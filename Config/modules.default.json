@@ -60,9 +60,10 @@
         { "Type": "Builtin", "Handler": "Wallpaper" }
       ] },
     { "Id": "DesktopIcons", "Name": "Desktop-Symbolanordnung", "Group": "Windows", "Default": true, "Scope": "User", "Remote": true,
-      "Hint": "Position der Desktop-Symbole (Registry). Wird bei der naechsten Anmeldung angewendet.",
+      "Hint": "Position der Desktop-Symbole: direkt vom laufenden Desktop (Benutzer angemeldet) plus Ansicht/Symbolgroesse aus der Registry. Beim Restore wird der Explorer neu gestartet und die Positionen werden gesetzt. 'Symbole automatisch anordnen' muss aus sein.",
       "Items": [
-        { "Type": "Reg", "Name": "DesktopBags", "Key": "HKCU\\Software\\Microsoft\\Windows\\Shell\\Bags\\1\\Desktop", "Legacy": "REGBACKUP\\ICONS.reg" }
+        { "Type": "Reg", "Name": "DesktopBags", "Key": "HKCU\\Software\\Microsoft\\Windows\\Shell\\Bags\\1\\Desktop", "Legacy": "REGBACKUP\\ICONS.reg" },
+        { "Type": "Builtin", "Name": "Positionen", "Handler": "DesktopIconPositions", "Legacy": "ICONS\\IconLayouts.ini" }
       ] },
     { "Id": "StartMenu", "Name": "Startmenue-Pins (best effort)", "Group": "Windows", "Default": false, "Scope": "User", "Remote": true,
       "Hint": "Windows 11: angeheftete Startmenue-Eintraege (start2.bin). Funktioniert nur zwischen gleichen Windows-11-Versionen zuverlaessig; Microsoft unterstuetzt das offiziell nicht.",

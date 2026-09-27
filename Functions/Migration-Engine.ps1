@@ -33,6 +33,259 @@ function Test-HMModuleUserOk($Module) {
     if ($Module.Id -eq 'ExtraFolders') { return $true }
     return ($Module.Scope -eq 'User' -and $Module.Id -ne 'Usmt')
 }
+# ============================================================================
+# DESKTOP-SYMBOLPOSITIONEN direkt vom laufenden Desktop (Shell IFolderView) - wie ReIcon in der Vorgaengerversion.
+# Laeuft immer in der Sitzung des Benutzers (eigener Prozess / geplante Aufgabe als Benutzer), nie erhoeht.
+# ============================================================================
+$script:HMDesktopIconsCs = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+namespace HMDesk
+{
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+    [StructLayout(LayoutKind.Explicit, Size = 272)] public struct STRRET { [FieldOffset(0)] public uint uType; }
+
+    [ComImport, Guid("85CB6900-4D95-11CF-960C-0080C7F4EE85"), InterfaceType(ComInterfaceType.InterfaceIsDual)]
+    interface IShellWindows
+    {
+        int Count { get; }
+        [return: MarshalAs(UnmanagedType.IDispatch)] object Item(object index);
+        [return: MarshalAs(UnmanagedType.IUnknown)] object _NewEnum();
+        void Register();          // Platzhalter (vtable)
+        void RegisterPending();   // Platzhalter
+        void Revoke();            // Platzhalter
+        void OnNavigate();        // Platzhalter
+        void OnActivated();       // Platzhalter
+        [return: MarshalAs(UnmanagedType.IDispatch)]
+        object FindWindowSW(ref object pvarLoc, ref object pvarLocRoot, int swClass, out int phwnd, int swfwOptions);
+    }
+
+    [ComImport, Guid("6D5140C1-7436-11CE-8034-00AA006009FA"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IHMServiceProvider
+    {
+        [PreserveSig] int QueryService(ref Guid guidService, ref Guid riid, [MarshalAs(UnmanagedType.IUnknown)] out object ppv);
+    }
+
+    [ComImport, Guid("000214E2-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IShellBrowser
+    {
+        void GetWindow(); void ContextSensitiveHelp();                                   // IOleWindow
+        void InsertMenusSB(); void SetMenuSB(); void RemoveMenusSB(); void SetStatusTextSB();
+        void EnableModelessSB(); void TranslateAcceleratorSB(); void BrowseObject();
+        void GetViewStateStream(); void GetControlWindow(); void SendControlMsg();
+        [PreserveSig] int QueryActiveShellView([MarshalAs(UnmanagedType.IUnknown)] out object ppshv);
+    }
+
+    [ComImport, Guid("CDE725B0-CCC9-4519-917E-325D72FAB4CE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IFolderView
+    {
+        [PreserveSig] int GetCurrentViewMode(out uint pViewMode);
+        [PreserveSig] int SetCurrentViewMode(uint ViewMode);
+        [PreserveSig] int GetFolder(ref Guid riid, [MarshalAs(UnmanagedType.IUnknown)] out object ppv);
+        [PreserveSig] int Item(int iItemIndex, out IntPtr ppidl);
+        [PreserveSig] int ItemCount(uint uFlags, out int pcItems);
+        [PreserveSig] int Items(uint uFlags, ref Guid riid, out IntPtr ppv);
+        [PreserveSig] int GetSelectionMarkedItem(out int piItem);
+        [PreserveSig] int GetFocusedItem(out int piItem);
+        [PreserveSig] int GetItemPosition(IntPtr pidl, out POINT ppt);
+        [PreserveSig] int GetSpacing(out POINT ppt);
+        [PreserveSig] int GetDefaultSpacing(out POINT ppt);
+        [PreserveSig] int GetAutoArrange();
+        [PreserveSig] int SelectItem(int iItem, uint dwFlags);
+        [PreserveSig] int SelectAndPositionItems(uint cidl, [MarshalAs(UnmanagedType.LPArray)] IntPtr[] apidl, [MarshalAs(UnmanagedType.LPArray)] POINT[] apt, uint dwFlags);
+    }
+
+    [ComImport, Guid("000214E6-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IShellFolder
+    {
+        void ParseDisplayName(); void EnumObjects(); void BindToObject(); void BindToStorage();
+        void CompareIDs(); void CreateViewObject(); void GetAttributesOf(); void GetUIObjectOf();
+        [PreserveSig] int GetDisplayNameOf(IntPtr pidl, uint uFlags, out STRRET pName);
+    }
+
+    public static class Icons
+    {
+        [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)]
+        static extern int StrRetToBSTR(ref STRRET pstr, IntPtr pidl, [MarshalAs(UnmanagedType.BStr)] out string pbstr);
+
+        static IFolderView GetDesktopView()
+        {
+            Type t = Type.GetTypeFromCLSID(new Guid("9BA05972-F6A8-11CF-A442-00A0C90A8F39")); // ShellWindows
+            IShellWindows sw = (IShellWindows)Activator.CreateInstance(t);
+            object loc = 0;               // CSIDL_DESKTOP
+            object root = null;
+            int hwnd;
+            object disp = sw.FindWindowSW(ref loc, ref root, 8 /* SWC_DESKTOP */, out hwnd, 1 /* SWFO_NEEDDISPATCH */);
+            if (disp == null) throw new Exception("Desktop-Fenster nicht gefunden");
+            Guid sid = new Guid("4C96BE40-915C-11CF-99D3-00AA004AE837");   // SID_STopLevelBrowser
+            Guid iid = new Guid("000214E2-0000-0000-C000-000000000046");   // IID_IShellBrowser
+            object sb;
+            int hr = ((IHMServiceProvider)disp).QueryService(ref sid, ref iid, out sb);
+            if (hr != 0) throw new Exception("QueryService 0x" + hr.ToString("X8"));
+            object view;
+            hr = ((IShellBrowser)sb).QueryActiveShellView(out view);
+            if (hr != 0) throw new Exception("QueryActiveShellView 0x" + hr.ToString("X8"));
+            return (IFolderView)view;
+        }
+
+        static string NameOf(IShellFolder sf, IntPtr pidl, uint flags)
+        {
+            STRRET r;
+            if (sf.GetDisplayNameOf(pidl, flags, out r) != 0) return null;
+            string s;
+            return StrRetToBSTR(ref r, pidl, out s) == 0 ? s : null;
+        }
+
+        public static bool AutoArrange() { return GetDesktopView().GetAutoArrange() == 0; }
+
+        // Zeilen: Name <TAB> X <TAB> Y
+        public static string[] Get()
+        {
+            IFolderView fv = GetDesktopView();
+            Guid iidSf = new Guid("000214E6-0000-0000-C000-000000000046");
+            object o; fv.GetFolder(ref iidSf, out o);
+            IShellFolder sf = (IShellFolder)o;
+            int n; fv.ItemCount(2 /* SVGIO_ALLVIEW */, out n);
+            List<string> list = new List<string>();
+            for (int i = 0; i < n; i++)
+            {
+                IntPtr pidl;
+                if (fv.Item(i, out pidl) != 0) continue;
+                try
+                {
+                    POINT p; fv.GetItemPosition(pidl, out p);
+                    string name = NameOf(sf, pidl, 0x8001 /* SHGDN_INFOLDER | SHGDN_FORPARSING */);
+                    if (!string.IsNullOrEmpty(name)) list.Add(name + "\t" + p.X + "\t" + p.Y);
+                }
+                finally { Marshal.FreeCoTaskMem(pidl); }
+            }
+            return list.ToArray();
+        }
+
+        // Rueckgabe: Anzahl gesetzter Symbole
+        public static int Set(string[] lines)
+        {
+            Dictionary<string, POINT> want = new Dictionary<string, POINT>(StringComparer.OrdinalIgnoreCase);
+            foreach (string l in lines)
+            {
+                string[] f = l.Split('\t');
+                if (f.Length < 3) continue;
+                int x, y;
+                if (int.TryParse(f[1], out x) && int.TryParse(f[2], out y)) { POINT p; p.X = x; p.Y = y; want[f[0]] = p; }
+            }
+            IFolderView fv = GetDesktopView();
+            Guid iidSf = new Guid("000214E6-0000-0000-C000-000000000046");
+            object o; fv.GetFolder(ref iidSf, out o);
+            IShellFolder sf = (IShellFolder)o;
+            int n; fv.ItemCount(2, out n);
+            int done = 0;
+            for (int i = 0; i < n; i++)
+            {
+                IntPtr pidl;
+                if (fv.Item(i, out pidl) != 0) continue;
+                try
+                {
+                    string name = NameOf(sf, pidl, 0x8001);
+                    string disp = NameOf(sf, pidl, 0x1);   // SHGDN_INFOLDER (Anzeigename, z.B. ohne .lnk)
+                    POINT p;
+                    if ((name != null && want.TryGetValue(name, out p)) || (disp != null && want.TryGetValue(disp, out p)))
+                    {
+                        if (fv.SelectAndPositionItems(1, new IntPtr[] { pidl }, new POINT[] { p }, 0x80 /* SVSI_POSITIONITEM */) == 0) done++;
+                    }
+                }
+                finally { Marshal.FreeCoTaskMem(pidl); }
+            }
+            return done;
+        }
+    }
+}
+'@
+
+# PowerShell-Code fuer die Benutzersitzung: Save = Positionen in $DataFile schreiben, Load = aus Zeilen setzen (mit Wartezeit nach Explorer-Start)
+function Get-HMDesktopIconsCode([string]$Mode, [string]$DataFile, [string]$ResultFile, [string[]]$Lines = @()) {
+    $q = { param($s) "'" + ("$s" -replace "'", "''") + "'" }
+    $c = "`$ErrorActionPreference = 'Stop'`r`ntry {`r`nAdd-Type -TypeDefinition @'`r`n$script:HMDesktopIconsCs`r`n'@`r`n"
+    if ($Mode -eq 'Save') {
+        $c += "`$l = [HMDesk.Icons]::Get(); Set-Content -LiteralPath $(& $q $DataFile) -Value `$l -Encoding UTF8`r`n"
+        $c += "`$aa = if ([HMDesk.Icons]::AutoArrange()) { ' AUTO' } else { '' }`r`n"
+        $c += "Set-Content -LiteralPath $(& $q $ResultFile) -Value (""OK `$(@(`$l).Count)`$aa"") -Encoding UTF8`r`n"
+    } else {
+        $data = ($Lines | ForEach-Object { "$_" -replace "'", "''" } | ForEach-Object { "'$_'" }) -join ",`r`n"
+        $c += "`$lines = @(`r`n$data`r`n)`r`n"
+        $c += "`$n = 0; for (`$i = 0; `$i -lt 25; `$i++) { try { `$n = [HMDesk.Icons]::Set(`$lines) } catch { `$n = 0 }; if (`$n -gt 0) { Start-Sleep -Seconds 3; try { `$n = [HMDesk.Icons]::Set(`$lines) } catch { }; break }; Start-Sleep -Seconds 2 }`r`n"
+        if ($ResultFile) { $c += "Set-Content -LiteralPath $(& $q $ResultFile) -Value (""OK `$n"") -Encoding UTF8`r`n" }
+    }
+    $c += "} catch {`r`n"
+    if ($ResultFile) { $c += "Set-Content -LiteralPath $(& $q $ResultFile) -Value (""FEHLER `$(`$_.Exception.Message)"") -Encoding UTF8`r`n" }
+    $c += "}`r`n"
+    return $c
+}
+
+# Symbolpositionen des angemeldeten Zielbenutzers lesen. Rueckgabe: @{ Status = OK|SKIP|FEHLER; Lines; Msg }
+function Read-HMDesktopIconPositions([hashtable]$Ctx) {
+    if ($Ctx.UserMode) {
+        # eigener, nicht erhoehter Prozess in der eigenen Sitzung
+        $d = Join-Path $env:TEMP ('HMicons_' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $d -Force | Out-Null
+        try {
+            $df = Join-Path $d 'pos.tsv'; $rf = Join-Path $d 'result.txt'; $sf = Join-Path $d 'icons.ps1'
+            Set-Content -LiteralPath $sf -Value (Get-HMDesktopIconsCode 'Save' $df $rf) -Encoding UTF8
+            Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$sf`"") -WindowStyle Hidden -Wait
+            $r = if (Test-Path -LiteralPath $rf) { "$(Get-Content -LiteralPath $rf -Raw)".Trim() } else { 'FEHLER kein Ergebnis' }
+            $lines = if (Test-Path -LiteralPath $df) { @(Get-Content -LiteralPath $df -Encoding UTF8) } else { @() }
+            return @{ Status = $(if ($r -like 'OK*') { 'OK' } else { 'FEHLER' }); Lines = $lines; Msg = $r }
+        } finally { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    if (-not $Ctx.Account) { return @{ Status = 'SKIP'; Lines = @(); Msg = 'Kontoname unbekannt' } }
+    $code = { param($acct, $saveCode)
+        $logged = @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue | ForEach-Object { try { $o = Invoke-CimMethod -InputObject $_ -MethodName GetOwner; "$($o.Domain)\$($o.User)" } catch { } })
+        if ($logged -notcontains $acct) { return @{ Status = 'SKIP'; Lines = @(); Msg = 'Benutzer nicht angemeldet' } }
+        $id = [guid]::NewGuid().ToString('N')
+        $d = Join-Path $env:ProgramData "HUMig\Icons_$id"
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+        $n = "HUMig_Icons_$id"
+        try {
+            & icacls.exe $d /grant "${acct}:(OI)(CI)M" | Out-Null
+            $df = Join-Path $d 'pos.tsv'; $rf = Join-Path $d 'result.txt'; $sf = Join-Path $d 'icons.ps1'
+            Set-Content -LiteralPath $sf -Value ($saveCode.Replace('%DATA%', $df).Replace('%RESULT%', $rf)) -Encoding UTF8
+            $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$sf`""
+            $p = New-ScheduledTaskPrincipal -UserId $acct -LogonType Interactive -RunLevel Limited
+            $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+            Register-ScheduledTask -TaskName $n -Action $a -Principal $p -Settings $s -Force -ErrorAction Stop | Out-Null
+            Start-ScheduledTask -TaskName $n
+            $t0 = Get-Date
+            while (-not (Test-Path -LiteralPath $rf) -and ((Get-Date) - $t0).TotalSeconds -lt 60) { Start-Sleep -Milliseconds 500 }
+            Start-Sleep -Milliseconds 300
+            $r = if (Test-Path -LiteralPath $rf) { "$(Get-Content -LiteralPath $rf -Raw)".Trim() } else { 'FEHLER keine Antwort aus der Benutzersitzung (Zeitueberschreitung)' }
+            $lines = if (Test-Path -LiteralPath $df) { @(Get-Content -LiteralPath $df -Encoding UTF8) } else { @() }
+            return @{ Status = $(if ($r -like 'OK*') { 'OK' } else { 'FEHLER' }); Lines = $lines; Msg = $r }
+        } finally {
+            Unregister-ScheduledTask -TaskName $n -Confirm:$false -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return (Invoke-HMTarget $Ctx $code @($Ctx.Account, (Get-HMDesktopIconsCode 'Save' '%DATA%' '%RESULT%')))
+}
+
+# Positionen aus einem Backup lesen: positions.tsv (HUMig v2) oder IconLayouts.ini (Vorgaengerversion, ReIcon)
+function Get-HMDesktopIconLines([string]$Path) {
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return @() }
+    if ((Get-Item -LiteralPath $Path).PSIsContainer) {
+        $f = Join-Path $Path 'positions.tsv'
+        if (Test-Path -LiteralPath $f) { return @(Get-Content -LiteralPath $f -Encoding UTF8 | Where-Object { $_ -match "`t" }) }
+        return @()
+    }
+    # ReIcon-INI: erste Sektion [Icon_Layout_*], Zeilen Name=X,Y
+    $out = @(); $in = $false
+    foreach ($l in @(Get-Content -LiteralPath $Path)) {
+        if ($l -match '^\[Icon_Layout_') { if ($out.Count) { break }; $in = $true; continue }
+        if ($l -match '^\[') { if ($in -and $out.Count) { break }; $in = $false; continue }
+        if ($in -and $l -match '^([^:;][^=]*)=(-?\d+),(-?\d+)\s*$') { $out += ("{0}`t{1}`t{2}" -f $Matches[1], $Matches[2], $Matches[3]) }
+    }
+    return $out
+}
+
 # Backup-Ordner loeschen - nur ganz oder gar nicht: vorher fuer JEDE Datei pruefen, ob sie geloescht werden darf
 # (Loeschrecht, nicht geoeffnet). Sonst bleibt ein halb geloeschtes, unbrauchbares Backup zurueck.
 function Remove-HMBackupFolder([string]$Path) {
@@ -923,6 +1176,17 @@ function Backup-HMBuiltin {
     $res = { param($st, $msg, $b = 0) [pscustomobject]@{ Name = $Item.Handler; Status = $st; Msg = $msg; Bytes = $b; Source = '' } }
     switch ($Item.Handler) {
 
+        'DesktopIconPositions' {
+            $r = $null
+            try { $r = Read-HMDesktopIconPositions $Ctx } catch { return (& $res 'Warning' "Symbolpositionen nicht lesbar: $($_.Exception.Message) - nur Registry-Anordnung gesichert") }
+            if ($r.Status -eq 'SKIP') { return (& $res 'Skip' "Symbolpositionen: $($r.Msg) - nur Registry-Anordnung gesichert") }
+            if ($r.Status -ne 'OK' -or -not @($r.Lines).Count) { return (& $res 'Warning' "Symbolpositionen: $($r.Msg) - nur Registry-Anordnung gesichert") }
+            Set-Content -LiteralPath (Join-Path $dir 'positions.tsv') -Value @($r.Lines) -Encoding UTF8
+            $msg = "$(@($r.Lines).Count) Symbolpositionen vom Desktop gelesen"
+            if ("$($r.Msg)" -like '*AUTO*') { $msg += ' (Achtung: Symbole automatisch anordnen ist EIN - Positionen werden dann nicht verwendet)' }
+            return (& $res 'OK' $msg)
+        }
+
         'ExtraFolders' {
             $list = @($Ctx.Options.ExtraFolders | Where-Object { $_ })
             if (-not $list.Count) { return (& $res 'Skip' 'keine Ordner ausgewaehlt') }
@@ -1630,6 +1894,13 @@ function Restore-HMBuiltin {
     $res = { param($st, $msg) [pscustomobject]@{ Name = $Item.Handler; Status = $st; Msg = $msg } }
     switch ($Item.Handler) {
 
+        'DesktopIconPositions' {
+            $lines = @(Get-HMDesktopIconLines $dir)
+            if (-not $lines.Count) { return (& $res 'Skip' 'keine Symbolpositionen im Backup') }
+            $Ctx.DesktopIconLines = $lines
+            return (& $res 'OK' "$($lines.Count) Symbolpositionen werden nach dem Explorer-Neustart gesetzt")
+        }
+
         'ExtraFolders' {
             $entries = @()
             if ($Ctx.Backup.Legacy) {
@@ -1912,6 +2183,7 @@ function Start-HMRestore {
     $Ctx.IsRemote = -not (Test-HMIsLocal $Ctx.Computer)
     if (-not $Ctx.IsRemote) { $Ctx.Computer = $env:COMPUTERNAME }
     $Ctx.LogonActions = @()
+    $Ctx.DesktopIconLines = @()
     $Job.LogFile = Join-Path $Ctx.Backup.Path ("Restore_{0}_{1}.log" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))
     $Ctx.RoboLog = Join-Path $Ctx.Backup.Path ("Restore_{0}_{1}_Robocopy.log" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))
     Write-HMLog $Job "RESTORE  $($Ctx.Backup.Name)  ->  $($Ctx.Computer) \ $($Ctx.UserFolder)" 'Header'
@@ -1983,6 +2255,9 @@ function Start-HMRestore {
         # Explorer-/Taskleisten-Einstellungen greifen erst nach Explorer-Neustart
         if (@($mods | Where-Object { $_.Id -in @('TaskbarWallpaper', 'DesktopIcons', 'QuickAccess') }).Count) {
             Add-HMLogonAction $Ctx "# Explorer neu starten, damit Taskleiste/Symbole uebernommen werden`r`nStart-Sleep -Seconds 5; Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue"
+        }
+        if (@($Ctx.DesktopIconLines).Count) {
+            Add-HMLogonAction $Ctx ("# Desktop-Symbolpositionen setzen (wartet, bis der Desktop wieder da ist)`r`nStart-Sleep -Seconds 4; if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }`r`n" + (Get-HMDesktopIconsCode 'Load' '' '' $Ctx.DesktopIconLines))
         }
         if (-not (Test-HMCancel $Job)) {
             if ($Ctx.HiveReady) { Register-HMLogonTask $Ctx $Job }
