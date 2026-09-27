@@ -128,7 +128,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><b>Standort</b></td><td>Auswahl des Standort-Profils (Backup-Ordner, Softwareverteilung, USMT, Domäne). Nur sichtbar, wenn Standorte angelegt sind.</td></tr>
     <tr><td><b>Computer</b></td><td>Dieser PC oder Name/IP eines anderen PCs. <kbd>Enter</kbd> oder <span class="ui">Verbinden</span> lädt die Profile. Rechtsklick auf <span class="ui">Verbinden</span>: andere Anmeldedaten. <span class="ui">Lokal</span> = zurück auf diesen PC.</td></tr>
     <tr><td><span class="ui">Geraete (AD) …</span></td><td>PCs aus dem Active Directory – einen per Doppelklick wählen oder mehrere für <a href="#mehrfach">Mehrfachaktionen</a> anhaken.</td></tr>
-    <tr><td><b>Benutzer</b></td><td>Profil am gewählten PC. Für einen neuen PC ohne Profil: Konto als <code>DOMÄNE\Benutzer</code> eintragen (dann das USMT-Modul mitwählen).</td></tr>
+    <tr><td><b>Benutzer</b></td><td>Profil am gewählten PC (nur echte Benutzerkonten, keine Dienstkonten). <i>[angemeldet]</i> = hat eine Desktop-Sitzung, <i>[aktiv]</i> = nur Registry geladen (z. B. getrennte Sitzung). Vorausgewählt ist am eigenen PC der Benutzer, der HUMig startet. Für einen neuen PC ohne Profil: Konto als <code>DOMÄNE\Benutzer</code> eintragen (dann das USMT-Modul mitwählen).</td></tr>
     <tr><td><b>Backup-Ordner</b></td><td><span class="ui">…</span> links: Ordner wählen (USB, Freigabe), rechts: Standard. <span class="ui">Oeffnen</span> im Explorer, <span class="ui">Verschluesseln …</span> = BitLocker To Go für das USB-Laufwerk.</td></tr>
     <tr><td><b>Konsole</b> (unten)</td><td>Alle Meldungen farbig. Rechtsklick = leeren, <kbd>Strg</kbd>+<kbd>C</kbd> = kopieren. Die Trennlinie ist verschiebbar.</td></tr>
   </table>
@@ -231,7 +231,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><span class="ui">Backup pruefen</span></td><td>Alle Dateien gegen den Prüfsummen-Katalog (beschädigt? fehlt etwas?). Ohne Katalog: Rechtsklick = Katalog jetzt erstellen. Ergebnis <code>Pruefung_*.txt</code>.</td></tr>
     <tr><td><span class="ui">Vergleichen …</span></td><td>Zwei Backups vergleichen: geändert, nur in A, nur in B</td></tr>
     <tr><td><span class="ui">Uebersicht (HTML)</span></td><td><code>Backups.html</code>: alle Backups mit Status, Größe, Prüfung, Links (Filter, Sortierung)</td></tr>
-    <tr><td><span class="ui r">Loeschen</span> / <span class="ui">Alte loeschen</span></td><td>Einzeln löschen bzw. nach Aufbewahrungsregel: je PC + Benutzer die neuesten N behalten, ältere nach X Tagen vorschlagen – immer mit Rückfrage</td></tr>
+    <tr><td><span class="ui r">Loeschen</span> / <span class="ui">Alte loeschen</span></td><td>Einzeln löschen bzw. nach Aufbewahrungsregel: je PC + Benutzer die neuesten N behalten, ältere nach X Tagen vorschlagen – immer mit Rückfrage. <b>Ganz oder gar nicht:</b> vorher wird jede Datei geprüft (Rechte, geöffnet, auch sehr lange Pfade); fehlt etwas, wird nichts gelöscht und die Meldung nennt den Grund.</td></tr>
   </table>
   <h3>Optionen</h3>
   <table>
@@ -310,6 +310,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><span class="ui m">Inventar (mehrere PCs)</span></td><td>Hardware, Windows, BitLocker, TPM, IP/MAC parallel – Tabelle + CSV. Rechts: mit installierter Software</td></tr>
     <tr><td><span class="ui b">BitLocker-Schluessel</span></td><td>Status aller Laufwerke, Wiederherstellungskennwort in AD oder Entra ID sichern</td></tr>
     <tr><td><span class="ui">Autopilot-Hash</span></td><td>Hardware-Hash als CSV (<code>Autopilot\AutopilotHWID_&lt;PC&gt;_&lt;Seriennummer&gt;_&lt;Datum&gt;.csv</code>) für den Intune-Import</td></tr>
+    <tr><td><span class="ui b">Laufwerke (C$)</span></td><td>Links: C: des PCs im Explorer (remote <code>\\PC\C$</code>) · Rechts: alle Laufwerke inkl. USB-Sticks und Freigaben des PCs zur Auswahl. Der angemeldete Windows-Benutzer braucht Adminrechte am Ziel-PC.</td></tr>
     <tr><td><span class="ui">Wake-on-LAN</span></td><td>PC aufwecken (MAC aus Inventar/Backup) – optional über einen PC im Zielnetz senden</td></tr>
   </table>
 
@@ -331,7 +332,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><span class="ui">Windows-Apps neu registrieren</span></td><td>Store-Apps, Startmenü, Einstellungen reparieren</td></tr>
     <tr><td><span class="ui">Gruppenrichtlinien-Ergebnis</span></td><td>gpresult als HTML für PC + Benutzer</td></tr>
     <tr><td><span class="ui">Aufgaben aus Backup importieren</span></td><td>Geplante Aufgaben aus dem markierten Backup einzeln importieren</td></tr>
-    <tr><td><span class="ui r">Alte Profile loeschen</span></td><td>Profile mit letzter Anmeldung, markierte sauber löschen (Ordner + Registry)</td></tr>
+    <tr><td><span class="ui r">Alte Profile loeschen</span></td><td>Profile mit letzter Anmeldung, markierte sauber löschen (Ordner + Registry) – Dienstkonten werden nicht angezeigt</td></tr>
     <tr><td><span class="ui p">Wichtige Dateien suchen</span></td><td>PST, KeePass, Access, OneNote, CAD … außerhalb der gesicherten Bereiche finden und als Zusätzliche Ordner aufnehmen</td></tr>
     <tr><td><span class="ui t">Im Backup suchen</span></td><td>Dateien im markierten Backup suchen und einzeln herauskopieren</td></tr>
     <tr><td>Schnellzugriffe</td><td>AppData · Autostart · Profilordner des Benutzers · Anmeldedaten sichern/wiederherstellen (credwiz) · Gespeicherte Anmeldedaten anzeigen/löschen</td></tr>
