@@ -1093,7 +1093,11 @@ function Start-HMGpResult {
         [void](& $gp "$scope /h `"$html`" /f")
         if (-not (& $big $html) -and $acc) {
             $vt = & $gp "$scope /v"
-            if ($vt -match 'RSoP|RSOP') { "WARN Keine Richtlinien-Daten fuer $acc auf diesem PC (dort noch nie angemeldet) - Bericht nur mit Computer-Richtlinien"; $scope = '/scope computer'; [void](& $gp "$scope /h `"$html`" /f") }
+            if ($vt -match 'RSoP|RSOP') {
+                $msg = (($vt -split "`r?`n") | Where-Object { $_ -match 'RSoP|RSOP' } | Select-Object -First 1).Trim()
+                "WARN Benutzer-Teil fuer $acc nicht verfuegbar (gpresult: $msg) - Bericht nur mit Computer-Richtlinien. Den Benutzer-Teil gibt es i.d.R. nur, solange der Benutzer an diesem PC angemeldet ist"
+                $scope = '/scope computer'; [void](& $gp "$scope /h `"$html`" /f")
+            }
         }
         if (& $big $html) { "FILE|$html"; return }
 
