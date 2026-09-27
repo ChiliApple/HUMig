@@ -1070,32 +1070,54 @@ function Start-HMGpResult {
     $c = Get-TargetComputer
     $p = Get-SelectedProfile
     $acc = if ($p -and $p.Account) { $p.Account } else { '' }
-    $dst = Join-Path $script:LogDir ("GPResult_{0}_{1}.html" -f ($c -replace '[^\w\-]', '_'), (Get-Date -Format 'yyyyMMdd_HHmmss'))
-    Out-Console "Gruppenrichtlinien-Ergebnis$(if ($acc) { " ($acc)" }) - $c ..." 'Info'
-    # Remote: gpresult /s von diesem PC aus (RSoP ueber WMI). In einer WinRM-Sitzung liefert gpresult nur einen leeren Bericht.
-    Invoke-AsyncCommand -ScriptBlock {
-        param($comp, $isLocal, $acc, $out)
+    # Am Ziel-PC als geplante Aufgabe unter SYSTEM: gpresult direkt in einer WinRM-Sitzung liefert nur einen leeren Bericht,
+    # gpresult /s scheitert oft an DCOM-Rechten. Erst mit Benutzer, ohne Daten fuer den Benutzer nur der Computer-Teil.
+    Invoke-HMTool -Title "Gruppenrichtlinien-Ergebnis$(if ($acc) { " ($acc)" })" -Computer $c -TimeoutSec 300 -ArgumentList @($acc) -Script {
+        param($acc)
+        $dir = Join-Path $env:ProgramData 'HUMig'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
         $run = {
-            param($userArgs)
-            $a = @()
-            if (-not $isLocal) { $a += @('/s', $comp) }
-            $a += $userArgs + @('/h', $out, '/f')
-            $o = & gpresult.exe @a 2>&1
-            [pscustomobject]@{ Code = $LASTEXITCODE; Text = (($o | Out-String).Trim()); Ok = ((Test-Path -LiteralPath $out) -and (Get-Item -LiteralPath $out).Length -gt 2000) }
+            param([string[]]$userArgs)
+            $id = [guid]::NewGuid().ToString('N')
+            $f = Join-Path $dir "GPResult_$id.html"; $log = Join-Path $dir "GPResult_$id.txt"; $n = "HUMig_GPResult_$id"
+            $argStr = (@($userArgs | ForEach-Object { "`"$_`"" }) -join ' ')
+            try {
+                $a = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c gpresult.exe $argStr /h `"$f`" /f > `"$log`" 2>&1"
+                $pr = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+                $st = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+                Register-ScheduledTask -TaskName $n -Action $a -Principal $pr -Settings $st -Force -ErrorAction Stop | Out-Null
+                Start-ScheduledTask -TaskName $n
+                $t0 = Get-Date
+                do { Start-Sleep -Seconds 2; $state = (Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue).State } while ($state -eq 'Running' -and ((Get-Date) - $t0).TotalSeconds -lt 240)
+                $txt = if (Test-Path -LiteralPath $log) { ((Get-Content -LiteralPath $log -ErrorAction SilentlyContinue) -join ' ').Trim() } else { '' }
+                $ok = (Test-Path -LiteralPath $f) -and (Get-Item -LiteralPath $f).Length -gt 2000
+                [pscustomobject]@{ Ok = $ok; File = $f; Text = $txt }
+            } finally {
+                Unregister-ScheduledTask -TaskName $n -Confirm:$false -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+            }
         }
-        $notes = @()
         $r = if ($acc) { & $run @('/user', $acc) } else { & $run @('/scope', 'computer') }
         if (-not $r.Ok -and $acc) {
-            $notes += "Keine Richtlinien-Daten fuer $acc auf $comp (Benutzer dort nie/nicht angemeldet?) - nur Computer-Richtlinien"
+            "WARN Kein Benutzer-Teil fuer ${acc}: $(if ($r.Text) { $r.Text } else { 'keine Daten' }) - Bericht nur mit Computer-Richtlinien"
+            Remove-Item -LiteralPath $r.File -Force -ErrorAction SilentlyContinue
             $r = & $run @('/scope', 'computer')
         }
-        [pscustomobject]@{ Ok = $r.Ok; Text = $r.Text; Notes = $notes }
-    } -ArgumentList @($c, [bool](Test-HMIsLocal $c), $acc, $dst) -TimeoutSec 300 -State $dst -OnComplete {
-        param($r, $file)
-        if ($r -is [string] -or -not $r) { Out-Console "Gruppenrichtlinien-Ergebnis: $r" 'Error'; return }
-        foreach ($n in @($r.Notes)) { Out-Console "   $n" 'Warning' }
-        if ($r.Ok) { Out-Console "   Bericht: $file" 'Success'; try { Start-Process -FilePath explorer.exe -ArgumentList "`"$file`"" } catch { } }
-        else { Out-Console "   gpresult ohne Ergebnis: $($r.Text) - Abhilfe: Fernwartung aktivieren (WMI/RSoP), Firewall pruefen" 'Error' }
+        if ($r.Ok) { "FILE|$($r.File)" } else { Remove-Item -LiteralPath $r.File -Force -ErrorAction SilentlyContinue; "FEHLER gpresult: $(if ($r.Text) { $r.Text } else { 'kein Bericht erstellt' })" }
+    } -OnResult {
+        param($r, $comp)
+        foreach ($l in @($r)) {
+            if ("$l" -like 'FILE|*') {
+                $remote = "$l".Substring(5)
+                $src = if (Test-HMIsLocal $comp) { $remote } else { Convert-HMPath @{ IsRemote = $true; Computer = $comp } $remote }
+                $dst = Join-Path $script:LogDir ("GPResult_{0}_{1}.html" -f ($comp -replace '[^\w\-]', '_'), (Get-Date -Format 'yyyyMMdd_HHmmss'))
+                try {
+                    if (-not (Test-Path -LiteralPath $script:LogDir)) { New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null }
+                    Copy-Item -LiteralPath $src -Destination $dst -Force -ErrorAction Stop; Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
+                    Out-Console "   Bericht: $dst" 'Success'; Start-Process -FilePath explorer.exe -ArgumentList "`"$dst`""
+                } catch { Out-Console "   Bericht nicht kopierbar ($src): $($_.Exception.Message)" 'Error' }
+            } else { Write-HMToolResult $l }
+        }
     }
 }
 
