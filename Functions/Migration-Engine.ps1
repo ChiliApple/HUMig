@@ -1505,6 +1505,16 @@ function Backup-HMBuiltin {
 }
 
 # --- USMT ---
+# Bekannte Windows-Fehlercodes beim Start von ScanState/LoadState verstaendlich machen
+function Get-HMUsmtCodeText([int]$Code, [string]$Version) {
+    switch ($Code) {
+        -1073741511 { return " = Einsprungpunkt nicht gefunden: diese USMT-Version passt nicht zum Windows des PCs$(if ($Version) { " (USMT $Version)" }). USMT aus dem ADK 10.1.26100.x verwenden (Werkzeuge > USMT einrichten)" }
+        -1073741515 { return ' = DLL fehlt: USMT-Ordner unvollstaendig - neu einrichten (Werkzeuge > USMT einrichten)' }
+        -1073741701 { return ' = falsche Architektur (amd64/arm64/x86 passt nicht zum PC)' }
+        default { return '' }
+    }
+}
+
 function Find-HMUsmt([hashtable]$Ctx) {
     $cands = @()
     if ($Ctx.Settings.UsmtPath) { $cands += $Ctx.Settings.UsmtPath }
@@ -1528,7 +1538,8 @@ function Backup-HMUsmt {
     if (-not $Ctx.Account) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; Msg = 'Kontoname des Benutzers unbekannt (SID nicht aufloesbar)'; Bytes = 0; Source = '' } }
     $xmlDir = Join-Path $Ctx.ToolRoot 'Config\USMT'
     $store = Join-Path (Join-Path $Ctx.BackupPath $Module.Id) 'STORE'
-    Write-HMLog $Job "   USMT: $usmt" 'Debug'
+    $uver = ''; try { $uver = (Get-Item -LiteralPath (Join-Path $usmt 'scanstate.exe')).VersionInfo.ProductVersion } catch { }
+    Write-HMLog $Job "   USMT: $usmt$(if ($uver) { " (Version $uver)" })" 'Debug'
     $remoteDir = $null
     if ($Ctx.IsRemote) {
         # USMT + XML auf den Ziel-PC kopieren und dort ausfuehren
@@ -1554,8 +1565,9 @@ function Backup-HMUsmt {
     }
     $mig = Get-ChildItem -LiteralPath $store -Filter 'USMT.MIG' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($code -eq 0 -and $mig) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'OK'; Msg = "ScanState OK, $(Format-HMSize $mig.Length)"; Bytes = $mig.Length; Source = $usmt } }
-    if ($mig) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'Warning'; Msg = "ScanState Code $code (Details: $store\scanstate.log)"; Bytes = $mig.Length; Source = $usmt } }
-    return [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; Msg = "ScanState Code $code, kein USMT.MIG (Log: $store\scanstate.log)"; Bytes = 0; Source = $usmt }
+    $why = Get-HMUsmtCodeText $code $uver
+    if ($mig) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'Warning'; Msg = "ScanState Code $code$why (Details: $store\scanstate.log)"; Bytes = $mig.Length; Source = $usmt } }
+    return [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; Msg = "ScanState Code $code$why, kein USMT.MIG (Log: $store\scanstate.log)"; Bytes = 0; Source = $usmt }
 }
 
 # ----------------------------------------------------------------------------
@@ -2219,7 +2231,7 @@ function Restore-HMUsmt {
     } @($exeDir, ($a -join ' '))
     if ($Ctx.IsRemote) { Remove-Item -LiteralPath $rr -Recurse -Force -ErrorAction SilentlyContinue }
     if ([int]"$code" -eq 0) { Write-HMLog $Job '   LoadState OK' 'Success'; return $true }
-    Write-HMLog $Job "   LoadState Code $code (Log am Ziel-PC: %TEMP%\HUMig_loadstate.log)" 'Warning'
+    Write-HMLog $Job "   LoadState Code $code$(Get-HMUsmtCodeText $code '') (Log am Ziel-PC: %TEMP%\HUMig_loadstate.log)" 'Warning'
     return $true
 }
 
