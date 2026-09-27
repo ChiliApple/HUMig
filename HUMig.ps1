@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.6'
+$script:Version   = '2.0.7'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -1354,8 +1354,8 @@ function Show-About {
     <TextBlock Text="HUMig v2" FontSize="28" FontWeight="Bold" Foreground="#FFCDD6F4" HorizontalAlignment="Center" Margin="0,8,0,0"/>
     <TextBlock Text="Benutzerprofil-Migration" FontSize="14" Foreground="#FFA6ADC8" HorizontalAlignment="Center"/>
     <TextBlock x:Name="ver" FontSize="12" Foreground="#FF89B4FA" HorizontalAlignment="Center" Margin="0,8,0,0"/>
-    <TextBlock x:Name="src" FontSize="11" Foreground="#FF6C7086" HorizontalAlignment="Center" Margin="0,4,0,0"/>
-    <TextBlock Text="Nutzungslizenz - siehe LICENSE" FontSize="11" Foreground="#FF6C7086" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+    <TextBlock x:Name="src" FontSize="11" Foreground="#FF89B4FA" HorizontalAlignment="Center" Margin="0,4,0,0" Cursor="Hand" TextDecorations="Underline" ToolTip="Projektseite im Browser oeffnen"/>
+    <TextBlock x:Name="lic" Text="Nutzungslizenz - siehe LICENSE" FontSize="11" Foreground="#FF89B4FA" HorizontalAlignment="Center" Margin="0,2,0,0" Cursor="Hand" TextDecorations="Underline" ToolTip="Lizenz anzeigen"/>
   </StackPanel>
 </Window>
 "@
@@ -1364,6 +1364,12 @@ function Show-About {
     if ($script:AppIcon) { $w.Icon = $script:AppIcon }
     $w.FindName('ver').Text = "Version $($script:Version)  |  PowerShell $($PSVersionTable.PSVersion)"
     $w.FindName('src').Text = "github.com/$($script:UpdateOwner)/$($script:UpdateRepo)"
+    # ueber den Explorer oeffnen -> Browser laeuft als angemeldeter Benutzer, nicht erhoeht
+    $w.FindName('src').Add_MouseLeftButtonUp({ try { Start-Process -FilePath explorer.exe -ArgumentList "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)" } catch { } })
+    $w.FindName('lic').Add_MouseLeftButtonUp({
+        $lf = Join-Path $script:AppRoot 'LICENSE'
+        try { if (Test-Path -LiteralPath $lf) { Start-Process -FilePath notepad.exe -ArgumentList "`"$lf`"" } else { Start-Process -FilePath explorer.exe -ArgumentList "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)/blob/main/LICENSE" } } catch { }
+    })
     $w.Owner = $script:Window; Set-HMWindowScale $w
     [void]$w.ShowDialog()
 }
