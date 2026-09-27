@@ -487,13 +487,19 @@ function Disconnect-HMShare([string]$UncRoot) {
 function Get-HMUserProfiles {
     param([string]$Computer, [System.Management.Automation.PSCredential]$Credential)
     $isLocal = Test-HMIsLocal $Computer
+    # Nur echte Benutzerkonten (lokal/Domaene S-1-5-21, Entra ID S-1-12-1) - keine Dienstkonten (NT SERVICE, IIS ...).
+    # Interactive = hat eine Desktop-Sitzung (explorer.exe), Loaded = nur Registry geladen (auch Dienste/getrennte Sitzungen)
     $sb = {
-        $list = foreach ($p in @(Get-CimInstance Win32_UserProfile -ErrorAction Stop | Where-Object { -not $_.Special -and $_.LocalPath })) {
+        $inter = @{}
+        foreach ($pr in @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue)) {
+            try { $o = Invoke-CimMethod -InputObject $pr -MethodName GetOwnerSid -ErrorAction Stop; if ($o.Sid) { $inter["$($o.Sid)"] = $true } } catch { }
+        }
+        $list = foreach ($p in @(Get-CimInstance Win32_UserProfile -ErrorAction Stop | Where-Object { -not $_.Special -and $_.LocalPath -and "$($_.SID)" -match '^S-1-(5-21|12-1)-' })) {
             $name = $null
             try { $name = (New-Object System.Security.Principal.SecurityIdentifier($p.SID)).Translate([System.Security.Principal.NTAccount]).Value } catch { }
             [pscustomobject]@{
                 SID = $p.SID; LocalPath = $p.LocalPath; Folder = (Split-Path $p.LocalPath -Leaf)
-                Account = $name; Loaded = [bool]$p.Loaded
+                Account = $name; Loaded = [bool]$p.Loaded; Interactive = [bool]$inter["$($p.SID)"]
                 LastUse = $(if ($p.LastUseTime) { $p.LastUseTime.ToString('yyyy-MM-dd HH:mm') } else { '' })
             }
         }
@@ -504,17 +510,21 @@ function Get-HMUserProfiles {
     try {
         $p = @{ ComputerName = $Computer; ScriptBlock = $sb; ErrorAction = 'Stop' }
         if ($Credential) { $p.Credential = $Credential }
-        return (Invoke-Command @p | Select-Object SID, LocalPath, Folder, Account, Loaded, LastUse)
+        return (Invoke-Command @p | Select-Object SID, LocalPath, Folder, Account, Loaded, Interactive, LastUse)
     } catch {
         $o = New-CimSessionOption -Protocol Dcom
         $sp = @{ ComputerName = $Computer; SessionOption = $o; ErrorAction = 'Stop' }
         if ($Credential) { $sp.Credential = $Credential }
         $cs = New-CimSession @sp
         try {
-            foreach ($p in @(Get-CimInstance -CimSession $cs Win32_UserProfile -ErrorAction Stop | Where-Object { -not $_.Special -and $_.LocalPath } | Sort-Object LocalPath)) {
+            $inter = @{}
+            foreach ($pr in @(Get-CimInstance -CimSession $cs Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue)) {
+                try { $o = Invoke-CimMethod -InputObject $pr -MethodName GetOwnerSid -ErrorAction Stop; if ($o.Sid) { $inter["$($o.Sid)"] = $true } } catch { }
+            }
+            foreach ($p in @(Get-CimInstance -CimSession $cs Win32_UserProfile -ErrorAction Stop | Where-Object { -not $_.Special -and $_.LocalPath -and "$($_.SID)" -match '^S-1-(5-21|12-1)-' } | Sort-Object LocalPath)) {
                 $name = $null
                 try { $name = (New-Object System.Security.Principal.SecurityIdentifier($p.SID)).Translate([System.Security.Principal.NTAccount]).Value } catch { }
-                [pscustomobject]@{ SID = $p.SID; LocalPath = $p.LocalPath; Folder = (Split-Path $p.LocalPath -Leaf); Account = $name; Loaded = [bool]$p.Loaded
+                [pscustomobject]@{ SID = $p.SID; LocalPath = $p.LocalPath; Folder = (Split-Path $p.LocalPath -Leaf); Account = $name; Loaded = [bool]$p.Loaded; Interactive = [bool]$inter["$($p.SID)"]
                     LastUse = $(if ($p.LastUseTime) { $p.LastUseTime.ToString('yyyy-MM-dd HH:mm') } else { '' }) }
             }
         } finally { Remove-CimSession $cs -ErrorAction SilentlyContinue }

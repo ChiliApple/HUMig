@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.9'
+$script:Version   = '2.0.10'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -569,7 +569,7 @@ function Get-TargetComputer {
 function Format-ProfileEntry($p) {
     $s = $p.Folder
     if ($p.Account -and ($p.Account.Split('\')[-1] -ne $p.Folder)) { $s += "  ($($p.Account))" } elseif ($p.Account) { $s += "  ($($p.Account.Split('\')[0]))" }
-    if ($p.Loaded) { $s += '  [angemeldet]' }
+    if ($p.Interactive) { $s += '  [angemeldet]' } elseif ($p.Loaded) { $s += '  [aktiv]' }
     return $s
 }
 # Gewaehltes Profil (oder eingegebenes Konto ohne Profil)
@@ -587,7 +587,7 @@ function Update-SidLabel {
     if (-not $p) { $ui.lblSid.Text = ''; return }
     if ($p.NoProfile) { $ui.lblSid.Text = 'kein Profil an diesem PC (nur Restore mit USMT)'; $ui.lblSid.Foreground = Get-ConsoleBrush '#FFF9E2AF' }
     else {
-        $ui.lblSid.Text = "$($p.LocalPath)$(if ($p.LastUse) { "   zuletzt $($p.LastUse)" })$(if ($p.Loaded) { '   (angemeldet)' })"
+        $ui.lblSid.Text = "$($p.LocalPath)$(if ($p.LastUse) { "   zuletzt $($p.LastUse)" })$(if ($p.Interactive) { '   (angemeldet)' } elseif ($p.Loaded) { '   (aktiv - Registry geladen, z.B. getrennte Sitzung)' })"
         $ui.lblSid.Foreground = Get-ConsoleBrush $(if ($p.Loaded) { '#FFF9E2AF' } else { '#FFA6ADC8' })
     }
     $ui.lblSid.ToolTip = "Konto: $($p.Account)`nSID: $($p.SID)`nProfil: $($p.LocalPath)$(if ($p.LastUse) { "`nZuletzt verwendet: $($p.LastUse)" })`n`nKlick = SID kopieren"
@@ -605,7 +605,7 @@ function Connect-Target {
         $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
         $ui.cmbComputer.Text = $env:COMPUTERNAME; $script:RemoteCred = $null
         $script:Profiles = @([pscustomobject]@{ SID = $id.User.Value; LocalPath = $env:USERPROFILE; Folder = (Split-Path $env:USERPROFILE -Leaf)
-            Account = $id.Name; Loaded = $true; LastUse = (Get-Date).ToString('yyyy-MM-dd HH:mm') })
+            Account = $id.Name; Loaded = $true; Interactive = $true; LastUse = (Get-Date).ToString('yyyy-MM-dd HH:mm') })
         $ui.cmbUser.Items.Clear(); [void]$ui.cmbUser.Items.Add((Format-ProfileEntry $script:Profiles[0])); $ui.cmbUser.SelectedIndex = 0
         Out-Console "Benutzer-Modus: $($id.Name) auf $env:COMPUTERNAME - vor dem Backup/Restore offene Programme (Outlook, Browser, Office) schliessen" 'Info'
         Set-Status "Benutzer-Modus: $($id.Name)" '#FFA6E3A1'
@@ -639,7 +639,12 @@ function Connect-Target {
         $script:Profiles = @($r.Profiles)
         foreach ($p in $script:Profiles) { [void]$ui.cmbUser.Items.Add((Format-ProfileEntry $p)) }
         # Vorauswahl: angemeldeter Benutzer, sonst zuletzt verwendet
-        $sel = @($script:Profiles | Where-Object { $_.Loaded } | Select-Object -First 1)
+        # Vorauswahl: lokal der Benutzer, der das Tool startet (wenn angemeldet) - sonst angemeldeter Benutzer, sonst Registry geladen
+        $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $sel = @()
+        if (Test-HMIsLocal $comp) { $sel = @($script:Profiles | Where-Object { $_.SID -eq $me -and $_.Interactive } | Select-Object -First 1) }
+        if (-not $sel) { $sel = @($script:Profiles | Where-Object { $_.Interactive } | Select-Object -First 1) }
+        if (-not $sel) { $sel = @($script:Profiles | Where-Object { $_.Loaded } | Select-Object -First 1) }
         if (-not $sel) { $sel = @($script:Profiles | Sort-Object LastUse -Descending | Select-Object -First 1) }
         if ($sel) { $ui.cmbUser.SelectedIndex = [array]::IndexOf($script:Profiles, $sel[0]) }
         Out-Console "$($script:Profiles.Count) Benutzerprofile auf $comp" 'Success'
