@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- HUMig: USMT sichert nur Windows-Einstellungen (Manifeste) + Favoriten/Schnellstart.
+     Die Dateien des Profils werden von HUMig per Robocopy gesichert. -->
+<migration urlid="http://www.microsoft.com/migration/1.0/migxmlext/humig_settingsonly">
+    <component type="System" context="User">
+        <displayName>Favoriten</displayName>
+        <role role="Settings">
+            <rules>
+                <include>
+                    <objectSet>
+                        <pattern type="File">%CSIDL_FAVORITES%\* [*]</pattern>
+                    </objectSet>
+                </include>
+            </rules>
+        </role>
+    </component>
+    <component type="System" context="User">
+        <displayName>Schnellstart</displayName>
+        <role role="Settings">
+            <rules>
+                <include>
+                    <objectSet>
+                        <pattern type="File">%CSIDL_APPDATA%\Microsoft\Internet Explorer\Quick Launch\* [*]</pattern>
+                    </objectSet>
+                </include>
+            </rules>
+        </role>
+    </component>
+</migration>

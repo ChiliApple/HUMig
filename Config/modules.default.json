@@ -1,0 +1,163 @@
+{
+  "_Info": "Modul-Katalog. Jedes Modul = Checkbox im Tool. Eigene/zusaetzliche Module in Config\\modules.json (gleiche Id ueberschreibt). Platzhalter: {PROFILE} {APPDATA} {LOCALAPPDATA} {SYSTEMDRIVE} {WINDIR} {PROGRAMDATA} {PROGRAMFILES} {PROGRAMFILESX86} {PUBLIC}. HKCU = Hive des gewaehlten Benutzers.",
+  "Groups": [ "Profil & Daten", "Browser", "Office", "Windows", "Netzwerk & Drucker", "System", "Programme" ],
+  "Modules": [
+    { "Id": "Profile", "Name": "Benutzerprofil (Dateien)", "Group": "Profil & Daten", "Default": true, "Scope": "User", "Remote": true,
+      "Hint": "Alle Dateien und Ordner im Benutzerprofil ausser den Ausnahmen (Einstellungen > Ausnahmen). Autostart-Ordner wird mitgesichert.",
+      "Items": [
+        { "Type": "Folder", "Name": "USER", "Path": "{PROFILE}", "Exceptions": "Profile", "NoHidden": true, "Legacy": "USER" },
+        { "Type": "Folder", "Name": "AUTOSTART", "Path": "{APPDATA}\\Microsoft\\Windows\\Start Menu\\Programs\\Startup", "Legacy": "AUTOSTART" }
+      ] },
+    { "Id": "DataC", "Name": "Daten auf Systemlaufwerk", "Group": "Profil & Daten", "Default": true, "Scope": "Machine", "Remote": true,
+      "Hint": "Eigene Ordner direkt auf C:\\ (ohne Windows, Programme, Benutzer und die System-Ausnahmen).",
+      "Items": [ { "Type": "Folder", "Name": "DATA_C", "Path": "{SYSTEMDRIVE}\\", "Exceptions": "System", "NoHidden": true, "Legacy": "DATA_C" } ] },
+    { "Id": "ExtraFolders", "Name": "Zusaetzliche Ordner", "Group": "Profil & Daten", "Default": false, "Scope": "Machine", "Remote": true,
+      "Hint": "Beliebige Ordner (auch USB/andere Laufwerke). Der Originalpfad wird im Backup gespeichert und beim Restore wiederverwendet.",
+      "Items": [ { "Type": "Builtin", "Handler": "ExtraFolders" } ] },
+
+    { "Id": "Edge", "Name": "Edge-Profil", "Group": "Browser", "Default": true, "Scope": "User", "Remote": true,
+      "Hint": "Favoriten, Einstellungen, Erweiterungen. Gespeicherte Kennwoerter/Cookies werden durch Windows-Verschluesselung meist NICHT uebertragen -> Edge-Sync mit dem Microsoft-Konto verwenden.",
+      "Items": [
+        { "Type": "Folder", "Name": "EDGE", "Path": "{LOCALAPPDATA}\\Microsoft\\Edge", "XD": [ "*Cache*", "Crashpad", "GrShaderCache", "ShaderCache" ], "Legacy": "EDGE" },
+        { "Type": "Reg", "Name": "EdgePreferenceMACs", "Key": "HKCU\\Software\\Microsoft\\Edge\\PreferenceMACs", "Legacy": "REGBACKUP\\EdgeProfile.reg" }
+      ] },
+    { "Id": "Chrome", "Name": "Chrome-Profil", "Group": "Browser", "Default": true, "Scope": "User", "Remote": true,
+      "Hint": "Lesezeichen, Einstellungen, Erweiterungen. Kennwoerter/Cookies meist NICHT uebertragbar -> Chrome-Sync verwenden.",
+      "Items": [
+        { "Type": "Folder", "Name": "CHROME", "Path": "{LOCALAPPDATA}\\Google\\Chrome", "XD": [ "*Cache*", "Crashpad", "GrShaderCache", "ShaderCache" ], "Legacy": "CHROME" },
+        { "Type": "Reg", "Name": "ChromePreferenceMACs", "Key": "HKCU\\Software\\Google\\Chrome\\PreferenceMACs", "Legacy": "REGBACKUP\\ChromeProfile.reg" }
+      ] },
+    { "Id": "Firefox", "Name": "Firefox-Profil", "Group": "Browser", "Default": false, "Scope": "User", "Remote": true,
+      "Hint": "Komplettes Firefox-Profil (Lesezeichen, Kennwoerter mit Hauptpasswort, Erweiterungen).",
+      "Items": [
+        { "Type": "Folder", "Name": "FIREFOX_ROAMING", "Path": "{APPDATA}\\Mozilla\\Firefox" },
+        { "Type": "Folder", "Name": "FIREFOX_LOCAL", "Path": "{LOCALAPPDATA}\\Mozilla\\Firefox", "XD": [ "cache2", "startupCache", "thumbnails" ] }
+      ] },
+
+    { "Id": "Office", "Name": "Office (Signaturen, Vorlagen, PST, OneNote)", "Group": "Office", "Default": true, "Scope": "User", "Remote": true,
+      "Hint": "Outlook-Signaturen, Office-Vorlagen, lokale PST-Dateien, OneNote-Cache. OST-Dateien werden nicht gesichert (kommen vom Server).",
+      "Items": [
+        { "Type": "Folder", "Name": "SIGNATURES", "Path": "{APPDATA}\\Microsoft\\Signatures", "Legacy": "OFFICE\\Signatures" },
+        { "Type": "Folder", "Name": "TEMPLATES", "Path": "{APPDATA}\\Microsoft\\Templates", "Legacy": "OFFICE\\Templates" },
+        { "Type": "Files", "Name": "PST", "Path": "{LOCALAPPDATA}\\Microsoft\\Outlook", "Filter": [ "*.pst" ] },
+        { "Type": "Folder", "Name": "ONENOTE", "Path": "{LOCALAPPDATA}\\Microsoft\\OneNote" },
+        { "Type": "Folder", "Name": "UPROOF", "Path": "{APPDATA}\\Microsoft\\UProof" }
+      ] },
+    { "Id": "OfficeReg", "Name": "Office-Einstellungen (Registry)", "Group": "Office", "Default": false, "Scope": "User", "Remote": true,
+      "Hint": "Kompletter Zweig HKCU\\Software\\Microsoft\\Office. Nur bei gleicher Office-Version empfohlen.",
+      "Items": [ { "Type": "Reg", "Name": "Office", "Key": "HKCU\\Software\\Microsoft\\Office", "Legacy": "REGBACKUP\\Office.reg" } ] },
+
+    { "Id": "TaskbarWallpaper", "Name": "Taskleiste, Hintergrund, Farben", "Group": "Windows", "Default": true, "Scope": "User", "Remote": true,
+      "Hint": "Hintergrundbild, Farben, Fenster-Metriken, Taskleisten-Pins. Taskleisten-Pins unter Windows 11 nur eingeschraenkt (Windows ueberschreibt sie teilweise).",
+      "Items": [
+        { "Type": "Folder", "Name": "THEMES", "Path": "{APPDATA}\\Microsoft\\Windows\\Themes", "Legacy": "WALLPAPER" },
+        { "Type": "Folder", "Name": "TASKBAR_PINS", "Path": "{APPDATA}\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar", "Legacy": "TASKBAR\\TaskBar" },
+        { "Type": "Reg", "Name": "Taskband", "Key": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Taskband", "Legacy": "REGBACKUP\\Taskbar.reg" },
+        { "Type": "Reg", "Name": "StreamsDesktop", "Key": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Streams\\Desktop", "Legacy": "REGBACKUP\\Symbolbar.reg" },
+        { "Type": "Reg", "Name": "Colors", "Key": "HKCU\\Control Panel\\Colors", "Legacy": "REGBACKUP\\Colors1.reg" },
+        { "Type": "Reg", "Name": "Desktop", "Key": "HKCU\\Control Panel\\Desktop" },
+        { "Type": "Reg", "Name": "Personalize", "Key": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize" },
+        { "Type": "Builtin", "Handler": "Wallpaper" }
+      ] },
+    { "Id": "DesktopIcons", "Name": "Desktop-Symbolanordnung", "Group": "Windows", "Default": true, "Scope": "User", "Remote": true,
+      "Hint": "Position der Desktop-Symbole (Registry). Wird bei der naechsten Anmeldung angewendet.",
+      "Items": [
+        { "Type": "Reg", "Name": "DesktopBags", "Key": "HKCU\\Software\\Microsoft\\Windows\\Shell\\Bags\\1\\Desktop", "Legacy": "REGBACKUP\\ICONS.reg" }
+      ] },
+    { "Id": "StartMenu", "Name": "Startmenue-Pins (best effort)", "Group": "Windows", "Default": false, "Scope": "User", "Remote": true,
+      "Hint": "Windows 11: angeheftete Startmenue-Eintraege (start2.bin). Funktioniert nur zwischen gleichen Windows-11-Versionen zuverlaessig; Microsoft unterstuetzt das offiziell nicht.",
+      "Items": [
+        { "Type": "Files", "Name": "STARTMENU_W11", "Path": "{LOCALAPPDATA}\\Packages\\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\\LocalState", "Filter": [ "start*.bin" ] },
+        { "Type": "Folder", "Name": "STARTMENU_USER", "Path": "{APPDATA}\\Microsoft\\Windows\\Start Menu\\Programs", "XD": [ "Startup" ] }
+      ] },
+    { "Id": "QuickAccess", "Name": "Schnellzugriff + Kurznotizen", "Group": "Windows", "Default": true, "Scope": "User", "Remote": true,
+      "Hint": "Angeheftete Ordner im Explorer (Schnellzugriff) und Sticky Notes.",
+      "Items": [
+        { "Type": "Folder", "Name": "QUICKACCESS", "Path": "{APPDATA}\\Microsoft\\Windows\\Recent\\AutomaticDestinations", "Legacy": "SCHNELLZUGRIFF" },
+        { "Type": "Folder", "Name": "STICKYNOTES", "Path": "{LOCALAPPDATA}\\Packages\\Microsoft.MicrosoftStickyNotes_8wekyb3d8bbwe", "XD": [ "AC", "TempState" ], "Legacy": "STICKYNOTES" }
+      ] },
+    { "Id": "Fonts", "Name": "Schriftarten", "Group": "Windows", "Default": false, "Scope": "Machine", "Remote": true,
+      "Hint": "Installierte Schriftarten (System + Benutzer). Beim Restore werden nur fehlende installiert.",
+      "Items": [
+        { "Type": "Builtin", "Handler": "Fonts", "Legacy": "FONTS" },
+        { "Type": "Folder", "Name": "USERFONTS", "Path": "{LOCALAPPDATA}\\Microsoft\\Windows\\Fonts", "Legacy": "USERFONTS" },
+        { "Type": "Reg", "Name": "UserFontsReg", "Key": "HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts" }
+      ] },
+
+    { "Id": "Wlan", "Name": "WLAN-Profile", "Group": "Netzwerk & Drucker", "Default": false, "AutoOnLaptop": true, "Scope": "Machine", "Remote": true,
+      "Hint": "Alle WLAN-Profile des Rechners (netsh). Schluessel im Klartext nur wenn in den Einstellungen aktiviert.",
+      "Items": [ { "Type": "Builtin", "Handler": "Wlan", "Legacy": "WLAN" } ] },
+    { "Id": "Shares", "Name": "Ordnerfreigaben (mit Rechten)", "Group": "Netzwerk & Drucker", "Default": false, "Scope": "Machine", "Remote": true,
+      "Hint": "SMB-Freigaben des PCs mit Freigabe- und NTFS-Berechtigungen (shares.json + Freigaben.txt). Restore legt fehlende Freigaben mit den Freigabe-Rechten an; NTFS-Rechte uebernimmt das Werkzeug 'Freigaben'.",
+      "Items": [ { "Type": "Builtin", "Handler": "Shares" } ] },
+    { "Id": "NetDrives", "Name": "Netzlaufwerke", "Group": "Netzwerk & Drucker", "Default": true, "Scope": "User", "Remote": true,
+      "Hint": "Dauerhaft verbundene Netzlaufwerke des Benutzers. Werden bei der naechsten Anmeldung wieder verbunden.",
+      "Items": [ { "Type": "Reg", "Name": "Network", "Key": "HKCU\\Network", "Legacy": "REGBACKUP\\NETDRIVES.reg" } ] },
+    { "Id": "Printers", "Name": "Netzwerkdrucker (Benutzer)", "Group": "Netzwerk & Drucker", "Default": true, "Scope": "User", "Remote": true,
+      "Hint": "Verbundene Server-Drucker des Benutzers und Standarddrucker. Werden bei der naechsten Anmeldung im Benutzerkontext verbunden.",
+      "Items": [ { "Type": "Builtin", "Handler": "PrinterConnections", "Legacy": "07-MappedPrinter.txt" } ] },
+    { "Id": "PrintersFull", "Name": "Drucker komplett (inkl. Treiber)", "Group": "Netzwerk & Drucker", "Default": false, "Scope": "Machine", "Remote": true,
+      "Hint": "Alle lokalen Drucker, Anschluesse und Treiber (PrintBrm).",
+      "Items": [ { "Type": "Builtin", "Handler": "PrintersFull", "Legacy": "PRINTERScomplete.printerExport" } ] },
+    { "Id": "Odbc", "Name": "ODBC-Datenquellen", "Group": "Netzwerk & Drucker", "Default": true, "Scope": "Machine", "Remote": true,
+      "Hint": "Benutzer-DSN und System-DSN (64 + 32 Bit).",
+      "Items": [
+        { "Type": "Reg", "Name": "OdbcUser", "Key": "HKCU\\Software\\ODBC\\ODBC.INI", "Legacy": "REGBACKUP\\ODBC64Bit_USER.reg" },
+        { "Type": "Reg", "Name": "OdbcSystem64", "Key": "HKLM\\Software\\ODBC\\ODBC.INI", "Legacy": "REGBACKUP\\ODBC64Bit_System.reg" },
+        { "Type": "Reg", "Name": "OdbcSystem32", "Key": "HKLM\\Software\\WOW6432Node\\ODBC\\ODBC.INI", "Legacy": "REGBACKUP\\ODBC32Bit_System.reg" }
+      ] },
+    { "Id": "UserVpn", "Name": "VPN-Verbindungen (Benutzer)", "Group": "Netzwerk & Drucker", "Default": false, "Scope": "User", "Remote": true,
+      "Hint": "Windows-VPN-Verbindungen des Benutzers (rasphone.pbk).",
+      "Items": [ { "Type": "Folder", "Name": "USERVPN", "Path": "{APPDATA}\\Microsoft\\Network\\Connections", "Legacy": "USERVPN" } ] },
+
+    { "Id": "Usmt", "Name": "Windows-Einstellungen (USMT)", "Group": "System", "Default": false, "Scope": "User", "Remote": true,
+      "Hint": "ScanState/LoadState (Microsoft USMT aus dem ADK): Maus, Tastatur, Region, Ordneroptionen, Zertifikate, Netzlaufwerke u.a. Legt beim Restore auch das Profil an, wenn sich der Benutzer am Ziel-PC noch nie angemeldet hat. Tool muss als Administrator laufen.",
+      "Items": [ { "Type": "Builtin", "Handler": "Usmt", "Legacy": "USMT" } ] },
+    { "Id": "Tasks", "Name": "Aufgabenplanung", "Group": "System", "Default": false, "Scope": "Machine", "Remote": true,
+      "Hint": "Eigene geplante Aufgaben (ohne \\Microsoft\\) als XML. Restore: Auswahl einzeln im Restore-Dialog.",
+      "Items": [ { "Type": "Builtin", "Handler": "Tasks", "Legacy": "TASKSHEDULLER" } ] },
+    { "Id": "Drivers", "Name": "Treiber (Export)", "Group": "System", "Default": false, "Scope": "Machine", "Remote": true,
+      "Hint": "Alle Dritthersteller-Treiber (Export-WindowsDriver). Restore installiert per pnputil.",
+      "Items": [ { "Type": "Builtin", "Handler": "Drivers", "Legacy": "DRIVERS" } ] },
+    { "Id": "Info", "Name": "Info-Export (Software, Admins, IP ...)", "Group": "System", "Default": true, "Scope": "Machine", "Remote": true,
+      "Hint": "Installierte Software, lokale Admins, Umgebungsvariablen, AD-Gruppen des Computers, IP-Konfiguration. Nur zur Info, wird nicht zurueckgespielt.",
+      "Items": [ { "Type": "Builtin", "Handler": "Info" } ] },
+
+    { "Id": "IPhone", "Name": "iPhone/iPad-Backups", "Group": "Programme", "Default": false, "Scope": "User", "Remote": true,
+      "Hint": "Lokale Geraete-Backups von iTunes / Apple-Geraete.",
+      "Items": [
+        { "Type": "Folder", "Name": "MOBILESYNC", "Path": "{APPDATA}\\Apple Computer\\MobileSync", "Legacy": "iPHONEBACKUP" },
+        { "Type": "Folder", "Name": "MOBILESYNC_STORE", "Path": "{PROFILE}\\Apple\\MobileSync" }
+      ] },
+    { "Id": "KeePass", "Name": "KeePass-Konfiguration", "Group": "Programme", "Default": false, "Scope": "User", "Remote": true,
+      "Hint": "KeePass-Einstellungen (nicht die Datenbank - die liegt meist im Profil/Dokumente).",
+      "Items": [
+        { "Type": "Files", "Name": "KEEPASS", "Path": "{APPDATA}\\KeePass", "Filter": [ "*.xml" ], "Legacy": "KEEPASS" },
+        { "Type": "Files", "Name": "KEEPASS_PROG", "Path": "{PROGRAMFILESX86}\\KeePass2x", "Filter": [ "*.xml" ], "Legacy": "KEEPASS\\x86" }
+      ] },
+    { "Id": "Autodesk", "Name": "Autodesk (AutoCAD, Fusion ...)", "Group": "Programme", "Default": false, "Scope": "User", "Remote": true,
+      "Hint": "Benutzereinstellungen der Autodesk-Programme (ohne Cache).",
+      "Items": [ { "Type": "Folder", "Name": "AUTODESK", "Path": "{APPDATA}\\Autodesk", "XD": [ "*Cache*" ], "Legacy": "ACAD" } ] },
+    { "Id": "SapGui", "Name": "SAP GUI", "Group": "Programme", "Default": false, "Scope": "User", "Remote": true, "Show": false,
+      "Hint": "SAP-Logon, Favoriten und lokale SAP-Einstellungen.",
+      "Items": [
+        { "Type": "Folder", "Name": "SAP_ROAMING", "Path": "{APPDATA}\\SAP", "Legacy": "OFFICE\\SAP" },
+        { "Type": "Folder", "Name": "SAP_LOCAL", "Path": "{LOCALAPPDATA}\\SAP", "Legacy": "OFFICE\\LocalSAP" }
+      ] },
+    { "Id": "Schichtplaner", "Name": "Schichtplaner (RPS)", "Group": "Programme", "Default": false, "Scope": "User", "Remote": true, "Show": false,
+      "Hint": "Beispiel fuer ein Programm mit Benutzer- und Programmordner.",
+      "Items": [
+        { "Type": "Folder", "Name": "RPS", "Path": "{APPDATA}\\RPS", "Legacy": "SCHICHTPLANER" },
+        { "Type": "Folder", "Name": "RPS_PROG", "Path": "{PROGRAMFILESX86}\\Schichtplaner 5", "Legacy": "SCHICHTPLANER\\Schichtplaner 5" }
+      ] }
+  ],
+  "Presets": [
+    { "Name": "Standard", "Modules": [ "Profile", "DataC", "Edge", "Chrome", "Office", "TaskbarWallpaper", "DesktopIcons", "QuickAccess", "NetDrives", "Printers", "Odbc", "Info" ] },
+    { "Name": "Komplett", "Modules": [ "*" ] },
+    { "Name": "Nur Browser + Office", "Modules": [ "Edge", "Chrome", "Firefox", "Office", "Info" ] },
+    { "Name": "Neuer PC (mit Windows-Einstellungen)", "Modules": [ "Profile", "DataC", "Edge", "Chrome", "Office", "TaskbarWallpaper", "DesktopIcons", "QuickAccess", "NetDrives", "Printers", "Odbc", "Wlan", "Fonts", "Usmt", "Info" ] },
+    { "Name": "Notebook", "Hint": "Profil, Browser, Office, Taskleiste/Desktop, Netzlaufwerke, Drucker, WLAN - ohne Daten auf C:\\", "Modules": [ "Profile", "Edge", "Chrome", "Firefox", "Office", "TaskbarWallpaper", "DesktopIcons", "QuickAccess", "NetDrives", "Printers", "Wlan", "Info" ] },
+    { "Name": "Buero-PC (mit Druckertreibern)", "Hint": "Wie Standard plus Schriftarten, Office-Einstellungen und Drucker mit Treibern (PrintBrm)", "Modules": [ "Profile", "DataC", "Edge", "Chrome", "Office", "OfficeReg", "TaskbarWallpaper", "DesktopIcons", "QuickAccess", "NetDrives", "Printers", "PrintersFull", "Odbc", "Fonts", "Info" ] },
+    { "Name": "Minimal", "Hint": "Nur das Noetigste: Profil-Dateien, Browser, WLAN, Info", "Modules": [ "Profile", "Edge", "Chrome", "Wlan", "Info" ] }
+  ]
+}

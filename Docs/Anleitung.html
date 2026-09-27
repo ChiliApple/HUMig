@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HUMig v2 – Anleitung</title>
+<style>
+:root{
+  --bg:#eff1f5;--panel:#ffffff;--panel2:#e6e9ef;--text:#4c4f69;--sub:#6c6f85;--line:#ccd0da;
+  --blue:#1e66f5;--green:#40a02b;--peach:#fe640b;--red:#d20f39;--mauve:#8839ef;--teal:#179299;--yellow:#df8e1d;
+  --accent:#b9a88a;--shadow:0 2px 10px rgba(76,79,105,.08);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#11111b;--panel:#1e1e2e;--panel2:#181825;--text:#cdd6f4;--sub:#a6adc8;--line:#313244;
+  --blue:#89b4fa;--green:#a6e3a1;--peach:#fab387;--red:#f38ba8;--mauve:#cba6f7;--teal:#94e2d5;--yellow:#f9e2af;--shadow:0 2px 12px rgba(0,0,0,.35);
+}}
+:root[data-theme="dark"]{
+  --bg:#11111b;--panel:#1e1e2e;--panel2:#181825;--text:#cdd6f4;--sub:#a6adc8;--line:#313244;
+  --blue:#89b4fa;--green:#a6e3a1;--peach:#fab387;--red:#f38ba8;--mauve:#cba6f7;--teal:#94e2d5;--yellow:#f9e2af;--shadow:0 2px 12px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:84px}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 "Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px;padding:10px 20px;background:var(--panel);border-bottom:2px solid var(--accent);box-shadow:var(--shadow)}
+header img{width:44px;height:44px}
+header .t{font-size:22px;font-weight:700;line-height:1.1}
+header .s{font-size:12px;color:var(--sub)}
+header .sp{flex:1}
+#q{width:260px;max-width:40vw;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:inherit}
+.tbtn{padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;font:inherit}
+.wrap{display:grid;grid-template-columns:270px 1fr;max-width:1400px;margin:0 auto}
+nav{position:sticky;top:66px;align-self:start;height:calc(100vh - 66px);overflow:auto;padding:18px 10px 40px 18px;border-right:1px solid var(--line)}
+nav a{display:block;padding:4px 10px;border-radius:6px;color:var(--text);font-size:14px}
+nav a:hover{background:var(--panel2);text-decoration:none}
+nav a.l2{padding-left:24px;font-size:13px;color:var(--sub)}
+nav a.act{background:var(--panel2);color:var(--blue);font-weight:600}
+main{padding:24px 36px 80px;min-width:0}
+section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 28px;margin:0 0 22px;box-shadow:var(--shadow)}
+h1{font-size:28px;margin:0 0 6px}
+h2{font-size:22px;margin:0 0 12px}
+h2 .n{display:inline-grid;place-items:center;width:32px;height:32px;margin-right:10px;vertical-align:2px;border-radius:50%;background:var(--accent);color:#1e1e2e;font-size:15px}
+h3{font-size:17px;margin:22px 0 8px;color:var(--blue)}
+p{margin:8px 0}
+.lead{color:var(--sub);font-size:16px}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{background:var(--panel2);font-weight:600}
+tr:hover td{background:color-mix(in srgb,var(--panel2) 55%,transparent)}
+.ui{display:inline-block;padding:0 8px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);font-size:13px;font-weight:600;white-space:nowrap}
+.ui.g{border-color:var(--green);color:var(--green)}.ui.r{border-color:var(--red);color:var(--red)}.ui.b{border-color:var(--blue);color:var(--blue)}
+.ui.p{border-color:var(--peach);color:var(--peach)}.ui.m{border-color:var(--mauve);color:var(--mauve)}.ui.t{border-color:var(--teal);color:var(--teal)}
+kbd{padding:1px 7px;border-radius:5px;border:1px solid var(--line);border-bottom-width:2px;background:var(--panel2);font:12px Consolas,monospace}
+code{font:13px Consolas,monospace;background:var(--panel2);padding:1px 5px;border-radius:4px}
+.note{border-left:4px solid var(--blue);background:var(--panel2);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+.note.tip{border-color:var(--green)}.note.warn{border-color:var(--peach)}.note.stop{border-color:var(--red)}
+.note b.h{display:block;margin-bottom:2px}
+.steps{counter-reset:s;list-style:none;padding:0;margin:12px 0}
+.steps>li{counter-increment:s;position:relative;padding:4px 0 10px 46px;min-height:36px}
+.steps>li::before{content:counter(s);position:absolute;left:0;top:2px;width:32px;height:32px;border-radius:50%;background:var(--blue);color:var(--panel);display:grid;place-items:center;font-weight:700}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin:12px 0}
+.card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card b{display:block;margin-bottom:4px}
+.card.g{border-top:4px solid var(--green)}.card.b{border-top:4px solid var(--blue)}.card.p{border-top:4px solid var(--peach)}.card.m{border-top:4px solid var(--mauve)}.card.t{border-top:4px solid var(--teal)}.card.r{border-top:4px solid var(--red)}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px 0}
+.flow span{padding:8px 14px;border-radius:20px;background:var(--panel2);border:1px solid var(--line);font-weight:600;font-size:14px}
+.flow i{color:var(--sub);font-style:normal}
+.hide{display:none!important}
+figure{margin:14px 0}figure img{max-width:100%;border-radius:10px;border:1px solid var(--line);box-shadow:var(--shadow);cursor:zoom-in}figure figcaption{color:var(--sub);font-size:13px;margin-top:4px}
+mark{background:var(--yellow);color:#1e1e2e;border-radius:3px}
+footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
+@media (max-width:900px){.wrap{grid-template-columns:1fr}nav{display:none}main{padding:16px}section{padding:18px 16px}#q{width:150px}}
+@media print{header,nav,#q,.tbtn{display:none!important}.wrap{display:block}section{box-shadow:none;break-inside:avoid-page}body{background:#fff;color:#000}}
+</style>
+</head>
+<body>
+<header>
+  <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAWfmNhQlgAABZ+anVtYgAAAB5qdW1kYzJwYQARABCAAACqADibcQNjMnBhAAAAFlhqdW1iAAAAR2p1bWRjMm1hABEAEIAAAKoAOJtxA3VybjpjMnBhOjlhNjBjNTQzLTA2MTMtNGVhYy1hY2QzLWNmY2UyYTlhNGY4MQAAAAOTanVtYgAAAClqdW1kYzJhcwARABCAAACqADibcQNjMnBhLmFzc2VydGlvbnMAAAAAuGp1bWIAAABEanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5pbmdyZWRpZW50LnYzAAAAABhjMnNo1w+x2lp1TdftRZcdL2nEYwAAAGxjYm9yo2lkYzpmb3JtYXRpaW1hZ2UvcG5namluc3RhbmNlSUR4LHhtcDppaWQ6ZDUzMzFmYjQtNWE1Mi00ODU0LTg3MWYtMjk1YTMyYTIwNTllbHJlbGF0aW9uc2hpcGhwYXJlbnRPZgAAAeJqdW1iAAAAQWp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuYWN0aW9ucy52MgAAAAAYYzJzaKkkrfT73FcN+ebiCyJqwQIAAAGZY2JvcqJnYWN0aW9uc4KiZmFjdGlvbmtjMnBhLm9wZW5lZGpwYXJhbWV0ZXJzoWtpbmdyZWRpZW50c4GiY3VybHgtc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5pbmdyZWRpZW50LnYzZGhhc2hYIGaEtIrJAx/MyCbLhyjuCFIO8oA6A0BF1S3lXouZ+A52pGZhY3Rpb254HWNvbS5hbnRocm9waWMuY2xhdWRlLnByb3ZpZGVkanBhcmFtZXRlcnOheB9jb20uYW50aHJvcGljLm9yaWdpbi1jb25maWRlbmNlZ3Vua25vd25rZGVzY3JpcHRpb254ZkNsYXVkZSBwcm92aWRlZCB0aGlzIGZpbGUgYXQgdGhlIHJlcXVlc3Qgb2YgYSB1c2VyIGFuZCBtYXkgaGF2ZSBjcmVhdGVkIG9yIG1vZGlmaWVkIHRoZSBmaWxlIGNvbnRlbnRzLm1zb2Z0d2FyZUFnZW50oWRuYW1lZkNsYXVkZXJhbGxBY3Rpb25zSW5jbHVkZWT1AAAAyGp1bWIAAABAanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5oYXNoLmRhdGEAAAAAGGMyc2hlf9P1aqpj4lapFsg0/gizAAAAgGNib3KlY2FsZ2ZzaGEyNTZjcGFkTQAAAAAAAAAAAAAAAABkaGFzaFggbN7pdGAoCJDQiG07N8JCStrrlsxNZ3Z18/JpNSM5OTpkbmFtZW5qdW1iZiBtYW5pZmVzdGpleGNsdXNpb25zgaJlc3RhcnQYIWZsZW5ndGgZFooAAAI+anVtYgAAACdqdW1kYzJjbAARABCAAACqADibcQNjMnBhLmNsYWltLnYyAAAAAg9jYm9ypWNhbGdmc2hhMjU2aXNpZ25hdHVyZXhNc2VsZiNqdW1iZj0vYzJwYS91cm46YzJwYTo5YTYwYzU0My0wNjEzLTRlYWMtYWNkMy1jZmNlMmE5YTRmODEvYzJwYS5zaWduYXR1cmVqaW5zdGFuY2VJRHgseG1wOmlpZDpmMjFjZGQ1Ny1hMzBkLTQ5OGUtOTM1Zi02Y2YzZmExNWE4ZDFyY3JlYXRlZF9hc3NlcnRpb25zg6JjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggZoS0iskDH8zIJsuHKO4IUg7ygDoDQEXVLeVei5n4DnaiY3VybHgqc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5hY3Rpb25zLnYyZGhhc2hYIOtXMsrTriWdb3od3wTgqdrRO2nrcM4B5Bh+xKldS6dYomN1cmx4KXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaGFzaC5kYXRhZGhhc2hYIOVyGE49uVxqmzAjj8r32BRzjyAAHa4wNMDflALk8iYhdGNsYWltX2dlbmVyYXRvcl9pbmZvo2RuYW1lb0FudGhyb3BpYyBGaWxlc2d2ZXJzaW9uZTEuMC4wa3NwZWNWZXJzaW9uZTIuNC4wAAAQOGp1bWIAAAAoanVtZGMyY3MAEQAQgAAAqgA4m3EDYzJwYS5zaWduYXR1cmUAAAAQCGNib3LShFkCEqIBJhghWQIKMIICBjCCAY2gAwIBAgIUQOWgCu7COdC+uIP6BkIFPWdVEwAwCgYIKoZIzj0EAwMwSTEXMBUGA1UEChMOQW50aHJvcGljLCBQQkMxLjAsBgNVBAMTJUFudGhyb3BpYyBDb250ZW50IENyZWRlbnRpYWxzIFJvb3QgQ0EwHhcNMjYwODA3MTg0MzU2WhcNMjgwODA2MTk0MzU2WjBEMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEpMCcGA1UEAxMgQW50aHJvcGljIENsYXVkZSBDb250ZW50IFNpZ25pbmcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAASYegpry1AYBRTVNL1CpTlbROnY3dey+UrsF9C3phYrATN3ZHf93Mo8RQN0KOUuOn19P4oWNFWe5n2/She9N7eTo1gwVjAOBgNVHQ8BAf8EBAMCB4AwFQYDVR0lBA4wDAYKKwYBBAGD6F4CATAMBgNVHRMBAf8EAjAAMB8GA1UdIwQYMBaAFM5R4gSBTmRbI/jjxM+aPpzB11zCMAoGCCqGSM49BAMDA2cAMGQCMDFzHRSeAXrSy1WOzkbhPZ6Km2wGTmZ/2gK18k8BQGXyqz88Rdrz6CTX9flAnYNVxgIwcF9c3fVhqmJKpi+UhasNUMko69cyX6STPfta3Q8EjyzDjzoyrol46FP6VFHhvUcJoWNwYWRZDZ4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA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" alt="">
+  <div><div class="t">HUMig v2</div><div class="s">Benutzerprofil-Migration · Anleitung</div></div>
+  <div class="sp"></div>
+  <input id="q" type="search" placeholder="Suchen … (z. B. OneDrive, Lizenz)">
+  <button class="tbtn" id="theme" title="Hell / Dunkel">◐</button>
+  <button class="tbtn" onclick="window.print()" title="Drucken / PDF">⎙</button>
+</header>
+<div class="wrap">
+<nav id="toc"></nav>
+<main>
+
+<section id="start">
+  <h1>Willkommen bei HUMig v2</h1>
+  <p class="lead">HUMig sichert Benutzerprofile unter Windows 10/11 und stellt sie auf demselben oder einem neuen PC wieder her – lokal auf ein USB-Laufwerk oder über das Netzwerk von jedem PC aus. Dazu kommen viele Werkzeuge für die tägliche PC-Betreuung.</p>
+  <div class="flow"><span>1 · Computer + Benutzer wählen</span><i>→</i><span>2 · Module wählen</span><i>→</i><span>3 · Backup</span><i>→</i><span>4 · Neuer PC: Restore</span><i>→</i><span>5 · Checkliste</span></div>
+  <div class="cards">
+    <div class="card g"><b>Backup</b>Dateien, Browser, Office, Windows-Einstellungen, Drucker, WLAN, Programme mit Lizenzdateien …</div>
+    <div class="card b"><b>Restore</b>mit Vorschau, was überschrieben wird, Nachinstallation fehlender Programme und Checkliste</div>
+    <div class="card p"><b>Werkzeuge</b>Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot, BitLocker, Profil-Reparatur, Diagnose</div>
+    <div class="card m"><b>Softwareverteilung</b>MSI/EXE still installieren – auf einem oder vielen PCs</div>
+  </div>
+  <div class="note tip"><b class="h">Diese Anleitung ist immer aktuell</b>Der Knopf <span class="ui">Anleitung</span> (oder <kbd>F1</kbd>) lädt sie jedes Mal neu aus dem Repository. Ohne Internet öffnet sich die mitgelieferte Kopie <code>Docs\Anleitung.html</code>.</div>
+</section>
+
+<section id="schnellstart">
+  <h2><span class="n">1</span>Schnellstart</h2>
+  <h3>Erster Start</h3>
+  <ol class="steps">
+    <li>Tool-Ordner auf ein USB-Laufwerk (am besten NVMe) oder lokal kopieren.</li>
+    <li><b>Start.cmd</b> ausführen – fragt nach Administratorrechten. Dabei entsteht <b>HUMig.exe</b>: ab dann damit starten (kein Konsolenfenster, anheftbar).</li>
+    <li>Oben den Backup-Ordner prüfen (Standard: <code>BACKUPS\</code> neben dem Tool) und bei Bedarf einen <b>Standort</b> anlegen (siehe <a href="#standorte">Standorte</a>).</li>
+  </ol>
+  <h3>Profil umziehen (alter PC → neuer PC)</h3>
+  <ol class="steps">
+    <li><b>Alter PC:</b> Computer wählen (<span class="ui">Lokal</span> oder Name eintippen + <span class="ui">Verbinden</span>), Benutzer wählen.</li>
+    <li>Reiter <b>Backup</b>: Vorlage wählen (z. B. <i>Standard</i>), optional <span class="ui">Programme</span> – erkannte Programme werden als Module ergänzt.</li>
+    <li><span class="ui">Vorab-Pruefung</span> – zeigt Anmeldestatus, Cloud-Ordner, Größe und freien Platz. Dann <span class="ui g">Backup starten</span>.</li>
+    <li><b>Neuer PC:</b> Computer + Benutzer wählen, Reiter <b>Restore</b>, Backup markieren, optional <span class="ui">Vorschau: was wird ueberschrieben?</span></li>
+    <li><span class="ui g">Restore starten</span>, danach <span class="ui">Fehlende Programme installieren …</span> und <span class="ui">Checkliste</span>.</li>
+  </ol>
+  <div class="note warn"><b class="h">Benutzer abmelden</b>Am besten ist der Benutzer beim Backup <b>nicht angemeldet</b> – dann lädt HUMig seine Registry direkt und keine Datei ist gesperrt. Werkzeug <span class="ui t">Angemeldete Benutzer</span> meldet Sitzungen ab.</div>
+</section>
+
+<section id="oberflaeche">
+  <h2><span class="n">2</span>Die Oberfläche</h2>
+  <table>
+    <tr><th style="width:230px">Bereich</th><th>Bedeutung</th></tr>
+    <tr><td><span class="ui">Update</span></td><td>Links: neue Version laden (Tool startet neu, eigene Daten bleiben). Wird gelb, wenn ein Update verfügbar ist. Rechts: GitHub-Token (nur bei privatem Repo).</td></tr>
+    <tr><td><span class="ui">Einstellungen</span></td><td>Links: Einstellungsfenster. Rechts: Konfigurationsdateien im Editor, Config-/Log-Ordner.</td></tr>
+    <tr><td><span class="ui">Anleitung</span> / <span class="ui">Info</span></td><td>Diese Anleitung (<kbd>F1</kbd>) bzw. Version und Quelle.</td></tr>
+    <tr><td><b>Standort</b></td><td>Auswahl des Standort-Profils (Backup-Ordner, Softwareverteilung, USMT, Domäne). Nur sichtbar, wenn Standorte angelegt sind.</td></tr>
+    <tr><td><b>Computer</b></td><td>Dieser PC oder Name/IP eines anderen PCs. <kbd>Enter</kbd> oder <span class="ui">Verbinden</span> lädt die Profile. Rechtsklick auf <span class="ui">Verbinden</span>: andere Anmeldedaten. <span class="ui">Lokal</span> = zurück auf diesen PC.</td></tr>
+    <tr><td><span class="ui">Geraete (AD) …</span></td><td>PCs aus dem Active Directory – einen per Doppelklick wählen oder mehrere für <a href="#mehrfach">Mehrfachaktionen</a> anhaken.</td></tr>
+    <tr><td><b>Benutzer</b></td><td>Profil am gewählten PC. Für einen neuen PC ohne Profil: Konto als <code>DOMÄNE\Benutzer</code> eintragen (dann das USMT-Modul mitwählen).</td></tr>
+    <tr><td><b>Backup-Ordner</b></td><td><span class="ui">…</span> links: Ordner wählen (USB, Freigabe), rechts: Standard. <span class="ui">Oeffnen</span> im Explorer, <span class="ui">Verschluesseln …</span> = BitLocker To Go für das USB-Laufwerk.</td></tr>
+    <tr><td><b>Konsole</b> (unten)</td><td>Alle Meldungen farbig. Rechtsklick = leeren, <kbd>Strg</kbd>+<kbd>C</kbd> = kopieren. Die Trennlinie ist verschiebbar.</td></tr>
+  </table>
+  <h3>Größe anpassen (kleine Bildschirme)</h3>
+  <p><kbd>Strg</kbd>+<kbd>+</kbd> / <kbd>Strg</kbd>+<kbd>−</kbd> oder <kbd>Strg</kbd>+Mausrad vergrößert/verkleinert die gesamte Oberfläche, <kbd>Strg</kbd>+<kbd>0</kbd> = automatisch. Fest einstellen: Einstellungen › Allgemein › <b>Skalierung</b>. Die Größe wird beim Beenden gespeichert und gilt für alle Fenster.</p>
+  <p>Ohne Administratorrechte bietet HUMig den <a href="#benutzermodus">Benutzer-Modus</a> an – für Profile anderer Benutzer, Remote, USMT und die meisten Werkzeuge werden Adminrechte gebraucht.</p>
+</section>
+
+<section id="backup">
+  <h2><span class="n">3</span>Backup</h2>
+  <figure><a href="img/backup.png" target="_blank"><img src="img/backup.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Docs/img/backup.png'" alt="Reiter Backup: Module links, Ausnahmen und Optionen rechts" loading="lazy"></a><figcaption>Reiter Backup: Module links, Ausnahmen und Optionen rechts</figcaption></figure>
+  <h3>So funktioniert es</h3>
+  <table>
+    <tr><th style="width:230px">Was</th><th>Wie</th></tr>
+    <tr><td>Dateien</td><td>Robocopy mit bis zu 128 Threads und Ausnahmelisten</td></tr>
+    <tr><td>Benutzer-Einstellungen</td><td>Registry-Export aus dem Benutzer-Hive – wird geladen, wenn der Benutzer nicht angemeldet ist; Pfade und SID werden beim Restore auf den Zielbenutzer umgeschrieben</td></tr>
+    <tr><td>Windows-Einstellungen</td><td>optional Microsoft USMT (ScanState/LoadState) – legt beim Restore auch das Profil an</td></tr>
+    <tr><td>Backup-Ordner</td><td>je PC + Benutzer ein Ordner mit Datum; Protokolle, <code>manifest.json</code> und Berichte liegen darin</td></tr>
+  </table>
+  <h3>Module</h3>
+  <p>Links anhaken, was gesichert werden soll (<span class="ui">Alle</span> / <span class="ui">Keine</span>). Nach <span class="ui">Groesse ermitteln</span> steht neben jedem Modul die Größe.</p>
+  <table>
+    <tr><th style="width:190px">Gruppe</th><th>Module</th></tr>
+    <tr><td>Profil &amp; Daten</td><td>Benutzerprofil (Dateien) · Daten auf Systemlaufwerk (C:\ außerhalb von Windows/Programmen) · Zusätzliche Ordner</td></tr>
+    <tr><td>Browser</td><td>Edge-, Chrome-, Firefox-Profil (Lesezeichen, Erweiterungen, Einstellungen)</td></tr>
+    <tr><td>Office</td><td>Signaturen, Vorlagen, PST, OneNote · Office-Einstellungen (Registry)</td></tr>
+    <tr><td>Windows</td><td>Taskleiste, Hintergrund, Farben · Desktop-Symbolanordnung · Startmenü-Pins (best effort) · Schnellzugriff + Kurznotizen · Schriftarten</td></tr>
+    <tr><td>Netzwerk &amp; Drucker</td><td>WLAN-Profile · Ordnerfreigaben (mit Rechten) · Netzlaufwerke · Netzwerkdrucker · Drucker komplett (inkl. Treiber) · ODBC · VPN-Verbindungen</td></tr>
+    <tr><td>System</td><td>Windows-Einstellungen (USMT) · Aufgabenplanung · Treiber (Export) · Info-Export (Software, Admins, IP …)</td></tr>
+    <tr><td>Programme</td><td>iPhone/iPad-Backups, KeePass, Autodesk, SAP GUI u. a. – dazu alle Programme, die der <a href="#programme">Programm-Katalog</a> erkennt</td></tr>
+  </table>
+  <p><b>Vorlagen</b> haken nur Module vor – danach frei änderbar. Erkannte Programme kommen immer dazu.</p>
+  <table>
+    <tr><th style="width:230px">Vorlage</th><th>Enthält</th><th style="width:30%">Wofür</th></tr>
+    <tr><td>Standard</td><td>Profil, Daten auf C:\, Edge, Chrome, Office, Taskleiste, Desktop-Symbole, Schnellzugriff, Netzlaufwerke, Drucker, ODBC, Info</td><td>normaler Arbeitsplatz</td></tr>
+    <tr><td>Komplett</td><td>alle Module</td><td>sicher alles</td></tr>
+    <tr><td>Nur Browser + Office</td><td>Edge, Chrome, Firefox, Office, Info</td><td>schnelle Kleinigkeiten</td></tr>
+    <tr><td>Neuer PC (mit Windows-Einstellungen)</td><td>wie Standard + WLAN, Schriftarten, <b>USMT</b></td><td>Benutzer war am Ziel-PC noch nie angemeldet – USMT legt das Profil an</td></tr>
+    <tr><td>Notebook</td><td>wie Standard + Firefox, WLAN – ohne Daten auf C:\ und ODBC</td><td>Notebooks</td></tr>
+    <tr><td>Büro-PC (mit Druckertreibern)</td><td>wie Standard + Office-Registry, Drucker mit Treibern, Schriftarten</td><td>Arbeitsplatz mit lokalen Druckern/Spezialschriften</td></tr>
+    <tr><td>Minimal</td><td>Profil, Edge, Chrome, WLAN, Info</td><td>schnell, nur das Nötigste</td></tr>
+  </table>
+  <p>Eigene Vorlagen: <code>Config\modules.json</code> bzw. Einstellungen › Module.</p>
+
+  <h3>Zusätzliche Ordner und Ausnahmen</h3>
+  <ul>
+    <li><b>Zusätzliche Ordner</b> (<span class="ui">+ Ordner</span>): werden im Modul <i>Zusätzliche Ordner</i> mit vollem Pfad gesichert.</li>
+    <li><b>Ausschließen</b>: einzelne Ordner/Dateien weglassen (Rechtsklick auf <span class="ui">+ Ordner</span> = Pfad eintippen). <span class="ui">Grosse Dateien …</span> zeigt die größten Ordner/Dateien der letzten Messung – markierte direkt ausschließen.</li>
+    <li>Schalter: <i>Profil: nur AppData ausnehmen</i> · <i>Profil: keine Datei-Ausnahmen</i> · <i>C:\ nur Systemordner ausnehmen</i> · <i>C:\ keine Datei-Ausnahmen</i> · <span class="ui">Ausnahmelisten bearbeiten</span>.</li>
+  </ul>
+
+  <h3>Optionen</h3>
+  <table>
+    <tr><th style="width:290px">Option</th><th>Wirkung</th></tr>
+    <tr><td>Vorhandenes Backup aktualisieren</td><td>Gibt es schon ein Backup dieses PCs/Benutzers, wird es weitergeführt – nur Neues/Geändertes wird kopiert. Gelöschte Dateien bleiben im Backup.</td></tr>
+    <tr><td>Platz vor dem Start prüfen</td><td>Simuliert das Backup und startet nicht, wenn der Platz nicht reicht (Rückfrage).</td></tr>
+    <tr><td>Backup danach prüfen</td><td>Vergleich Quelle ↔ Backup und SHA-256-Stichprobe.</td></tr>
+    <tr><td>Prüfsummen-Katalog erstellen</td><td><b>Standard aus.</b> SHA-256 jeder Datei (<code>Pruefsummen.tsv</code>) – damit lässt sich das Backup später jederzeit vollständig prüfen. Der erste Lauf dauert lange, weil jede Datei gelesen wird.</td></tr>
+    <tr><td>OneDrive/SharePoint: lokale Dateien mitsichern</td><td>Aus: Cloud-Ordner werden ausgelassen. Ein: nur Dateien, die am PC liegen. <b>Nur-Cloud-Dateien werden nie heruntergeladen.</b></td></tr>
+    <tr><td>Threads</td><td>1 = schonend (HDD, langsames Netz) · 32 = Standard · 128 = maximal (NVMe)</td></tr>
+  </table>
+
+  <h3>Vorab-Prüfung und Größe</h3>
+  <p><span class="ui">Vorab-Pruefung</span> prüft Verbindung, Anmeldestatus, Cloud-Ordner aller Anbieter, USMT und zeigt die <b>Backup-Größe mit freiem Platz am Ziel</b> – ist noch nicht gemessen, startet die Messung automatisch. <span class="ui">Groesse ermitteln</span> misst nur (Robocopy-Simulation, kopiert nichts).</p>
+
+  <h3>Cloud-Ordner (OneDrive, SharePoint, Dropbox …)</h3>
+  <p>HUMig erkennt die Sync-Ordner <b>aller</b> Anbieter, die sich bei Windows registrieren. Dateien, die nur in der Cloud liegen (Platzhalter), werden nie gelesen – so wird nichts heruntergeladen und das Backup bleibt abbrechbar. Findet HUMig Nur-Cloud-Dateien in einem unbekannten Ordner, lässt es diesen aus und meldet das.</p>
+
+  <h3>Während und nach dem Backup</h3>
+  <p><span class="ui r">Abbrechen</span> stoppt sofort (auch hängende Kopiervorgänge). Ein abgebrochenes Backup bleibt erhalten und ist als abgebrochen markiert.</p>
+  <table>
+    <tr><th style="width:230px">Datei im Backup</th><th>Inhalt</th></tr>
+    <tr><td><code>Bericht_Backup.html</code></td><td>Druckbares Protokoll mit Unterschriftsfeldern</td></tr>
+    <tr><td><code>HUMig.log</code></td><td>Ablauf mit allen Meldungen</td></tr>
+    <tr><td><code>Robocopy.log</code></td><td>Kopierprotokoll. Die Spalte <i>Übersprungen/Skipped</i> enthält <b>absichtlich ausgelassene</b> Dateien (versteckt/System wie <code>pagefile.sys</code>, Nur-Cloud, Ausschlussmuster) – das ist kein Fehler. Fehler stehen unter <i>FAILED</i>.</td></tr>
+    <tr><td><code>manifest.json</code></td><td>Beschreibung des Backups (Module, Programme, Status)</td></tr>
+    <tr><td><code>Pruefsummen.tsv</code></td><td>Prüfsummen-Katalog (wenn eingeschaltet)</td></tr>
+  </table>
+</section>
+
+<section id="programme">
+  <h2><span class="n">4</span>Programm-Katalog und Lizenzen</h2>
+  <p><span class="ui">Programme</span> (Reiter Backup) erkennt installierte Programme am Quell-PC. Für bekannte Programme werden passende Module eingeblendet und angehakt; die Übersicht zeigt, was übertragbar ist, welche Lizenz-Hinweise gelten und was nach dem Restore zu tun ist. Rechtsklick = nur Übersicht.</p>
+  <p>Der Katalog kennt u. a.: Firefox, Chrome, Edge, Microsoft 365, Thunderbird, Notepad++, 7-Zip, VLC, LibreOffice, Acrobat Reader, Foxit, GIMP, Inkscape, Audacity, Paint.NET, IrfanView, Greenshot, OBS, VS Code, KeePass/KeePassXC, FileZilla, PuTTY, WinSCP, mRemoteNG, AnyDesk, TeamViewer, FortiClient VPN, Zotero, Citavi, Obsidian, Arduino, GeoGebra, SketchUp, Autodesk, SMART Notebook, ActivInspire, Untis, Packet Tracer, Zoom, Teams, WinRAR, Total Commander, Beyond Compare, Sublime Text.</p>
+  <div class="note tip"><b class="h">Lizenzen mitnehmen</b>Programme mit Lizenzdatei/-schlüssel (z. B. WinRAR <code>rarreg.key</code>, Total Commander <code>wincmd.key</code>, Beyond Compare, Sublime Text) werden mit Lizenz gesichert und sind am neuen PC gleich registriert – Modulname mit <i>(+ Lizenz)</i>. Nicht übertragbar sind Lizenzen, die an Konto oder Hardware gebunden sind (Microsoft 365, Adobe, Autodesk …) – dafür gibt es Hinweise in der Checkliste.</div>
+  <h3>Eigene Programme</h3>
+  <p>In <code>Config\apps.json</code> (Aufbau wie <code>apps.default.json</code>), z. B. mit Lizenzdatei:</p>
+  <p><code>{ "Apps": [ { "Id": "App_MeinTool", "Name": "Mein Tool", "Detect": "^Mein Tool", "Items": [ { "Type": "Files", "Name": "LIC", "Path": "{PROGRAMFILES}\\MeinTool", "Filter": [ "*.lic" ], "License": true } ] } ] }</code></p>
+</section>
+
+<section id="restore">
+  <h2><span class="n">5</span>Restore und Backups verwalten</h2>
+  <p>Oben Ziel-Computer und Ziel-Benutzer wählen, im Reiter <b>Restore</b> das Backup markieren und die Module anhaken. Stimmt der Benutzer nicht mit dem Backup überein, warnt HUMig.</p>
+  <figure><a href="img/restore.png" target="_blank"><img src="img/restore.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Docs/img/restore.png'" alt="Reiter Restore: Backup wählen, Module, Optionen und Nacharbeiten" loading="lazy"></a><figcaption>Reiter Restore: Backup wählen, Module, Optionen und Nacharbeiten</figcaption></figure>
+  <h3>Liste der Backups</h3>
+  <table>
+    <tr><th style="width:230px">Knopf</th><th>Wirkung</th></tr>
+    <tr><td><span class="ui">Aktualisieren</span> / <span class="ui">Ordner oeffnen</span></td><td>Liste neu laden / Backup im Explorer</td></tr>
+    <tr><td><span class="ui">Protokoll</span></td><td>Backup- bzw. Restore-Bericht (HTML, druckbar, als PDF speicherbar)</td></tr>
+    <tr><td><span class="ui">Backup pruefen</span></td><td>Alle Dateien gegen den Prüfsummen-Katalog (beschädigt? fehlt etwas?). Ohne Katalog: Rechtsklick = Katalog jetzt erstellen. Ergebnis <code>Pruefung_*.txt</code>.</td></tr>
+    <tr><td><span class="ui">Vergleichen …</span></td><td>Zwei Backups vergleichen: geändert, nur in A, nur in B</td></tr>
+    <tr><td><span class="ui">Uebersicht (HTML)</span></td><td><code>Backups.html</code>: alle Backups mit Status, Größe, Prüfung, Links (Filter, Sortierung)</td></tr>
+    <tr><td><span class="ui r">Loeschen</span> / <span class="ui">Alte loeschen</span></td><td>Einzeln löschen bzw. nach Aufbewahrungsregel: je PC + Benutzer die neuesten N behalten, ältere nach X Tagen vorschlagen – immer mit Rückfrage</td></tr>
+  </table>
+  <h3>Optionen</h3>
+  <table>
+    <tr><th style="width:290px">Option</th><th>Wirkung</th></tr>
+    <tr><td>Neuere Dateien am Ziel nicht überschreiben</td><td>Ist eine Datei am Ziel neuer, bleibt sie erhalten</td></tr>
+    <tr><td>OneDrive-Dateien in eigenen Ordner</td><td>Mitgesicherte Cloud-Dateien landen in <code>Profil\OneDrive-Wiederherstellung</code> – nie direkt im Sync-Ordner (dort könnten neuere Cloud-Versionen überschrieben werden)</td></tr>
+    <tr><td>Nacharbeiten</td><td>gpupdate /force · Treiber über Windows Update aus · NumLock beim Start an · Explorer-Favoriten einblenden · Schnellstart aus</td></tr>
+  </table>
+  <h3>Vorschau, Programme, Checkliste</h3>
+  <ul>
+    <li><span class="ui">Vorschau: was wird ueberschrieben?</span> – je Datei: <i>neu</i>, <i>überschreibt ältere Zieldatei</i>, <i>überschreibt neuere Zieldatei</i>, <i>gleich</i>. Nach dem Restore als Kontrolle: alles „gleich“ = vollständig. Als CSV exportierbar.</li>
+    <li><span class="ui">Fehlende Programme installieren …</span> – vergleicht die Programmliste des Backups mit dem Ziel-PC und installiert fehlende aus der Softwareverteilung nacheinander.</li>
+    <li><span class="ui">Checkliste</span> – nach dem Restore abhaken (eigene Punkte + Nacharbeiten der erkannten Programme). Stand und Bemerkung landen im Restore-Protokoll.</li>
+  </ul>
+  <div class="note"><b class="h">Test am selben PC</b>Wird auf den PC zurückgespielt, auf dem das Backup gemacht wurde, zeigt die Vorschau bei laufenden Programmen (z. B. Chrome) „überschreibt neuere Zieldatei“. Programme vorher schließen oder <i>Neuere Dateien am Ziel nicht überschreiben</i> aktivieren.</div>
+</section>
+
+<section id="remote">
+  <h2><span class="n">6</span>Remote-Betrieb</h2>
+  <p>Backup, Restore und fast alle Werkzeuge funktionieren auch für andere PCs im Netz. Am Ziel-PC werden gebraucht:</p>
+  <div class="cards">
+    <div class="card b"><b>Admin-Freigabe C$</b>Datei- und Druckerfreigabe – für alle Dateien</div>
+    <div class="card t"><b>PowerShell-Remoting (WinRM)</b>Registry, Drucker, WLAN, Treiber, USMT, Werkzeuge</div>
+    <div class="card g"><b>Fehlt etwas?</b><span class="ui g">Fernwartung aktivieren</span> schaltet alles über WMI (Port 135) ein</div>
+  </div>
+  <p><span class="ui">Verbinden</span> zeigt, was erreichbar ist. <span class="ui">Netzwerktest</span> prüft DNS, Ping und die Ports 445/5985/135/3389.</p>
+</section>
+
+<section id="benutzermodus">
+  <h2><span class="n">7</span>Benutzer-Modus (ohne Administratorrechte)</h2>
+  <p class="lead">Für Verwaltung und Lehrkräfte: das <b>eigene Profil</b> selbst sichern und wiederherstellen oder schnell einzelne Dateien aus einem Backup holen – ganz ohne Administratorrechte.</p>
+  <h3>Starten</h3>
+  <div class="cards">
+    <div class="card g"><b>HUMig-Benutzer.exe</b>im Tool-Ordner (wird beim ersten Start des Tools automatisch erzeugt) – an die Taskleiste anheftbar</div>
+    <div class="card b"><b>Start-Benutzer.cmd</b>gleiche Funktion, falls die .exe fehlt</div>
+    <div class="card t"><b>Ohne Adminrechte gestartet?</b>HUMig fragt: <i>Ja</i> = als Administrator neu starten, <i>Nein</i> = Benutzer-Modus</div>
+  </div>
+  <h3>Was geht – was nicht</h3>
+  <table>
+    <tr><th style="width:50%">Möglich</th><th>Ausgeblendet (braucht Administratorrechte)</th></tr>
+    <tr><td>Benutzerprofil (Dateien), Zusätzliche Ordner<br>Edge, Chrome, Firefox<br>Office-Signaturen, Vorlagen, PST, Office-Einstellungen<br>Taskleiste, Hintergrund, Desktop-Symbole, Schnellzugriff<br>Netzlaufwerke, Netzwerkdrucker, VPN-Verbindungen<br>Programme aus dem Katalog (Einstellungen im Profil)<br>Restore-Vorschau, Checkliste, Backup prüfen, Vergleichen<br>Werkzeuge: <span class="ui t">Im Backup suchen</span>, <span class="ui p">Wichtige Dateien suchen</span>, Anmeldedaten, Profilordner</td>
+        <td>andere Computer und Benutzer, Active Directory<br>Daten auf Systemlaufwerk, WLAN, Schriftarten, ODBC<br>Drucker mit Treibern, Treiber, Freigaben, Aufgaben, USMT<br>Einträge in Programme/Windows/HKLM (werden beim Restore übersprungen)<br>Fehlende Programme installieren, Softwareverteilung<br>Nacharbeiten mit Systemzugriff, Einstellungen, Update<br>alle übrigen Werkzeuge</td></tr>
+  </table>
+  <ul>
+    <li>Die Backup-Liste zeigt nur <b>eigene Backups</b>. Den eigentlichen Zugriffsschutz regeln die Ordnerrechte des Backup-Ordners (z. B. Freigabe mit „Ersteller-Besitzer“-Rechten).</li>
+    <li>Der Benutzer ist dabei angemeldet: <b>Outlook, Browser und Office vorher schließen</b>, sonst sind Dateien gesperrt.</li>
+    <li>Netzwerkdrucker und Explorer-Einstellungen werden nach dem Restore sofort in der laufenden Sitzung übernommen.</li>
+    <li>Der Backup-Ordner muss für den Benutzer beschreibbar sein (USB-Laufwerk oder Freigabe mit Schreibrecht).</li>
+  </ul>
+</section>
+
+<section id="werkzeuge">
+  <h2><span class="n">8</span>Werkzeuge</h2>
+  <p>Alle Werkzeuge wirken auf den <b>oben gewählten Computer</b> (bzw. Benutzer). Änderungen erfolgen immer mit Rückfrage; Profil-Werkzeuge sichern vorher Registry und Dateirechte unter <code>C:\ProgramData\HUMig</code> am Ziel-PC. Viele Knöpfe haben eine zweite Funktion auf der <b>rechten Maustaste</b> (siehe Tooltip).</p>
+
+  <figure><a href="img/werkzeuge.png" target="_blank"><img src="img/werkzeuge.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Docs/img/werkzeuge.png'" alt="Reiter Werkzeuge" loading="lazy"></a><figcaption>Reiter Werkzeuge</figcaption></figure>
+  <h3 id="w-computer">Computer</h3>
+  <table>
+    <tr><th style="width:250px">Werkzeug</th><th>Funktion</th></tr>
+    <tr><td><span class="ui g">Fernwartung aktivieren</span></td><td>WinRM, Remotedesktop, SMB/C$, Remoteregistrierung, Firewall-Regeln – über WMI, auch wenn WinRM noch aus ist</td></tr>
+    <tr><td><span class="ui p">Umbenennen</span></td><td>Computernamen ändern (Domänen-PC: Domänen-Anmeldedaten), optional Neustart</td></tr>
+    <tr><td><span class="ui p">IP-Adresse / DHCP</span></td><td>Statische IP oder DHCP – läuft als SYSTEM-Aufgabe am Ziel (Verbindungsabbruch egal)</td></tr>
+    <tr><td><span class="ui b">Lokale Gruppen</span></td><td>Administratoren, Netzwerkkonfigurations-Operatoren, Remotedesktopbenutzer, Benutzer anzeigen/ändern</td></tr>
+    <tr><td><span class="ui">Autologon</span></td><td>Automatische Anmeldung setzen/aufheben (Kennwort als LSA-Geheimnis)</td></tr>
+    <tr><td><span class="ui">Sperrbildschirm / Energie</span></td><td>Sperren, Bildschirm aus, Energiesparen, Schnellstart · Rechts: aktuelle Werte</td></tr>
+    <tr><td><span class="ui">Firewall / Netzwerkprofil</span></td><td>Firewall-Profile und Netzwerkkategorie (Privat/Öffentlich)</td></tr>
+    <tr><td><span class="ui t">Angemeldete Benutzer</span></td><td>Sitzungen anzeigen und abmelden</td></tr>
+    <tr><td><span class="ui t">Nachricht senden</span></td><td>Nachricht an alle angemeldeten Benutzer</td></tr>
+    <tr><td><span class="ui r">Neustart / Herunterfahren</span></td><td>Mit Wartezeit und Nachricht – oder geplanten Neustart abbrechen</td></tr>
+    <tr><td><span class="ui">Netzwerktest</span></td><td>DNS vor-/rückwärts, Ping, Ports, WinRM</td></tr>
+    <tr><td><span class="ui g">Geraete (AD) / Mehrfach</span></td><td>siehe <a href="#mehrfach">Mehrfachaktionen</a></td></tr>
+    <tr><td><span class="ui t">Remote-PowerShell</span></td><td>Links: PowerShell-Sitzung am Ziel-PC · Rechts: CMD (winrs)</td></tr>
+    <tr><td><span class="ui">Uebermittlungsoptimierung</span></td><td>Delivery Optimization: Updates zwischen PCs im Netz teilen (LAN/Gruppe) – Richtlinie setzen und Status anzeigen</td></tr>
+    <tr><td><span class="ui b">Ordnerfreigaben</span></td><td>Freigaben mit Freigabe- und NTFS-Rechten anzeigen, Freigaben aus einem Backup übernehmen</td></tr>
+    <tr><td><span class="ui">USMT einrichten (ADK)</span></td><td>USMT aus dem Windows ADK nach <code>BIN\USMT</code> kopieren – ohne ADK nur USMT still installieren</td></tr>
+    <tr><td><span class="ui m">Inventar (mehrere PCs)</span></td><td>Hardware, Windows, BitLocker, TPM, IP/MAC parallel – Tabelle + CSV. Rechts: mit installierter Software</td></tr>
+    <tr><td><span class="ui b">BitLocker-Schluessel</span></td><td>Status aller Laufwerke, Wiederherstellungskennwort in AD oder Entra ID sichern</td></tr>
+    <tr><td><span class="ui">Autopilot-Hash</span></td><td>Hardware-Hash als CSV (<code>Autopilot\AutopilotHWID_&lt;PC&gt;_&lt;Seriennummer&gt;_&lt;Datum&gt;.csv</code>) für den Intune-Import</td></tr>
+    <tr><td><span class="ui">Wake-on-LAN</span></td><td>PC aufwecken (MAC aus Inventar/Backup) – optional über einen PC im Zielnetz senden</td></tr>
+  </table>
+
+  <h3 id="mehrfach">Geräte aus dem AD und Mehrfachaktionen</h3>
+  <ol class="steps">
+    <li><span class="ui">Geraete (AD) …</span> öffnen. Außerhalb der Domäne: Domäne/DC eintragen und <span class="ui">Laden</span> (fragt nach Anmeldedaten).</li>
+    <li>Mit OU und Filter eingrenzen, PCs anhaken (oder einen PC per Doppelklick als Computer übernehmen).</li>
+    <li>Aktion wählen und starten – läuft parallel auf allen gewählten PCs, Ergebnis je PC wird angezeigt.</li>
+  </ol>
+  <p><b>Aktionen:</b> Online-Check · Fernwartung aktivieren · Inventar (CSV) · Inventar + Software · Autopilot-Hash (eine CSV für alle) · Übermittlungsoptimierung setzen · Speicher aufräumen · Software verteilen · GPUpdate /force · Intune-Synchronisierung · Nachricht senden · Neustart (in 2 min).</p>
+
+  <h3 id="w-profil">Benutzerprofil</h3>
+  <table>
+    <tr><th style="width:250px">Werkzeug</th><th>Funktion</th></tr>
+    <tr><td><span class="ui p">Profil erneuern (Test)</span></td><td>Profilordner umbenennen + Registry sichern: Benutzer bekommt beim Anmelden ein frisches Profil (bei defektem Profil)</td></tr>
+    <tr><td><span class="ui g">Profil zurueckholen</span></td><td>Erneuertes Profil wiederherstellen</td></tr>
+    <tr><td><span class="ui">Profilordner umbenennen</span></td><td>z. B. nach Namensänderung, ProfileList wird angepasst</td></tr>
+    <tr><td><span class="ui m">Profil anderem Konto zuweisen</span></td><td>Profil bleibt am Ort und gehört danach einem anderen Konto (z. B. Domäne → lokal): Rechte, Registry, ProfileList. Nicht übertragbar: DPAPI-geschützte Daten (gespeicherte Kennwörter, Zertifikate, EFS). Entra-ID-Konten nicht unterstützt.</td></tr>
+    <tr><td><span class="ui">Windows-Apps neu registrieren</span></td><td>Store-Apps, Startmenü, Einstellungen reparieren</td></tr>
+    <tr><td><span class="ui">Gruppenrichtlinien-Ergebnis</span></td><td>gpresult als HTML für PC + Benutzer</td></tr>
+    <tr><td><span class="ui">Aufgaben aus Backup importieren</span></td><td>Geplante Aufgaben aus dem markierten Backup einzeln importieren</td></tr>
+    <tr><td><span class="ui r">Alte Profile loeschen</span></td><td>Profile mit letzter Anmeldung, markierte sauber löschen (Ordner + Registry)</td></tr>
+    <tr><td><span class="ui p">Wichtige Dateien suchen</span></td><td>PST, KeePass, Access, OneNote, CAD … außerhalb der gesicherten Bereiche finden und als Zusätzliche Ordner aufnehmen</td></tr>
+    <tr><td><span class="ui t">Im Backup suchen</span></td><td>Dateien im markierten Backup suchen und einzeln herauskopieren</td></tr>
+    <tr><td>Schnellzugriffe</td><td>AppData · Autostart · Profilordner des Benutzers · Anmeldedaten sichern/wiederherstellen (credwiz) · Gespeicherte Anmeldedaten anzeigen/löschen</td></tr>
+  </table>
+
+  <h3 id="w-diag">Diagnose / Wartung</h3>
+  <table>
+    <tr><th style="width:250px">Werkzeug</th><th>Funktion</th></tr>
+    <tr><td><span class="ui b">Ereignisse (Fehler)</span></td><td>Fehler der letzten 3 Tage · Rechts: 14 Tage inkl. Warnungen</td></tr>
+    <tr><td><span class="ui">Akku-Bericht</span></td><td>Ladestand, Zustand in %, Ladezyklen + Windows-Akku-Bericht</td></tr>
+    <tr><td><span class="ui">Aktivierung</span></td><td>Windows- und Office-Lizenzstatus (KMS, Abo)</td></tr>
+    <tr><td><span class="ui">Entra ID / Intune</span></td><td>Status (dsregcmd, MDM) · Rechts: Intune-Synchronisierung</td></tr>
+    <tr><td><span class="ui">Domaene / Zeit / Kerberos</span></td><td>Vertrauensstellung prüfen/reparieren, Zeit synchronisieren, Kerberos-Tickets leeren</td></tr>
+    <tr><td><span class="ui">Druckwarteschlange leeren</span></td><td>Spooler stoppen, hängende Aufträge löschen, neu starten</td></tr>
+    <tr><td><span class="ui p">Speicher aufraeumen</span></td><td>Temp, Update-Cache, Fehlerberichte, Papierkorb, Komponentenspeicher, optional <b>Windows.old</b> – mit Anzeige des freigegebenen Platzes</td></tr>
+    <tr><td><span class="ui p">Systemdateien reparieren</span></td><td>DISM /RestoreHealth + SFC im Hintergrund · Rechts: Ergebnis</td></tr>
+  </table>
+
+  <h3 id="w-pc">Dieser PC</h3>
+  <p>Direktaufrufe: Taskmanager, Autostart-Apps, Netzwerkadapter, Systemsteuerung, Verwaltung, Firewall, Ereignisanzeige, Maus, Geräte-Manager, Dienste, Programme (alt), Computerverwaltung, Lokale Sicherheit, Zertifikate (PC/Benutzer), Speicherdiagnose, Treiberüberprüfung, Schrittaufzeichnung, Datenträger, Registry, <span class="ui m">.exe als Admin starten</span> – dazu eigene Links (Einstellungen › Links) und Hersteller-Treiberseiten.</p>
+</section>
+
+<section id="software">
+  <h2><span class="n">9</span>Softwareverteilung</h2>
+  <p>Pakete in den Ordner <code>Softwareverteilung\</code> legen (anderer Ordner/Freigabe: Einstellungen › Allgemein oder je Standort):</p>
+  <div class="cards">
+    <div class="card b"><b>Eine Datei</b><code>.msi</code>, <code>.exe</code>, <code>.msp</code> = ein Paket</div>
+    <div class="card t"><b>Ein Unterordner</b>= ein Paket mit Installer + Zubehör. Ordner mit <code>_</code> am Anfang werden ignoriert.</div>
+  </div>
+  <p>HUMig liest den Installer aus und schlägt die Silent-Parameter vor (MSI, Inno Setup, NSIS, WiX Burn, InstallShield, Advanced Installer, Squirrel, 7-Zip-SFX – bei unbekanntem Typ nur geraten, Herstellerdoku prüfen). Je Paket gespeichert: Name, Installer, Parameter, Erkennung (ProductCode oder Name + Mindestversion), Erfolgs-ExitCodes, Timeout.</p>
+  <p>Installiert wird auf dem gewählten Computer oder auf <b>mehreren PCs</b> (bis zu 8 gleichzeitig); bereits installierte werden übersprungen.</p>
+  <h3>Installierte Software</h3>
+  <p>Liste des gewählten Computers mit Filter, CSV und Drucken. Markierte Programme lassen sich still <b>deinstallieren</b> (MSI per <code>msiexec /x</code>, sonst stiller Herstellerbefehl) – Ergebnis je Programm in der Konsole.</p>
+</section>
+
+<section id="einstellungen">
+  <h2><span class="n">10</span>Einstellungen</h2>
+  <table>
+    <tr><th style="width:170px">Reiter</th><th>Inhalt</th></tr>
+    <tr><td>Allgemein</td><td>Backup-Ordner, Threads, Aufbewahrung (Tage + Anzahl je PC/Benutzer), USMT-Pfad (<span class="ui">Aus ADK einrichten</span>), Softwareverteilung, WLAN-Schlüssel im Klartext, Übersicht automatisch aktualisieren, Skalierung, HUMig.exe neu erstellen, Desktop-Verknüpfung</td></tr>
+    <tr><td>Restore</td><td>Standard-Nacharbeiten, Checkliste (Punkte, automatisch anzeigen)</td></tr>
+    <tr><td id="standorte">Standorte</td><td>Beliebig viele Standorte (Standort 1, 2, … frei benennbar): je Standort Backup-Ordner, Softwareverteilung, USMT-Ordner, Domäne/DC, Subnetz, DNS-Server, Notiz. Umschalten oben im Hauptfenster.</td></tr>
+    <tr><td>Ausnahmen</td><td>Ordner und Dateitypen, die im Profil und auf C:\ nicht gesichert werden · Standard wiederherstellen</td></tr>
+    <tr><td>Module</td><td>Module ein-/ausblenden, eigene Module anlegen/löschen, <code>modules.json</code> für Experten</td></tr>
+    <tr><td>Links</td><td>Eigene Links (Name + URL) für den Werkzeug-Reiter</td></tr>
+    <tr><td>Update</td><td>GitHub-Token eingeben/löschen (nur bei privatem Repository nötig)</td></tr>
+  </table>
+  <h3>Konfigurationsdateien</h3>
+  <table>
+    <tr><th style="width:230px">Datei</th><th>Inhalt</th></tr>
+    <tr><td><code>Config\settings.json</code></td><td>alle Einstellungen inkl. Standorte</td></tr>
+    <tr><td><code>Config\apps.json</code></td><td>eigene Einträge für den Programm-Katalog</td></tr>
+    <tr><td><code>Config\exceptions.json</code></td><td>Ausnahmen Ordner/Dateitypen</td></tr>
+    <tr><td><code>Config\modules.json</code></td><td>eigene Module und Vorlagen</td></tr>
+    <tr><td><code>Config\update.json</code></td><td>andere Update-Quelle <code>{ "Owner": "…", "Repo": "…", "Branch": "main" }</code></td></tr>
+  </table>
+  <p>Die <code>*.default.json</code> kommen mit jedem Update, eigene Dateien bleiben erhalten.</p>
+</section>
+
+<section id="update">
+  <h2><span class="n">11</span>Installation und Update</h2>
+  <ol class="steps">
+    <li><b>Neu installieren:</b> <code>Pull.ps1</code> in den Zielordner legen und ausführen: <code>powershell -ExecutionPolicy Bypass -File Pull.ps1</code></li>
+    <li><b>Update:</b> Knopf <span class="ui">Update</span> – lädt die aktuelle Version und startet neu. BACKUPS, Config, Softwareverteilung und HUMig.exe bleiben erhalten.</li>
+    <li><b>USMT</b> (nur für das Modul <i>Windows-Einstellungen</i>): Werkzeug <span class="ui">USMT einrichten (ADK)</span> oder siehe <code>BIN\LIESMICH.txt</code>.</li>
+    <li><b>Selbsttest:</b> <code>powershell -NoProfile -ExecutionPolicy Bypass -File .\Test-HUMig.ps1</code> – Ergebnis in <code>Test-HUMig.result.txt</code>.</li>
+  </ol>
+</section>
+
+<section id="faq">
+  <h2><span class="n">12</span>Fragen und Probleme</h2>
+  <h3>„Übersprungen“ im Robocopy.log – fehlt etwas?</h3>
+  <p>Nein. Versteckte/System-Dateien (z. B. <code>pagefile.sys</code>), Nur-Cloud-Platzhalter und Ausschlussmuster werden bewusst nicht kopiert. Das HUMig-Protokoll zeigt sie getrennt als <i>absichtlich ausgelassen</i>. Echte Fehler stehen unter <i>FAILED</i> und als Warnung im Protokoll.</p>
+  <h3>Windows meldet „Robocopy lädt Dateien herunter“</h3>
+  <p>HUMig liest Nur-Cloud-Dateien nicht. Kommt die Meldung trotzdem, liegt ein Sync-Ordner an einer unerwarteten Stelle: Backup abbrechen, <span class="ui">Vorab-Pruefung</span> ausführen (zeigt alle erkannten Cloud-Ordner) und den Ordner bei Bedarf ausschließen.</p>
+  <h3>Das Backup dauert lange</h3>
+  <p>Ist der <b>Prüfsummen-Katalog</b> eingeschaltet, wird jede Datei gelesen – beim ersten Mal dauert das. Das Backup selbst ist dann schon fertig. Threads erhöhen (NVMe: 64–128).</p>
+  <h3>Remote-PC nicht erreichbar</h3>
+  <p><span class="ui">Netzwerktest</span> ausführen, dann <span class="ui g">Fernwartung aktivieren</span>. Über VPN funktioniert Wake-on-LAN meist nur über einen PC im Zielnetz.</p>
+  <h3>Grenzen</h3>
+  <ul>
+    <li>Gespeicherte Browser-Kennwörter/Cookies sind durch Windows-Verschlüsselung meist nicht übertragbar → Browser-Sync verwenden.</li>
+    <li>Taskleisten- und Startmenü-Pins unter Windows 11 nur eingeschränkt.</li>
+    <li>USMT: keine Migration zwischen AD- und Entra-ID-Geräten (laut Microsoft).</li>
+    <li>Die Prüfsummen-Stichprobe nach dem Backup ist eine Stichprobe – die Vollprüfung macht <span class="ui">Backup pruefen</span> mit dem Katalog.</li>
+    <li>Programm-Katalog: Pfade nach Herstellerangaben bzw. Erfahrung (best effort).</li>
+  </ul>
+</section>
+
+<section id="tasten">
+  <h2><span class="n">13</span>Tastenkürzel</h2>
+  <table>
+    <tr><td style="width:230px"><kbd>F1</kbd></td><td>Anleitung</td></tr>
+    <tr><td><kbd>Enter</kbd> im Feld Computer</td><td>Verbinden</td></tr>
+    <tr><td><kbd>Strg</kbd>+<kbd>+</kbd> / <kbd>−</kbd> / Mausrad</td><td>Oberfläche größer/kleiner</td></tr>
+    <tr><td><kbd>Strg</kbd>+<kbd>0</kbd></td><td>Größe automatisch</td></tr>
+    <tr><td>Rechtsklick auf Knöpfe</td><td>Zweitfunktion (siehe Tooltip)</td></tr>
+  </table>
+</section>
+
+<footer>HUMig v2 · Nutzungslizenz siehe LICENSE · Diese Anleitung wird mit jedem Update aktualisiert</footer>
+</main>
+</div>
+<script>
+(function(){
+  var toc=document.getElementById('toc'),secs=[].slice.call(document.querySelectorAll('main section'));
+  secs.forEach(function(s){
+    var h=s.querySelector('h2,h1');var a=document.createElement('a');a.href='#'+s.id;a.textContent=h.textContent.replace(/^\d+/,'').trim();a.dataset.s=s.id;toc.appendChild(a);
+    [].slice.call(s.querySelectorAll('h3[id]')).forEach(function(h3){var b=document.createElement('a');b.href='#'+h3.id;b.className='l2';b.textContent=h3.textContent;toc.appendChild(b);});
+  });
+  var links=[].slice.call(toc.querySelectorAll('a[data-s]'));
+  function spy(){var cur=secs[0].id;secs.forEach(function(s){if(s.getBoundingClientRect().top<120)cur=s.id;});links.forEach(function(l){l.classList.toggle('act',l.dataset.s===cur);});}
+  window.addEventListener('scroll',spy,{passive:true});spy();
+  var root=document.documentElement,tb=document.getElementById('theme');
+  try{var t=localStorage.getItem('humig-theme');if(t)root.setAttribute('data-theme',t);}catch(e){}
+  tb.onclick=function(){var dark=root.getAttribute('data-theme')?root.getAttribute('data-theme')==='dark':matchMedia('(prefers-color-scheme: dark)').matches;var n=dark?'light':'dark';root.setAttribute('data-theme',n);try{localStorage.setItem('humig-theme',n);}catch(e){}};
+  var q=document.getElementById('q'),orig=secs.map(function(s){return s.innerHTML;});
+  q.addEventListener('input',function(){
+    var v=q.value.trim().toLowerCase();
+    secs.forEach(function(s,i){
+      s.innerHTML=orig[i];
+      if(!v){s.classList.remove('hide');return;}
+      var hit=s.textContent.toLowerCase().indexOf(v)>=0;s.classList.toggle('hide',!hit);
+      if(hit){var w=document.createTreeWalker(s,NodeFilter.SHOW_TEXT,null,false),n,list=[];while(n=w.nextNode())if(n.nodeValue.toLowerCase().indexOf(v)>=0)list.push(n);
+        list.forEach(function(n){var i2=n.nodeValue.toLowerCase().indexOf(v);var m=document.createElement('mark');var r=n.splitText(i2);r.splitText(v.length);m.textContent=r.nodeValue;r.parentNode.replaceChild(m,r);});}
+    });
+  });
+})();
+</script>
+</body>
+</html>

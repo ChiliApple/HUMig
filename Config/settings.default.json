@@ -1,0 +1,74 @@
+{
+  "_Info": "Standardwerte. Eigene Werte in Config\\settings.json (wird vom Tool angelegt, nicht im Repo).",
+  "BackupRoot": "",
+  "Threads": 32,
+  "RetentionDays": 30,
+  "RetentionKeepPerUser": 3,
+  "UsmtPath": "",
+  "SoftwareFolder": "",
+  "WlanExportClearKey": false,
+  "NewNameSuffix": "",
+  "Notify": true,
+  "UiScale": 0,
+  "LastPreset": "",
+  "OverviewAuto": true,
+  "RestoreChecklistAuto": true,
+  "RestoreChecklist": [
+    "Benutzer hat sich angemeldet - Desktop, Dokumente und Bilder sind da",
+    "E-Mail/Outlook startet, Postfach und Signatur passen",
+    "OneDrive und Teams angemeldet, Synchronisation laeuft",
+    "Browser: Lesezeichen und gespeicherte Kennwoerter vorhanden",
+    "Drucker vorhanden, Testseite gedruckt",
+    "Netzlaufwerke verbunden",
+    "WLAN verbindet sich automatisch",
+    "Benoetigte Programme installiert und lizenziert",
+    "BitLocker aktiv, Wiederherstellungsschluessel gesichert",
+    "Windows-Updates installiert, Neustart erledigt",
+    "Altgeraet: Daten kontrolliert, Freigabe zum Loeschen/Zuruecksetzen"
+  ],
+  "ActiveProfile": "",
+  "Profiles": [],
+  "Backup": {
+    "Incremental": true,
+    "SpaceCheck": true,
+    "Verify": true,
+    "VerifySamples": 30,
+    "OneDriveLocal": false,
+    "WarnUnencryptedUsb": true,
+    "MinimalProfileExceptions": false,
+    "NoProfileFileExceptions": false,
+    "MinimalSystemExceptions": false,
+    "NoSystemFileExceptions": false,
+    "Catalog": false
+  },
+  "Network": {
+    "SubnetMask": "255.255.255.0",
+    "DnsServers": []
+  },
+  "Restore": {
+    "GpUpdate": true,
+    "DisableWUDrivers": false,
+    "NumLockOn": false,
+    "ExplorerFavorites": false,
+    "FastBootOff": false,
+    "PostScript": "",
+    "OneDriveToFolder": false,
+    "KeepNewer": false
+  },
+  "Shares": [],
+  "Links": [
+    {
+      "Name": "Lenovo Treiber (Seriennummer)",
+      "Url": "https://pcsupport.lenovo.com/products/{SERIAL}/downloads/driver-list"
+    },
+    {
+      "Name": "HP Treiber (Seriennummer in Zwischenablage)",
+      "Url": "https://support.hp.com/drivers",
+      "CopySerial": true
+    },
+    {
+      "Name": "Dell Treiber (Service Tag)",
+      "Url": "https://www.dell.com/support/home/product-support/servicetag/{SERIAL}/drivers"
+    }
+  ]
+}

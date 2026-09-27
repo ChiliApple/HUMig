@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- HUMig: nur Systemlaufwerk, alle anderen Laufwerke ausschliessen -->
+<migration urlid="http://www.microsoft.com/migration/1.0/migxmlext/humig_excludeotherdrives">
+    <component type="Documents" context="System">
+        <displayName>Andere Laufwerke ausschliessen</displayName>
+        <role role="Data">
+            <rules>
+                <unconditionalExclude>
+                    <objectSet>
+                        <pattern type="File">D:\* [*]</pattern>
+                        <pattern type="File">E:\* [*]</pattern>
+                        <pattern type="File">F:\* [*]</pattern>
+                        <pattern type="File">G:\* [*]</pattern>
+                        <pattern type="File">H:\* [*]</pattern>
+                        <pattern type="File">I:\* [*]</pattern>
+                        <pattern type="File">J:\* [*]</pattern>
+                        <pattern type="File">K:\* [*]</pattern>
+                        <pattern type="File">L:\* [*]</pattern>
+                        <pattern type="File">M:\* [*]</pattern>
+                        <pattern type="File">N:\* [*]</pattern>
+                        <pattern type="File">O:\* [*]</pattern>
+                        <pattern type="File">P:\* [*]</pattern>
+                        <pattern type="File">Q:\* [*]</pattern>
+                        <pattern type="File">R:\* [*]</pattern>
+                        <pattern type="File">S:\* [*]</pattern>
+                        <pattern type="File">T:\* [*]</pattern>
+                        <pattern type="File">U:\* [*]</pattern>
+                        <pattern type="File">V:\* [*]</pattern>
+                        <pattern type="File">W:\* [*]</pattern>
+                        <pattern type="File">X:\* [*]</pattern>
+                        <pattern type="File">Y:\* [*]</pattern>
+                        <pattern type="File">Z:\* [*]</pattern>
+                    </objectSet>
+                </unconditionalExclude>
+            </rules>
+        </role>
+    </component>
+</migration>

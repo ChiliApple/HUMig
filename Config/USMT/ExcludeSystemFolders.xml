@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- HUMig: System- und Programmordner nie per USMT -->
+<migration urlid="http://www.microsoft.com/migration/1.0/migxmlext/humig_excludesystemfolders">
+    <component type="Documents" context="UserAndSystem">
+        <displayName>Systemordner ausschliessen</displayName>
+        <role role="Data">
+            <rules>
+                <unconditionalExclude>
+                    <objectSet>
+                        <pattern type="File">%SYSTEMDRIVE%\Boot\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\_SMSTaskSequence\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\Windows.old\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\SWSetup\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\MININT\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\ProgramData\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\Program Files\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\Program Files (x86)\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\PerfLogs\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\MSOCache\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\Dell\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\Intel\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\Windows\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\Users\* [*]</pattern>
+                        <pattern type="File">%SYSTEMDRIVE%\ [*]</pattern>
+                        <script>MigXmlHelper.GenerateDrivePatterns ("* [*.tmp]", "Fixed")</script>
+                    </objectSet>
+                </unconditionalExclude>
+            </rules>
+        </role>
+    </component>
+</migration>

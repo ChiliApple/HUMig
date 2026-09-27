@@ -1,0 +1,753 @@
+{
+  "_Info": "Programm-Katalog: erkennt installierte Programme (Detect = Regex auf den Anzeigenamen) und schlaegt passende Module vor. Eigene Eintraege in Config\\apps.json (gleiche Id ueberschreibt). Felder: Modules (vorhandene Modul-Ids) oder Items (wie modules.default.json), Transfer, License, After (Checkliste), Package (Regex auf Paketnamen in der Softwareverteilung). Items mit \"License\": true sind Lizenzdateien/-schluessel, die mitgesichert werden (Programm ist am neuen PC gleich lizenziert).",
+  "Apps": [
+    {
+      "Id": "App_Firefox",
+      "Name": "Mozilla Firefox",
+      "Detect": "^Mozilla Firefox",
+      "Modules": [
+        "Firefox"
+      ],
+      "Transfer": "Lesezeichen, Kennwoerter, Erweiterungen, Verlauf",
+      "License": "kostenlos",
+      "After": [
+        "Firefox: Lesezeichen und Kennwoerter vorhanden, ggf. Firefox-Konto anmelden"
+      ],
+      "Package": "firefox"
+    },
+    {
+      "Id": "App_Chrome",
+      "Name": "Google Chrome",
+      "Detect": "^Google Chrome$",
+      "Modules": [
+        "Chrome"
+      ],
+      "Transfer": "Lesezeichen, Kennwoerter, Erweiterungen",
+      "License": "kostenlos",
+      "After": [
+        "Chrome: Profil pruefen, ggf. Google-Konto neu anmelden (Kennwoerter sind an Windows-Konto gebunden)"
+      ],
+      "Package": "chrome"
+    },
+    {
+      "Id": "App_Edge",
+      "Name": "Microsoft Edge",
+      "Detect": "^Microsoft Edge$",
+      "Modules": [
+        "Edge"
+      ],
+      "Transfer": "Favoriten, Kennwoerter, Erweiterungen",
+      "License": "in Windows enthalten",
+      "After": [
+        "Edge: mit Organisationskonto anmelden, Favoriten/Kennwoerter pruefen"
+      ]
+    },
+    {
+      "Id": "App_Office",
+      "Name": "Microsoft 365 / Office",
+      "Detect": "^(Microsoft 365|Microsoft Office|Office 16 Click-to-Run)",
+      "Modules": [
+        "Office",
+        "OfficeReg"
+      ],
+      "Transfer": "Signaturen, Vorlagen, Woerterbuch, Outlook-Einstellungen, PST",
+      "License": "M365: Lizenz am Konto (nach Anmeldung aktiv) | Volumenlizenz: KMS-Aktivierung pruefen",
+      "After": [
+        "Office: mit Organisationskonto anmelden und Aktivierung pruefen (Datei > Konto)",
+        "Outlook: Postfach, Signatur und PST-Dateien pruefen"
+      ],
+      "Package": "office|m365|o365"
+    },
+    {
+      "Id": "App_Thunderbird",
+      "Name": "Mozilla Thunderbird",
+      "Detect": "^Mozilla Thunderbird",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "ROAMING",
+          "Path": "{APPDATA}\\Thunderbird"
+        },
+        {
+          "Type": "Folder",
+          "Name": "LOCAL",
+          "Path": "{LOCALAPPDATA}\\Thunderbird"
+        }
+      ],
+      "Transfer": "Konten, Mails (lokal), Adressbuch, Filter",
+      "License": "kostenlos",
+      "After": [
+        "Thunderbird: Konten und Kennwoerter pruefen"
+      ],
+      "Package": "thunderbird"
+    },
+    {
+      "Id": "App_NotepadPP",
+      "Name": "Notepad++",
+      "Detect": "^Notepad\\+\\+",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Notepad++"
+        }
+      ],
+      "Transfer": "Einstellungen, Sitzung, Makros, Plugin-Konfiguration",
+      "License": "kostenlos",
+      "Package": "notepad"
+    },
+    {
+      "Id": "App_7Zip",
+      "Name": "7-Zip",
+      "Detect": "^7-Zip",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\7-Zip"
+        }
+      ],
+      "Transfer": "Einstellungen",
+      "License": "kostenlos",
+      "Package": "7-?zip|7z"
+    },
+    {
+      "Id": "App_VLC",
+      "Name": "VLC media player",
+      "Detect": "^VLC media player",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\vlc"
+        }
+      ],
+      "Transfer": "Einstellungen, Wiedergabelisten",
+      "License": "kostenlos",
+      "Package": "vlc"
+    },
+    {
+      "Id": "App_LibreOffice",
+      "Name": "LibreOffice",
+      "Detect": "^LibreOffice",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\LibreOffice"
+        }
+      ],
+      "Transfer": "Benutzerprofil (Einstellungen, Woerterbuch, Vorlagen, Makros)",
+      "License": "kostenlos",
+      "Package": "libreoffice"
+    },
+    {
+      "Id": "App_AcrobatReader",
+      "Name": "Adobe Acrobat Reader",
+      "Detect": "^Adobe Acrobat",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Adobe\\Acrobat Reader"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Adobe\\Acrobat"
+        }
+      ],
+      "Transfer": "Einstellungen, Signaturen/Stempel, Zuletzt verwendet",
+      "License": "Reader kostenlos | Acrobat Pro: Lizenz an der Adobe-ID - am Altgeraet abmelden",
+      "After": [
+        "Acrobat: bei Pro-Lizenz am Altgeraet abmelden, am neuen Geraet mit Adobe-ID anmelden"
+      ],
+      "Package": "acrobat|adobe.?reader"
+    },
+    {
+      "Id": "App_Foxit",
+      "Name": "Foxit PDF Reader/Editor",
+      "Detect": "^Foxit PDF",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Foxit Software"
+        },
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Foxit Software"
+        }
+      ],
+      "Transfer": "Einstellungen, Stempel",
+      "License": "Reader kostenlos | Editor: Lizenz deaktivieren/aktivieren",
+      "Package": "foxit"
+    },
+    {
+      "Id": "App_GIMP",
+      "Name": "GIMP",
+      "Detect": "^GIMP",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\GIMP"
+        }
+      ],
+      "Transfer": "Einstellungen, Pinsel, Plugins",
+      "License": "kostenlos",
+      "Package": "gimp"
+    },
+    {
+      "Id": "App_Inkscape",
+      "Name": "Inkscape",
+      "Detect": "^Inkscape",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\inkscape"
+        }
+      ],
+      "Transfer": "Einstellungen, Erweiterungen, Vorlagen",
+      "License": "kostenlos",
+      "Package": "inkscape"
+    },
+    {
+      "Id": "App_Audacity",
+      "Name": "Audacity",
+      "Detect": "^Audacity",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\audacity"
+        }
+      ],
+      "Transfer": "Einstellungen, Effekt-Voreinstellungen",
+      "License": "kostenlos",
+      "Package": "audacity"
+    },
+    {
+      "Id": "App_PaintNet",
+      "Name": "Paint.NET",
+      "Detect": "^paint\\.net",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\paint.net"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\paint.net"
+        }
+      ],
+      "Transfer": "Einstellungen, Paletten",
+      "License": "kostenlos (Store-Version kostenpflichtig)",
+      "Package": "paint"
+    },
+    {
+      "Id": "App_IrfanView",
+      "Name": "IrfanView",
+      "Detect": "^IrfanView",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\IrfanView"
+        }
+      ],
+      "Transfer": "Einstellungen (i_view64.ini)",
+      "License": "kostenlos (privat/Bildung)",
+      "Package": "irfan"
+    },
+    {
+      "Id": "App_Greenshot",
+      "Name": "Greenshot",
+      "Detect": "^Greenshot",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Greenshot"
+        }
+      ],
+      "Transfer": "Einstellungen, Ziele",
+      "License": "kostenlos",
+      "Package": "greenshot"
+    },
+    {
+      "Id": "App_OBS",
+      "Name": "OBS Studio",
+      "Detect": "^OBS Studio",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\obs-studio"
+        }
+      ],
+      "Transfer": "Szenen, Profile, Einstellungen",
+      "License": "kostenlos",
+      "Package": "obs"
+    },
+    {
+      "Id": "App_VSCode",
+      "Name": "Visual Studio Code",
+      "Detect": "^Microsoft Visual Studio Code",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "USER",
+          "Path": "{APPDATA}\\Code\\User"
+        },
+        {
+          "Type": "Folder",
+          "Name": "EXT",
+          "Path": "{PROFILE}\\.vscode"
+        }
+      ],
+      "Transfer": "Einstellungen, Tastenkuerzel, Snippets, Erweiterungen",
+      "License": "kostenlos",
+      "After": [
+        "VS Code: Einstellungs-Sync (Konto) pruefen"
+      ],
+      "Package": "vscode|code"
+    },
+    {
+      "Id": "App_KeePass",
+      "Name": "KeePass",
+      "Detect": "^KeePass Password Safe",
+      "Modules": [
+        "KeePass"
+      ],
+      "Transfer": "Konfiguration (Datenbank .kdbx liegt meist in Dokumente/OneDrive)",
+      "License": "kostenlos",
+      "After": [
+        "KeePass: Datenbank oeffnen, Pfad in der Konfiguration pruefen"
+      ],
+      "Package": "keepass"
+    },
+    {
+      "Id": "App_KeePassXC",
+      "Name": "KeePassXC",
+      "Detect": "^KeePassXC",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\KeePassXC"
+        },
+        {
+          "Type": "Folder",
+          "Name": "LOCAL",
+          "Path": "{LOCALAPPDATA}\\KeePassXC"
+        }
+      ],
+      "Transfer": "Konfiguration, zuletzt geoeffnete Datenbanken",
+      "License": "kostenlos",
+      "Package": "keepassxc"
+    },
+    {
+      "Id": "App_FileZilla",
+      "Name": "FileZilla",
+      "Detect": "^FileZilla",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\FileZilla"
+        }
+      ],
+      "Transfer": "Servermanager, Einstellungen",
+      "License": "kostenlos",
+      "Package": "filezilla"
+    },
+    {
+      "Id": "App_PuTTY",
+      "Name": "PuTTY",
+      "Detect": "^PuTTY",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\SimonTatham\\PuTTY"
+        }
+      ],
+      "Transfer": "Gespeicherte Sitzungen, bekannte Host-Schluessel",
+      "License": "kostenlos",
+      "Package": "putty"
+    },
+    {
+      "Id": "App_WinSCP",
+      "Name": "WinSCP",
+      "Detect": "^WinSCP",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Martin Prikryl"
+        },
+        {
+          "Type": "Folder",
+          "Name": "INI",
+          "Path": "{APPDATA}\\WinSCP"
+        }
+      ],
+      "Transfer": "Gespeicherte Verbindungen, Einstellungen",
+      "License": "kostenlos",
+      "Package": "winscp"
+    },
+    {
+      "Id": "App_mRemoteNG",
+      "Name": "mRemoteNG",
+      "Detect": "^mRemoteNG",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\mRemoteNG"
+        }
+      ],
+      "Transfer": "Verbindungsliste (confCons.xml), Einstellungen",
+      "License": "kostenlos",
+      "Package": "mremote"
+    },
+    {
+      "Id": "App_AnyDesk",
+      "Name": "AnyDesk",
+      "Detect": "^AnyDesk",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\AnyDesk"
+        }
+      ],
+      "Transfer": "Adressbuch, Einstellungen (neue ID am neuen Geraet)",
+      "License": "Lizenz am AnyDesk-Konto",
+      "After": [
+        "AnyDesk: neue ID weitergeben, ggf. Lizenz zuweisen"
+      ],
+      "Package": "anydesk"
+    },
+    {
+      "Id": "App_TeamViewer",
+      "Name": "TeamViewer",
+      "Detect": "^TeamViewer",
+      "Transfer": "nichts (Einstellungen am TeamViewer-Konto)",
+      "License": "Lizenz am TeamViewer-Konto; Geraet im Konto neu zuweisen",
+      "After": [
+        "TeamViewer: am Konto anmelden, altes Geraet im Konto entfernen"
+      ],
+      "Package": "teamviewer"
+    },
+    {
+      "Id": "App_FortiClient",
+      "Name": "FortiClient VPN",
+      "Detect": "^FortiClient",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "TUNNELS",
+          "Key": "HKLM\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels"
+        }
+      ],
+      "Transfer": "SSL-VPN-Verbindungen (ohne Kennwoerter)",
+      "License": "FortiClient VPN kostenlos | EMS: am Server registrieren",
+      "After": [
+        "FortiClient: VPN-Verbindung testen"
+      ],
+      "Package": "forti"
+    },
+    {
+      "Id": "App_Zotero",
+      "Name": "Zotero",
+      "Detect": "^Zotero",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Zotero"
+        }
+      ],
+      "Transfer": "Profil (Datenordner ~\\Zotero ist im Benutzerprofil)",
+      "License": "kostenlos",
+      "After": [
+        "Zotero: Synchronisation / Word-Plugin pruefen"
+      ],
+      "Package": "zotero"
+    },
+    {
+      "Id": "App_Citavi",
+      "Name": "Citavi",
+      "Detect": "^Citavi",
+      "Transfer": "Projekte liegen in Dokumente bzw. Cloud",
+      "License": "Lizenz am Citavi-Konto (Campuslizenz)",
+      "After": [
+        "Citavi: mit Citavi-Konto anmelden, Word-Add-In pruefen"
+      ],
+      "Package": "citavi"
+    },
+    {
+      "Id": "App_Obsidian",
+      "Name": "Obsidian",
+      "Detect": "^Obsidian",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\obsidian"
+        }
+      ],
+      "Transfer": "Tresor-Liste, Einstellungen (Tresore selbst in Dokumente/OneDrive)",
+      "License": "kostenlos (privat/Bildung)",
+      "Package": "obsidian"
+    },
+    {
+      "Id": "App_Arduino",
+      "Name": "Arduino IDE",
+      "Detect": "^Arduino",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "BOARDS",
+          "Path": "{LOCALAPPDATA}\\Arduino15"
+        },
+        {
+          "Type": "Folder",
+          "Name": "IDE",
+          "Path": "{APPDATA}\\arduino-ide"
+        }
+      ],
+      "Transfer": "Boards, Bibliotheken, Einstellungen (Sketche in Dokumente\\Arduino)",
+      "License": "kostenlos",
+      "Package": "arduino"
+    },
+    {
+      "Id": "App_GeoGebra",
+      "Name": "GeoGebra",
+      "Detect": "^GeoGebra",
+      "Transfer": "nichts (Materialien am GeoGebra-Konto)",
+      "License": "kostenlos",
+      "Package": "geogebra"
+    },
+    {
+      "Id": "App_SketchUp",
+      "Name": "SketchUp",
+      "Detect": "^SketchUp",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\SketchUp"
+        }
+      ],
+      "Transfer": "Einstellungen, Erweiterungen, Vorlagen",
+      "License": "Lizenz am Trimble-Konto (Organisations-/Schullizenz)",
+      "After": [
+        "SketchUp: mit Trimble-/Organisationskonto anmelden"
+      ],
+      "Package": "sketchup"
+    },
+    {
+      "Id": "App_Autodesk",
+      "Name": "Autodesk (AutoCAD, Inventor, Fusion ...)",
+      "Detect": "^Autodesk (AutoCAD|Inventor|Revit|Fusion|3ds Max|Maya)",
+      "Modules": [
+        "Autodesk"
+      ],
+      "Transfer": "Benutzereinstellungen, Profile",
+      "License": "Education-Lizenz am Autodesk-Konto - am Altgeraet abmelden",
+      "After": [
+        "Autodesk: mit Autodesk-Konto anmelden, Lizenz pruefen"
+      ],
+      "Package": "autodesk|autocad|inventor"
+    },
+    {
+      "Id": "App_SMART",
+      "Name": "SMART Notebook",
+      "Detect": "^SMART (Notebook|Learning Suite)",
+      "Transfer": "Dateien (.notebook) liegen in Dokumente",
+      "License": "Produktschluessel/Abo - am neuen Geraet aktivieren",
+      "After": [
+        "SMART: Aktivierung/Abo pruefen, Board-Treiber testen"
+      ],
+      "Package": "smart"
+    },
+    {
+      "Id": "App_ActivInspire",
+      "Name": "Promethean ActivInspire",
+      "Detect": "^ActivInspire",
+      "Transfer": "Flipcharts liegen in Dokumente",
+      "License": "Lizenzschluessel - am neuen Geraet eingeben",
+      "After": [
+        "ActivInspire: Lizenz und Board-Treiber pruefen"
+      ],
+      "Package": "activ|promethean"
+    },
+    {
+      "Id": "App_Untis",
+      "Name": "Untis",
+      "Detect": "^Untis",
+      "Transfer": "Datendatei/Datenbank (meist am Server)",
+      "License": "Lizenz der Einrichtung - Datenbankpfad pruefen",
+      "After": [
+        "Untis: Datenbank-/Datenpfad und Lizenz pruefen"
+      ],
+      "Package": "untis"
+    },
+    {
+      "Id": "App_PacketTracer",
+      "Name": "Cisco Packet Tracer",
+      "Detect": "^Cisco Packet Tracer",
+      "Transfer": "Dateien in Dokumente",
+      "License": "Anmeldung mit NetAcad-Konto",
+      "After": [
+        "Packet Tracer: mit NetAcad-Konto anmelden"
+      ],
+      "Package": "packet"
+    },
+    {
+      "Id": "App_Zoom",
+      "Name": "Zoom Workplace",
+      "Detect": "^Zoom",
+      "Transfer": "nichts (Einstellungen am Konto)",
+      "License": "Konto/Organisationslizenz",
+      "After": [
+        "Zoom: anmelden"
+      ],
+      "Package": "zoom"
+    },
+    {
+      "Id": "App_Teams",
+      "Name": "Microsoft Teams",
+      "Detect": "^Microsoft Teams",
+      "Transfer": "nichts (Chats/Dateien in der Cloud)",
+      "License": "in Microsoft 365 enthalten",
+      "After": [
+        "Teams: mit Organisationskonto anmelden"
+      ],
+      "Package": "teams"
+    },
+    {
+      "Id": "App_WinRAR",
+      "Name": "WinRAR",
+      "Detect": "^WinRAR",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "LICUSER",
+          "Path": "{APPDATA}\\WinRAR",
+          "Filter": [
+            "rarreg.key"
+          ],
+          "License": true
+        },
+        {
+          "Type": "Files",
+          "Name": "LICPROG",
+          "Path": "{PROGRAMFILES}\\WinRAR",
+          "Filter": [
+            "rarreg.key"
+          ],
+          "License": true
+        },
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\WinRAR"
+        }
+      ],
+      "Transfer": "Einstellungen + Lizenzdatei rarreg.key",
+      "License": "Lizenzdatei rarreg.key wird uebertragen - WinRAR ist am neuen PC sofort registriert",
+      "After": [
+        "WinRAR: Hilfe > Info zeigt den Lizenznehmer"
+      ],
+      "Package": "winrar"
+    },
+    {
+      "Id": "App_TotalCommander",
+      "Name": "Total Commander",
+      "Detect": "^Total Commander",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "INI",
+          "Path": "{APPDATA}\\GHISLER"
+        },
+        {
+          "Type": "Files",
+          "Name": "LICPROG",
+          "Path": "{PROGRAMFILES}\\totalcmd",
+          "Filter": [
+            "wincmd.key"
+          ],
+          "License": true
+        },
+        {
+          "Type": "Files",
+          "Name": "LICPROG86",
+          "Path": "{PROGRAMFILESX86}\\totalcmd",
+          "Filter": [
+            "wincmd.key"
+          ],
+          "License": true
+        },
+        {
+          "Type": "Files",
+          "Name": "LICROOT",
+          "Path": "{SYSTEMDRIVE}\\totalcmd",
+          "Filter": [
+            "wincmd.key"
+          ],
+          "License": true
+        }
+      ],
+      "Transfer": "Einstellungen (wincmd.ini) + Lizenzdatei wincmd.key",
+      "License": "Lizenzdatei wincmd.key wird uebertragen (Programmordner) - liegt TC woanders, Pfad in Config\\apps.json anpassen",
+      "After": [
+        "Total Commander: Titelleiste zeigt den Lizenznehmer (kein Hinweisfenster)"
+      ],
+      "Package": "totalcmd|total.?commander"
+    },
+    {
+      "Id": "App_BeyondCompare",
+      "Name": "Beyond Compare",
+      "Detect": "^Beyond Compare",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Scooter Software",
+          "License": true
+        }
+      ],
+      "Transfer": "Einstellungen, Sitzungen + Lizenzdatei (BCxKey.txt)",
+      "License": "Lizenzdatei im Profilordner wird uebertragen",
+      "After": [
+        "Beyond Compare: Hilfe > Info zeigt die Lizenz"
+      ],
+      "Package": "beyond|bcompare"
+    },
+    {
+      "Id": "App_SublimeText",
+      "Name": "Sublime Text",
+      "Detect": "^Sublime Text",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Sublime Text",
+          "License": true
+        }
+      ],
+      "Transfer": "Einstellungen, Pakete + Lizenzdatei (Local\\License.sublime_license)",
+      "License": "Lizenzdatei wird uebertragen",
+      "Package": "sublime"
+    }
+  ]
+}

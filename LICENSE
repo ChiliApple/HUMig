@@ -1,0 +1,40 @@
+HUMig v2 - Nutzungslizenz
+
+Copyright (c) 2026 Die Urheber von HUMig. Alle Rechte vorbehalten.
+
+1. Erlaubte Nutzung
+   Die Software "HUMig" (Programmcode, Oberflaeche, Dokumentation, Grafiken)
+   darf kostenlos heruntergeladen, installiert und ausgefuehrt werden - von
+   Privatpersonen, Schulen, Behoerden, Vereinen und Unternehmen. Kopien fuer
+   den eigenen Einsatz (z.B. auf USB-Laufwerken, Servern oder Freigaben der
+   eigenen Organisation) sind erlaubt.
+
+2. Eigene Einstellungen
+   Das Anpassen der Konfigurationsdateien im Ordner "Config" (z.B.
+   settings.json, apps.json, modules.json, exceptions.json, update.json)
+   ueber das Programm oder einen Editor ist ausdruecklich erlaubt.
+
+3. Nicht erlaubt (ohne vorherige schriftliche Zustimmung der Urheber)
+   a) den Programmcode oder die Dokumentation zu veraendern, zu bearbeiten,
+      zu uebersetzen oder Teile davon in andere Software zu uebernehmen,
+   b) veraenderte Fassungen zu verwenden oder weiterzugeben,
+   c) die Software zu verkaufen, zu vermieten oder gegen Entgelt als Teil
+      eines Produkts oder einer Dienstleistung anzubieten,
+   d) die Software ausserhalb des offiziellen Repositorys zu veroeffentlichen
+      (Weitergabe innerhalb der eigenen Organisation ist erlaubt),
+   e) Urheber-, Lizenz- oder Versionshinweise zu entfernen oder zu aendern.
+
+4. GitHub
+   Das Ansehen und Forken des Repositorys im Rahmen der Nutzungsbedingungen
+   von GitHub bleibt unberuehrt. Ein Fork berechtigt nicht zu den unter
+   Punkt 3 genannten Handlungen.
+
+5. Gewaehrleistung und Haftung
+   Die Software wird "wie besehen" ohne jede Gewaehrleistung bereitgestellt.
+   Die Urheber haften - soweit gesetzlich zulaessig - nicht fuer Schaeden,
+   Datenverlust oder Folgeschaeden aus der Nutzung. Vor jeder Migration ist
+   ein Backup zu erstellen und zu pruefen.
+
+6. Schlussbestimmungen
+   Es gilt oesterreichisches Recht. Ist eine Bestimmung unwirksam, bleiben
+   die uebrigen Bestimmungen gueltig.
