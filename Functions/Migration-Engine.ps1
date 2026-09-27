@@ -286,25 +286,125 @@ function Get-HMDesktopIconLines([string]$Path) {
     return $out
 }
 
+# Dateisystem-Hilfen mit langen Pfaden (\\?\ - Backups koennen Pfade > 260 Zeichen enthalten, Robocopy legt sie an)
+$script:HMFsCs = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+namespace HMFs
+{
+    public static class Tree
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct WIN32_FIND_DATA
+        {
+            public uint dwFileAttributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME c, a, w;
+            public uint nFileSizeHigh, nFileSizeLow, r0, r1;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string cFileName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 14)] public string cAlternateFileName;
+        }
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr FindFirstFileW(string n, out WIN32_FIND_DATA fd);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool FindNextFileW(IntPtr h, out WIN32_FIND_DATA fd);
+        [DllImport("kernel32.dll")] static extern bool FindClose(IntPtr h);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateFileW(string n, uint acc, uint share, IntPtr sa, uint disp, uint flags, IntPtr tmpl);
+        [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool SetFileAttributesW(string n, uint a);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool DeleteFileW(string n);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool RemoveDirectoryW(string n);
+
+        static readonly IntPtr INVALID = new IntPtr(-1);
+        static string L(string p)
+        {
+            if (p.StartsWith(@"\\?\")) return p;
+            if (p.StartsWith(@"\\")) return @"\\?\UNC\" + p.Substring(2);
+            return @"\\?\" + p;
+        }
+        static string Err(int c)
+        {
+            if (c == 5) return "Zugriff verweigert";
+            if (c == 32) return "Datei geoeffnet";
+            return "Fehler " + c;
+        }
+
+        // Prueft jede Datei/jeden Ordner auf Loeschrecht (DELETE + Attribute schreiben). Rueckgabe: Problemfaelle (max. 'max')
+        public static string[] CheckDeletable(string root, int max)
+        {
+            root = root.TrimEnd('\\');
+            List<string> bad = new List<string>();
+            Walk(root, root.Length, bad, max, false);
+            return bad.ToArray();
+        }
+        // Loescht den Ordner komplett (auch schreibgeschuetzte Dateien, lange Pfade). Rueckgabe: Problemfaelle
+        public static string[] Delete(string root, int max)
+        {
+            root = root.TrimEnd('\\');
+            List<string> bad = new List<string>();
+            Walk(root, root.Length, bad, max, true);
+            if (bad.Count == 0 && !RemoveDirectoryW(L(root))) bad.Add("(Backup-Ordner) " + Err(Marshal.GetLastWin32Error()));
+            return bad.ToArray();
+        }
+
+        static void Walk(string dir, int rootLen, List<string> bad, int max, bool delete)
+        {
+            WIN32_FIND_DATA fd;
+            IntPtr h = FindFirstFileW(L(dir) + @"\*", out fd);
+            if (h == INVALID) { bad.Add(Rel(dir, rootLen) + @"\ (nicht lesbar: " + Err(Marshal.GetLastWin32Error()) + ")"); return; }
+            try
+            {
+                do
+                {
+                    if (bad.Count >= max) return;
+                    string n = fd.cFileName;
+                    if (n == "." || n == "..") continue;
+                    string full = dir + "\\" + n;
+                    bool isDir = (fd.dwFileAttributes & 0x10) != 0;
+                    bool reparse = (fd.dwFileAttributes & 0x400) != 0;
+                    if (isDir && !reparse)
+                    {
+                        Walk(full, rootLen, bad, max, delete);
+                        if (delete && bad.Count == 0)
+                        {
+                            SetFileAttributesW(L(full), 0x10);
+                            if (!RemoveDirectoryW(L(full))) bad.Add(Rel(full, rootLen) + @"\ (" + Err(Marshal.GetLastWin32Error()) + ")");
+                        }
+                    }
+                    else if (delete)
+                    {
+                        if (isDir) { if (!RemoveDirectoryW(L(full))) bad.Add(Rel(full, rootLen) + " (" + Err(Marshal.GetLastWin32Error()) + ")"); continue; }   // Verknuepfung (Junction) - nur den Link
+                        if ((fd.dwFileAttributes & 0x7) != 0) SetFileAttributesW(L(full), 0x80);   // schreibgeschuetzt/versteckt/System aufheben
+                        if (!DeleteFileW(L(full))) bad.Add(Rel(full, rootLen) + " (" + Err(Marshal.GetLastWin32Error()) + ")");
+                    }
+                    else
+                    {
+                        // DELETE (0x10000) + FILE_WRITE_ATTRIBUTES (0x100), alle Freigaben; Ordner-Links mit BACKUP_SEMANTICS
+                        IntPtr fh = CreateFileW(L(full), 0x10100, 7, IntPtr.Zero, 3, isDir ? 0x02200000u : 0x00200000u, IntPtr.Zero);
+                        if (fh == INVALID) bad.Add(Rel(full, rootLen) + " (" + Err(Marshal.GetLastWin32Error()) + ")");
+                        else CloseHandle(fh);
+                    }
+                } while (FindNextFileW(h, out fd));
+            }
+            finally { FindClose(h); }
+        }
+        static string Rel(string p, int rootLen) { return p.Length > rootLen ? p.Substring(rootLen).TrimStart('\\') : p; }
+    }
+}
+'@
+function Initialize-HMFs { if (-not ('HMFs.Tree' -as [type])) { Add-Type -TypeDefinition $script:HMFsCs -ErrorAction Stop } }
+
 # Backup-Ordner loeschen - nur ganz oder gar nicht: vorher fuer JEDE Datei pruefen, ob sie geloescht werden darf
-# (Loeschrecht, nicht geoeffnet). Sonst bleibt ein halb geloeschtes, unbrauchbares Backup zurueck.
+# (Loeschrecht, nicht geoeffnet). Sonst bleibt ein halb geloeschtes, unbrauchbares Backup zurueck. Lange Pfade und schreibgeschuetzte Dateien werden unterstuetzt.
 function Remove-HMBackupFolder([string]$Path) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return 'OK' }
-    $bad = New-Object System.Collections.Generic.List[string]
-    $share = [System.IO.FileShare]'ReadWrite, Delete'
-    try {
-        foreach ($f in [System.IO.Directory]::EnumerateFiles($Path, '*', [System.IO.SearchOption]::AllDirectories)) {
-            try {
-                $s = New-Object System.IO.FileStream($f, [System.IO.FileMode]::Open, [System.Security.AccessControl.FileSystemRights]::Delete, $share, 4096, [System.IO.FileOptions]::None)
-                $s.Dispose()
-            } catch { $bad.Add($f.Substring($Path.Length).TrimStart('\')); if ($bad.Count -ge 5) { break } }
-        }
-    } catch { return "FEHLER: nichts geloescht - Ordner nicht lesbar: $($_.Exception.Message)" }
+    try { Initialize-HMFs } catch { return "FEHLER: nichts geloescht - Pruefung nicht moeglich: $($_.Exception.Message)" }
+    $bad = @([HMFs.Tree]::CheckDeletable($Path, 5))
     if ($bad.Count) {
-        return ("FEHLER: nichts geloescht - keine Loeschberechtigung oder Datei geoeffnet: {0}{1}. Backup als Administrator loeschen." -f ($bad -join ', '), $(if ($bad.Count -ge 5) { ' ...' } else { '' }))
+        return ("FEHLER: nichts geloescht - {0}{1}. Rechte des Backup-Ordners pruefen bzw. geoeffnete Dateien schliessen." -f ($bad -join '; '), $(if ($bad.Count -ge 5) { ' ...' } else { '' }))
     }
-    try { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop; return 'OK' }
-    catch { return "FEHLER: $($_.Exception.Message) - Backup ist unvollstaendig, bitte als Administrator ganz loeschen" }
+    $bad = @([HMFs.Tree]::Delete($Path, 5))
+    if ($bad.Count) { return ("FEHLER: Loeschen unvollstaendig - {0}. Backup-Rest bitte noch einmal loeschen." -f ($bad -join '; ')) }
+    return 'OK'
 }
 
 # Eintrag schreibt beim Restore ausserhalb des Profils (Programme, Windows, HKLM) -> braucht Administratorrechte
