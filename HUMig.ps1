@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.5'
+$script:Version   = '2.0.6'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -1369,39 +1369,42 @@ function Show-About {
 }
 # Anleitung: immer aktuell aus dem Repo laden (Docs/Anleitung.html), sonst lokale Kopie
 function Show-HMManual {
-    # Ziel: lokale Kopie im Tool-Ordner (bleibt so aktuell); nicht beschreibbar -> Oeffentliche Dokumente (fuer jeden Benutzer lesbar,
-    # auch wenn der Browser unter einem anderen Konto laeuft als das erhoehte Tool)
+    # Ziele der Reihe nach: Kopie im Tool-Ordner (bleibt aktuell) -> sonst eine Ablage, die dem aktuellen Benutzer gehoert
+    # (Benutzer-Modus: eigenes LocalAppData; Administrator: Oeffentliche Dokumente, lesbar fuer den angemeldeten Benutzer)
     $script:ManualLocal = Join-Path $script:AppRoot 'Docs\Anleitung.html'
-    $script:ManualTmp = $script:ManualLocal
-    try {
-        $d = Split-Path $script:ManualLocal
-        if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force -ErrorAction Stop | Out-Null }
-        $probe = Join-Path $d ('.w' + [guid]::NewGuid().ToString('N'))
-        [System.IO.File]::WriteAllText($probe, ''); Remove-Item -LiteralPath $probe -Force
-    } catch { $script:ManualTmp = Join-Path ([Environment]::GetFolderPath('CommonDocuments')) 'HUMig_Anleitung.html' }
+    $alt = if ($script:UserMode) { Join-Path $env:LOCALAPPDATA 'HUMig\Anleitung.html' } else { Join-Path ([Environment]::GetFolderPath('CommonDocuments')) 'HUMig_Anleitung.html' }
     Out-Console 'Anleitung wird geladen ...' 'Debug'
     Invoke-AsyncCommand -ScriptBlock {
-        param($token, $owner, $repo, $branch, $out)
+        param($token, $owner, $repo, $branch, $targets)
+        $dl = Join-Path $env:TEMP ('HUMig_Anleitung_{0}.html' -f [guid]::NewGuid().ToString('N'))
         try {
             try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
             $rel = 'Docs/Anleitung.html'
-            $tmp = "$out.download"
             if ($token) {
                 $h = @{ Accept = 'application/vnd.github.v3.raw'; 'User-Agent' = 'HUMig'; Authorization = "token $token" }
-                Invoke-WebRequest "https://api.github.com/repos/$owner/$repo/contents/${rel}?ref=$branch" -Headers $h -UseBasicParsing -TimeoutSec 20 -OutFile $tmp -ErrorAction Stop
+                Invoke-WebRequest "https://api.github.com/repos/$owner/$repo/contents/${rel}?ref=$branch" -Headers $h -UseBasicParsing -TimeoutSec 20 -OutFile $dl -ErrorAction Stop
             } else {
-                Invoke-WebRequest "https://raw.githubusercontent.com/$owner/$repo/$branch/$rel" -Headers @{ 'User-Agent' = 'HUMig' } -UseBasicParsing -TimeoutSec 20 -OutFile $tmp -ErrorAction Stop
+                Invoke-WebRequest "https://raw.githubusercontent.com/$owner/$repo/$branch/$rel" -Headers @{ 'User-Agent' = 'HUMig' } -UseBasicParsing -TimeoutSec 20 -OutFile $dl -ErrorAction Stop
             }
-            if ((Get-Item -LiteralPath $tmp).Length -lt 1000) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue; return 'ERR:Datei leer' }
-            Move-Item -LiteralPath $tmp -Destination $out -Force -ErrorAction Stop
-            if (Test-Path -LiteralPath $out) { return 'OK' }
-            return 'ERR:Datei nicht gespeichert'
+            if ((Get-Item -LiteralPath $dl).Length -lt 1000) { return 'ERR:Datei leer' }
+            $why = ''
+            foreach ($t in @($targets)) {
+                try {
+                    $d = Split-Path $t
+                    if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force -ErrorAction Stop | Out-Null }
+                    # ueberschreiben (Inhalt ersetzen) statt verschieben: klappt auch, wenn die alte Datei einem anderen Konto gehoert
+                    Copy-Item -LiteralPath $dl -Destination $t -Force -ErrorAction Stop
+                    if ((Get-Item -LiteralPath $t).Length -eq (Get-Item -LiteralPath $dl).Length) { return "OK:$t" }
+                } catch { $why = $_.Exception.Message }
+            }
+            return "ERR:nicht speicherbar ($why)"
         } catch { return "ERR:$($_.Exception.Message)" }
-    } -ArgumentList @((Read-GitHubToken), $script:UpdateOwner, $script:UpdateRepo, $script:UpdateBranch, $script:ManualTmp) -TimeoutSec 30 -OnComplete {
+        finally { Remove-Item -LiteralPath $dl -Force -ErrorAction SilentlyContinue }
+    } -ArgumentList @((Read-GitHubToken), $script:UpdateOwner, $script:UpdateRepo, $script:UpdateBranch, @($script:ManualLocal, $alt)) -TimeoutSec 30 -OnComplete {
         param($r)
         $f = $null
-        if ("$r" -eq 'OK') { $f = $script:ManualTmp; Out-Console 'Anleitung geoeffnet (aktuelle Fassung von GitHub)' 'Debug' }
-        elseif (Test-Path -LiteralPath $script:ManualLocal) { $f = $script:ManualLocal; Out-Console "GitHub nicht erreichbar ($("$r" -replace '^ERR:', '')) - lokale Anleitung geoeffnet" 'Warning' }
+        if ("$r" -match '^OK:(.+)$') { $f = $Matches[1]; Out-Console 'Anleitung geoeffnet (aktuelle Fassung von GitHub)' 'Debug' }
+        elseif (Test-Path -LiteralPath $script:ManualLocal) { $f = $script:ManualLocal; Out-Console "Aktuelle Anleitung nicht ladbar ($("$r" -replace '^ERR:', '')) - lokale Anleitung geoeffnet" 'Warning' }
         else { Out-Console "Anleitung nicht verfuegbar: $("$r" -replace '^ERR:', '')" 'Error'; return }
         # ueber den Explorer oeffnen: Browser startet im Kontext des angemeldeten Benutzers (nicht erhoeht)
         try { Start-Process -FilePath explorer.exe -ArgumentList "`"$f`"" } catch { Out-Console "Anleitung konnte nicht geoeffnet werden: $($_.Exception.Message)" 'Error' }

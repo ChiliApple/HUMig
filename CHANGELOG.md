@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.6 - 2026-09-27
+### Behoben
+- Anleitung im Benutzer-Modus: *Datei kann nicht erstellt werden* - die Anleitung wird jetzt ueberschrieben statt verschoben und landet, wenn der Tool-Ordner dem Benutzer nicht gehoert, im eigenen LocalAppData
+
 ## v2.0.5 - 2026-09-27
 ### Behoben
 - **Backup loeschen ganz oder gar nicht**: vorher wird fuer jede Datei geprueft, ob sie geloescht werden darf (Berechtigung, nicht geoeffnet) - sonst wird nichts geloescht (vorher blieb bei *Zugriff verweigert* ein halb geloeschtes Backup zurueck). Gilt auch fuer *Alte loeschen*
@@ -29,13 +33,10 @@
 - Anleitung: Browser meldete *Zugriff auf die Datei nicht moeglich* - die Anleitung wird jetzt direkt als `Docs\Anleitung.html` im Tool-Ordner aktualisiert (sonst unter *Oeffentliche Dokumente*) und ueber den Explorer im Kontext des angemeldeten Benutzers geoeffnet
 
 ## v2.0.0 - 2026-09-27
-### Neu
-- **HUMig v2**: Name in Titel, Kopfzeile, Startbild und Info
-- **Anleitung** (Knopf *Anleitung* oder F1): uebersichtliche HTML-Anleitung ueber alle Funktionen mit Suche, Inhaltsverzeichnis, Hell/Dunkel und Druck - wird bei jedem Aufruf aktuell aus dem Repository geladen, ohne Internet die lokale Kopie `Docs\Anleitung.html`
-### Geaendert
-- **Lizenz**: Nutzungslizenz statt MIT - kostenlose Nutzung erlaubt, Veraenderung und Weitergabe veraenderter Fassungen nicht (siehe LICENSE)
-- Versionssprung auf 2.0.0 (weiter mit 2.0.x)
-### Verbessert
-- Protokoll: absichtlich ausgelassene Dateien (versteckt/System wie `pagefile.sys`, Nur-Cloud, Ausschlussmuster) werden je Ordner getrennt ausgewiesen; `Robocopy.log` erklaert die Spalte *Uebersprungen*
-- Backup-Groesse und Groessenermittlung zaehlen ausgelassene Dateien nicht mehr mit (vorher z.B. `pagefile.sys` in *Daten auf Systemlaufwerk*)
-- Kopfzeile zeigt die Version auch bei gewaehltem Standort
+Erste Veroeffentlichung von HUMig v2 (Neuentwicklung fuer Windows 10/11):
+- Backup/Restore von Benutzerprofilen lokal oder ueber das Netzwerk (Robocopy, Registry-Export, optional USMT), inkrementell, mit Vorab-Pruefung, Pruefung danach und Pruefsummen-Katalog
+- Cloud-Ordner aller Anbieter werden erkannt, Nur-Cloud-Dateien nie heruntergeladen
+- Programm-Katalog mit Einstellungen und Lizenzdateien, Nachinstallation aus der Softwareverteilung
+- Restore-Vorschau, Checkliste, Backup-Vergleich, HTML-Uebersicht, Aufbewahrungsregeln
+- Werkzeuge: Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Softwareverteilung
+- Standorte, Anzeige-Skalierung, Update ueber GitHub, Anleitung (F1)
