@@ -1070,40 +1070,69 @@ function Start-HMGpResult {
     $c = Get-TargetComputer
     $p = Get-SelectedProfile
     $acc = if ($p -and $p.Account) { $p.Account } else { '' }
-    # Am Ziel-PC als geplante Aufgabe unter SYSTEM: gpresult direkt in einer WinRM-Sitzung liefert nur einen leeren Bericht,
-    # gpresult /s scheitert oft an DCOM-Rechten. Erst mit Benutzer, ohne Daten fuer den Benutzer nur der Computer-Teil.
+    # gpresult /h scheitert in Remote-Sitzungen (WinRM) mit "Zugriff verweigert" - /r, /v und /x funktionieren.
+    # Daher: erst /h versuchen, sonst eigener HTML-Bericht aus /x (GPO-Tabellen, Gruppen) + /v (alle Einstellungen als Text).
     Invoke-HMTool -Title "Gruppenrichtlinien-Ergebnis$(if ($acc) { " ($acc)" })" -Computer $c -TimeoutSec 300 -ArgumentList @($acc) -Script {
         param($acc)
-        $dir = Join-Path $env:ProgramData 'HUMig'
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-        $run = {
-            param([string[]]$userArgs)
-            $id = [guid]::NewGuid().ToString('N')
-            $f = Join-Path $dir "GPResult_$id.html"; $log = Join-Path $dir "GPResult_$id.txt"; $n = "HUMig_GPResult_$id"
-            $argStr = (@($userArgs | ForEach-Object { "`"$_`"" }) -join ' ')
+        $dir = Join-Path $env:windir 'Temp'
+        $id = [guid]::NewGuid().ToString('N')
+        $oem = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
+        $gp = {
+            param([string]$a)
+            $o = Join-Path $dir "HUMig_GP_$([guid]::NewGuid().ToString('N')).txt"
+            & cmd.exe /c "gpresult.exe $a > `"$o`" 2>&1" | Out-Null
+            $txt = if (Test-Path -LiteralPath $o) { [System.IO.File]::ReadAllText($o, $oem) } else { '' }
+            Remove-Item -LiteralPath $o -Force -ErrorAction SilentlyContinue
+            return $txt
+        }
+        $big = { param($f) (Test-Path -LiteralPath $f) -and (Get-Item -LiteralPath $f).Length -gt 2000 }
+        $scope = if ($acc) { "/user `"$acc`"" } else { '/scope computer' }
+        $html = Join-Path $dir "HUMig_GPResult_$id.html"
+
+        # 1. Original-Bericht (klappt lokal bzw. interaktiv)
+        [void](& $gp "$scope /h `"$html`" /f")
+        if (-not (& $big $html) -and $acc) {
+            $vt = & $gp "$scope /v"
+            if ($vt -match 'RSoP|RSOP') { "WARN Keine Richtlinien-Daten fuer $acc auf diesem PC (dort noch nie angemeldet) - Bericht nur mit Computer-Richtlinien"; $scope = '/scope computer'; [void](& $gp "$scope /h `"$html`" /f") }
+        }
+        if (& $big $html) { "FILE|$html"; return }
+
+        # 2. Eigener Bericht aus XML + Text
+        $xf = Join-Path $dir "HUMig_GP_$id.xml"
+        $xt = & $gp "$scope /x `"$xf`" /f"
+        $vtext = & $gp "$scope /v"
+        $enc = { param($s) [System.Net.WebUtility]::HtmlEncode("$s") }
+        $sb = New-Object System.Text.StringBuilder
+        [void]$sb.Append("<!DOCTYPE html><html lang='de'><head><meta charset='utf-8'><title>Gruppenrichtlinien-Ergebnis $env:COMPUTERNAME</title><style>body{font:14px 'Segoe UI',Arial,sans-serif;margin:24px;color:#222}h1{font-size:22px}h2{font-size:17px;margin-top:26px;border-bottom:2px solid #b9a88a}table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #ccc;padding:5px 8px;text-align:left;vertical-align:top}th{background:#eee}.no{color:#b00020}.ok{color:#2e7d32}pre{background:#f6f6f6;border:1px solid #ddd;padding:10px;font:12px Consolas,monospace;white-space:pre-wrap}</style></head><body>")
+        [void]$sb.Append("<h1>Gruppenrichtlinien-Ergebnis &ndash; $(& $enc $env:COMPUTERNAME)</h1><p>Erstellt $(Get-Date -Format 'dd.MM.yyyy HH:mm') &middot; $(if ($acc -and $scope -ne '/scope computer') { 'Benutzer ' + (& $enc $acc) + ' + Computer' } else { 'nur Computer' }) &middot; (HUMig-Bericht aus gpresult /x und /v, da /h in Remote-Sitzungen nicht moeglich ist)</p>")
+        if (Test-Path -LiteralPath $xf) {
             try {
-                $a = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c gpresult.exe $argStr /h `"$f`" /f > `"$log`" 2>&1"
-                $pr = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-                $st = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
-                Register-ScheduledTask -TaskName $n -Action $a -Principal $pr -Settings $st -Force -ErrorAction Stop | Out-Null
-                Start-ScheduledTask -TaskName $n
-                $t0 = Get-Date
-                do { Start-Sleep -Seconds 2; $state = (Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue).State } while ($state -eq 'Running' -and ((Get-Date) - $t0).TotalSeconds -lt 240)
-                $txt = if (Test-Path -LiteralPath $log) { ((Get-Content -LiteralPath $log -ErrorAction SilentlyContinue) -join ' ').Trim() } else { '' }
-                $ok = (Test-Path -LiteralPath $f) -and (Get-Item -LiteralPath $f).Length -gt 2000
-                [pscustomobject]@{ Ok = $ok; File = $f; Text = $txt }
-            } finally {
-                Unregister-ScheduledTask -TaskName $n -Confirm:$false -ErrorAction SilentlyContinue
-                Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
-            }
-        }
-        $r = if ($acc) { & $run @('/user', $acc) } else { & $run @('/scope', 'computer') }
-        if (-not $r.Ok -and $acc) {
-            "WARN Kein Benutzer-Teil fuer ${acc}: $(if ($r.Text) { $r.Text } else { 'keine Daten' }) - Bericht nur mit Computer-Richtlinien"
-            Remove-Item -LiteralPath $r.File -Force -ErrorAction SilentlyContinue
-            $r = & $run @('/scope', 'computer')
-        }
-        if ($r.Ok) { "FILE|$($r.File)" } else { Remove-Item -LiteralPath $r.File -Force -ErrorAction SilentlyContinue; "FEHLER gpresult: $(if ($r.Text) { $r.Text } else { 'kein Bericht erstellt' })" }
+                [xml]$x = Get-Content -LiteralPath $xf -Raw -Encoding UTF8
+                foreach ($part in @(@{ N = 'ComputerResults'; T = 'Computer' }, @{ N = 'UserResults'; T = 'Benutzer' })) {
+                    $res = $x.SelectSingleNode("//*[local-name()='$($part.N)']")
+                    if (-not $res) { continue }
+                    [void]$sb.Append("<h2>$($part.T): Gruppenrichtlinienobjekte</h2><table><tr><th>GPO</th><th>Verknuepft mit</th><th>Status</th></tr>")
+                    foreach ($g in @($res.SelectNodes("*[local-name()='GPO']"))) {
+                        $v = { param($n) $nd = $g.SelectSingleNode("*[local-name()='$n']"); if ($nd) { $nd.InnerText } else { '' } }
+                        $link = $g.SelectSingleNode(".//*[local-name()='SOMPath']")
+                        $why = @()
+                        if ((& $v 'Enabled') -eq 'false') { $why += 'deaktiviert' }
+                        if ((& $v 'FilterAllowed') -eq 'false') { $why += 'WMI-Filter' }
+                        if ((& $v 'AccessDenied') -eq 'true') { $why += 'Zugriff verweigert (Sicherheitsfilter)' }
+                        if ((& $v 'IsValid') -eq 'false') { $why += 'ungueltig' }
+                        $st = if ($why.Count) { "<span class='no'>nicht angewendet: $($why -join ', ')</span>" } else { "<span class='ok'>angewendet</span>" }
+                        [void]$sb.Append("<tr><td>$(& $enc (& $v 'Name'))</td><td>$(& $enc $(if ($link) { $link.InnerText }))</td><td>$st</td></tr>")
+                    }
+                    [void]$sb.Append('</table>')
+                    $grp = @($res.SelectNodes(".//*[local-name()='SecurityGroup']/*[local-name()='Name']") | ForEach-Object { $_.InnerText } | Sort-Object -Unique)
+                    if ($grp.Count) { [void]$sb.Append("<h2>$($part.T): Sicherheitsgruppen</h2><p>$((@($grp | ForEach-Object { & $enc $_ })) -join '<br>')</p>") }
+                }
+            } catch { [void]$sb.Append("<p class='no'>XML-Auswertung nicht moeglich: $(& $enc $_.Exception.Message)</p>") }
+        } elseif ($xt) { [void]$sb.Append("<p class='no'>gpresult /x: $(& $enc $xt.Trim())</p>") }
+        [void]$sb.Append("<h2>Alle Einstellungen (gpresult /v)</h2><pre>$(& $enc $vtext)</pre></body></html>")
+        [System.IO.File]::WriteAllText($html, $sb.ToString(), (New-Object System.Text.UTF8Encoding($true)))
+        Remove-Item -LiteralPath $xf -Force -ErrorAction SilentlyContinue
+        if (& $big $html) { "FILE|$html" } else { "FEHLER gpresult: $($vtext.Trim())" }
     } -OnResult {
         param($r, $comp)
         foreach ($l in @($r)) {
