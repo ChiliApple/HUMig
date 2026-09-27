@@ -130,7 +130,7 @@ function Start-HMInventory([bool]$WithSoftware, [string[]]$Hosts = @()) {
 function Show-HMOldProfiles {
     $c = Get-TargetComputer
     Invoke-HMTool -Title 'Profile auflisten' -Computer $c -TimeoutSec 300 -Script {
-        foreach ($p in @(Get-CimInstance Win32_UserProfile | Where-Object { -not $_.Special -and $_.LocalPath -notmatch '\\(systemprofile|LocalService|NetworkService)$' })) {
+        foreach ($p in @(Get-CimInstance Win32_UserProfile | Where-Object { -not $_.Special -and $_.LocalPath -notmatch '\\(systemprofile|LocalService|NetworkService)$' -and "$($_.SID)" -match '^S-1-(5-21|12-1)-' })) {
             $name = ''; try { $name = (New-Object System.Security.Principal.SecurityIdentifier($p.SID)).Translate([System.Security.Principal.NTAccount]).Value } catch { $name = '(Konto unbekannt/geloescht)' }
             $nt = $null; try { $nt = (Get-Item -LiteralPath (Join-Path $p.LocalPath 'NTUSER.DAT') -Force -ErrorAction Stop).LastWriteTime } catch { }
             [pscustomobject]@{ Konto = $name; Pfad = "$($p.LocalPath)"; SID = "$($p.SID)"; Geladen = [bool]$p.Loaded; Zuletzt = $p.LastUseTime; NtUser = $nt }
