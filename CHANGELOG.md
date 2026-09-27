@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.7 - 2026-09-27
+### Verbessert
+- Info: Link zur Projektseite und Lizenz-Hinweis sind anklickbar
+
 ## v2.0.6 - 2026-09-27
 ### Behoben
 - Anleitung im Benutzer-Modus: *Datei kann nicht erstellt werden* - die Anleitung wird jetzt ueberschrieben statt verschoben und landet, wenn der Tool-Ordner dem Benutzer nicht gehoert, im eigenen LocalAppData
