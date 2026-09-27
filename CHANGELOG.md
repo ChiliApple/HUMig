@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.11 - 2026-09-27
+### Neu
+- Werkzeug **Laufwerke (C$)**: links C: des gewaehlten PCs im Explorer (remote `\\PC\C$`), rechts Auswahl aller Laufwerke (USB-Sticks hervorgehoben, mit Name und freiem Platz) und Freigaben des PCs
+
 ## v2.0.10 - 2026-09-27
 ### Verbessert
 - Benutzerliste: Dienstkonten (NT SERVICE, SQL, IIS ...) werden nicht mehr angezeigt

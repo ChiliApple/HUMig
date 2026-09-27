@@ -582,3 +582,77 @@ function Copy-HMUsmtToTool {
     }
     if (-not $n) { Out-Console "Keine USMT-Dateien unter $src gefunden." 'Warning' }
 }
+
+# ----------------------------------------------------------------------------
+# Laufwerke / Admin-Freigaben des gewaehlten PCs im Explorer oeffnen (C$, USB-Sticks, weitere Freigaben)
+# Explorer laeuft als angemeldeter Windows-Benutzer - dieser braucht Adminrechte am Ziel-PC.
+# ----------------------------------------------------------------------------
+function Open-HMDrivePath([string]$Path) {
+    Out-Console "Explorer: $Path" 'Info'
+    try { Start-Process -FilePath explorer.exe -ArgumentList "`"$Path`"" } catch { Out-Console "Oeffnen nicht moeglich: $($_.Exception.Message)" 'Error' }
+}
+function Open-HMAdminShare {
+    $c = Get-TargetComputer
+    if (Test-HMIsLocal $c) { Open-HMDrivePath "$env:SystemDrive\" } else { Open-HMDrivePath "\\$c\C$" }
+}
+function Show-HMDriveMenu {
+    $c = Get-TargetComputer
+    Out-Console "Laufwerke und Freigaben von $c lesen ..." 'Info'
+    Invoke-AsyncCommand -ScriptBlock {
+        param($comp, $cred, $isLocal)
+        $cs = $null
+        try {
+            if (-not $isLocal) {
+                $p = @{ ComputerName = $comp; ErrorAction = 'Stop' }; if ($cred) { $p.Credential = $cred }
+                try { $cs = New-CimSession @p; [void](Get-CimInstance -CimSession $cs Win32_OperatingSystem -ErrorAction Stop) }
+                catch { if ($cs) { Remove-CimSession $cs -ErrorAction SilentlyContinue }; $p.SessionOption = New-CimSessionOption -Protocol Dcom; $cs = New-CimSession @p }
+            }
+            $q = @{ ErrorAction = 'Stop' }; if ($cs) { $q.CimSession = $cs }
+            $disks = @(Get-CimInstance @q Win32_LogicalDisk | Where-Object { $_.DriveType -in 2, 3, 5 } | ForEach-Object {
+                [pscustomobject]@{ Letter = "$($_.DeviceID)".TrimEnd(':'); Type = [int]$_.DriveType; Label = "$($_.VolumeName)"; Size = [double]$_.Size; Free = [double]$_.FreeSpace } })
+            $usb = @{}
+            try {
+                foreach ($dd in @(Get-CimInstance @q Win32_DiskDrive | Where-Object { $_.InterfaceType -eq 'USB' })) {
+                    foreach ($part in @(Get-CimAssociatedInstance -InputObject $dd -ResultClassName Win32_DiskPartition -ErrorAction SilentlyContinue)) {
+                        foreach ($ld in @(Get-CimAssociatedInstance -InputObject $part -ResultClassName Win32_LogicalDisk -ErrorAction SilentlyContinue)) { $usb["$($ld.DeviceID)".TrimEnd(':')] = $true }
+                    }
+                }
+            } catch { }
+            $shares = @(Get-CimInstance @q Win32_Share | Where-Object { $_.Type -eq 0 } | ForEach-Object { [pscustomobject]@{ Name = "$($_.Name)"; Path = "$($_.Path)" } })
+            [pscustomobject]@{ Disks = $disks; Usb = @($usb.Keys); Shares = $shares; Error = $null }
+        } catch { [pscustomobject]@{ Disks = @(); Usb = @(); Shares = @(); Error = $_.Exception.Message } }
+        finally { if ($cs) { Remove-CimSession $cs -ErrorAction SilentlyContinue } }
+    } -ArgumentList @($c, $script:RemoteCred, [bool](Test-HMIsLocal $c)) -TimeoutSec 60 -State $c -OnComplete {
+        param($r, $comp)
+        if ($r -is [string] -or -not $r) { Out-Console "Laufwerke von ${comp}: $r" 'Error'; return }
+        if ($r.Error) { Out-Console "Laufwerke von $comp nicht lesbar: $($r.Error) - Abhilfe: Fernwartung aktivieren" 'Error'; return }
+        $local = Test-HMIsLocal $comp
+        $m = New-Object System.Windows.Controls.ContextMenu
+        $h = New-Object System.Windows.Controls.MenuItem; $h.Header = "Laufwerke von $comp"; $h.IsEnabled = $false; [void]$m.Items.Add($h)
+        foreach ($d in @($r.Disks | Sort-Object Letter)) {
+            $kind = if (@($r.Usb) -contains $d.Letter) { 'USB' } elseif ($d.Type -eq 2) { 'Wechseldatentraeger/USB' } elseif ($d.Type -eq 5) { 'CD/DVD' } else { 'Lokal' }
+            $size = if ($d.Size -gt 0) { ", $(Format-HMSize $d.Free) frei von $(Format-HMSize $d.Size)" } else { '' }
+            $mi = New-Object System.Windows.Controls.MenuItem
+            $mi.Header = "$($d.Letter):   $(if ($d.Label) { $d.Label } else { '(ohne Namen)' })   [$kind$size]"
+            $mi.Tag = $(if ($local) { "$($d.Letter):\" } else { "\\$comp\$($d.Letter)$" })
+            if ($kind -like '*USB*') { $mi.FontWeight = [System.Windows.FontWeights]::Bold }
+            $mi.Add_Click({ param($src) Open-HMDrivePath "$($src.Tag)" })
+            [void]$m.Items.Add($mi)
+        }
+        $sh = @($r.Shares | Sort-Object Name)
+        if ($sh.Count) {
+            [void]$m.Items.Add((New-Object System.Windows.Controls.Separator))
+            $h2 = New-Object System.Windows.Controls.MenuItem; $h2.Header = 'Freigaben'; $h2.IsEnabled = $false; [void]$m.Items.Add($h2)
+            foreach ($s in $sh) {
+                $mi = New-Object System.Windows.Controls.MenuItem
+                $mi.Header = "$($s.Name)   ($($s.Path))"
+                $mi.Tag = $(if ($local) { $s.Path } else { "\\$comp\$($s.Name)" })
+                $mi.Add_Click({ param($src) Open-HMDrivePath "$($src.Tag)" })
+                [void]$m.Items.Add($mi)
+            }
+        }
+        $m.Placement = [System.Windows.Controls.Primitives.PlacementMode]::MousePoint
+        $m.IsOpen = $true
+        Out-Console "$(@($r.Disks).Count) Laufwerke, $($sh.Count) Freigaben auf $comp" 'Debug'
+    }
+}
