@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- HUMig: Benutzerordner nicht per USMT (werden per Robocopy gesichert, bzw. liegen in OneDrive) -->
+<migration urlid="http://www.microsoft.com/migration/1.0/migxmlext/humig_excludeuserfolders">
+    <component type="Documents" context="UserAndSystem">
+        <displayName>Benutzerordner ausschliessen</displayName>
+        <role role="Data">
+            <rules>
+                <unconditionalExclude>
+                    <objectSet>
+                        <pattern type="File">%CSIDL_MYDOCUMENTS%\* [*]</pattern>
+                        <pattern type="File">%CSIDL_COMMON_DOCUMENTS%\* [*]</pattern>
+                        <pattern type="File">%CSIDL_DESKTOP%\* [*]</pattern>
+                        <pattern type="File">%CSIDL_DESKTOPDIRECTORY%\* [*]</pattern>
+                        <pattern type="File">%CSIDL_COMMON_DESKTOPDIRECTORY%\* [*]</pattern>
+                        <pattern type="File">%CSIDL_MYMUSIC%\* [*]</pattern>
+                        <pattern type="File">%CSIDL_COMMON_MUSIC%\* [*]</pattern>
+                        <pattern type="File">%CSIDL_MYPICTURES%\* [*]</pattern>
+                        <pattern type="File">%CSIDL_COMMON_PICTURES%\* [*]</pattern>
+                        <pattern type="File">%CSIDL_MYVIDEO%\* [*]</pattern>
+                        <pattern type="File">%CSIDL_COMMON_VIDEO%\* [*]</pattern>
+                        <script>MigXmlHelper.GenerateDrivePatterns ("* [*.tmp]", "Fixed")</script>
+                    </objectSet>
+                </unconditionalExclude>
+            </rules>
+        </role>
+    </component>
+</migration>

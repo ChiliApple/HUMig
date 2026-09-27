@@ -1,0 +1,10 @@
+BIN - optionale Zusatzprogramme (werden NICHT ueber GitHub verteilt)
+
+USMT (fuer das Modul "Windows-Einstellungen (USMT)"):
+  - Windows ADK installieren (Feature "User State Migration Tool") ODER
+  - den Ordner "amd64" aus
+      C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\User State Migration Tool\
+    hierher kopieren:  BIN\USMT\amd64\scanstate.exe, loadstate.exe, ...
+  - oder in Config\settings.json "UsmtPath" setzen.
+  HUMig sucht in dieser Reihenfolge: UsmtPath, BIN\USMT\amd64, BIN\USMT, ADK-Standardpfad.
+  Fuer Windows 11 die USMT-Version aus dem aktuellen ADK verwenden.

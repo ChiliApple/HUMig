@@ -1,0 +1,20 @@
+# Lokale Daten - nie ins Repo
+BACKUPS/
+Logs/
+BIN/USMT/
+BIN/Tools/
+Config/settings.json
+Config/exceptions.json
+Config/modules.json
+Config/update.json
+Config/computer_history.json
+Config/GitHubToken_*.xml
+*.pulltmp
+*.log
+Test-HUMig.result.txt
+HUMig.exe
+Softwareverteilung/
+Config/WindowState.json
+Config/apps.json
+Config/mac_cache.json
+HUMig-Benutzer.exe

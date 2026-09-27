@@ -1,0 +1,28 @@
+{
+  "_Info": "Ausnahmen fuer Robocopy (/XD Ordner, /XF Dateien). Platzhalter * erlaubt. Eigene Listen in Config\\exceptions.json.",
+  "ProfileFolders": [
+    "AppData", "Anwendungsdaten", "Cookies", "Druckumgebung", "Netzwerkumgebung", "Lokale Einstellungen",
+    "Eigene Dateien", "Startmenü", "Vorlagen", "Templates", "SendTo", "Recent", "Searches*", "Saved Games",
+    "OneDrive*", "Intel*", ".*", "@docker", "MicrosoftEdgeBackups", "Commcell*", "source", "Webutil*"
+  ],
+  "ProfileFiles": [
+    "ntuser*.*", "usrclass*.*", "!This folder protects against Ransomware", ".truststore", "*.log", "*.dll",
+    ".*", "sys*.*", "*.bin", "*.dat", "*.MARKER", "*.sys", "webutil*.*", "*.tmp"
+  ],
+  "SystemFolders": [
+    "Windows", "Windows.old", "System Volume Information", "$Recycle.Bin", "$WinREAgent", "$Windows.~*",
+    "Program Files", "Program Files (x86)", "Programme*", "ProgramData", "Users", "Documents and Settings",
+    "Recovery", "Recovery System*", "Config.Msi", "Boot", "PerfLogs", "MSOCache", "OneDriveTemp", "Intel*",
+    "Dell", "Drivers", "SWSetup", "hpswsetup", "SMSTSLog", "_SMSTaskSequence", "MININT", "Python*", "usr",
+    "System.sav", "Microsoft", "Autodesk", "Canon", "log4j2-scan*"
+  ],
+  "SystemFiles": [
+    "pagefile.sys", "hiberfil.sys", "swapfile.sys", "DumpStack.log*", "ntuser*.*", "!This folder protects against Ransomware",
+    ".truststore", "*.log", ".*", "sys*.*", "*.bin", "*.dat", "*.MARKER", "*.sys", "*.tmp"
+  ],
+  "MinimalProfileFolders": [ "AppData", "Intel*" ],
+  "MinimalSystemFolders": [
+    "Windows", "Windows.old", "System Volume Information", "$Recycle.Bin", "$WinREAgent", "Program Files",
+    "Program Files (x86)", "Programme*", "ProgramData", "Users", "Recovery", "Recovery System*", "Config.Msi", "Boot", "usr"
+  ]
+}
