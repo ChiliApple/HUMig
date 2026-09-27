@@ -1081,7 +1081,7 @@ function Start-HMGpResult {
             param([string]$a)
             $o = Join-Path $dir "HUMig_GP_$([guid]::NewGuid().ToString('N')).txt"
             & cmd.exe /c "gpresult.exe $a > `"$o`" 2>&1" | Out-Null
-            $txt = if (Test-Path -LiteralPath $o) { [System.IO.File]::ReadAllText($o, $oem) } else { '' }
+            $txt = if (Test-Path -LiteralPath $o) { [System.IO.File]::ReadAllText($o, $oem) -replace '\?(?=\d)', '' } else { '' }   # Richtungszeichen vor Datumsziffern (werden in der Codepage zu '?')
             Remove-Item -LiteralPath $o -Force -ErrorAction SilentlyContinue
             return $txt
         }
@@ -1111,17 +1111,26 @@ function Start-HMGpResult {
                 foreach ($part in @(@{ N = 'ComputerResults'; T = 'Computer' }, @{ N = 'UserResults'; T = 'Benutzer' })) {
                     $res = $x.SelectSingleNode("//*[local-name()='$($part.N)']")
                     if (-not $res) { continue }
-                    [void]$sb.Append("<h2>$($part.T): Gruppenrichtlinienobjekte</h2><table><tr><th>GPO</th><th>Verknuepft mit</th><th>Status</th></tr>")
-                    foreach ($g in @($res.SelectNodes("*[local-name()='GPO']"))) {
+                    $rows = foreach ($g in @($res.SelectNodes("*[local-name()='GPO']"))) {
                         $v = { param($n) $nd = $g.SelectSingleNode("*[local-name()='$n']"); if ($nd) { $nd.InnerText } else { '' } }
                         $link = $g.SelectSingleNode(".//*[local-name()='SOMPath']")
+                        $name = & $v 'Name'
                         $why = @()
-                        if ((& $v 'Enabled') -eq 'false') { $why += 'deaktiviert' }
-                        if ((& $v 'FilterAllowed') -eq 'false') { $why += 'WMI-Filter' }
-                        if ((& $v 'AccessDenied') -eq 'true') { $why += 'Zugriff verweigert (Sicherheitsfilter)' }
-                        if ((& $v 'IsValid') -eq 'false') { $why += 'ungueltig' }
-                        $st = if ($why.Count) { "<span class='no'>nicht angewendet: $($why -join ', ')</span>" } else { "<span class='ok'>angewendet</span>" }
-                        [void]$sb.Append("<tr><td>$(& $enc (& $v 'Name'))</td><td>$(& $enc $(if ($link) { $link.InnerText }))</td><td>$st</td></tr>")
+                        if ((& $v 'IsValid') -eq 'false') {
+                            # GPO nicht lesbar (fehlende Leserechte fuer den PC/Benutzer oder im SYSVOL nicht vorhanden) - dann ist auch der Name nur die GUID
+                            $why += 'nicht lesbar (Leserecht/Sicherheitsfilter oder GPO fehlt im SYSVOL)'
+                        } else {
+                            if ((& $v 'Enabled') -eq 'false') { $why += 'deaktiviert' }
+                            if ((& $v 'FilterAllowed') -eq 'false') { $why += 'WMI-Filter trifft nicht zu' }
+                            if ((& $v 'AccessDenied') -eq 'true') { $why += 'Sicherheitsfilter (kein Zugriff)' }
+                        }
+                        [pscustomobject]@{ Name = $name; Link = $(if ($link) { $link.InnerText } else { '' }); Why = ($why -join ', '); Ok = (-not $why.Count) }
+                    }
+                    $rows = @($rows | Sort-Object @{ Expression = { -not $_.Ok } }, Name)
+                    [void]$sb.Append("<h2>$($part.T): Gruppenrichtlinienobjekte ($(@($rows | Where-Object { $_.Ok }).Count) angewendet, $(@($rows | Where-Object { -not $_.Ok }).Count) nicht)</h2><table><tr><th>GPO</th><th>Verknuepft mit</th><th>Status</th></tr>")
+                    foreach ($rw in $rows) {
+                        $st = if ($rw.Ok) { "<span class='ok'>angewendet</span>" } else { "<span class='no'>nicht angewendet: $(& $enc $rw.Why)</span>" }
+                        [void]$sb.Append("<tr><td>$(& $enc $rw.Name)</td><td>$(& $enc $rw.Link)</td><td>$st</td></tr>")
                     }
                     [void]$sb.Append('</table>')
                     $grp = @($res.SelectNodes(".//*[local-name()='SecurityGroup']/*[local-name()='Name']") | ForEach-Object { $_.InnerText } | Sort-Object -Unique)
