@@ -1070,23 +1070,32 @@ function Start-HMGpResult {
     $c = Get-TargetComputer
     $p = Get-SelectedProfile
     $acc = if ($p -and $p.Account) { $p.Account } else { '' }
-    Invoke-HMTool -Title "Gruppenrichtlinien-Ergebnis$(if ($acc) { " ($acc)" })" -Computer $c -TimeoutSec 300 -ArgumentList @($acc) -Script {
-        param($acc)
-        $f = Join-Path $env:windir "Temp\HUMig_GPResult_$(Get-Date -Format 'yyyyMMdd_HHmmss').html"
-        $a = @('/h', $f, '/f')
-        if ($acc) { $a += @('/user', $acc) } else { $a += @('/scope', 'computer') }
-        $o = & gpresult.exe @a 2>&1
-        if (Test-Path $f) { "FILE|$f" } else { "FEHLER gpresult: $(($o | Out-String).Trim())" }
-    } -OnResult {
-        param($r, $comp)
-        foreach ($l in @($r)) {
-            if ("$l" -like 'FILE|*') {
-                $remote = "$l".Substring(5)
-                $src = if (Test-HMIsLocal $comp) { $remote } else { Convert-HMPath @{ IsRemote = $true; Computer = $comp } $remote }
-                $dst = Join-Path $script:LogDir ("GPResult_{0}_{1}.html" -f ($comp -replace '[^\w\-]', '_'), (Get-Date -Format 'yyyyMMdd_HHmmss'))
-                try { Copy-Item -LiteralPath $src -Destination $dst -Force -ErrorAction Stop; Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue; Out-Console "   Bericht: $dst" 'Success'; Start-Process $dst } catch { Out-Console "   Bericht nicht kopierbar: $($_.Exception.Message)" 'Warning' }
-            } else { Write-HMToolResult $l }
+    $dst = Join-Path $script:LogDir ("GPResult_{0}_{1}.html" -f ($c -replace '[^\w\-]', '_'), (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    Out-Console "Gruppenrichtlinien-Ergebnis$(if ($acc) { " ($acc)" }) - $c ..." 'Info'
+    # Remote: gpresult /s von diesem PC aus (RSoP ueber WMI). In einer WinRM-Sitzung liefert gpresult nur einen leeren Bericht.
+    Invoke-AsyncCommand -ScriptBlock {
+        param($comp, $isLocal, $acc, $out)
+        $run = {
+            param($userArgs)
+            $a = @()
+            if (-not $isLocal) { $a += @('/s', $comp) }
+            $a += $userArgs + @('/h', $out, '/f')
+            $o = & gpresult.exe @a 2>&1
+            [pscustomobject]@{ Code = $LASTEXITCODE; Text = (($o | Out-String).Trim()); Ok = ((Test-Path -LiteralPath $out) -and (Get-Item -LiteralPath $out).Length -gt 2000) }
         }
+        $notes = @()
+        $r = if ($acc) { & $run @('/user', $acc) } else { & $run @('/scope', 'computer') }
+        if (-not $r.Ok -and $acc) {
+            $notes += "Keine Richtlinien-Daten fuer $acc auf $comp (Benutzer dort nie/nicht angemeldet?) - nur Computer-Richtlinien"
+            $r = & $run @('/scope', 'computer')
+        }
+        [pscustomobject]@{ Ok = $r.Ok; Text = $r.Text; Notes = $notes }
+    } -ArgumentList @($c, [bool](Test-HMIsLocal $c), $acc, $dst) -TimeoutSec 300 -State $dst -OnComplete {
+        param($r, $file)
+        if ($r -is [string] -or -not $r) { Out-Console "Gruppenrichtlinien-Ergebnis: $r" 'Error'; return }
+        foreach ($n in @($r.Notes)) { Out-Console "   $n" 'Warning' }
+        if ($r.Ok) { Out-Console "   Bericht: $file" 'Success'; try { Start-Process -FilePath explorer.exe -ArgumentList "`"$file`"" } catch { } }
+        else { Out-Console "   gpresult ohne Ergebnis: $($r.Text) - Abhilfe: Fernwartung aktivieren (WMI/RSoP), Firewall pruefen" 'Error' }
     }
 }
 
