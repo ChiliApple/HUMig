@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.21 - 2026-09-28
+### Verbessert
+- Server-Backup: **neuer Bericht** (Bericht.html) - deutsch, Status mit erklaerendem Satz, Hinweise mit "Was tun", alle Dateien des Laufs als Links mit Erklaerung, komplettes Protokoll des Laufs (aufklappbar), Hinweis zur Wiederherstellung
+- Server-Backup: Status **OK (Hinweis)** - vollstaendig gesichert, aber mit Hinweis (z.B. VM offline gesichert); **Warnung** nur noch, wenn wirklich etwas nicht einwandfrei ist (Pruefung, Host-Konfiguration, Host-System)
+
 ## v2.0.20 - 2026-09-28
 ### Neu
 - Server-Backup: Grund fuer eine **Offline-Sicherung** wird aus dem Hyper-V-Protokoll gelesen und in Konsole, Bericht und Verlauf genannt (z.B. "dynamische Datentraeger im Gast") inkl. Abhilfe

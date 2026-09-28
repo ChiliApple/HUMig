@@ -28,6 +28,7 @@ $script:TaskLog = Join-Path $repDir ('Aufgabe_{0}_{1}.log' -f (Get-Date -Format 
 
 # Protokoll direkt in die Datei (ueberschreibt die Queue-Variante der Engine)
 function Write-HMSbLog([string]$Msg, [string]$Lvl = 'Info') {
+    Add-HMSbRunLog $Msg $Lvl
     try { Add-Content -LiteralPath $script:TaskLog -Value ('{0} [{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Lvl.ToUpper(), $Msg) -Encoding UTF8 } catch { }
 }
 
