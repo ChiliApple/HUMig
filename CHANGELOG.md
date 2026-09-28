@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.20 - 2026-09-28
+### Neu
+- Server-Backup: Grund fuer eine **Offline-Sicherung** wird aus dem Hyper-V-Protokoll gelesen und in Konsole, Bericht und Verlauf genannt (z.B. "dynamische Datentraeger im Gast") inkl. Abhilfe
+- Server-Backup: Verlauf mit Spalte **Hinweis** (warum Warnung/Fehler); **Doppelklick** auf einen Lauf oeffnet dessen Bericht
+- Server-Backup: VMs, die nur offline sicherbar sind, werden in der VM-Liste orange markiert und **vor dem Start** gemeldet (auch im Protokoll geplanter Laeufe)
+
 ## v2.0.19 - 2026-09-28
 ### Neu
 - Server-Backup: **Zeitplan** - einmalig, taeglich oder woechentlich als geplante Aufgabe (Aufgabenplanung \HUMig, laeuft als SYSTEM ohne Anmeldung) mit den angehakten VMs; Uebersicht mit naechstem/letztem Lauf, Jetzt starten, Loeschen; Protokoll `Logs\ServerBackup\Aufgabe_*.log`

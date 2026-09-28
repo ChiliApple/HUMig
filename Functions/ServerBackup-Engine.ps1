@@ -46,8 +46,37 @@ function Test-HMSbPrereq {
 }
 
 # Virtuelle Computer des Hosts mit Groesse der virtuellen Festplatten
+# Hyper-V-Meldungen, warum eine VM nicht online (Hotbackup) gesichert werden kann - Protokoll Hyper-V-Worker-Admin
+# Rueckgabe: Hashtable VM-Name -> @{ Messages = @(...); Dynamic = $true/$false; Last = [datetime] }
+function Get-HMSbOfflineReasons {
+    param([datetime]$Since = (Get-Date).AddDays(-90), [datetime]$Until = (Get-Date).AddMinutes(1))
+    $map = @{}
+    $ev = @()
+    try {
+        $ev = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Hyper-V-Worker-Admin'; ProviderName = 'Microsoft-Windows-Hyper-V-Integration'; Level = 2, 3; StartTime = $Since; EndTime = $Until } -MaxEvents 3000 -ErrorAction Stop)
+    } catch { return $map }
+    foreach ($e in $ev) {
+        $m = "$($e.Message)".Trim()
+        if ($m -notmatch '(?i)backup|sicherung') { continue }
+        if ($m -notmatch '^(.+?):\s') { continue }
+        $n = $Matches[1].Trim()
+        if (-not $map.ContainsKey($n)) { $map[$n] = @{ Messages = @(); Dynamic = $false; Last = $e.TimeCreated } }
+        $txt = ($m.Substring($n.Length + 1).Trim() -replace '\s*\((ID des virtuellen Computers|virtual machine ID)[^)]*\)', '' -replace '\s[0-9A-Fa-f]{8}-[0-9A-Fa-f\-]{27}\s', ' ')
+        if ($map[$n].Messages -notcontains $txt) { $map[$n].Messages += $txt }
+        if ($m -match '(?i)dynamisch|dynamic') { $map[$n].Dynamic = $true }
+        if ($e.TimeCreated -gt $map[$n].Last) { $map[$n].Last = $e.TimeCreated }
+    }
+    return $map
+}
+function Get-HMSbOfflineHintText($Info) {
+    if (-not $Info) { return '' }
+    if ($Info.Dynamic) { return 'dynamische Datentraeger im Gast' }
+    return (@($Info.Messages) | Select-Object -First 1)
+}
+
 function Get-HMSbVmList {
     $list = @()
+    $reasons = Get-HMSbOfflineReasons
     foreach ($vm in @(Get-VM -ErrorAction Stop | Sort-Object Name)) {
         $size = [long]0; $paths = @()
         foreach ($d in @(Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue)) {
@@ -61,6 +90,8 @@ function Get-HMSbVmList {
         $list += [pscustomobject]@{
             Name = "$($vm.Name)"; State = "$($vm.State)"; SizeBytes = $size; Checkpoints = $cp
             Paths = $paths; VmPath = "$($vm.Path)"; ConfigPath = "$($vm.ConfigurationLocation)"; Id = "$($vm.Id)"
+            OfflineHint = (Get-HMSbOfflineHintText $reasons["$($vm.Name)"])
+            OfflineDetail = $(if ($reasons["$($vm.Name)"]) { (@($reasons["$($vm.Name)"].Messages) -join ' | ') } else { '' })
         }
     }
     return ,$list
@@ -561,6 +592,7 @@ function Start-HMServerBackup {
             $v = @($all | Where-Object { $_.Name -eq $n })[0]
             if (-not $v) { throw "VM '$n' gibt es auf diesem Host nicht (umbenannt/geloescht?) - Profil anpassen" }
             foreach ($p in @($v.Paths) + @($v.VmPath)) { if ("$p" -match "^$L`:") { throw "VM '$n' liegt (teilweise) auf dem Ziel-Laufwerk $target ($p)" } }
+            if ($v.OfflineHint) { Write-HMSbLog "Vorab-Hinweis: VM '$n' wird voraussichtlich OFFLINE gesichert ($($v.OfflineHint)) - sie wird zu Beginn kurz angehalten (gespeicherter Zustand), danach laeuft sie weiter. Laut Hyper-V: $($v.OfflineDetail)" 'Warning' }
             if ([int]$v.Checkpoints -ge 2) { Write-HMSbLog "Hinweis: VM '$n' hat $($v.Checkpoints) Pruefpunkte. Die Sicherung funktioniert; ein aelterer MS-Artikel (KB 958662, Server 2008) nennt Einschraenkungen beim Wiederherstellen von VMs mit 2+ Pruefpunkten - fuer aktuelle Server nicht belegt. Nicht mehr benoetigte Pruefpunkte zusammenfuehren, Wiederherstellung einmal testen." 'Warning' }
             $info += $v
         }
@@ -612,7 +644,21 @@ function Start-HMServerBackup {
         foreach ($lf in @($r.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
         if ($r.ExitCode -ne 0) { $status = 'Error'; $notes += "VM-Sicherung Exitcode $($r.ExitCode)"; Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - Details: wbadmin-VMs.log im Berichtsordner" 'Error' }
         else {
-            if (@($r.Lines | Where-Object { $_ -match '\(Offline\)' }).Count) { $notes += 'VM(s) offline gesichert (gespeicherter Zustand)'; if ($status -eq 'OK') { $status = 'Warning' }; Write-HMSbLog 'Mindestens eine VM wurde OFFLINE gesichert (kurz in gespeicherten Zustand versetzt) - Integrationsdienste/Pruefpunkte der VM pruefen.' 'Warning' }
+            $offVms = @($r.Lines | Where-Object { $_ -match '"(.+?) \(Offline\)"' } | ForEach-Object { if ($_ -match '"(.+?) \(Offline\)"') { $Matches[1] } } | Select-Object -Unique)
+            if ($offVms.Count) {
+                if ($status -eq 'OK') { $status = 'Warning' }
+                $why = Get-HMSbOfflineReasons -Since $t0.AddMinutes(-1)
+                foreach ($ov in $offVms) {
+                    $h = Get-HMSbOfflineHintText $why[$ov]
+                    if ($h) {
+                        Write-HMSbLog "VM '$ov' wurde OFFLINE gesichert (kurz angehalten) - Grund laut Hyper-V: $h$(if ($why[$ov].Dynamic) { '. Abhilfe: Laufwerke im Gast auf Basisdatentraeger umstellen (neue Basis-VHDX, Daten kopieren) - siehe Anleitung.' })" 'Warning'
+                        $notes += "$ov offline ($h)"
+                    } else {
+                        Write-HMSbLog "VM '$ov' wurde OFFLINE gesichert (kurz angehalten) - Grund nicht im Hyper-V-Protokoll gefunden: Integrationsdienst Sicherung (VSS), Dienst vmicvss im Gast und Volumes (NTFS/ReFS, Basisdatentraeger) pruefen." 'Warning'
+                        $notes += "$ov offline"
+                    }
+                }
+            }
             Write-HMSbLog 'VM-Sicherung erfolgreich' 'Success'
         }
         # Version ermitteln + pruefen
@@ -664,7 +710,7 @@ function Start-HMServerBackup {
     $entry = [pscustomobject][ordered]@{
         Date = $t0.ToString('yyyy-MM-dd HH:mm'); Profile = "$($Ctx.Profile)"; Host = $env:COMPUTERNAME; Disk = "$($Ctx.DiskLabel)"; DiskSerial = "$($Ctx.DiskSerial)"
         VMs = ($vms -join ', '); Status = $status; Minutes = $dur; SizeGB = [math]::Round($res.SizeBytes / 1GB, 1); VersionId = $verId
-        HostConfig = $hostCfgOk; HostSystem = $hostSysOk; HostVersionId = "$($res.HostVersionId)"; Note = ($notes -join '; '); Tool = "HUMig $($Ctx.Version)"
+        HostConfig = $hostCfgOk; HostSystem = $hostSysOk; HostVersionId = "$($res.HostVersionId)"; Note = ($notes -join '; '); Tool = "HUMig $($Ctx.Version)"; Report = (Split-Path $rep -Leaf)
     }
     try { Add-HMSbHistory (Join-Path "$target\$($script:SbDirName)" 'history.json') $entry } catch { Write-HMSbLog "Verlauf auf der Platte nicht gespeichert: $($_.Exception.Message)" 'Warning' }
     if ($Ctx.LocalHistory) { try { Add-HMSbHistory "$($Ctx.LocalHistory)" $entry } catch { Write-HMSbLog "Verlauf im Tool-Ordner nicht gespeichert: $($_.Exception.Message)" 'Warning' } }
