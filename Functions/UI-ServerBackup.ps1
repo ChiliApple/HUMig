@@ -804,7 +804,7 @@ function Initialize-HMServerBackupTab {
     $ui.btnSbSchedule.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMSbSchedules })
     $ui.btnSbRestore.Add_Click({ Show-HMSbRestoreHelp })
     $ui.btnSbFeature.Add_Click({ Install-HMSbFeature })
-    $ui.chkSbHostSystem.Add_Click({ if ($ui.chkSbHostSystem.IsChecked) { Out-Console 'Host-System-Sicherung: alle kritischen Volumes des Hosts (Bare-Metal). Liegen VMs auf dem Systemlaufwerk, werden sie dabei zusaetzlich gesichert (Platz!).' 'Info' } })
+    $ui.chkSbHostSystem.Add_Click({ if ($ui.chkSbHostSystem.IsChecked) { Out-Console 'Host-System: sichert nur den Host (C:, Boot/EFI) fuer eine Bare-Metal-Wiederherstellung - Datenlaufwerke mit VMs (z.B. D:) sind nicht dabei, dafuer die VM-Sicherung. Liegen VMs auf C:, werden sie zusaetzlich gesichert (Platz!).' 'Info' } })
     $ui.cmbSbProfile.Add_SelectionChanged({
         if ($script:SbSuppress -or $null -eq $ui.cmbSbProfile.SelectedItem) { return }
         Save-HMSbLastProfile "$($ui.cmbSbProfile.SelectedItem)"
