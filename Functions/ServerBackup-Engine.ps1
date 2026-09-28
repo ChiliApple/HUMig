@@ -50,6 +50,36 @@ function Test-HMSbPrereq {
     return [pscustomobject]$r
 }
 
+# Echter Hyper-V-Host? (Dienst vmms laeuft - nur die Verwaltungstools reichen nicht)
+function Test-HMSbHyperVHost {
+    $s = Get-Service -Name vmms -ErrorAction SilentlyContinue
+    return [bool]($s -and "$($s.Status)" -eq 'Running')
+}
+
+# Lokale Laufwerke dieses Servers (fest, NTFS/ReFS, mit Buchstaben, keine USB-Platten)
+function Get-HMSbVolumeList {
+    $out = @()
+    foreach ($v in @(Get-Volume -ErrorAction Stop | Where-Object { $_.DriveLetter -and "$($_.DriveType)" -match '^(Fixed|3)$' -and "$($_.FileSystem)" -match '^(NTFS|ReFS)$' } | Sort-Object DriveLetter)) {
+        $L = "$($v.DriveLetter)".ToUpper()
+        $bus = ''
+        try { $bus = "$((Get-Partition -DriveLetter $L -ErrorAction Stop | Get-Disk -ErrorAction Stop).BusType)" } catch { }
+        if ($bus -match '^(USB|7)$') { continue }
+        $out += [pscustomobject]@{ Letter = "${L}:"; Label = "$($v.FileSystemLabel)"; FileSystem = "$($v.FileSystem)"; Size = [long]$v.Size; Used = [long]($v.Size - $v.SizeRemaining); System = ("$env:SystemDrive".ToUpper() -eq "${L}:") }
+    }
+    return ,$out
+}
+
+# Alles fuer die Anzeige im Reiter: Hyper-V ja/nein, VMs, lokale Laufwerke
+function Get-HMSbSources {
+    $hv = Test-HMSbHyperVHost
+    $vms = @()
+    $err = ''
+    if ($hv) { try { $vms = Get-HMSbVmList; $vms = @($vms) } catch { $err = $_.Exception.Message } }
+    $vols = @()
+    try { $vols = Get-HMSbVolumeList; $vols = @($vols) } catch { if (-not $err) { $err = $_.Exception.Message } }
+    return [pscustomobject]@{ HyperV = $hv; VMs = $vms; Volumes = $vols; Error = $err }
+}
+
 # Virtuelle Computer des Hosts mit Groesse der virtuellen Festplatten
 # Hyper-V-Meldungen, warum eine VM nicht online (Hotbackup) gesichert werden kann - Protokoll Hyper-V-Worker-Admin
 # Rueckgabe: Hashtable VM-Name -> @{ Messages = @(...); Dynamic = $true/$false; Last = [datetime] }
@@ -356,9 +386,11 @@ function Export-HMSbHostConfig {
     $cfg = [ordered]@{ Created = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'); Host = $env:COMPUTERNAME; Domain = "$env:USERDNSDOMAIN"; OS = '' }
     try { $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop; $cfg.OS = "$($os.Caption) ($($os.Version))" } catch { }
 
+    $hv = Test-HMSbHyperVHost
+    $cfg.HyperV = $hv
     # Hyper-V-Host
     $cfg.VMHost = $null
-    try {
+    if ($hv) { try {
         $h = Get-VMHost -ErrorAction Stop
         $cfg.VMHost = [ordered]@{
             VirtualHardDiskPath = "$($h.VirtualHardDiskPath)"; VirtualMachinePath = "$($h.VirtualMachinePath)"
@@ -367,7 +399,7 @@ function Export-HMSbHostConfig {
             VirtualMachineMigrationEnabled = [bool]$h.VirtualMachineMigrationEnabled; MaximumVirtualMachineMigrations = $h.MaximumVirtualMachineMigrations
             MaximumStorageMigrations = $h.MaximumStorageMigrations; MacAddressMinimum = "$($h.MacAddressMinimum)"; MacAddressMaximum = "$($h.MacAddressMaximum)"
         }
-    } catch { $warn += "Get-VMHost: $($_.Exception.Message)" }
+    } catch { $warn += "Get-VMHost: $($_.Exception.Message)" } }
 
     # Netzwerkkarten
     $allNics = @()
@@ -398,7 +430,7 @@ function Export-HMSbHostConfig {
 
     # Virtuelle Switches
     $sw = @()
-    try {
+    if ($hv) { try {
         foreach ($s in @(Get-VMSwitch -ErrorAction Stop | Sort-Object Name)) {
             $descs = @($s.NetAdapterInterfaceDescriptions | Where-Object { $_ })
             if (-not $descs.Count -and $s.NetAdapterInterfaceDescription) { $descs = @("$($s.NetAdapterInterfaceDescription)") }
@@ -417,22 +449,22 @@ function Export-HMSbHostConfig {
                 BandwidthMode = "$($s.BandwidthReservationMode)"; IovEnabled = [bool]$s.IovEnabled; Members = $mem; Notes = "$($s.Notes)"
             }
         }
-    } catch { $warn += "Get-VMSwitch: $($_.Exception.Message)" }
+    } catch { $warn += "Get-VMSwitch: $($_.Exception.Message)" } }
     $cfg.Switches = $sw
 
     # Host-Netzwerkadapter (vEthernet) inkl. VLAN
     $mg = @()
-    try {
+    if ($hv) { try {
         foreach ($a in @(Get-VMNetworkAdapter -ManagementOS -ErrorAction Stop)) {
             $v = Get-HMSbVlanInfo $a
             $mg += [ordered]@{ Name = "$($a.Name)"; SwitchName = "$($a.SwitchName)"; MacAddress = "$($a.MacAddress)"; VlanMode = $v.VlanMode; AccessVlanId = $v.AccessVlanId; NativeVlanId = $v.NativeVlanId; AllowedVlans = $v.AllowedVlans }
         }
-    } catch { $warn += "Host-vNICs: $($_.Exception.Message)" }
+    } catch { $warn += "Host-vNICs: $($_.Exception.Message)" } }
     $cfg.ManagementAdapters = $mg
 
     # Virtuelle Computer
     $vms = @()
-    try {
+    if ($hv) { try {
         foreach ($vm in @(Get-VM -ErrorAction Stop | Sort-Object Name)) {
             $nics = @()
             foreach ($a in @(Get-VMNetworkAdapter -VM $vm -ErrorAction SilentlyContinue)) {
@@ -451,7 +483,7 @@ function Export-HMSbHostConfig {
                 SecureBoot = $sb; Checkpoints = $cp; Path = "$($vm.Path)"; Notes = "$($vm.Notes)"; NetworkAdapters = $nics; Disks = $disks
             }
         }
-    } catch { $warn += "Get-VM: $($_.Exception.Message)" }
+    } catch { $warn += "Get-VM: $($_.Exception.Message)" } }
     $cfg.VMs = $vms
     $cfg.Warnings = $warn
 
@@ -586,7 +618,8 @@ function Write-HMSbReport {
         @('Datum', $Entry.Date), @('Profil', $Entry.Profile), @('Hyper-V-Host', $Entry.Host),
         @('Platte', "$($Entry.Disk)$(if ($Entry.DiskSerial) { "  (Seriennummer $($Entry.DiskSerial))" })"),
         @('Virtuelle Computer', $(if ($Entry.VMs) { $Entry.VMs } else { '-' })),
-        @('Dauer', "$($Entry.Minutes) Minuten"), @('Groesse der VMs', "ca. $($Entry.SizeGB) GB (virtuelle Festplatten)"),
+        @('Laufwerke dieses Servers', $(if ($Entry.Volumes) { "$($Entry.Volumes)$(if ($Entry.VolVersionId) { " - Version $($Entry.VolVersionId) (UTC)" })" } else { '-' })),
+        @('Dauer', "$($Entry.Minutes) Minuten"), @('Gesicherte Datenmenge', "ca. $($Entry.SizeGB) GB (virtuelle Festplatten der VMs + belegter Platz der Laufwerke)"),
         @('Sicherungsversion', $(if ($Entry.VersionId) { "$($Entry.VersionId) (UTC) - fuer die Wiederherstellung" } else { '-' })),
         @('Host-Konfiguration', (& $ja $Entry.HostConfig)),
         @('Host-System (Bare-Metal)', "$(& $ja $Entry.HostSystem)$(if ($Entry.HostVersionId) { " - Version $($Entry.HostVersionId) (UTC)" })"),
@@ -608,6 +641,8 @@ function Write-HMSbReport {
     # Dateien im Ordner mit Erklaerung
     $desc = [ordered]@{
         'wbadmin-VMs.log' = 'Ausgabe der Windows Server-Sicherung (wbadmin) waehrend der VM-Sicherung'
+        'wbadmin-Laufwerke.log' = 'Ausgabe von wbadmin waehrend der Sicherung der Laufwerke dieses Servers'
+        'Inhalt-Laufwerke.txt' = 'Inhalt der Laufwerks-Sicherung - Grundlage der Pruefung'
         'wbadmin-HostSystem.log' = 'Ausgabe von wbadmin waehrend der Host-System-Sicherung (zeigt auch, welche Volumes gesichert wurden)'
         'Versionen.txt' = 'alle Sicherungsstaende (Versionen) auf dieser Platte'
         'Inhalt.txt' = 'Inhalt der neuen Version - Grundlage der Pruefung'
@@ -645,7 +680,8 @@ function Start-HMServerBackup {
     $L = "$($Ctx.Drive)".TrimEnd(':', '\').ToUpper()
     $target = "${L}:"
     $vms = @($Ctx.VMs | Where-Object { "$_".Trim() })
-    $res = [ordered]@{ Status = 'Error'; SizeBytes = [long]0; Report = ''; VersionId = ''; HostVersionId = '' }
+    $vols = @($Ctx.Volumes | Where-Object { "$_".Trim() } | ForEach-Object { ("$_".Trim().TrimEnd('\', ':')).ToUpper() + ':' } | Select-Object -Unique)
+    $res = [ordered]@{ Status = 'Error'; SizeBytes = [long]0; Report = ''; VersionId = ''; HostVersionId = ''; VolVersionId = '' }
     $Job.Result = [pscustomobject]$res
 
     Write-HMSbLog "SERVER-BACKUP $($Ctx.Profile) - Host $env:COMPUTERNAME - Ziel $target $($Ctx.DiskLabel)" 'Header'
@@ -668,6 +704,15 @@ function Start-HMServerBackup {
         }
         $res.SizeBytes = [long](@($info | Measure-Object -Property SizeBytes -Sum).Sum)
         Write-HMSbLog ("{0} VM(s): {1} - virtuelle Festplatten ca. {2:N1} GB" -f $vms.Count, ($vms -join ', '), ($res.SizeBytes / 1GB)) 'Info'
+    }
+    if ($vols.Count) {
+        if ($vols -contains $target) { throw "Das Ziel-Laufwerk $target kann nicht sich selbst sichern - Laufwerk abwaehlen" }
+        $volUsed = [long]0
+        foreach ($vl in $vols) {
+            try { $vo = Get-Volume -DriveLetter $vl.TrimEnd(':') -ErrorAction Stop; $volUsed += [long]($vo.Size - $vo.SizeRemaining) } catch { throw "Laufwerk $vl nicht gefunden" }
+        }
+        $res.SizeBytes += $volUsed
+        Write-HMSbLog ("Laufwerke dieses Servers: {0} - belegt ca. {1:N1} GB" -f ($vols -join ', '), ($volUsed / 1GB)) 'Info'
     }
     try {
         $vol = Get-Volume -DriveLetter $L -ErrorAction Stop
@@ -701,14 +746,16 @@ function Start-HMServerBackup {
     }
     if ($Job.Cancel) { throw 'Abgebrochen' }
 
-    $spanVm = $(if ($Ctx.HostSystem) { 70 } else { 95 })
+    $nPh = [Math]::Max(1, [int][bool]$vms.Count + [int][bool]$vols.Count + [int][bool]$Ctx.HostSystem)
+    $span = [int](95 / $nPh)
+    $pb = 2
     # --- VMs sichern
     $verId = ''
     if ($vms.Count) {
         $Job.Status = 'VMs: Schattenkopie wird erstellt ...'
         Write-HMSbLog "wbadmin: VMs sichern -> $target (Online-Sicherung ueber VSS, VMs laufen weiter)" 'Header'
         $argList = "start backup -backupTarget:$target -hyperv:""$($vms -join ',')"" -quiet"
-        $r = Invoke-HMSbWbadmin -Arguments $argList -Phase 'VMs' -PBase 2 -PSpan $spanVm -LogFile (Join-Path $rep 'wbadmin-VMs.log')
+        $r = Invoke-HMSbWbadmin -Arguments $argList -Phase 'VMs' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-VMs.log')
         if ($Job.Cancel) {
             Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
             [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
@@ -758,6 +805,47 @@ function Start-HMServerBackup {
             }
         } catch { Write-HMSbLog "Versionen/Pruefung nicht moeglich: $($_.Exception.Message)" 'Warning' }
     }
+    if ($vms.Count) { $pb += $span }
+    if ($Job.Cancel) { throw 'Abgebrochen' }
+
+    # --- Laufwerke dieses Servers (Volume-Sicherung, blockbasiert)
+    $volOk = $false
+    if ($vols.Count) {
+        $Job.Status = 'Laufwerke: Schattenkopie wird erstellt ...'
+        Write-HMSbLog "wbadmin: Laufwerke sichern ($($vols -join ', ')) -> $target" 'Header'
+        $r3 = Invoke-HMSbWbadmin -Arguments "start backup -backupTarget:$target -include:$($vols -join ',') -quiet" -Phase 'Laufwerke' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-Laufwerke.log')
+        $pb += $span
+        if ($Job.Cancel) {
+            Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
+            [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+            throw 'Abgebrochen'
+        }
+        foreach ($lf in @($r3.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
+        if ($r3.ExitCode -ne 0) {
+            $status = 'Error'; $notes += "Laufwerke Exitcode $($r3.ExitCode)"
+            $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die Sicherung der Laufwerke $($vols -join ', ') ist fehlgeschlagen (wbadmin Exitcode $($r3.ExitCode))."; Fix = 'Ursache in wbadmin-Laufwerke.log und im Protokoll der Windows Server-Sicherung. Haeufig: Platte voll, VSS-Fehler (vssadmin list writers).' }
+            Write-HMSbLog "Laufwerks-Sicherung FEHLGESCHLAGEN (Exitcode $($r3.ExitCode)) - wbadmin-Laufwerke.log" 'Error'
+        } else {
+            $volOk = $true
+            Write-HMSbLog 'Laufwerks-Sicherung erfolgreich' 'Success'
+            try {
+                $vv3 = Get-HMSbVersions $target
+                $l3 = @($vv3.Versions) | Select-Object -Last 1
+                if ($l3) { $res.VolVersionId = "$($l3.Id)"; Set-Content -LiteralPath (Join-Path $rep 'Versionen.txt') -Value $vv3.Text -Encoding UTF8 }
+                if ($Ctx.Verify -and $res.VolVersionId) {
+                    $gi3 = Invoke-HMSbWbadmin -Arguments "get items -version:$($res.VolVersionId) -backupTarget:$target" -Quiet
+                    Set-Content -LiteralPath (Join-Path $rep 'Inhalt-Laufwerke.txt') -Value $gi3.Text -Encoding UTF8
+                    $missV = @($vols | Where-Object { $gi3.Text -notmatch [regex]::Escape($_) })
+                    if ($gi3.ExitCode -ne 0 -or $missV.Count) {
+                        if ($status -eq 'OK') { $status = 'Warning' }
+                        $notes += "Pruefung Laufwerke: $(if ($missV.Count) { 'fehlt ' + ($missV -join ', ') } else { 'nicht moeglich' })"
+                        $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Pruefung der Laufwerks-Sicherung war nicht erfolgreich$(if ($missV.Count) { " (nicht gefunden: $($missV -join ', '))" })."; Fix = 'Inhalt-Laufwerke.txt ansehen, ggf. Sicherung wiederholen.' }
+                        Write-HMSbLog 'Pruefung Laufwerke: nicht alle Laufwerke in der Version gefunden - siehe Inhalt-Laufwerke.txt' 'Warning'
+                    } else { Write-HMSbLog "Pruefung OK: alle $($vols.Count) Laufwerk(e) in Version $($res.VolVersionId) enthalten" 'Success' }
+                }
+            } catch { Write-HMSbLog "Versionen/Pruefung Laufwerke nicht moeglich: $($_.Exception.Message)" 'Warning' }
+        }
+    }
     if ($Job.Cancel) { throw 'Abgebrochen' }
 
     # --- Host-System (Bare-Metal)
@@ -765,7 +853,7 @@ function Start-HMServerBackup {
     if ($Ctx.HostSystem) {
         $Job.Status = 'Host-System: wird vorbereitet ...'
         Write-HMSbLog "wbadmin: Host-System (alle kritischen Volumes, Bare-Metal) -> $target" 'Header'
-        $r2 = Invoke-HMSbWbadmin -Arguments "start backup -backupTarget:$target -allCritical -quiet" -Phase 'Host-System' -PBase (2 + $spanVm) -PSpan (97 - 2 - $spanVm) -LogFile (Join-Path $rep 'wbadmin-HostSystem.log')
+        $r2 = Invoke-HMSbWbadmin -Arguments "start backup -backupTarget:$target -allCritical -quiet" -Phase 'Host-System' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-HostSystem.log')
         if ($Job.Cancel) {
             Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
             [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
@@ -783,10 +871,10 @@ function Start-HMServerBackup {
     # --- Verlauf, Bericht
     $Job.Status = 'Bericht'
     $dur = [math]::Round(((Get-Date) - $t0).TotalMinutes, 1)
-    if (-not $vms.Count -and -not $Ctx.HostSystem -and -not $hostCfgOk) { $status = 'Error' }
+    if (-not $vms.Count -and -not $vols.Count -and -not $Ctx.HostSystem -and -not $hostCfgOk) { $status = 'Error' }
     $entry = [pscustomobject][ordered]@{
         Date = $t0.ToString('yyyy-MM-dd HH:mm'); Profile = "$($Ctx.Profile)"; Host = $env:COMPUTERNAME; Disk = "$($Ctx.DiskLabel)"; DiskSerial = "$($Ctx.DiskSerial)"
-        VMs = ($vms -join ', '); Status = $status; Minutes = $dur; SizeGB = [math]::Round($res.SizeBytes / 1GB, 1); VersionId = $verId
+        VMs = ($vms -join ', '); Volumes = ($vols -join ', '); VolVersionId = "$($res.VolVersionId)"; Status = $status; Minutes = $dur; SizeGB = [math]::Round($res.SizeBytes / 1GB, 1); VersionId = $verId
         HostConfig = $hostCfgOk; HostSystem = $hostSysOk; HostVersionId = "$($res.HostVersionId)"; Note = ($notes -join '; '); Tool = "HUMig $($Ctx.Version)"; Report = (Split-Path $rep -Leaf)
     }
     try { Add-HMSbHistory (Join-Path "$target\$($script:SbDirName)" 'history.json') $entry } catch { Write-HMSbLog "Verlauf auf der Platte nicht gespeichert: $($_.Exception.Message)" 'Warning' }

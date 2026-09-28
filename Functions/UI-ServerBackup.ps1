@@ -13,6 +13,8 @@ $script:SbCfgFile    = Join-Path $script:ConfigDir 'serverbackup.json'
 $script:SbHistFile   = Join-Path $script:ConfigDir 'ServerBackup\history.json'
 $script:SbReportDir  = Join-Path $script:LogDir 'ServerBackup'
 $script:SbVms        = @()
+$script:SbVols       = @()
+$script:SbHyperV     = $true
 $script:SbDrives     = @()
 $script:SbInit       = $false
 $script:SbPrereq     = $null
@@ -32,6 +34,7 @@ function ConvertTo-HMSbProfile($p) {
     return [pscustomobject][ordered]@{
         Name = $name; DiskPrefix = $pre; Disks = $(if ($n -gt 0) { $n } else { 2 })
         VMs = @($p.VMs | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
+        Volumes = @($p.Volumes | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim().ToUpper() })
         HostConfig = ($p.HostConfig -ne $false); Verify = ($p.Verify -ne $false); HostSystem = ($p.HostSystem -eq $true)
         WarnDays = $(if ($w -gt 0) { $w } else { 14 })
     }
@@ -64,7 +67,10 @@ function Get-HMSbProfile {
     return (@($cfg.Profiles | Where-Object { $_.Name -eq $n })[0])
 }
 function Get-HMSbCheckedVms {
-    return @($ui.pnlSbVms.Children | Where-Object { $_ -is [System.Windows.Controls.CheckBox] -and $_.IsChecked } | ForEach-Object { "$($_.Tag)" })
+    return @($ui.pnlSbVms.Children | Where-Object { $_ -is [System.Windows.Controls.CheckBox] -and $_.IsChecked -and "$($_.Tag)" -notlike 'vol:*' } | ForEach-Object { "$($_.Tag)" })
+}
+function Get-HMSbCheckedVols {
+    return @($ui.pnlSbVms.Children | Where-Object { $_ -is [System.Windows.Controls.CheckBox] -and $_.IsChecked -and "$($_.Tag)" -like 'vol:*' } | ForEach-Object { "$($_.Tag)".Substring(4) })
 }
 function Format-HMSbStatus([string]$s, [string]$Note = '') { switch ($s) { 'OK' { if ("$Note".Trim()) { 'OK (Hinweis)' } else { 'OK' } } 'Warning' { 'Warnung' } 'Error' { 'FEHLER' } default { $s } } }
 function Format-HMSbState([string]$s) { switch ($s) { 'Running' { 'laeuft' } 'Off' { 'aus' } 'Saved' { 'gespeichert' } 'Paused' { 'angehalten' } default { $s } } }
@@ -86,7 +92,11 @@ function Update-HMSbProfileList([string]$Select = '') {
 function Set-HMSbFromProfile {
     $p = Get-HMSbProfile
     foreach ($cb in @($ui.pnlSbVms.Children)) {
-        if ($cb -is [System.Windows.Controls.CheckBox]) { $cb.IsChecked = [bool]($p -and (@($p.VMs) -contains "$($cb.Tag)")) }
+        if ($cb -is [System.Windows.Controls.CheckBox]) {
+            $tg = "$($cb.Tag)"
+            if ($tg -like 'vol:*') { $cb.IsChecked = [bool]($p -and (@($p.Volumes) -contains $tg.Substring(4))) }
+            else { $cb.IsChecked = [bool]($p -and (@($p.VMs) -contains $tg)) }
+        }
     }
     if ($p) {
         $ui.chkSbHostConfig.IsChecked = $p.HostConfig
@@ -117,7 +127,7 @@ function New-HMSbProfile {
     if (-not $pre) { return }
     $cnt = Read-HMSbDiskCount 2
     if (-not $cnt) { return }
-    $prof = ConvertTo-HMSbProfile ([pscustomobject]@{ Name = $n; DiskPrefix = $pre; Disks = $cnt; VMs = @(Get-HMSbCheckedVms)
+    $prof = ConvertTo-HMSbProfile ([pscustomobject]@{ Name = $n; DiskPrefix = $pre; Disks = $cnt; VMs = @(Get-HMSbCheckedVms); Volumes = @(Get-HMSbCheckedVols)
             HostConfig = [bool]$ui.chkSbHostConfig.IsChecked; Verify = [bool]$ui.chkSbVerify.IsChecked; HostSystem = [bool]$ui.chkSbHostSystem.IsChecked; WarnDays = 14 })
     $cfg.Profiles = @($cfg.Profiles) + @($prof)
     $cfg.LastProfile = $n
@@ -146,13 +156,14 @@ function Save-HMSbProfile {
     foreach ($x in $cfg.Profiles) {
         if ($x.Name -eq $p.Name) {
             $x.VMs = @(Get-HMSbCheckedVms)
+            if ($x.PSObject.Properties['Volumes']) { $x.Volumes = @(Get-HMSbCheckedVols) } else { $x | Add-Member -NotePropertyName Volumes -NotePropertyValue @(Get-HMSbCheckedVols) -Force }
             $x.HostConfig = [bool]$ui.chkSbHostConfig.IsChecked
             $x.Verify = [bool]$ui.chkSbVerify.IsChecked
             $x.HostSystem = [bool]$ui.chkSbHostSystem.IsChecked
         }
     }
     Save-HMSbConfig $cfg
-    Out-Console "Profil '$($p.Name)' gespeichert: $(@(Get-HMSbCheckedVms).Count) VM(s)" 'Success'
+    Out-Console "Profil '$($p.Name)' gespeichert: $(@(Get-HMSbCheckedVms).Count) VM(s), $(@(Get-HMSbCheckedVols).Count) Laufwerk(e)" 'Success'
     Update-HMSbHistory
 }
 function Edit-HMSbProfile {
@@ -208,29 +219,54 @@ function Add-HMSbInfoText([string]$Text, [string]$Color = '#FFA6ADC8') {
     $tb.Text = $Text; $tb.Foreground = New-Brush $Color; $tb.TextWrapping = 'Wrap'
     [void]$ui.pnlSbVms.Children.Add($tb)
 }
+function Add-HMSbHeader([string]$Text) {
+    $tb = New-Object System.Windows.Controls.TextBlock
+    $tb.Text = $Text; $tb.FontSize = 10; $tb.FontWeight = [System.Windows.FontWeights]::Bold
+    $tb.Foreground = New-Brush '#FFA6ADC8'; $tb.Margin = [System.Windows.Thickness]::new(0, 8, 0, 3)
+    [void]$ui.pnlSbVms.Children.Add($tb)
+}
 function Update-HMSbVms {
     $ui.pnlSbVms.Children.Clear()
-    Add-HMSbInfoText 'VMs werden gelesen ...'
-    Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Get-HMSbVmList } -ArgumentList @($script:SbEngine) -TimeoutSec 120 -OnComplete {
+    Add-HMSbInfoText 'VMs und Laufwerke werden gelesen ...'
+    Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Get-HMSbSources } -ArgumentList @($script:SbEngine) -TimeoutSec 120 -OnComplete {
         param($r)
         $ui.pnlSbVms.Children.Clear()
-        if ($r -is [string]) { $script:SbVms = @(); Add-HMSbInfoText "VMs nicht lesbar: $r" '#FFF38BA8'; return }
-        $script:SbVms = @($r | Where-Object { $_ -and $_.Name })
-        foreach ($v in $script:SbVms) {
-            $cb = New-Object System.Windows.Controls.CheckBox
-            $cb.Content = ('{0}   [{1}]   {2:N1} GB{3}' -f $v.Name, (Format-HMSbState $v.State), ($v.SizeBytes / 1GB), $(if ([int]$v.Checkpoints) { "   $($v.Checkpoints) Pruefpunkt(e)" } else { '' }))
-            $cb.Tag = $v.Name
-            $cb.ToolTip = "Speicherort: $($v.VmPath)`nFestplatten: $(@($v.Paths) -join ', ')"
-            if ($v.OfflineHint) {
-                $cb.Content = "$($cb.Content)   ! nur offline ($($v.OfflineHint))"
-                $cb.Foreground = New-Brush '#FFFAB387'
-                $cb.ToolTip = "$($cb.ToolTip)`n`nWird OFFLINE gesichert: die VM wird zu Beginn der Sicherung kurz angehalten (gespeicherter Zustand), danach laeuft sie weiter.`nLaut Hyper-V-Protokoll: $($v.OfflineDetail)$(if ($v.OfflineHint -match 'dynamisch') { "`n`nAbhilfe: Laufwerke im Gast auf Basisdatentraeger umstellen (neue Basis-VHDX anhaengen, Daten kopieren) - Details in der Anleitung." })"
+        if ($r -is [string] -or $null -eq $r) { $script:SbVms = @(); $script:SbVols = @(); Add-HMSbInfoText "Nicht lesbar: $r" '#FFF38BA8'; return }
+        $script:SbHyperV = [bool]$r.HyperV
+        $script:SbVms = @($r.VMs | Where-Object { $_ -and $_.Name })
+        $script:SbVols = @($r.Volumes | Where-Object { $_ -and $_.Letter })
+        if ($script:SbHyperV) {
+            Add-HMSbHeader 'VIRTUELLE COMPUTER (Hyper-V)'
+            foreach ($v in $script:SbVms) {
+                $cb = New-Object System.Windows.Controls.CheckBox
+                $cb.Content = ('{0}   [{1}]   {2:N1} GB{3}' -f $v.Name, (Format-HMSbState $v.State), ($v.SizeBytes / 1GB), $(if ([int]$v.Checkpoints) { "   $($v.Checkpoints) Pruefpunkt(e)" } else { '' }))
+                $cb.Tag = $v.Name
+                $cb.ToolTip = "Speicherort: $($v.VmPath)`nFestplatten: $(@($v.Paths) -join ', ')"
+                if ($v.OfflineHint) {
+                    $cb.Content = "$($cb.Content)   ! nur offline ($($v.OfflineHint))"
+                    $cb.Foreground = New-Brush '#FFFAB387'
+                    $cb.ToolTip = "$($cb.ToolTip)`n`nWird OFFLINE gesichert: die VM wird zu Beginn der Sicherung kurz angehalten (gespeicherter Zustand), danach laeuft sie weiter.`nLaut Hyper-V-Protokoll: $($v.OfflineDetail)$(if ($v.OfflineHint -match 'dynamisch') { "`n`nAbhilfe: Laufwerke im Gast auf Basisdatentraeger umstellen (neue Basis-VHDX anhaengen, Daten kopieren) - Details in der Anleitung." })"
+                }
+                $cb.Add_Click({ Update-HMSbSize })
+                [void]$ui.pnlSbVms.Children.Add($cb)
             }
+            if (-not $script:SbVms.Count) { Add-HMSbInfoText 'Keine VMs auf diesem Host gefunden.' '#FFF9E2AF' }
+            if ("$($r.Error)") { Add-HMSbInfoText "VMs nicht lesbar: $($r.Error)" '#FFF38BA8' }
+        } else {
+            Add-HMSbInfoText "Auf diesem Server laeuft kein Hyper-V. VMs sichern: HUMig am Hyper-V-Host starten, auf dem die VMs laufen. Hier koennen die Laufwerke und das System dieses Servers gesichert werden." '#FFF9E2AF'
+        }
+        Add-HMSbHeader 'LAUFWERKE DIESES SERVERS (Volume-Sicherung)'
+        foreach ($v in $script:SbVols) {
+            $cb = New-Object System.Windows.Controls.CheckBox
+            $cb.Content = ('{0}  {1}   {2} belegt von {3}{4}' -f $v.Letter, $(if ($v.Label) { $v.Label } else { '' }), (Format-HMSize $v.Used), (Format-HMSize $v.Size), $(if ($v.System) { '   (System)' } else { '' }))
+            $cb.Tag = "vol:$($v.Letter)"
+            $cb.ToolTip = "Sichert das ganze Laufwerk $($v.Letter) blockbasiert (Dateien und Ordner einzeln wiederherstellbar).$(if ($script:SbHyperV) { "`nAuf einem Hyper-V-Host: Laufwerke mit VM-Dateien besser ueber die VM-Sicherung sichern." })"
             $cb.Add_Click({ Update-HMSbSize })
             [void]$ui.pnlSbVms.Children.Add($cb)
         }
-        if (-not $script:SbVms.Count) { Add-HMSbInfoText 'Keine VMs auf diesem Host gefunden.' '#FFF9E2AF' }
-        $ui.lblSbHost.Text = "Host $env:COMPUTERNAME - $($script:SbVms.Count) VM(s)" + $(if ($script:SbPrereq) { " - Windows Server-Sicherung: $(if ($script:SbPrereq.Feature -eq $false) { 'FEHLT' } elseif ($script:SbPrereq.Wbadmin) { 'OK' } else { 'FEHLT' })" } else { '' })
+        if (-not $script:SbVols.Count) { Add-HMSbInfoText 'Keine lokalen NTFS/ReFS-Laufwerke gefunden.' '#FFA6ADC8' }
+        $ui.chkSbHostSystem.Content = $(if ($script:SbHyperV) { 'Host-System mitsichern (nur der Host: C:, Boot/EFI - fuer Bare-Metal-Wiederherstellung)' } else { 'System dieses Servers mitsichern (C:, Boot/EFI - fuer Bare-Metal-Wiederherstellung)' })
+        $ui.lblSbHost.Text = "$(if ($script:SbHyperV) { 'Hyper-V-Host' } else { 'Server (kein Hyper-V)' }) $env:COMPUTERNAME - $($script:SbVms.Count) VM(s), $($script:SbVols.Count) Laufwerk(e)" + $(if ($script:SbPrereq) { " - Windows Server-Sicherung: $(if ($script:SbPrereq.Feature -eq $false -or -not $script:SbPrereq.Wbadmin) { 'FEHLT' } else { 'OK' })" } else { '' })
         Set-HMSbFromProfile
     }
 }
@@ -334,7 +370,11 @@ function Update-HMSbSize {
     $sel = @(Get-HMSbCheckedVms)
     $sum = [long]0
     foreach ($n in $sel) { $v = @($script:SbVms | Where-Object { $_.Name -eq $n })[0]; if ($v) { $sum += [long]$v.SizeBytes } }
+    $selV = @(Get-HMSbCheckedVols)
+    $sumV = [long]0
+    foreach ($n in $selV) { $v = @($script:SbVols | Where-Object { $_.Letter -eq $n })[0]; if ($v) { $sumV += [long]$v.Used } }
     $t = "$($sel.Count) VM(s) gewaehlt - virtuelle Festplatten ca. $(Format-HMSize $sum)"
+    if ($selV.Count) { $t += " | $($selV.Count) Laufwerk(e) - belegt ca. $(Format-HMSize $sumV)" }
     $d = Get-HMSbDrive
     if ($d) { $t += " - Platte $($d.Letter): $(Format-HMSize $d.Free) frei" }
     $ui.lblSbSize.Text = $t
@@ -371,7 +411,7 @@ function Update-HMSbHistory {
     foreach ($e in @($mine | Select-Object -First 300)) {
         $hin = "$($e.Note)"
         if (-not $hin -and "$($e.Status)" -eq 'OK') { $hin = 'alles in Ordnung' }
-        $rows += [pscustomobject]@{ Datum = "$($e.Date)"; Platte = "$($e.Disk)"; Status = (Format-HMSbStatus "$($e.Status)" "$($e.Note)"); Minuten = $e.Minutes; GB = $e.SizeGB; VMs = "$($e.VMs)"; Hinweis = $hin; Entry = $e }
+        $rows += [pscustomobject]@{ Datum = "$($e.Date)"; Platte = "$($e.Disk)"; Status = (Format-HMSbStatus "$($e.Status)" "$($e.Note)"); Minuten = $e.Minutes; GB = $e.SizeGB; VMs = ((@("$($e.VMs)", $(if ("$($e.Volumes)") { "Laufwerke $($e.Volumes)" })) | Where-Object { $_ }) -join ' | '); Hinweis = $hin; Entry = $e }
     }
     $ui.dgSbHistory.ItemsSource = $rows
     # Plattenstatus + Rotationsempfehlung
@@ -451,14 +491,16 @@ function Start-HMSbBackup {
     $p = Get-HMSbProfile
     $d = Get-HMSbDrive
     $vms = @(Get-HMSbCheckedVms)
+    $vols = @(Get-HMSbCheckedVols)
     $hc = [bool]$ui.chkSbHostConfig.IsChecked
     $hs = [bool]$ui.chkSbHostSystem.IsChecked
     if (-not $d) { Out-Console 'Server-Backup: keine Ziel-Platte gewaehlt.' 'Warning'; return }
+    if ($vols -contains "$($d.Letter):") { Out-Console "Server-Backup: das Ziel-Laufwerk $($d.Letter): kann nicht sich selbst sichern - abwaehlen." 'Error'; return }
     if ($d.FileSystem -and $d.FileSystem -notmatch '^(NTFS|ReFS)$') { Out-Console "Server-Backup: Dateisystem $($d.FileSystem) auf $($d.Letter): wird nicht unterstuetzt - Platte einrichten (NTFS)." 'Error'; return }
-    if (-not $vms.Count -and -not $hs -and -not $hc) { Out-Console 'Server-Backup: nichts gewaehlt (VMs, Host-Konfiguration oder Host-System).' 'Warning'; return }
+    if (-not $vms.Count -and -not $vols.Count -and -not $hs -and -not $hc) { Out-Console 'Server-Backup: nichts gewaehlt (VMs, Laufwerke, Host-Konfiguration oder System).' 'Warning'; return }
     if ($script:SbPrereq -and ($script:SbPrereq.Feature -eq $false -or -not $script:SbPrereq.Wbadmin)) { Out-Console 'Windows Server-Sicherung fehlt - Button "Windows Server-Sicherung installieren".' 'Error'; return }
     $pName = if ($p) { $p.Name } else { '(ohne Profil)' }
-    $msg = "Server-Backup starten?`n`nProfil: $pName`nZiel: $($d.Letter): $($d.Label)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })`nHost-System (Bare-Metal): $(if ($hs) { 'ja' } else { 'nein' })`n`nDie VMs laufen weiter (Online-Sicherung ueber VSS)."
+    $msg = "Server-Backup starten?`n`nProfil: $pName`nZiel: $($d.Letter): $($d.Label)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })`nSystem (Bare-Metal): $(if ($hs) { 'ja' } else { 'nein' })`n`nVMs und Server laufen weiter (Online-Sicherung ueber VSS)."
     if (-not $p) { $msg += "`n`nHinweis: kein Profil gewaehlt - Verlauf unter '(ohne Profil)'." }
     elseif (-not (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { $msg += "`n`nACHTUNG: Die Platte '$($d.Label)' gehoert laut Bezeichnung NICHT zum Profil ($($p.DiskPrefix)-...)." }
     if ($p) {
@@ -471,7 +513,7 @@ function Start-HMSbBackup {
     if ($p) { Save-HMSbLastProfile $p.Name }
     $ctx = @{
         Profile = $pName; DiskPrefix = $(if ($p) { $p.DiskPrefix } else { '' }); Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
-        VMs = $vms; HostConfig = $hc; HostSystem = $hs; Verify = [bool]$ui.chkSbVerify.IsChecked
+        VMs = $vms; Volumes = $vols; HostConfig = $hc; HostSystem = $hs; Verify = [bool]$ui.chkSbVerify.IsChecked
         LocalHistory = $script:SbHistFile; LocalReportDir = $script:SbReportDir; Version = $script:Version
         ProfileData = $(if ($p) { $p } else { $null })
     }
@@ -736,18 +778,21 @@ function New-HMSbSchedule {
     $p = Get-HMSbProfile
     if (-not $p) { Out-Console 'Zeitplan: zuerst ein Profil waehlen/anlegen.' 'Warning'; return }
     $vms = @(Get-HMSbCheckedVms)
+    $vols = @(Get-HMSbCheckedVols)
     $hc = [bool]$ui.chkSbHostConfig.IsChecked; $hs = [bool]$ui.chkSbHostSystem.IsChecked; $vf = [bool]$ui.chkSbVerify.IsChecked
-    if (-not $vms.Count -and -not $hs -and -not $hc) { Out-Console 'Zeitplan: nichts gewaehlt (VMs, Host-Konfiguration oder Host-System).' 'Warning'; return }
+    if (-not $vms.Count -and -not $vols.Count -and -not $hs -and -not $hc) { Out-Console 'Zeitplan: nichts gewaehlt (VMs, Laufwerke, Host-Konfiguration oder System).' 'Warning'; return }
     foreach ($x in @($p.Name) + $vms) { if ("$x" -match '["|]') { Out-Console "Zeitplan: Name '$x' enthaelt ein nicht erlaubtes Zeichen (Anfuehrungszeichen oder |)." 'Error'; return } }
-    $info = "Profil: $($p.Name)   (Platten $($p.DiskPrefix)-...)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })   Pruefen: $(if ($vf) { 'ja' } else { 'nein' })   Host-System: $(if ($hs) { 'ja' } else { 'nein' })`n`nEs gelten die aktuell angehakten VMs und Optionen."
+    $info = "Profil: $($p.Name)   (Platten $($p.DiskPrefix)-...)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })   Pruefen: $(if ($vf) { 'ja' } else { 'nein' })   Host-System: $(if ($hs) { 'ja' } else { 'nein' })`n`nEs gelten die aktuell angehakten VMs und Optionen."
     $r = Show-HMSbScheduleDialog $info
     if (-not $r) { return }
     $task = Join-Path $script:AppRoot 'Functions\ServerBackup-Task.ps1'
     $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$task`" -ProfileName `"$($p.Name)`""
     if ($vms.Count) { $arg += " -VMs `"$($vms -join '|')`"" }
+    if ($vols.Count) { $arg += " -Volumes `"$($vols -join '|')`"" }
     if ($hc) { $arg += ' -HostConfig' }
     if ($hs) { $arg += ' -HostSystem' }
     if (-not $vf) { $arg += ' -NoVerify' }
+    $arg += ' -Explicit'
     $dayNames = @{ Monday = 'Mo'; Tuesday = 'Di'; Wednesday = 'Mi'; Thursday = 'Do'; Friday = 'Fr'; Saturday = 'Sa'; Sunday = 'So' }
     try {
         $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument $arg -WorkingDirectory $script:AppRoot
@@ -820,7 +865,10 @@ function Initialize-HMServerBackupTab {
     param([bool]$IsAdmin)
     $tab = $ui.tabServerBackup
     if (-not $tab) { return }
-    if ($script:UserMode -or -not $IsAdmin -or -not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { $tab.Visibility = 'Collapsed'; return }
+    # sichtbar auf Windows Server (mit oder ohne Hyper-V) und auf PCs mit Hyper-V-Modul
+    $isServer = $false
+    try { $isServer = ([int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).ProductType -ne 1) } catch { }
+    if ($script:UserMode -or -not $IsAdmin -or (-not $isServer -and -not (Get-Command Get-VM -ErrorAction SilentlyContinue))) { $tab.Visibility = 'Collapsed'; return }
     $script:SbButtons = @($ui.btnSbBackup, $ui.btnSbSchedule, $ui.btnSbProfileNew, $ui.btnSbProfileSave, $ui.btnSbProfileEdit, $ui.btnSbProfileDel, $ui.btnSbDrives, $ui.btnSbDiskSetup, $ui.btnSbEject, $ui.btnSbHostOnly, $ui.btnSbFeature)
     $ui.btnSbBackup.Add_Click({ Start-HMSbBackup })
     $ui.btnSbCancel.Add_Click($cancelAction)

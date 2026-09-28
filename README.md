@@ -152,11 +152,12 @@ OneDrive/Office/Teams neu anmelden. Entra-ID-Konten werden nicht unterstuetzt. V
 
 ## Server-Backup (Hyper-V-Host)
 
-Reiter **Server-Backup** (nur als Administrator auf einem Hyper-V-Host sichtbar):
+Reiter **Server-Backup** (als Administrator auf Windows Server - Hyper-V-Host: VMs; Server ohne Hyper-V: Laufwerke und System des Servers selbst):
 
 - **Profile** je Schule/Standort (Name frei, umbenennbar mit Verlauf; Kopie auf jeder Platte): VMs, Platten-Bezeichnung (z.B. `HUMIG-SCHULE1-1`, `-2` ...), Anzahl Platten (Rotation + ausgelagert), Optionen
 - **Platte einrichten**: nur USB-Platten, loeschen + GPT + NTFS 64K + Bezeichnung; Platten werden beim Anstecken an der Bezeichnung erkannt
 - **Sichern** mit `wbadmin start backup -hyperv` (online ueber VSS), danach Pruefung (Version + enthaltene VMs), optional Host-System (`-allCritical`)
+- **Laufwerke dieses Servers**: Volume-Sicherung (blockbasiert, einzelne Dateien wiederherstellbar) - z.B. fuer physische Server ohne Hyper-V
 - **Host-System** (Option, `-allCritical`): nur der Host selbst - Systemlaufwerk C: mit Windows, Hyper-V-Rolle, Switches, Einstellungen sowie EFI-/Boot-/Wiederherstellungspartition. Datenlaufwerke mit den VMs (z.B. D:) sind **nicht** enthalten - dafuer die VM-Sicherung. Fuer eine komplette Wiederherstellung nach Totalausfall: Host-System **und** VMs sichern
 - Die Sicherungen sind normale Windows-Server-Sicherungen (`WindowsImageBackup`) - wiederherstellbar auch ohne HUMig mit `wbadmin.msc`, `wbadmin` oder dem Windows-Server-Installationsmedium (Systemimage-Wiederherstellung)
 - **Host-Konfiguration**: virtuelle Switches, SET-Teams, Host-vNICs mit VLAN, IP, Netzwerkkarten, VM-Einstellungen als HTML/JSON + `Restore-VMSwitches.ps1`
