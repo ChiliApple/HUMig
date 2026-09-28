@@ -13,9 +13,11 @@
 param(
     [Parameter(Mandatory)][string]$ProfileName,
     [string]$VMs = '',              # VM-Namen getrennt durch |  (leer = VMs aus dem Profil)
+    [string]$Volumes = '',          # Laufwerke getrennt durch | (z.B. C:|D:), leer = Laufwerke aus dem Profil
     [switch]$HostConfig,
     [switch]$HostSystem,
-    [switch]$NoVerify
+    [switch]$NoVerify,
+    [switch]$Explicit               # VMs/Laufwerke genau wie angegeben (leer = keine), sonst leer = aus dem Profil
 )
 $ErrorActionPreference = 'Stop'
 $root   = Split-Path $PSScriptRoot -Parent
@@ -75,9 +77,14 @@ if ($drives.Count -gt 1) { Write-HMSbLog "Mehrere Platten des Profils angesteckt
 $d = $drives[0]
 
 $list = @(if ($VMs) { $VMs -split '\|' } else { @($prof.VMs) }) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() }
+$volList = @(if ($Volumes) { $Volumes -split '\|' } else { @($prof.Volumes) }) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() }
+if ($Explicit) {
+    $list = @($VMs -split '\|' | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
+    $volList = @($Volumes -split '\|' | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
+} elseif ($VMs -and -not $Volumes) { $volList = @() }   # aeltere Zeitplaene (nur VMs angegeben)
 $ctx = @{
     Profile = $ProfileName; DiskPrefix = $prefix; Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
-    VMs = @($list); HostConfig = [bool]$HostConfig; HostSystem = [bool]$HostSystem; Verify = -not $NoVerify
+    VMs = @($list); Volumes = @($volList); HostConfig = [bool]$HostConfig; HostSystem = [bool]$HostSystem; Verify = -not $NoVerify
     LocalHistory = $localHist; LocalReportDir = $repDir; Version = $version; ProfileData = $prof
 }
 $q = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))

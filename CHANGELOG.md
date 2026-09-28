@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.0.22 - 2026-09-28
+### Neu
+- Server-Backup: **Laufwerke dieses Servers** sichern (Volume-Sicherung per wbadmin -include, blockbasiert) - auch auf Servern **ohne Hyper-V**; mit Pruefung, Verlauf, Bericht und Zeitplan
+- Server-Backup: Reiter auf jedem Windows Server sichtbar; ohne Hyper-V verstaendlicher Hinweis statt WMI-Fehler ("kein Hyper-V - VMs am Hyper-V-Host sichern")
+### Verbessert
+- Host-Konfiguration auf Servern ohne Hyper-V: nur Netzwerk/IP, keine Hyper-V-Fehlermeldungen
+- Zeitplan speichert die Auswahl exakt (VMs und Laufwerke); aeltere Zeitplaene laufen unveraendert
+
 ## v2.0.21 - 2026-09-28
 ### Verbessert
 - Server-Backup: **neuer Bericht** (Bericht.html) - deutsch, Status mit erklaerendem Satz, Hinweise mit "Was tun", alle Dateien des Laufs als Links mit Erklaerung, komplettes Protokoll des Laufs (aufklappbar), Hinweis zur Wiederherstellung

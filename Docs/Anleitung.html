@@ -370,7 +370,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 
 <section id="serverbackup">
   <h2><span class="n">10</span>Server-Backup (Hyper-V)</h2>
-  <p>Reiter <span class="ui">Server-Backup</span> – nur sichtbar, wenn HUMig <b>als Administrator auf einem Hyper-V-Host</b> läuft. Sichert virtuelle Computer mit der <b>Windows Server-Sicherung</b> (<code>wbadmin</code>) auf USB-Platten, die angesteckt und nach der Sicherung wieder abgezogen werden. Die VMs laufen dabei weiter (Online-Sicherung über VSS).</p>
+  <p>Reiter <span class="ui">Server-Backup</span> – sichtbar, wenn HUMig <b>als Administrator auf einem Windows Server</b> (mit oder ohne Hyper-V) läuft. Sichert virtuelle Computer mit der <b>Windows Server-Sicherung</b> (<code>wbadmin</code>) auf USB-Platten, die angesteckt und nach der Sicherung wieder abgezogen werden. Die VMs laufen dabei weiter (Online-Sicherung über VSS).</p>
   <h3>Schnellstart in 5 Schritten</h3>
   <ol>
     <li>HUMig <b>als Administrator am Hyper-V-Host</b> starten, Reiter <span class="ui">Server-Backup</span>.</li>
@@ -387,6 +387,12 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>Platz</td><td>die erste Sicherung braucht etwa die Größe der VMs, jede weitere nur die Änderungen (Beispiel: zweite Version einer 34-GB-VM unter 1 GB)</td></tr>
     <tr><td>Host-Konfiguration</td><td>etwa 30–60 Sekunden, läuft vor den VMs</td></tr>
   </table>
+  <h3>Hyper-V-Host oder normaler Server</h3>
+  <ul>
+    <li><b>Hyper-V-Host:</b> links stehen die virtuellen Computer und darunter die Laufwerke des Hosts – gesichert werden meist die VMs.</li>
+    <li><b>Server ohne Hyper-V</b> (physischer Server oder HUMig läuft in einer VM): HUMig meldet „Auf diesem Server läuft kein Hyper-V“ und bietet die <b>Laufwerke dieses Servers</b> an (Volume-Sicherung, blockbasiert, einzelne Dateien und Ordner wiederherstellbar) sowie <b>System dieses Servers</b> (Bare-Metal). Profile, Platten, Zeitplan, Verlauf und Bericht funktionieren gleich.</li>
+    <li>VMs immer am Hyper-V-Host sichern, auf dem sie laufen – nicht in der VM selbst.</li>
+  </ul>
   <h3>Einmalig einrichten</h3>
   <ol>
     <li>Fehlt die Windows Server-Sicherung, erscheint <span class="ui">Windows Server-Sicherung installieren</span> (kein Neustart nötig).</li>
