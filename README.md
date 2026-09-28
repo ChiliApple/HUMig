@@ -26,6 +26,7 @@ Profile sichern und auf denselben oder einen neuen PC zurückspielen – per USB
 | **Programm-Katalog** | erkennt 45+ Programme, sichert deren Einstellungen und **Lizenzdateien** mit, installiert fehlende am neuen PC nach |
 | **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
 | **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Softwareverteilung |
+| **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |
 | **Benutzer-Modus** | ohne Administratorrechte: eigenes Profil sichern/wiederherstellen, Dateien aus dem Backup holen |
 | **Anleitung** | im Tool mit **F1** – immer aktuell aus diesem Repository |
 
@@ -146,6 +147,19 @@ Profil-Werkzeuge sichern vorher Registry (und Dateirechte) unter `C:\ProgramData
 **Profil einem anderen Konto zuweisen:** nicht uebertragbar sind mit Windows-DPAPI verschluesselte Daten
 (gespeicherte Kennwoerter in Browser/Anmeldeinformationsverwaltung, Zertifikate mit privatem Schluessel, EFS);
 OneDrive/Office/Teams neu anmelden. Entra-ID-Konten werden nicht unterstuetzt. Vorher ein Backup machen.
+
+## Server-Backup (Hyper-V-Host)
+
+Reiter **Server-Backup** (nur als Administrator auf einem Hyper-V-Host sichtbar):
+
+- **Profile** je Schule/Standort: VMs, Platten-Bezeichnung (z.B. `HUMIG-SCHULE1-1`, `-2` ...), Anzahl Platten (Rotation + ausgelagert), Optionen
+- **Platte einrichten**: nur USB-Platten, loeschen + GPT + NTFS 64K + Bezeichnung; Platten werden beim Anstecken an der Bezeichnung erkannt
+- **Sichern** mit `wbadmin start backup -hyperv` (online ueber VSS), danach Pruefung (Version + enthaltene VMs), optional Host-System (`-allCritical`)
+- **Host-Konfiguration**: virtuelle Switches, SET-Teams, Host-vNICs mit VLAN, IP, Netzwerkkarten, VM-Einstellungen als HTML/JSON + `Restore-VMSwitches.ps1`
+- **Verlauf/Statistik** auf der Platte und im Tool-Ordner: letzte Sicherung je Platte, Rotationsempfehlung, Warnung nach 14 Tagen
+- **Auswerfen** (Schreibcache leeren), **Versionen**, **Wiederherstellen** ueber die Windows Server-Sicherung
+
+Voraussetzung: Feature *Windows Server-Sicherung* (installierbar aus dem Reiter).
 
 ## Grenzen
 

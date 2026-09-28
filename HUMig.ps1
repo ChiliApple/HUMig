@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.16'
+$script:Version   = '2.0.17'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -115,7 +115,7 @@ $script:SplashShown = Get-Date
 # ============================================================================
 # FUNKTIONEN LADEN
 # ============================================================================
-foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'Tools-Software.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1')) {
+foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'Tools-Software.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1')) {
     $mp = Join-Path $script:AppRoot "Functions\$mod"
     try { . $mp } catch { [System.Windows.MessageBox]::Show("$mod konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null; exit 1 }
 }
@@ -245,7 +245,10 @@ foreach ($n in @('imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings
     'pnlLinks', 'rtbConsole', 'pbMain', 'lblStatus', 'lblElapsed', 'rowConsole', 'btnToolSoftDeploy', 'btnToolSoftList', 'lblSizeTotal', 'lstExclude',
     'btnExclAdd', 'btnExclDel', 'btnBigFiles', 'chkIncremental', 'lblIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport',
     'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag',
-    'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnReinstall', 'btnADDevices')) { $ui[$n] = Get-UI $n }
+    'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnReinstall', 'btnADDevices',
+    'tabServerBackup', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
+    'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
+    'lblSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbRestore', 'btnSbFeature')) { $ui[$n] = Get-UI $n }
 Initialize-HMTaskbar
 $script:RowConsole = $ui.rowConsole
 if ($script:LogoImage) { $ui.imgLogo.Source = $script:LogoImage }
@@ -683,9 +686,12 @@ function Set-JobUi([bool]$Running) {
     $ui.cmbComputer.IsEnabled = -not $Running -and -not $script:UserMode
     $ui.cmbUser.IsEnabled = -not $Running -and -not $script:UserMode
     if ($script:UserMode) { $ui.btnUpdate.IsEnabled = $false }
+    foreach ($b in @($script:SbButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
+    if ($ui.btnSbCancel) { $ui.btnSbCancel.IsEnabled = $Running }
 }
 function Start-EngineJob {
-    param([string]$Command, [hashtable]$Ctx, [string]$Title, [scriptblock]$OnFinished)
+    param([string]$Command, [hashtable]$Ctx, [string]$Title, [scriptblock]$OnFinished, [string[]]$ScriptFiles = @())
+    if (-not @($ScriptFiles).Count) { $ScriptFiles = @($script:Engine, $script:EngineQuality) }
     $job = New-JobState
     $script:CurrentJob = $job
     Set-JobUi $true
@@ -693,7 +699,7 @@ function Start-EngineJob {
     Set-Status "$Title ..." '#FFF9E2AF'
     $script:JobTitle = $Title
     $script:JobOnFinished = $OnFinished
-    Start-LongJob -ScriptFiles @($script:Engine, $script:EngineQuality) -Command $Command -Ctx $Ctx -Job $job -OnTick {
+    Start-LongJob -ScriptFiles $ScriptFiles -Command $Command -Ctx $Ctx -Job $job -OnTick {
         param($j)
         $n = 0
         while ($j.Log.Count -gt 0 -and $n -lt 200) { $e = $j.Log.Dequeue(); Out-Console $e.Msg $e.Lvl; $n++ }
@@ -1542,6 +1548,7 @@ Out-Console "HUMig v$($script:Version) - $env:USERDOMAIN\$env:USERNAME auf $env:
 foreach ($e in $script:ConfigErrors) { Out-Console "Konfigurationsfehler: $e" 'Error' }
 if ($script:ActiveSchool) { Out-Console "Standort: $($script:ActiveSchool.Name) - Backup-Ordner $(Get-BackupRoot)" 'Info' }
 if ($script:UserMode) { Set-HMUserModeUi }
+Initialize-HMServerBackupTab -IsAdmin $isAdmin
 Update-BackupList
 Connect-Target
 if (-not $script:UserMode) { Invoke-UpdateCheck }
