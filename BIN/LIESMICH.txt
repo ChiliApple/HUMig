@@ -1,6 +1,8 @@
 BIN - optionale Zusatzprogramme (werden NICHT ueber GitHub verteilt)
 
-USMT (fuer das Modul "Windows-Einstellungen (USMT)"):
+USMT (fuer das Modul "Windows-Einstellungen (USMT)" - auch noetig, wenn beim Restore
+  auf einem neuen PC das Profil des Benutzers angelegt werden soll; ohne USMT muss sich
+  der Benutzer vorher einmal am Ziel-PC anmelden):
   - Windows ADK installieren (Feature "User State Migration Tool") ODER
   - den Ordner "amd64" aus
       C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\User State Migration Tool\

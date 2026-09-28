@@ -10,7 +10,7 @@
    Der Backup-Ordner muss fuer diese Benutzer beschreibbar sein; wer welche Backups sehen darf, regeln die Ordnerrechte.
 
 ## USMT (optional)
-Nur fuer das Modul *Windows-Einstellungen (USMT)* noetig - siehe `BIN\LIESMICH.txt`.
+Noetig fuer das Modul *Windows-Einstellungen (USMT)* - und damit auch fuer den **Restore auf einen neuen PC, auf dem der Benutzer noch kein Profil hat**: LoadState legt das Profil an (Domaenenkonten). Ohne USMT muss sich der Benutzer vorher einmal am Ziel-PC anmelden, sonst werden die Benutzer-Module uebersprungen. Einrichten: Werkzeug *USMT einrichten (ADK)* oder siehe `BIN\LIESMICH.txt`.
 
 ## Remote-Backup/-Restore
 Am Ziel-PC muessen erreichbar sein:
