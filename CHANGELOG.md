@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.19 - 2026-09-28
+### Neu
+- Server-Backup: **Zeitplan** - einmalig, taeglich oder woechentlich als geplante Aufgabe (Aufgabenplanung \HUMig, laeuft als SYSTEM ohne Anmeldung) mit den angehakten VMs; Uebersicht mit naechstem/letztem Lauf, Jetzt starten, Loeschen; Protokoll `Logs\ServerBackup\Aufgabe_*.log`
+### Verbessert
+- Server-Backup: nach dem Umbenennen einer Platte werden ihre bisherigen Verlaufseintraege automatisch dem neuen Namen zugeordnet (Platte und Tool-Ordner)
+
 ## v2.0.18 - 2026-09-28
 ### Neu
 - Server-Backup: **Profil bearbeiten** - Name frei aenderbar (Verlauf im Tool-Ordner und auf angesteckten Platten wird uebernommen, spaeter angesteckte Platten werden automatisch zugeordnet), Platten-Bezeichnung, Anzahl Platten, Warnfrist

@@ -401,6 +401,14 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   </ol>
   <p>Die angehakten VMs gelten für diesen Lauf; <span class="ui g">Profil speichern</span> übernimmt Auswahl und Optionen ins Profil. <span class="ui">Bearbeiten …</span> ändert Name (frei wählbar, der Verlauf wird übernommen), Platten-Bezeichnung, Anzahl Platten und die Warnfrist. Mehrere Profile dürfen dieselbe Platten-Bezeichnung verwenden (z. B. zwei Schulen am selben Host mit gemeinsamen Platten).</p>
   <p>Das Profil wird bei jeder Sicherung auch auf der Platte gespeichert (<code>HUMig-ServerBackup\profiles.json</code>). Wird die Platte an einem Host ohne dieses Profil angesteckt (z. B. nach einer Neuinstallation), bietet HUMig an, es zu übernehmen.</p>
+  <h3>Zeitplan (z. B. Nachtsicherung)</h3>
+  <p>Große VMs dauern Stunden – solche Läufe am besten in die Nacht legen. VMs und Optionen anhaken, <span class="ui m">Zeitplan …</span>: <b>einmalig</b> (Datum), <b>täglich</b> oder <b>wöchentlich</b> (Wochentage) zur gewählten Uhrzeit. HUMig legt dafür eine geplante Aufgabe in der Aufgabenplanung unter <code>\HUMig</code> an: sie läuft als <b>SYSTEM ohne Anmeldung</b> (auch nach einem Neustart) und sichert die beim Planen angehakten VMs auf die angesteckte Platte des Profils. Ist keine Platte des Profils angesteckt, wird das als Fehler im Verlauf eingetragen.</p>
+  <ul>
+    <li>Rechtsklick auf <span class="ui m">Zeitplan …</span>: alle geplanten Server-Backups mit nächstem und letztem Lauf und Ergebnis – <i>Jetzt starten</i> oder <i>Löschen</i>.</li>
+    <li>Rechts im Reiter steht unter dem Plattenstatus, was für das Profil geplant ist.</li>
+    <li>Protokoll jedes geplanten Laufs: <code>Logs\ServerBackup\Aufgabe_*.log</code>; Verlauf und Bericht wie bei einer Sicherung aus der Oberfläche.</li>
+    <li>Einmalige Termine werden 7 Tage nach Ablauf automatisch aus der Aufgabenplanung entfernt.</li>
+  </ul>
   <h3>Was wird gesichert</h3>
   <table>
     <tr><th style="width:230px">Teil</th><th>Inhalt</th></tr>
@@ -410,7 +418,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   </table>
   <p>Auf der Platte: <code>WindowsImageBackup\</code> (Windows Server-Sicherung) und <code>HUMig-ServerBackup\</code> mit einem Ordner je Lauf (<code>Bericht.html</code>, wbadmin-Ausgabe, Versionen, Inhalt, Host-Konfiguration) und <code>history.json</code>. Kopien der Berichte liegen im Tool-Ordner unter <code>Logs\ServerBackup</code>.</p>
   <h3>Verlauf, Rotation, Statistik</h3>
-  <p>Rechts im Reiter: letzte Sicherung je Platte des Profils, Warnung, wenn die letzte erfolgreiche Sicherung älter als die Warnfrist ist (Standard 14 Tage), und die <b>nächste Platte laut Rotation</b> (am längsten nicht verwendet). <span class="ui m">Statistik / Übersicht</span> zeigt alle Profile und Platten (letzte Sicherung, Alter, Anzahl Läufe, mittlere Dauer, Host-System) – Rechtsklick: alle Läufe. Grundlage: Verlauf im Tool-Ordner (<code>Config\ServerBackup\history.json</code>) und auf allen angesteckten Platten.</p>
+  <p>Rechts im Reiter: letzte Sicherung je Platte des Profils, Warnung, wenn die letzte erfolgreiche Sicherung älter als die Warnfrist ist (Standard 14 Tage), und die <b>nächste Platte laut Rotation</b> (am längsten nicht verwendet). <span class="ui m">Statistik / Übersicht</span> zeigt alle Profile und Platten (letzte Sicherung, Alter, Anzahl Läufe, mittlere Dauer, Host-System) – Rechtsklick: alle Läufe. Wird eine Platte umbenannt, ordnet HUMig ihre bisherigen Einträge beim nächsten <span class="ui">Aktualisieren</span> automatisch dem neuen Namen zu. Grundlage: Verlauf im Tool-Ordner (<code>Config\ServerBackup\history.json</code>) und auf allen angesteckten Platten.</p>
   <p>Die Windows Server-Sicherung behält mehrere Versionen auf einer Platte und löscht bei Platzmangel automatisch die ältesten. <span class="ui b">Versionen auf der Platte</span> listet sie (<code>wbadmin get versions</code>, Versions-ID in UTC).</p>
   <h3>Wiederherstellen</h3>
   <ol>
