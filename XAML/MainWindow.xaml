@@ -495,7 +495,7 @@
                                         <TextBlock x:Name="lblSbSize" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" Margin="0,0,0,4"/>
                                         <CheckBox x:Name="chkSbHostConfig" Content="Host-Konfiguration sichern (Switches, VLANs, Netzwerk, VM-Einstellungen + Wiederherstellungs-Skript)" IsChecked="True"/>
                                         <CheckBox x:Name="chkSbVerify" Content="Sicherung pruefen (Version und enthaltene VMs)" IsChecked="True"/>
-                                        <CheckBox x:Name="chkSbHostSystem" Content="Host-System mitsichern (Bare-Metal, alle kritischen Volumes - dauert laenger)" ToolTip="wbadmin -allCritical: Host-Betriebssystem komplett, Wiederherstellung per Windows-Setup/WinRE. Liegen VMs auf C:, werden sie dabei nochmal mitgesichert."/>
+                                        <CheckBox x:Name="chkSbHostSystem" Content="Host-System mitsichern (nur der Host: C:, Boot/EFI - fuer Bare-Metal-Wiederherstellung)" ToolTip="wbadmin -allCritical: sichert nur den Host selbst - Systemlaufwerk C: (Windows, Hyper-V-Rolle, Switches, Einstellungen) und EFI-/Boot-/Wiederherstellungspartition. Datenlaufwerke mit den VMs (z.B. D:) sind NICHT enthalten - dafuer die VM-Sicherung. Komplette Wiederherstellung nach Totalausfall: Host-System UND VMs sichern. Liegen VMs auf C:, werden sie hier zusaetzlich mitgesichert."/>
                                         <TextBlock x:Name="lblSbHostSystem" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="11" Margin="20,0,0,0"/>
                                     </StackPanel>
                                     <ScrollViewer VerticalScrollBarVisibility="Auto">
