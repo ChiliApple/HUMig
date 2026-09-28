@@ -1,12 +1,14 @@
 <h1 align="center"><img src="Assets/logo64.png" width="44" alt="" align="absmiddle"/> HUMig v2</h1>
 
-<p align="center"><b>Benutzerprofil-Migration und PC-Werkzeuge für Windows 10/11</b><br>
-Profile sichern und auf denselben oder einen neuen PC zurückspielen – per USB-Laufwerk oder über das Netzwerk.</p>
+<p align="center"><b>Benutzerprofil-Migration, PC-Werkzeuge und Hyper-V-Server-Backup für Windows</b><br>
+Profile sichern und auf denselben oder einen neuen PC zurückspielen – per USB-Laufwerk oder über das Netzwerk.<br>
+Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfung und Verlauf.</p>
 
 <p align="center">
   <a href="https://github.com/ChiliApple/HUMig/releases/latest"><img src="https://img.shields.io/github/v/release/ChiliApple/HUMig?label=Version&color=b9a88a" alt="Version"></a>
   <img src="https://img.shields.io/badge/PowerShell-5.1-5391FE?logo=powershell&logoColor=white" alt="PowerShell 5.1">
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6" alt="Windows 10 | 11">
+  <img src="https://img.shields.io/badge/Windows%20Server-Hyper--V%20Backup-2E7D32" alt="Windows Server Hyper-V Backup">
   <img src="https://img.shields.io/badge/Oberfl%C3%A4che-WPF-8839ef" alt="WPF">
   <a href="LICENSE"><img src="https://img.shields.io/badge/Lizenz-Nutzung%20frei-orange" alt="Lizenz"></a>
 </p>
