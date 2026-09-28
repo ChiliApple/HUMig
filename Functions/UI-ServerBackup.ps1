@@ -66,7 +66,7 @@ function Get-HMSbProfile {
 function Get-HMSbCheckedVms {
     return @($ui.pnlSbVms.Children | Where-Object { $_ -is [System.Windows.Controls.CheckBox] -and $_.IsChecked } | ForEach-Object { "$($_.Tag)" })
 }
-function Format-HMSbStatus([string]$s) { switch ($s) { 'OK' { 'OK' } 'Warning' { 'Warnung' } 'Error' { 'FEHLER' } default { $s } } }
+function Format-HMSbStatus([string]$s, [string]$Note = '') { switch ($s) { 'OK' { if ("$Note".Trim()) { 'OK (Hinweis)' } else { 'OK' } } 'Warning' { 'Warnung' } 'Error' { 'FEHLER' } default { $s } } }
 function Format-HMSbState([string]$s) { switch ($s) { 'Running' { 'laeuft' } 'Off' { 'aus' } 'Saved' { 'gespeichert' } 'Paused' { 'angehalten' } default { $s } } }
 function Get-HMSbDate([string]$s) {
     try { return [datetime]::ParseExact($s, 'yyyy-MM-dd HH:mm', [System.Globalization.CultureInfo]::InvariantCulture) } catch { return $null }
@@ -371,7 +371,7 @@ function Update-HMSbHistory {
     foreach ($e in @($mine | Select-Object -First 300)) {
         $hin = "$($e.Note)"
         if (-not $hin -and "$($e.Status)" -eq 'OK') { $hin = 'alles in Ordnung' }
-        $rows += [pscustomobject]@{ Datum = "$($e.Date)"; Platte = "$($e.Disk)"; Status = (Format-HMSbStatus "$($e.Status)"); Minuten = $e.Minutes; GB = $e.SizeGB; VMs = "$($e.VMs)"; Hinweis = $hin; Entry = $e }
+        $rows += [pscustomobject]@{ Datum = "$($e.Date)"; Platte = "$($e.Disk)"; Status = (Format-HMSbStatus "$($e.Status)" "$($e.Note)"); Minuten = $e.Minutes; GB = $e.SizeGB; VMs = "$($e.VMs)"; Hinweis = $hin; Entry = $e }
     }
     $ui.dgSbHistory.ItemsSource = $rows
     # Plattenstatus + Rotationsempfehlung
@@ -422,7 +422,7 @@ function Show-HMSbOverview {
         $avg = 0.0
         if ($ok.Count) { try { $avg = [math]::Round([double](@($ok | ForEach-Object { [double]$_.Minutes }) | Measure-Object -Average).Average, 1) } catch { } }
         $hs = @($items | Where-Object { $_.HostSystem -eq $true })[0]
-        $rows.Add(@("$($last.Profile)", "$($last.Disk)", "$($last.Host)", $(if ($lastOk) { "$($lastOk.Date)" } else { '-' }), $age, (Format-HMSbStatus "$($last.Status)"), $items.Count, $avg, "$($last.SizeGB)", $(if ($hs) { "$($hs.Date)" } else { '' })))
+        $rows.Add(@("$($last.Profile)", "$($last.Disk)", "$($last.Host)", $(if ($lastOk) { "$($lastOk.Date)" } else { '-' }), $age, (Format-HMSbStatus "$($last.Status)" "$($last.Note)"), $items.Count, $avg, "$($last.SizeGB)", $(if ($hs) { "$($hs.Date)" } else { '' })))
     }
     Show-DataGridWindow -Title 'Server-Backup - Statistik je Profil und Platte' -Width 1100 -Height 520 `
         -Columns @('Profil', 'Platte', 'Host', 'Letzte_Sicherung', 'Tage', 'Letzter_Status', 'Laeufe', 'Mittel_Min', 'GB', 'Host_System') `
@@ -435,7 +435,7 @@ function Show-HMSbAllRuns {
     $all = @($all)
     $rows = New-Object System.Collections.Generic.List[object]
     foreach ($e in $all) {
-        $rows.Add(@("$($e.Date)", "$($e.Profile)", "$($e.Host)", "$($e.Disk)", (Format-HMSbStatus "$($e.Status)"), "$($e.Minutes)", "$($e.SizeGB)", "$($e.VMs)",
+        $rows.Add(@("$($e.Date)", "$($e.Profile)", "$($e.Host)", "$($e.Disk)", (Format-HMSbStatus "$($e.Status)" "$($e.Note)"), "$($e.Minutes)", "$($e.SizeGB)", "$($e.VMs)",
                 $(if ($e.HostConfig -eq $true) { 'ja' } else { '' }), $(if ($e.HostSystem -eq $true) { 'ja' } else { '' }), "$($e.VersionId)", "$($e.Note)", "$($e.Tool)"))
     }
     Show-DataGridWindow -Title 'Server-Backup - alle Laeufe' -Width 1250 -Height 600 `

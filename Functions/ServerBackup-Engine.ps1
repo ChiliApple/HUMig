@@ -12,7 +12,12 @@
 $script:SbDirName = 'HUMig-ServerBackup'
 $script:SbJob = $null
 
+$script:SbRunLog = $null
+function Add-HMSbRunLog([string]$Msg, [string]$Lvl) {
+    if ($null -ne $script:SbRunLog) { $script:SbRunLog.Add(('{0} [{1}] {2}' -f (Get-Date -Format 'HH:mm:ss'), $Lvl.ToUpper(), $Msg)) }
+}
 function Write-HMSbLog([string]$Msg, [string]$Lvl = 'Info') {
+    Add-HMSbRunLog $Msg $Lvl
     if ($script:SbJob) { $script:SbJob.Log.Enqueue(@{ Msg = $Msg; Lvl = $Lvl }) }
 }
 
@@ -563,6 +568,70 @@ function Write-HMSbHostHtml($Cfg, [string]$Path) {
     [System.IO.File]::WriteAllText($Path, $sb.ToString(), (New-Object System.Text.UTF8Encoding($true)))
 }
 
+# Bericht eines Laufs (deutsch, Status mit Erklaerung, Hinweise mit Abhilfe, Links zu den Dateien, Protokoll)
+function Write-HMSbReport {
+    param([string]$Path, $Entry, $Hints = @(), [string]$Folder, $Ctx)
+    $e = { param($x) [System.Net.WebUtility]::HtmlEncode("$x") }
+    $st = "$($Entry.Status)"
+    $hasInfo = [bool](@($Hints | Where-Object { $_.Lvl -eq 'Info' }).Count)
+    $title = switch ($st) { 'OK' { if ($hasInfo) { 'OK (Hinweis)' } else { 'OK' } } 'Warning' { 'Warnung' } default { 'Fehler' } }
+    $col = switch ($st) { 'OK' { if ($hasInfo) { '#1565c0' } else { '#2e7d32' } } 'Warning' { '#e69500' } default { '#c62828' } }
+    $expl = switch ($st) {
+        'OK' { if ($hasInfo) { 'Alles wurde vollstaendig gesichert und geprueft. Es gibt einen Hinweis, den man kennen sollte (siehe unten) - kein Handlungsbedarf fuer diese Sicherung.' } else { 'Alles wurde vollstaendig gesichert und geprueft.' } }
+        'Warning' { 'Die Sicherung ist gelaufen, aber nicht alles ist einwandfrei - bitte die Hinweise unten ansehen.' }
+        default { 'Die Sicherung ist fehlgeschlagen oder unvollstaendig - bitte die Hinweise unten ansehen und die Sicherung wiederholen.' }
+    }
+    $ja = { param($b) if ($b -eq $true) { 'ja' } else { 'nein' } }
+    $rows = @(
+        @('Datum', $Entry.Date), @('Profil', $Entry.Profile), @('Hyper-V-Host', $Entry.Host),
+        @('Platte', "$($Entry.Disk)$(if ($Entry.DiskSerial) { "  (Seriennummer $($Entry.DiskSerial))" })"),
+        @('Virtuelle Computer', $(if ($Entry.VMs) { $Entry.VMs } else { '-' })),
+        @('Dauer', "$($Entry.Minutes) Minuten"), @('Groesse der VMs', "ca. $($Entry.SizeGB) GB (virtuelle Festplatten)"),
+        @('Sicherungsversion', $(if ($Entry.VersionId) { "$($Entry.VersionId) (UTC) - fuer die Wiederherstellung" } else { '-' })),
+        @('Host-Konfiguration', (& $ja $Entry.HostConfig)),
+        @('Host-System (Bare-Metal)', "$(& $ja $Entry.HostSystem)$(if ($Entry.HostVersionId) { " - Version $($Entry.HostVersionId) (UTC)" })"),
+        @('Erstellt mit', $Entry.Tool)
+    )
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append("<!DOCTYPE html><html lang='de'><head><meta charset='utf-8'><title>Server-Backup $(& $e $Entry.Profile) $(& $e $Entry.Date)</title><style>body{font-family:Segoe UI,Arial;font-size:13px;margin:24px;color:#222;max-width:1100px}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin-top:22px;border-bottom:1px solid #ccc;padding-bottom:3px}table{border-collapse:collapse}th,td{border:1px solid #bbb;padding:4px 9px;text-align:left;vertical-align:top}th{background:#f1f1f1;width:190px}.box{border-left:5px solid #999;background:#f7f7f7;padding:8px 12px;margin:8px 0}.Info{border-color:#1565c0}.Warning{border-color:#e69500}.Error{border-color:#c62828}.fix{color:#444;margin-top:4px}pre{background:#1e1e2e;color:#cdd6f4;padding:10px;font-size:12px;overflow:auto;max-height:520px}a{color:#1565c0}.muted{color:#777}</style></head><body>")
+    [void]$sb.Append("<h1 style='color:$col'>Server-Backup $(& $e $Entry.Profile): $title</h1><p>$(& $e $expl)</p>")
+    [void]$sb.Append('<h2>Zusammenfassung</h2><table>')
+    foreach ($r in $rows) { [void]$sb.Append("<tr><th>$(& $e $r[0])</th><td>$(& $e $r[1])</td></tr>") }
+    [void]$sb.Append('</table>')
+    [void]$sb.Append('<h2>Hinweise</h2>')
+    if (@($Hints).Count) {
+        foreach ($h in @($Hints)) {
+            $lab = switch ($h.Lvl) { 'Info' { 'Hinweis' } 'Warning' { 'Warnung' } default { 'Fehler' } }
+            [void]$sb.Append("<div class='box $($h.Lvl)'><b>$lab</b>: $(& $e $h.Text)$(if ($h.Fix) { "<div class='fix'><b>Was tun:</b> $(& $e $h.Fix)</div>" })</div>")
+        }
+    } else { [void]$sb.Append("<p class='muted'>Keine - alles in Ordnung.</p>") }
+    # Dateien im Ordner mit Erklaerung
+    $desc = [ordered]@{
+        'wbadmin-VMs.log' = 'Ausgabe der Windows Server-Sicherung (wbadmin) waehrend der VM-Sicherung'
+        'wbadmin-HostSystem.log' = 'Ausgabe von wbadmin waehrend der Host-System-Sicherung (zeigt auch, welche Volumes gesichert wurden)'
+        'Versionen.txt' = 'alle Sicherungsstaende (Versionen) auf dieser Platte'
+        'Inhalt.txt' = 'Inhalt der neuen Version - Grundlage der Pruefung'
+        'Host-Konfiguration\HostConfig.html' = 'Host-Konfiguration: Switches, VLANs, Netzwerk, Hyper-V- und VM-Einstellungen'
+        'Host-Konfiguration\Restore-VMSwitches.ps1' = 'Skript: virtuelle Switches auf einem neu installierten Host wieder anlegen'
+        'Host-Konfiguration\HostConfig.json' = 'Host-Konfiguration maschinenlesbar'
+    }
+    [void]$sb.Append('<h2>Dateien in diesem Ordner</h2><table>')
+    foreach ($k in $desc.Keys) {
+        if (Test-Path -LiteralPath (Join-Path $Folder $k)) { [void]$sb.Append("<tr><th><a href='$(& $e ($k -replace '\\', '/'))'>$(& $e $k)</a></th><td>$(& $e $desc[$k])</td></tr>") }
+    }
+    foreach ($f in @(Get-ChildItem -LiteralPath $Folder -File -Filter '*.log' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'wbadmin-*' })) {
+        $d = if ($f.Name -like '*Error*') { 'Fehlerprotokoll der Windows Server-Sicherung' } elseif ($f.Name -like 'Backup*') { 'Protokoll der Windows Server-Sicherung (gesicherte Dateien)' } else { 'Protokoll der Windows Server-Sicherung' }
+        [void]$sb.Append("<tr><th><a href='$(& $e $f.Name)'>$(& $e $f.Name)</a></th><td>$(& $e $d)</td></tr>")
+    }
+    [void]$sb.Append('</table>')
+    [void]$sb.Append("<h2>Wiederherstellen</h2><p>Die Sicherung ist eine normale Windows-Server-Sicherung (Ordner <code>WindowsImageBackup</code> auf der Platte) und auch ohne HUMig wiederherstellbar: <code>wbadmin.msc</code> &gt; Wiederherstellen &gt; an einem anderen Speicherort gespeicherte Sicherung &gt; Lokale Laufwerke &gt; Datum &gt; Hyper-V. Neu installierter Host: vorher <code>Restore-VMSwitches.ps1</code> ausfuehren.</p>")
+    if ($null -ne $script:SbRunLog -and $script:SbRunLog.Count) {
+        [void]$sb.Append("<h2>Protokoll des Laufs</h2><details><summary>anzeigen ($($script:SbRunLog.Count) Zeilen)</summary><pre>$(& $e (($script:SbRunLog.ToArray()) -join "`n"))</pre></details>")
+    }
+    [void]$sb.Append('</body></html>')
+    [System.IO.File]::WriteAllText($Path, $sb.ToString(), (New-Object System.Text.UTF8Encoding($true)))
+}
+
 # ----------------------------------------------------------------------------
 # Hauptablauf (Hintergrund-Runspace)
 #   Ctx: Profile, DiskPrefix, Drive (Buchstabe), DiskLabel, DiskSerial, VMs (Namen), HostConfig, HostSystem, Verify, LocalHistory, LocalReportDir, Version
@@ -571,7 +640,8 @@ function Start-HMServerBackup {
     param([hashtable]$Ctx, [hashtable]$Job)
     $script:SbJob = $Job
     $t0 = Get-Date
-    $status = 'OK'; $notes = @()
+    $status = 'OK'; $notes = @(); $hints = @()
+    $script:SbRunLog = New-Object System.Collections.Generic.List[string]
     $L = "$($Ctx.Drive)".TrimEnd(':', '\').ToUpper()
     $target = "${L}:"
     $vms = @($Ctx.VMs | Where-Object { "$_".Trim() })
@@ -624,7 +694,10 @@ function Start-HMServerBackup {
             $hostCfgOk = $true
             Write-HMSbLog "Host-Konfiguration gesichert: $($hc.Switches) Switch(es), $($hc.ManagementAdapters) Host-vNIC(s), $($hc.VMs) VM(s) -> Host-Konfiguration\ (HTML, JSON, Restore-VMSwitches.ps1)" 'Success'
             foreach ($w in @($hc.Warnings)) { Write-HMSbLog "  Host-Konfiguration: $w" 'Warning' }
-        } catch { Write-HMSbLog "Host-Konfiguration nicht gesichert: $($_.Exception.Message)" 'Warning'; $notes += 'Host-Konfiguration fehlgeschlagen'; $status = 'Warning' }
+        } catch {
+            Write-HMSbLog "Host-Konfiguration nicht gesichert: $($_.Exception.Message)" 'Warning'; $notes += 'Host-Konfiguration fehlgeschlagen'; $status = 'Warning'
+            $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Host-Konfiguration konnte nicht gesichert werden: $($_.Exception.Message)"; Fix = 'Die VM-Sicherung ist davon nicht betroffen. Mit "Nur Host-Konfiguration" erneut versuchen.' }
+        }
     }
     if ($Job.Cancel) { throw 'Abgebrochen' }
 
@@ -642,20 +715,22 @@ function Start-HMServerBackup {
             throw 'Abgebrochen'
         }
         foreach ($lf in @($r.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
-        if ($r.ExitCode -ne 0) { $status = 'Error'; $notes += "VM-Sicherung Exitcode $($r.ExitCode)"; Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - Details: wbadmin-VMs.log im Berichtsordner" 'Error' }
+        if ($r.ExitCode -ne 0) { $status = 'Error'; $notes += "VM-Sicherung Exitcode $($r.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die VM-Sicherung ist fehlgeschlagen (wbadmin Exitcode $($r.ExitCode))."; Fix = 'Ursache steht in wbadmin-VMs.log und im Backup-/Fehlerprotokoll der Windows Server-Sicherung (Links unten). Haeufig: Platte voll, VM gesperrt, VSS-Fehler im Gast.' }; Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - Details: wbadmin-VMs.log im Berichtsordner" 'Error' }
         else {
             $offVms = @($r.Lines | Where-Object { $_ -match '"(.+?) \(Offline\)"' } | ForEach-Object { if ($_ -match '"(.+?) \(Offline\)"') { $Matches[1] } } | Select-Object -Unique)
             if ($offVms.Count) {
-                if ($status -eq 'OK') { $status = 'Warning' }
+                # vollstaendig gesichert -> kein Warnstatus, nur Hinweis
                 $why = Get-HMSbOfflineReasons -Since $t0.AddMinutes(-1)
                 foreach ($ov in $offVms) {
                     $h = Get-HMSbOfflineHintText $why[$ov]
                     if ($h) {
                         Write-HMSbLog "VM '$ov' wurde OFFLINE gesichert (kurz angehalten) - Grund laut Hyper-V: $h$(if ($why[$ov].Dynamic) { '. Abhilfe: Laufwerke im Gast auf Basisdatentraeger umstellen (neue Basis-VHDX, Daten kopieren) - siehe Anleitung.' })" 'Warning'
-                        $notes += "$ov offline ($h)"
+                        $notes += "Hinweis: $ov offline gesichert ($h)"
+                        $hints += [pscustomobject]@{ Lvl = 'Info'; Text = "VM $ov wurde vollstaendig gesichert, aber OFFLINE: Hyper-V hat sie zu Beginn kurz angehalten (gespeicherter Zustand, meist 1-2 Minuten), danach lief sie weiter. Grund laut Hyper-V: $h."; Fix = $(if ($why[$ov].Dynamic) { 'Im Gast sind dynamische Datentraeger eingerichtet (diskpart > list disk, Spalte Dyn). Abhilfe: auf Basisdatentraeger umstellen (neue Basis-VHDX anhaengen, Daten kopieren). Bis dahin ausserhalb der Unterrichtszeit sichern (Zeitplan).' } else { 'Integrationsdienst Sicherung (VSS) der VM und den Dienst vmicvss im Gast pruefen.' }) }
                     } else {
                         Write-HMSbLog "VM '$ov' wurde OFFLINE gesichert (kurz angehalten) - Grund nicht im Hyper-V-Protokoll gefunden: Integrationsdienst Sicherung (VSS), Dienst vmicvss im Gast und Volumes (NTFS/ReFS, Basisdatentraeger) pruefen." 'Warning'
-                        $notes += "$ov offline"
+                        $notes += "Hinweis: $ov offline gesichert"
+                        $hints += [pscustomobject]@{ Lvl = 'Info'; Text = "VM $ov wurde vollstaendig gesichert, aber OFFLINE (zu Beginn kurz angehalten). Ein Grund stand nicht im Hyper-V-Protokoll."; Fix = 'Integrationsdienst Sicherung (VSS) der VM, Dienst vmicvss im Gast und Volumes im Gast (NTFS/ReFS, Basisdatentraeger) pruefen.' }
                     }
                 }
             }
@@ -675,8 +750,10 @@ function Start-HMServerBackup {
                 $gi = Invoke-HMSbWbadmin -Arguments "get items -version:$verId -backupTarget:$target" -Quiet
                 Set-Content -LiteralPath (Join-Path $rep 'Inhalt.txt') -Value $gi.Text -Encoding UTF8
                 $miss = @($vms | Where-Object { $gi.Text -notmatch [regex]::Escape($_) })
-                if ($gi.ExitCode -ne 0) { Write-HMSbLog "Pruefung: wbadmin get items Exitcode $($gi.ExitCode) - siehe Inhalt.txt" 'Warning'; if ($status -eq 'OK') { $status = 'Warning' } }
-                elseif ($miss.Count) { Write-HMSbLog "Pruefung: in Version $verId NICHT gefunden: $($miss -join ', ') - siehe Inhalt.txt" 'Warning'; $notes += "Pruefung: fehlt $($miss -join ', ')"; if ($status -eq 'OK') { $status = 'Warning' } }
+                if ($gi.ExitCode -ne 0) { Write-HMSbLog "Pruefung: wbadmin get items Exitcode $($gi.ExitCode) - siehe Inhalt.txt" 'Warning'; if ($status -eq 'OK') { $status = 'Warning' }; $notes += 'Pruefung nicht moeglich'
+                    $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Pruefung konnte den Inhalt der Sicherung nicht lesen (Exitcode $($gi.ExitCode))."; Fix = 'Inhalt.txt ansehen; "Versionen auf der Platte" zeigt, ob die Version vorhanden ist.' } }
+                elseif ($miss.Count) { Write-HMSbLog "Pruefung: in Version $verId NICHT gefunden: $($miss -join ', ') - siehe Inhalt.txt" 'Warning'; $notes += "Pruefung: fehlt $($miss -join ', ')"; if ($status -eq 'OK') { $status = 'Warning' }
+                    $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Pruefung hat folgende VMs in der neuen Version nicht gefunden: $($miss -join ', ')."; Fix = 'Inhalt.txt ansehen. Fehlen die VMs wirklich, Sicherung wiederholen.' } }
                 else { Write-HMSbLog "Pruefung OK: alle $($vms.Count) VM(s) in Version $verId enthalten" 'Success' }
             }
         } catch { Write-HMSbLog "Versionen/Pruefung nicht moeglich: $($_.Exception.Message)" 'Warning' }
@@ -695,7 +772,7 @@ function Start-HMServerBackup {
             throw 'Abgebrochen'
         }
         foreach ($lf in @($r2.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
-        if ($r2.ExitCode -ne 0) { if ($status -eq 'OK') { $status = 'Warning' }; $notes += "Host-System Exitcode $($r2.ExitCode)"; Write-HMSbLog "Host-System-Sicherung FEHLGESCHLAGEN (Exitcode $($r2.ExitCode)) - wbadmin-HostSystem.log" 'Error' }
+        if ($r2.ExitCode -ne 0) { if ($status -eq 'OK') { $status = 'Warning' }; $notes += "Host-System Exitcode $($r2.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Host-System-Sicherung ist fehlgeschlagen (Exitcode $($r2.ExitCode)). Die VM-Sicherung ist davon nicht betroffen."; Fix = 'Ursache in wbadmin-HostSystem.log.' }; Write-HMSbLog "Host-System-Sicherung FEHLGESCHLAGEN (Exitcode $($r2.ExitCode)) - wbadmin-HostSystem.log" 'Error' }
         else {
             $hostSysOk = $true
             Write-HMSbLog 'Host-System-Sicherung erfolgreich' 'Success'
@@ -715,14 +792,7 @@ function Start-HMServerBackup {
     try { Add-HMSbHistory (Join-Path "$target\$($script:SbDirName)" 'history.json') $entry } catch { Write-HMSbLog "Verlauf auf der Platte nicht gespeichert: $($_.Exception.Message)" 'Warning' }
     if ($Ctx.LocalHistory) { try { Add-HMSbHistory "$($Ctx.LocalHistory)" $entry } catch { Write-HMSbLog "Verlauf im Tool-Ordner nicht gespeichert: $($_.Exception.Message)" 'Warning' } }
     try {
-        $enc = { param($s) [System.Net.WebUtility]::HtmlEncode("$s") }
-        $rows = ''
-        foreach ($p in $entry.PSObject.Properties) { $rows += "<tr><th>$(& $enc $p.Name)</th><td>$(& $enc $p.Value)</td></tr>" }
-        $col = switch ($status) { 'OK' { '#2e7d32' } 'Warning' { '#e69500' } default { '#c62828' } }
-        $html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Server-Backup $(& $enc $Ctx.Profile)</title><style>body{font-family:Segoe UI,Arial;font-size:13px;margin:20px}table{border-collapse:collapse}th,td{border:1px solid #bbb;padding:3px 8px;text-align:left}th{background:#eee}</style></head><body>" +
-            "<h1 style='color:$col'>Server-Backup $(& $enc $Ctx.Profile): $(& $enc $status)</h1><table>$rows</table>" +
-            "<p>Dateien in diesem Ordner: wbadmin-*.log (Ausgabe), Versionen.txt, Inhalt.txt (Pruefung), Host-Konfiguration\ (HostConfig.html, Restore-VMSwitches.ps1).</p></body></html>"
-        [System.IO.File]::WriteAllText((Join-Path $rep 'Bericht.html'), $html, (New-Object System.Text.UTF8Encoding($true)))
+        Write-HMSbReport -Path (Join-Path $rep 'Bericht.html') -Entry $entry -Hints $hints -Folder $rep -Ctx $Ctx
         if ($Ctx.LocalReportDir) {
             $ld = Join-Path "$($Ctx.LocalReportDir)" (Split-Path $rep -Leaf)
             New-Item -ItemType Directory -Path $ld -Force | Out-Null
@@ -737,6 +807,7 @@ function Start-HMServerBackup {
     $Job.Result = [pscustomobject]$res
     $Job.Progress = 100
     $lvl = switch ($status) { 'OK' { 'Success' } 'Warning' { 'Warning' } default { 'Error' } }
-    Write-HMSbLog ("SERVER-BACKUP {0}: {1} in {2} min - Bericht: {3}" -f $Ctx.Profile, $(switch ($status) { 'OK' { 'erfolgreich' } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }), $dur, (Join-Path $rep 'Bericht.html')) $lvl
+    Write-HMSbLog ("SERVER-BACKUP {0}: {1} in {2} min - Bericht: {3}" -f $Ctx.Profile, $(switch ($status) { 'OK' { if ($notes.Count) { 'erfolgreich (mit Hinweis - siehe Bericht)' } else { 'erfolgreich' } } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }), $dur, (Join-Path $rep 'Bericht.html')) $lvl
+    $script:SbRunLog = $null
     if ($status -eq 'Error') { $Job.Error = ($notes -join '; ') }
 }
