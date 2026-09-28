@@ -368,8 +368,43 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <p>Liste des gewählten Computers mit Filter, CSV und Drucken. Markierte Programme lassen sich still <b>deinstallieren</b> (MSI per <code>msiexec /x</code>, sonst stiller Herstellerbefehl) – Ergebnis je Programm in der Konsole.</p>
 </section>
 
+<section id="serverbackup">
+  <h2><span class="n">10</span>Server-Backup (Hyper-V)</h2>
+  <p>Reiter <span class="ui">Server-Backup</span> – nur sichtbar, wenn HUMig <b>als Administrator auf einem Hyper-V-Host</b> läuft. Sichert virtuelle Computer mit der <b>Windows Server-Sicherung</b> (<code>wbadmin</code>) auf USB-Platten, die angesteckt und nach der Sicherung wieder abgezogen werden. Die VMs laufen dabei weiter (Online-Sicherung über VSS).</p>
+  <h3>Einmalig einrichten</h3>
+  <ol>
+    <li>Fehlt die Windows Server-Sicherung, erscheint <span class="ui">Windows Server-Sicherung installieren</span> (kein Neustart nötig).</li>
+    <li>VMs anhaken, <span class="ui b">Neu …</span>: Profilname (z. B. Schule), Platten-Bezeichnung (Vorschlag <code>HUMIG-&lt;PROFIL&gt;</code>) und Anzahl Platten (Rotation + ausgelagerte Platte). Teilen sich mehrere Schulen einen Host, je Schule ein Profil mit eigenen VMs und Platten.</li>
+    <li>Neue Platte anstecken, <span class="ui p">Platte einrichten …</span>: nur USB-Platten werden angezeigt (nie System-/Startplatten oder Platten mit VM-Dateien). Die Platte wird <b>komplett gelöscht</b>, GPT, NTFS mit 64-KB-Clustern, Bezeichnung z. B. <code>HUMIG-SCHULE1-2</code>. Bestätigung durch Eintippen der Datenträgernummer.</li>
+  </ol>
+  <h3>Sichern</h3>
+  <ol>
+    <li>Platte anstecken, <span class="ui">Aktualisieren</span> – die Platte des gewählten Profils wird an der Bezeichnung erkannt (grün). Eine fremde Platte wird orange markiert und vor dem Start nachgefragt.</li>
+    <li><span class="ui g">Server-Backup starten</span>. Ablauf: Host-Konfiguration → VMs (<code>wbadmin start backup -hyperv</code>) → Prüfung (Version und enthaltene VMs) → optional Host-System (<code>-allCritical</code>, Bare-Metal) → Bericht.</li>
+    <li><span class="ui t">Auswerfen</span> leert den Schreibcache und wirft die Platte aus – danach abziehen.</li>
+  </ol>
+  <p>Die angehakten VMs gelten für diesen Lauf; <span class="ui g">Profil speichern</span> übernimmt Auswahl und Optionen ins Profil.</p>
+  <h3>Was wird gesichert</h3>
+  <table>
+    <tr><th style="width:230px">Teil</th><th>Inhalt</th></tr>
+    <tr><td>VMs</td><td>Konfiguration, virtuelle Festplatten, Prüfpunkte – wiederherstellbar über die Windows Server-Sicherung. VLAN-Einstellungen der VMs sind Teil der VM.</td></tr>
+    <tr><td>Host-Konfiguration</td><td>Virtuelle Switches (Typ, Netzwerkkarte, SET-Team), Host-vNICs mit VLAN, IP-Adressen, Netzwerkkarten, NIC-Teams, Hyper-V-Einstellungen, alle VM-Einstellungen – als <code>HostConfig.html</code>, <code>HostConfig.json</code> und <code>Restore-VMSwitches.ps1</code> (legt die Switches mit gleichem Namen neu an).</td></tr>
+    <tr><td>Host-System (Option)</td><td>Alle kritischen Volumes des Hosts (Bare-Metal-Wiederherstellung über Windows-Setup/WinRE). Liegen VMs auf dem Systemlaufwerk, werden sie dabei nochmals mitgesichert.</td></tr>
+  </table>
+  <p>Auf der Platte: <code>WindowsImageBackup\</code> (Windows Server-Sicherung) und <code>HUMig-ServerBackup\</code> mit einem Ordner je Lauf (<code>Bericht.html</code>, wbadmin-Ausgabe, Versionen, Inhalt, Host-Konfiguration) und <code>history.json</code>. Kopien der Berichte liegen im Tool-Ordner unter <code>Logs\ServerBackup</code>.</p>
+  <h3>Verlauf, Rotation, Statistik</h3>
+  <p>Rechts im Reiter: letzte Sicherung je Platte des Profils, Warnung, wenn die letzte erfolgreiche Sicherung älter als 14 Tage ist, und die <b>nächste Platte laut Rotation</b> (am längsten nicht verwendet). <span class="ui m">Statistik / Übersicht</span> zeigt alle Profile und Platten (letzte Sicherung, Alter, Anzahl Läufe, mittlere Dauer, Host-System) – Rechtsklick: alle Läufe. Grundlage: Verlauf im Tool-Ordner (<code>Config\ServerBackup\history.json</code>) und auf allen angesteckten Platten.</p>
+  <p>Die Windows Server-Sicherung behält mehrere Versionen auf einer Platte und löscht bei Platzmangel automatisch die ältesten. <span class="ui b">Versionen auf der Platte</span> listet sie (<code>wbadmin get versions</code>, Versions-ID in UTC).</p>
+  <h3>Wiederherstellen</h3>
+  <ol>
+    <li>Neu installierter Host: zuerst <code>Restore-VMSwitches.ps1</code> aus dem Berichtsordner prüfen und als Administrator ausführen (gleiche Switch-Namen – die VMs finden ihr Netzwerk dann selbst).</li>
+    <li><span class="ui p">Wiederherstellen …</span> öffnet die Windows Server-Sicherung: <i>Wiederherstellen › an einem anderen Speicherort gespeicherte Sicherung › Lokale Laufwerke</i> › Datum › Typ <b>Hyper-V</b> › VM(s) › ursprünglicher oder anderer Speicherort.</li>
+  </ol>
+  <div class="note warn"><b class="h">Prüfpunkte</b>VMs mit zwei oder mehr Prüfpunkten stellt die Windows Server-Sicherung nicht direkt wieder her – Prüfpunkte vorher zusammenführen (HUMig warnt beim Sichern).</div>
+</section>
+
 <section id="einstellungen">
-  <h2><span class="n">10</span>Einstellungen</h2>
+  <h2><span class="n">11</span>Einstellungen</h2>
   <table>
     <tr><th style="width:170px">Reiter</th><th>Inhalt</th></tr>
     <tr><td>Allgemein</td><td>Backup-Ordner, Threads, Aufbewahrung (Tage + Anzahl je PC/Benutzer), USMT-Pfad (<span class="ui">Aus ADK einrichten</span>), Softwareverteilung, WLAN-Schlüssel im Klartext, Übersicht automatisch aktualisieren, Skalierung, HUMig.exe neu erstellen, Desktop-Verknüpfung</td></tr>
@@ -387,13 +422,14 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><code>Config\apps.json</code></td><td>eigene Einträge für den Programm-Katalog</td></tr>
     <tr><td><code>Config\exceptions.json</code></td><td>Ausnahmen Ordner/Dateitypen</td></tr>
     <tr><td><code>Config\modules.json</code></td><td>eigene Module und Vorlagen</td></tr>
+    <tr><td><code>Config\serverbackup.json</code></td><td>Server-Backup-Profile (VMs, Platten, Optionen)</td></tr>
     <tr><td><code>Config\update.json</code></td><td>andere Update-Quelle <code>{ "Owner": "…", "Repo": "…", "Branch": "main" }</code></td></tr>
   </table>
   <p>Die <code>*.default.json</code> kommen mit jedem Update, eigene Dateien bleiben erhalten.</p>
 </section>
 
 <section id="update">
-  <h2><span class="n">11</span>Installation und Update</h2>
+  <h2><span class="n">12</span>Installation und Update</h2>
   <ol class="steps">
     <li><b>Neu installieren:</b> <code>Pull.ps1</code> in den Zielordner legen und ausführen: <code>powershell -ExecutionPolicy Bypass -File Pull.ps1</code></li>
     <li><b>Update:</b> Knopf <span class="ui">Update</span> – lädt die aktuelle Version und startet neu. BACKUPS, Config, Softwareverteilung und HUMig.exe bleiben erhalten.</li>
@@ -403,7 +439,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 </section>
 
 <section id="faq">
-  <h2><span class="n">12</span>Fragen und Probleme</h2>
+  <h2><span class="n">13</span>Fragen und Probleme</h2>
   <h3>„Übersprungen“ im Robocopy.log – fehlt etwas?</h3>
   <p>Nein. Versteckte/System-Dateien (z. B. <code>pagefile.sys</code>), Nur-Cloud-Platzhalter und Ausschlussmuster werden bewusst nicht kopiert. Das HUMig-Protokoll zeigt sie getrennt als <i>absichtlich ausgelassen</i>. Echte Fehler stehen unter <i>FAILED</i> und als Warnung im Protokoll.</p>
   <h3>Windows meldet „Robocopy lädt Dateien herunter“</h3>
@@ -425,7 +461,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 </section>
 
 <section id="tasten">
-  <h2><span class="n">13</span>Tastenkürzel</h2>
+  <h2><span class="n">14</span>Tastenkürzel</h2>
   <table>
     <tr><td style="width:230px"><kbd>F1</kbd></td><td>Anleitung</td></tr>
     <tr><td><kbd>Enter</kbd> im Feld Computer</td><td>Verbinden</td></tr>
