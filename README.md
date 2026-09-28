@@ -161,6 +161,8 @@ Reiter **Server-Backup** (nur als Administrator auf einem Hyper-V-Host sichtbar)
 - Die Sicherungen sind normale Windows-Server-Sicherungen (`WindowsImageBackup`) - wiederherstellbar auch ohne HUMig mit `wbadmin.msc`, `wbadmin` oder dem Windows-Server-Installationsmedium (Systemimage-Wiederherstellung)
 - **Host-Konfiguration**: virtuelle Switches, SET-Teams, Host-vNICs mit VLAN, IP, Netzwerkkarten, VM-Einstellungen als HTML/JSON + `Restore-VMSwitches.ps1`
 - **Verlauf/Statistik** (mit Hinweis je Lauf, Doppelklick = Bericht) auf der Platte und im Tool-Ordner: letzte Sicherung je Platte, Rotationsempfehlung, Warnung nach 14 Tagen
+- **Status je Lauf**: *OK* (alles gesichert und geprueft), *OK (Hinweis)* (vollstaendig, aber etwas zu wissen - z.B. VM offline gesichert), *Warnung* (nicht alles einwandfrei, z.B. Pruefung oder Host-System), *Fehler*
+- **Bericht je Lauf** (`Bericht.html`, Doppelklick im Verlauf): Status mit Erklaerung, Hinweise mit "Was tun", alle Dateien als Links mit Erklaerung, komplettes Protokoll. *wbadmin* = Befehlszeile der Windows Server-Sicherung, die HUMig aufruft
 - **Offline-Hinweis**: VMs, die Hyper-V nur offline sichern kann (z.B. dynamische Datentraeger im Gast), werden markiert, vor dem Start gemeldet und der Grund steht im Bericht
 - **Zeitplan**: einmalig, taeglich oder woechentlich als geplante Aufgabe (SYSTEM, ohne Anmeldung) - z.B. grosse VMs ueber Nacht
 - **Auswerfen** (Schreibcache leeren), **Versionen**, **Wiederherstellen** ueber die Windows Server-Sicherung
