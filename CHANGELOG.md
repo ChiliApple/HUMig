@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.26 - 2026-09-28
+### Verbessert
+- Zeitplan-Verwaltung (Rechtsklick auf *Zeitplan ...*): neue Spalte **Was** - gesicherte Module, Zusaetzliche Ordner mit Pfad
+
 ## v2.0.25 - 2026-09-28
 ### Behoben
 - *Groesse ermitteln* / *Vorab-Pruefung*: mit genau einem angehakten Modul (z.B. nur Zusaetzliche Ordner) kam "Keine Module gewaehlt" und keine Groesse

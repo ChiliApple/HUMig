@@ -280,9 +280,19 @@ function Get-HMBsRows {
             try { $i = Get-ScheduledTaskInfo -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction Stop; if ($i.NextRunTime) { $next = $i.NextRunTime.ToString('dd.MM.yyyy HH:mm') } } catch { }
         }
         $res = switch ("$($d.LastStatus)") { 'OK' { 'OK' } 'Warning' { 'Warnung' } 'Skipped' { 'uebersprungen' } 'Error' { 'Fehler' } default { '' } }
+        # Was wird gesichert: Modulnamen, Zusaetzliche Ordner mit Pfaden
+        $what = @()
+        $ids = @($d.Modules); $names = @($d.ModuleNames)
+        for ($i = 0; $i -lt $ids.Count; $i++) {
+            $nm = if ($i -lt $names.Count -and "$($names[$i])") { "$($names[$i])" } else { "$($ids[$i])" }
+            if ("$($ids[$i])" -eq 'ExtraFolders') {
+                $fl = @(@($d.Options.ExtraFolders) | Where-Object { $_ })
+                $what += $(if ($fl.Count) { "Ordner: $($fl -join '; ')" } else { $nm })
+            } else { $what += $nm }
+        }
         $tgt = if ($d.Target.Type -eq 'Unc') { "$($d.Target.Path)" } elseif ($d.Target.Label) { "'$($d.Target.Label)'$(if ($d.Target.Rel) { "\$($d.Target.Rel)" })" } else { "$($d.Target.Letter):\$($d.Target.Rel)" }
         $rows += [pscustomobject]@{
-            Name = "$($d.Name)"; Art = $(if ($d.Kind -eq 'Update') { 'fortlaufend' } else { 'neu' }); Wann = (Format-HMBsWhen $d); Ziel = $tgt
+            Name = "$($d.Name)"; Art = $(if ($d.Kind -eq 'Update') { 'fortlaufend' } else { 'neu' }); Wann = (Format-HMBsWhen $d); Was = ($what -join ' | '); Ziel = $tgt
             Aufbewahrung = $(if ($d.Retention -and $d.Retention.Enabled) { "neueste $($d.Retention.Keep)" } else { 'aus' })
             Zustand = $state; Next = $next; Last = "$($d.LastRun)"; Result = $res; Msg = "$($d.LastMessage)"; Def = $d; Task = $t
         }
@@ -303,9 +313,9 @@ function Show-HMBackupSchedules {
     $rows = @($rows)
     if (-not $rows.Count) { Out-Console "Keine geplanten Backups fuer $([Security.Principal.WindowsIdentity]::GetCurrent().Name). Anlegen: Links-Klick auf 'Zeitplan ...'." 'Info'; return }
     $list = New-Object System.Collections.Generic.List[object]
-    foreach ($r in $rows) { $list.Add(@($r.Name, $r.Art, $r.Wann, $r.Ziel, $r.Aufbewahrung, $r.Zustand, $r.Next, $r.Last, $r.Result, $r.Msg, "$($r.Def.Id)")) }
-    Show-DataGridWindow -Title "Geplante Backups - $([Security.Principal.WindowsIdentity]::GetCurrent().Name)" -Width 1350 -Height 420 `
-        -Columns @('Name', 'Art', 'Wann', 'Ziel', 'Aufbewahrung', 'Zustand', 'Naechster_Lauf', 'Letzter_Lauf', 'Ergebnis', 'Meldung', 'Id') -Rows $list.ToArray() `
+    foreach ($r in $rows) { $list.Add(@($r.Name, $r.Art, $r.Wann, $r.Was, $r.Ziel, $r.Aufbewahrung, $r.Zustand, $r.Next, $r.Last, $r.Result, $r.Msg, "$($r.Def.Id)")) }
+    Show-DataGridWindow -Title "Geplante Backups - $([Security.Principal.WindowsIdentity]::GetCurrent().Name)" -Width 1500 -Height 420 `
+        -Columns @('Name', 'Art', 'Wann', 'Was', 'Ziel', 'Aufbewahrung', 'Zustand', 'Naechster_Lauf', 'Letzter_Lauf', 'Ergebnis', 'Meldung', 'Id') -Rows $list.ToArray() `
         -CountText 'Protokolle: %LOCALAPPDATA%\HUMig\Zeitplaene\Logs - Bericht des Backups: Bericht_Backup.html im Backup-Ordner' `
         -Actions @(
             @{ Text = 'Jetzt starten'; Color = '#FFA6E3A1'; Handler = { param($sel, $w, $c)
