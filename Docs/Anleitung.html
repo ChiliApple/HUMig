@@ -175,7 +175,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 
   <h3>Zusätzliche Ordner und Ausnahmen</h3>
   <ul>
-    <li><b>Zusätzliche Ordner</b> (<span class="ui">+ Ordner</span>): werden im Modul <i>Zusätzliche Ordner</i> mit vollem Pfad gesichert.</li>
+    <li><b>Zusätzliche Ordner</b> (<span class="ui">+ Ordner</span>): werden im Modul <i>Zusätzliche Ordner</i> mit vollem Pfad gesichert. Sind Ordner eingetragen, bleibt das Modul angehakt (auch nach <span class="ui">Keine</span> oder einem Vorlagenwechsel) – so lassen sich auch <b>nur</b> diese Ordner sichern und messen. Nicht mehr sichern: Ordner aus der Liste entfernen.</li>
     <li><b>Ausschließen</b>: einzelne Ordner/Dateien weglassen (Rechtsklick auf <span class="ui">+ Ordner</span> = Pfad eintippen). <span class="ui">Grosse Dateien …</span> zeigt die größten Ordner/Dateien der letzten Messung – markierte direkt ausschließen.</li>
     <li>Schalter: <i>Profil: nur AppData ausnehmen</i> · <i>Profil: keine Datei-Ausnahmen</i> · <i>C:\ nur Systemordner ausnehmen</i> · <i>C:\ keine Datei-Ausnahmen</i> · <span class="ui">Ausnahmelisten bearbeiten</span>.</li>
   </ul>
@@ -206,6 +206,33 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><code>Robocopy.log</code></td><td>Kopierprotokoll. Die Spalte <i>Übersprungen/Skipped</i> enthält <b>absichtlich ausgelassene</b> Dateien (versteckt/System wie <code>pagefile.sys</code>, Nur-Cloud, Ausschlussmuster) – das ist kein Fehler. Fehler stehen unter <i>FAILED</i>.</td></tr>
     <tr><td><code>manifest.json</code></td><td>Beschreibung des Backups (Module, Programme, Status)</td></tr>
     <tr><td><code>Pruefsummen.tsv</code></td><td>Prüfsummen-Katalog (wenn eingeschaltet)</td></tr>
+  </table>
+
+  <h3 id="zeitplan-backup">Zeitplan (automatisches Backup)</h3>
+  <p>Mit <span class="ui b">Zeitplan …</span> (unter <span class="ui r">Abbrechen</span>) sichert HUMig das <b>eigene Profil</b> an diesem PC automatisch – z. B. jeden Mittag auf ein USB-Laufwerk oder ein Netzlaufwerk. Übernommen wird die aktuelle Auswahl: angehakte Module, Zusätzliche Ordner, Ausschlüsse, Ausnahmen, Optionen (Prüfen, Katalog, OneDrive, Platzprüfung), Threads und der Backup-Ordner. <b>HUMig muss dafür nicht geöffnet sein.</b> Rechtsklick auf den Knopf = Zeitpläne verwalten.</p>
+  <table>
+    <tr><th style="width:230px">Einstellung</th><th>Bedeutung</th></tr>
+    <tr><td>Fortlaufend</td><td>Das neueste Backup dieses PCs/Benutzers im Backup-Ordner wird aktualisiert – nur neue/geänderte Dateien, daher schnell. Es gibt einen (immer aktuellen) Stand; gelöschte Dateien bleiben im Backup.</td></tr>
+    <tr><td>Neues Backup</td><td>Jeder Lauf legt einen eigenen Stand an (kopiert alles – dauert länger, braucht mehr Platz).</td></tr>
+    <tr><td>Kombination</td><td>Zwei Zeitpläne, z. B. <i>täglich fortlaufend</i> + <i>sonntags neu</i>: der Sonntagslauf friert den Stand der Woche ein, die täglichen Läufe aktualisieren danach das neue Backup. Ergebnis: je Woche ein fester Stand plus ein aktueller. Laufen zwei Zeitpläne gleichzeitig an, wartet der zweite, bis der erste fertig ist.</td></tr>
+    <tr><td>Wann</td><td>Täglich oder wöchentlich (Tage, Uhrzeit) oder <b>bei Anmeldung</b> mit Verzögerung. Verpasste Läufe (PC war aus) werden nachgeholt, auch im Akkubetrieb.</td></tr>
+    <tr><td>Alte Backups automatisch löschen</td><td><b>Standard aus.</b> Ein: nach einem erfolgreichen Lauf bleiben die neuesten N Backups dieses Benutzers von diesem PC im Backup-Ordner (auch von Hand erstellte), ältere werden <b>endgültig</b> gelöscht. Nach einem Fehler wird nichts gelöscht.</td></tr>
+    <tr><td>Meldung</td><td>Windows-Meldung nach jedem Lauf (Klick öffnet den Bericht) – oder nur bei Warnung, Fehler oder übersprungenem Lauf.</td></tr>
+  </table>
+  <ul>
+    <li><b>Konto:</b> Die geplante Aufgabe läuft im Konto des Benutzers <b>ohne Kennwort</b> und nur, solange er angemeldet ist. Ohne Administratorrechte (auch im <a href="#benutzermodus">Benutzer-Modus</a>) werden nur die Module des eigenen Profils gesichert; mit Administratorrechten angelegt, läuft die Aufgabe mit höchsten Rechten und sichert alle gewählten Module.</li>
+    <li><b>Nur eigenes Profil, nur dieser PC:</b> Für andere Benutzer HUMig in deren Anmeldung starten und dort planen.</li>
+    <li><b>Backup-Ziel:</b> Ein USB-Laufwerk wird an seiner <b>Laufwerksbezeichnung</b> erkannt – der Laufwerksbuchstabe darf sich ändern (Laufwerk daher benennen, z. B. <i>BACKUP-MEIER</i>). Ein Netzlaufwerk wird als UNC-Pfad (<code>\\Server\Freigabe\…</code>) gespeichert. Ist das Ziel beim Lauf nicht da, wird der Lauf <b>übersprungen</b> und gemeldet.</li>
+    <li><b>Ort von HUMig:</b> Die Aufgabe startet HUMig aus seinem Ordner. Liegt HUMig auf einem USB-Stick, läuft das Backup nur, wenn der Stick steckt – besser HUMig lokal ablegen (z. B. <code>C:\Tools\HUMig</code>). HUMig warnt beim Anlegen.</li>
+    <li><b>Geöffnete Programme:</b> Outlook und Browser sperren ihre Dateien (PST, Profil-Datenbanken) – diese können im Backup fehlen. Der Lauf nennt die geöffneten Programme im Protokoll. Tipp: Zeitpunkt wählen, an dem sie meist geschlossen sind, oder <i>bei Anmeldung</i>.</li>
+    <li>Beim Start kann für einen Moment ein PowerShell-Fenster aufblitzen.</li>
+  </ul>
+  <table>
+    <tr><th style="width:230px">Wo</th><th>Was</th></tr>
+    <tr><td>Rechtsklick auf <span class="ui b">Zeitplan …</span></td><td>Liste mit nächstem und letztem Lauf, Ergebnis und Meldung – <i>Jetzt starten</i>, <i>Protokoll</i>, <i>Bericht</i>, <i>Löschen</i> (vorhandene Backups bleiben erhalten)</td></tr>
+    <tr><td><code>%LOCALAPPDATA%\HUMig\Zeitplaene\</code></td><td>Zeitplan-Dateien (<code>*.json</code>) des Benutzers, Protokolle im Unterordner <code>Logs</code> (je Zeitplan die letzten 30)</td></tr>
+    <tr><td>Aufgabenplanung</td><td>Aufgabe <i>HUMig Backup - &lt;Benutzer&gt; - &lt;Name&gt;</i> im Ordner <code>\HUMig</code> – ohne Rechte dafür (Standardbenutzer) in der obersten Ebene</td></tr>
+    <tr><td>Backup-Ordner</td><td>wie beim Backup von Hand: <code>Bericht_Backup.html</code>, <code>HUMig.log</code>, <code>Robocopy.log</code></td></tr>
   </table>
 </section>
 
@@ -272,7 +299,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h3>Was geht – was nicht</h3>
   <table>
     <tr><th style="width:50%">Möglich</th><th>Ausgeblendet (braucht Administratorrechte)</th></tr>
-    <tr><td>Benutzerprofil (Dateien), Zusätzliche Ordner<br>Edge, Chrome, Firefox<br>Office-Signaturen, Vorlagen, PST, Office-Einstellungen<br>Taskleiste, Hintergrund, Desktop-Symbole, Schnellzugriff<br>Netzlaufwerke, Netzwerkdrucker, VPN-Verbindungen<br>Programme aus dem Katalog (Einstellungen im Profil)<br>Restore-Vorschau, Checkliste, Backup prüfen, Vergleichen<br>Werkzeuge: <span class="ui t">Im Backup suchen</span>, <span class="ui p">Wichtige Dateien suchen</span>, Anmeldedaten, Profilordner</td>
+    <tr><td>Benutzerprofil (Dateien), Zusätzliche Ordner<br>Edge, Chrome, Firefox<br>Office-Signaturen, Vorlagen, PST, Office-Einstellungen<br>Taskleiste, Hintergrund, Desktop-Symbole, Schnellzugriff<br>Netzlaufwerke, Netzwerkdrucker, VPN-Verbindungen<br>Programme aus dem Katalog (Einstellungen im Profil)<br>Restore-Vorschau, Checkliste, Backup prüfen, Vergleichen<br><a href="#zeitplan-backup">Zeitplan</a> (automatisches Backup des eigenen Profils)<br>Werkzeuge: <span class="ui t">Im Backup suchen</span>, <span class="ui p">Wichtige Dateien suchen</span>, Anmeldedaten, Profilordner</td>
         <td>andere Computer und Benutzer, Active Directory<br>Daten auf Systemlaufwerk, WLAN, Schriftarten, ODBC<br>Drucker mit Treibern, Treiber, Freigaben, Aufgaben, USMT<br>Einträge in Programme/Windows/HKLM (werden beim Restore übersprungen)<br>Fehlende Programme installieren, Softwareverteilung<br>Nacharbeiten mit Systemzugriff, Einstellungen, Update<br>alle übrigen Werkzeuge</td></tr>
   </table>
   <ul>

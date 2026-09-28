@@ -24,7 +24,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 
 | | |
 |---|---|
-| **Backup & Restore** | Dateien, Browser, Office, Windows-Einstellungen, Drucker, WLAN, Netzlaufwerke – Robocopy mit bis zu 128 Threads, inkrementell, mit Prüfung |
+| **Backup & Restore** | Dateien, Browser, Office, Windows-Einstellungen, Drucker, WLAN, Netzlaufwerke – Robocopy mit bis zu 128 Threads, inkrementell, mit Prüfung, **Zeitplan** (automatisch auf USB/Netz) |
 | **Programm-Katalog** | erkennt 45+ Programme, sichert deren Einstellungen und **Lizenzdateien** mit, installiert fehlende am neuen PC nach |
 | **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
 | **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Softwareverteilung |
@@ -98,6 +98,18 @@ Nicht uebertragbar sind Lizenzen, die an Konto oder Hardware gebunden sind (Micr
 | Pruefsummen-Katalog | Standard aus. SHA-256 aller Dateien im Backup (`Pruefsummen.tsv`, inkrementell - der erste Lauf dauert lange). Reiter Restore > *Backup pruefen* erkennt spaeter beschaedigte/fehlende Dateien (USB-Stick, NAS). Rechtsklick = Katalog fuer aeltere Backups erstellen. |
 | OneDrive/SharePoint: lokale Dateien mitsichern | Aus: Cloud-Ordner werden ausgelassen. Ein: nur Dateien, die am PC vorhanden sind - Nur-Cloud-Dateien werden nie heruntergeladen. |
 | Pfade ausschliessen | Einzelne Ordner/Dateien weglassen - auch direkt aus *Grosse Dateien ...* (groesste Ordner und Dateien der letzten Messung). |
+| Zusaetzliche Ordner | Beliebige Ordner mit vollem Pfad. Sind Ordner eingetragen, bleibt das Modul angehakt (auch nach *Keine*/Vorlagenwechsel) - so lassen sich auch nur diese Ordner sichern. |
+
+### Zeitplan (automatisches Backup)
+
+Knopf **Zeitplan ...** im Reiter Backup: das **eigene Profil** an diesem PC automatisch sichern - mit der aktuellen Auswahl (Module, Zusaetzliche Ordner, Ausschluesse, Optionen, Backup-Ordner). HUMig muss dafuer nicht geoeffnet sein.
+- **Fortlaufend** (vorhandenes Backup aktualisieren, nur Aenderungen) oder **Neues Backup** (eigener Stand) - kombinierbar, z.B. taeglich fortlaufend + sonntags neu = je Woche ein fester Stand plus ein aktueller
+- **Taeglich**, **woechentlich** oder **bei Anmeldung** (mit Verzoegerung); verpasste Laeufe werden nachgeholt
+- Geplante Aufgabe im Konto des Benutzers **ohne Kennwort** (laeuft, solange er angemeldet ist) - auch im Benutzer-Modus; ohne Adminrechte nur Module des eigenen Profils
+- Ziel: USB-Laufwerk wird an seiner **Bezeichnung** erkannt (Buchstabe darf wechseln), Netzlaufwerk als UNC-Pfad; fehlt das Ziel, wird der Lauf uebersprungen und gemeldet
+- Optional **alte Backups automatisch loeschen** (neueste N dieses Benutzers/PCs bleiben, Standard aus, nur nach erfolgreichem Lauf)
+- Windows-Meldung nach jedem Lauf oder nur bei Problemen; Rechtsklick auf *Zeitplan ...* = verwalten (jetzt starten, Protokoll, Bericht, loeschen)
+- Dateien: `%LOCALAPPDATA%\HUMig\Zeitplaene\` (Definition + `Logs\`), Aufgabe *HUMig Backup - Benutzer - Name* in der Aufgabenplanung
 
 Vorlagen: Standard, Komplett, Nur Browser + Office, Neuer PC (mit USMT), **Notebook** (ohne C:\\), **Buero-PC** (mit Druckertreibern, Schriftarten), **Minimal** - eigene in `Config\modules.json`.
 

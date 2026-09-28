@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.23'
+$script:Version   = '2.0.24'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -115,7 +115,7 @@ $script:SplashShown = Get-Date
 # ============================================================================
 # FUNKTIONEN LADEN
 # ============================================================================
-foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'Tools-Software.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1')) {
+foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1')) {
     $mp = Join-Path $script:AppRoot "Functions\$mod"
     try { . $mp } catch { [System.Windows.MessageBox]::Show("$mod konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null; exit 1 }
 }
@@ -248,7 +248,7 @@ foreach ($n in @('imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings
     'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnReinstall', 'btnADDevices',
     'tabServerBackup', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
     'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
-    'lblSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'lblSbSchedule')) { $ui[$n] = Get-UI $n }
+    'lblSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule')) { $ui[$n] = Get-UI $n }
 Initialize-HMTaskbar
 $script:RowConsole = $ui.rowConsole
 if ($script:LogoImage) { $ui.imgLogo.Source = $script:LogoImage }
@@ -456,12 +456,30 @@ $ui.cmbPreset.Add_SelectionChanged({
     if (-not $p) { return }
     $all = @($p.Modules) -contains '*'
     foreach ($k in $script:BackupChecks.Keys) { $script:BackupChecks[$k].IsChecked = ($all -or (@($p.Modules) -contains $k)) }
+    Sync-ExtraFoldersCheck
     if ($p.Hint) { $ui.cmbPreset.ToolTip = "$($p.Hint)" } else { $ui.cmbPreset.ToolTip = $null }
     if (-not $script:SuppressPresetSave) { Save-LocalSetting 'LastPreset' "$($p.Name)" }
 })
 Update-PresetList
 $ui.btnAllOn.Add_Click({ foreach ($c in $script:BackupChecks.Values) { $c.IsChecked = $true } })
-$ui.btnAllOff.Add_Click({ foreach ($c in $script:BackupChecks.Values) { $c.IsChecked = $false } })
+$ui.btnAllOff.Add_Click({ foreach ($c in $script:BackupChecks.Values) { $c.IsChecked = $false }; Sync-ExtraFoldersCheck })
+# Eingetragene Zusaetzliche Ordner -> Modul 'Zusaetzliche Ordner' bleibt angehakt (auch nach 'Keine' oder Vorlagenwechsel)
+function Sync-ExtraFoldersCheck {
+    if ($ui.lstExtra.Items.Count -and $script:BackupChecks.ContainsKey('ExtraFolders')) { $script:BackupChecks['ExtraFolders'].IsChecked = $true }
+}
+# Angehakte Backup-Module; sind Ordner eingetragen, gehoert 'Zusaetzliche Ordner' immer dazu
+function Get-BackupModules {
+    $mods = @(Get-CheckedModules $script:BackupChecks)
+    if ($ui.lstExtra.Items.Count -and -not @($mods | Where-Object { $_.Id -eq 'ExtraFolders' }).Count) {
+        $m = @($script:Modules | Where-Object { $_.Id -eq 'ExtraFolders' })[0]
+        if ($m -and $script:BackupChecks.ContainsKey('ExtraFolders') -and $script:BackupChecks['ExtraFolders'].IsEnabled) {
+            $script:BackupChecks['ExtraFolders'].IsChecked = $true
+            $mods += $m
+            Out-Console "Zusaetzliche Ordner sind eingetragen - Modul 'Zusaetzliche Ordner' wurde angehakt (nicht sichern: Ordner aus der Liste entfernen)" 'Info'
+        }
+    }
+    return $mods
+}
 
 foreach ($t in @(1, 4, 8, 16, 32, 64, 128)) { [void]$ui.cmbThreads.Items.Add("$t") }
 $ui.cmbThreads.SelectedItem = "$([int]$script:Settings.Threads)"
@@ -795,7 +813,7 @@ function New-BaseCtx {
 $ui.btnBackup.Add_Click({
     $p = Get-SelectedProfile
     if (-not $p -or $p.NoProfile) { Out-Console 'Bitte zuerst einen Benutzer mit Profil waehlen (Verbinden).' 'Warning'; return }
-    $mods = @(Get-CheckedModules $script:BackupChecks)
+    $mods = @(Get-BackupModules)
     if (-not $mods.Count) { Out-Console 'Keine Module gewaehlt.' 'Warning'; Write-ModuleDiag $script:BackupChecks; return }
     if (@($mods | Where-Object { $_.Id -eq 'ExtraFolders' }).Count -and -not $ui.lstExtra.Items.Count) { Out-Console "Modul 'Zusaetzliche Ordner' gewaehlt, aber kein Ordner eingetragen." 'Warning' }
     $root = Get-BackupRoot
@@ -871,7 +889,7 @@ function Start-SizeMeasure([bool]$All) {
     $p = Get-SelectedProfile
     if (-not $p -or $p.NoProfile) { Out-Console 'Bitte zuerst einen Benutzer waehlen.' 'Warning'; return }
     $ctx = New-BaseCtx
-    $ctx.Modules = if ($All) { @($script:Modules | Where-Object { $script:BackupChecks.ContainsKey($_.Id) }) } else { @(Get-CheckedModules $script:BackupChecks) }
+    $ctx.Modules = if ($All) { @($script:Modules | Where-Object { $script:BackupChecks.ContainsKey($_.Id) }) } else { @(Get-BackupModules) }
     if (-not $ctx.Modules.Count) { Out-Console 'Keine Module gewaehlt.' 'Warning'; return }
     $script:MeasureKey = Get-SizeKey
     Start-EngineJob -Command 'Measure-HMBackup -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'Groesse ermitteln' -OnFinished {
@@ -1124,6 +1142,8 @@ $ui.btnVerifyBackup.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; i
 $ui.btnCompare.Add_Click({ if (-not $script:JobRunning) { Start-HMCompareBackups } })
 $ui.btnOverview.Add_Click({ Update-HMBackupOverview -Open })
 $ui.btnApps.Add_Click({ Start-HMAppDetect -Show })
+$ui.btnBackupSchedule.Add_Click({ New-HMBackupSchedule })
+$ui.btnBackupSchedule.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMBackupSchedules })
 $ui.btnApps.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMAppCatalog })
 $ui.btnReinstall.Add_Click({ Start-HMAppReinstall })
 
@@ -1549,6 +1569,7 @@ foreach ($e in $script:ConfigErrors) { Out-Console "Konfigurationsfehler: $e" 'E
 if ($script:ActiveSchool) { Out-Console "Standort: $($script:ActiveSchool.Name) - Backup-Ordner $(Get-BackupRoot)" 'Info' }
 if ($script:UserMode) { Set-HMUserModeUi }
 Initialize-HMServerBackupTab -IsAdmin $isAdmin
+try { Update-HMBsLabel } catch { }
 Update-BackupList
 Connect-Target
 if (-not $script:UserMode) { Invoke-UpdateCheck }

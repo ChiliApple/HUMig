@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.24 - 2026-09-28
+### Neu
+- Backup: **Zeitplan** - eigenes Profil automatisch sichern (taeglich, woechentlich oder bei Anmeldung), fortlaufend oder als neues Backup, auf USB-Laufwerk (Erkennung ueber die Bezeichnung) oder Netzlaufwerk (UNC); geplante Aufgabe im Konto des Benutzers ohne Kennwort, auch im Benutzer-Modus; HUMig muss nicht geoeffnet sein
+- Zeitplan: optional alte Backups automatisch loeschen (neueste N bleiben, Standard aus), Windows-Meldung mit Link zum Bericht, Verwaltung per Rechtsklick (jetzt starten, Protokoll, Bericht, loeschen)
+### Behoben
+- Nur Zusaetzliche Ordner sichern/messen: war das Modul nach *Keine* oder einem Vorlagenwechsel nicht mehr angehakt, kam "Keine Module gewaehlt" und keine Groesse - sind Ordner eingetragen, bleibt das Modul jetzt angehakt
+
 ## v2.0.23 - 2026-09-28
 ### Doku
 - USMT: klargestellt, dass USMT auch fuer den Restore auf einen **neuen PC ohne Profil** noetig ist (LoadState legt das Profil an); ohne USMT muss sich der Benutzer vorher einmal anmelden (INSTALL.md, BIN\LIESMICH.txt, Anleitung)
