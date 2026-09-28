@@ -157,6 +157,7 @@ Reiter **Server-Backup** (nur als Administrator auf einem Hyper-V-Host sichtbar)
 - **Sichern** mit `wbadmin start backup -hyperv` (online ueber VSS), danach Pruefung (Version + enthaltene VMs), optional Host-System (`-allCritical`)
 - **Host-Konfiguration**: virtuelle Switches, SET-Teams, Host-vNICs mit VLAN, IP, Netzwerkkarten, VM-Einstellungen als HTML/JSON + `Restore-VMSwitches.ps1`
 - **Verlauf/Statistik** auf der Platte und im Tool-Ordner: letzte Sicherung je Platte, Rotationsempfehlung, Warnung nach 14 Tagen
+- **Zeitplan**: einmalig, taeglich oder woechentlich als geplante Aufgabe (SYSTEM, ohne Anmeldung) - z.B. grosse VMs ueber Nacht
 - **Auswerfen** (Schreibcache leeren), **Versionen**, **Wiederherstellen** ueber die Windows Server-Sicherung
 
 Voraussetzung: Feature *Windows Server-Sicherung* (installierbar aus dem Reiter).

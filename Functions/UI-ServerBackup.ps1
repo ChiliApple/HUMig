@@ -66,10 +66,6 @@ function Get-HMSbProfile {
 function Get-HMSbCheckedVms {
     return @($ui.pnlSbVms.Children | Where-Object { $_ -is [System.Windows.Controls.CheckBox] -and $_.IsChecked } | ForEach-Object { "$($_.Tag)" })
 }
-function Test-HMSbLabelMatch([string]$Label, [string]$Prefix) {
-    if (-not $Label -or -not $Prefix) { return $false }
-    return ($Label -ieq $Prefix -or $Label.StartsWith("$Prefix-", [System.StringComparison]::OrdinalIgnoreCase))
-}
 function Format-HMSbStatus([string]$s) { switch ($s) { 'OK' { 'OK' } 'Warning' { 'Warnung' } 'Error' { 'FEHLER' } default { $s } } }
 function Format-HMSbState([string]$s) { switch ($s) { 'Running' { 'laeuft' } 'Off' { 'aus' } 'Saved' { 'gespeichert' } 'Paused' { 'angehalten' } default { $s } } }
 function Get-HMSbDate([string]$s) {
@@ -104,6 +100,7 @@ function Set-HMSbFromProfile {
     Select-HMSbDriveForProfile
     Update-HMSbSize
     Update-HMSbHistory
+    Update-HMSbSchedules
 }
 function Save-HMSbLastProfile([string]$Name) {
     $cfg = Get-HMSbConfig
@@ -256,6 +253,11 @@ function Update-HMSbDrives {
         else {
             foreach ($m in @($r.Messages)) { if ($m) { Out-Console $m 'Warning' } }
             $script:SbDrives = @($r.Drives | Where-Object { $_ })
+            # umbenannte Platten: Verlaufseintraege auf den aktuellen Namen bringen
+            foreach ($d in $script:SbDrives) {
+                try { $c = Sync-HMSbDiskLabel $d.Letter $d.Label $script:SbHistFile; if ($c) { Out-Console "Platte $($d.Letter): heisst jetzt '$($d.Label)' - $c Verlaufseintrag/-eintraege angepasst" 'Info' } }
+                catch { Out-Console "Verlauf der Platte $($d.Letter): $($_.Exception.Message)" 'Warning' }
+            }
         }
         foreach ($d in $script:SbDrives) { [void]$ui.cmbSbDrive.Items.Add((Format-HMSbDrive $d)) }
         if (-not $script:SbDrives.Count) { [void]$ui.cmbSbDrive.Items.Add('(keine Platte gefunden - USB-Platte anstecken, dann Aktualisieren)'); $ui.cmbSbDrive.SelectedIndex = 0 }
@@ -627,6 +629,150 @@ function Update-HMSbAll {
 }
 
 # ----------------------------------------------------------------------------
+# Zeitplan: geplante Aufgabe (SYSTEM) startet Functions\ServerBackup-Task.ps1
+# ----------------------------------------------------------------------------
+$script:SbTaskPath = '\HUMig\'
+function Show-HMSbScheduleDialog([string]$Info) {
+    $x = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Server-Backup planen" Width="560" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#FF1E1E2E">
+  <StackPanel Margin="14">
+    <TextBlock x:Name="info" Foreground="#FFCDD6F4" TextWrapping="Wrap" Margin="0,0,0,12"/>
+    <RadioButton x:Name="rbOnce" Content="Einmalig am (TT.MM.JJJJ)" IsChecked="True" Foreground="#FFCDD6F4" Margin="0,2"/>
+    <TextBox x:Name="txtDate" Width="120" HorizontalAlignment="Left" Margin="22,2,0,6" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,2"/>
+    <RadioButton x:Name="rbDaily" Content="Taeglich" Foreground="#FFCDD6F4" Margin="0,2"/>
+    <RadioButton x:Name="rbWeekly" Content="Woechentlich an" Foreground="#FFCDD6F4" Margin="0,2"/>
+    <WrapPanel x:Name="pnlDays" Margin="22,2,0,6"/>
+    <StackPanel Orientation="Horizontal" Margin="0,6,0,10">
+      <TextBlock Text="Uhrzeit (HH:MM):" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
+      <TextBox x:Name="txtTime" Width="70" Text="22:00" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,2"/>
+    </StackPanel>
+    <TextBlock Foreground="#FF6C7086" TextWrapping="Wrap" Margin="0,0,0,12" Text="Die Aufgabe laeuft als SYSTEM ohne Anmeldung (auch nach Neustart). Zur Startzeit muss eine Platte des Profils angesteckt sein - sonst wird ein Fehler im Verlauf eingetragen. Protokoll: Logs\ServerBackup\Aufgabe_*.log"/>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button x:Name="ok" Content="Planen" Width="110" Height="28" Background="#FFA6E3A1" Foreground="#FF1E1E2E" FontWeight="SemiBold" Margin="0,0,6,0" IsDefault="True"/>
+      <Button x:Name="cancel" Content="Abbrechen" Width="100" Height="28" Background="#FF45475A" Foreground="#FFCDD6F4" IsCancel="True"/>
+    </StackPanel>
+  </StackPanel>
+</Window>
+"@
+    $w = [System.Windows.Markup.XamlReader]::Parse($x)
+    if ($script:AppIcon) { $w.Icon = $script:AppIcon }
+    $w.FindName('info').Text = $Info
+    $txtDate = $w.FindName('txtDate'); $txtTime = $w.FindName('txtTime')
+    $txtDate.Text = (Get-Date).ToString('dd.MM.yyyy')
+    $days = @(@('Monday', 'Mo'), @('Tuesday', 'Di'), @('Wednesday', 'Mi'), @('Thursday', 'Do'), @('Friday', 'Fr'), @('Saturday', 'Sa'), @('Sunday', 'So'))
+    $pnl = $w.FindName('pnlDays')
+    foreach ($d in $days) { $cb = New-Object System.Windows.Controls.CheckBox; $cb.Content = $d[1]; $cb.Tag = $d[0]; $cb.Foreground = New-Brush '#FFCDD6F4'; $cb.Margin = [System.Windows.Thickness]::new(0, 0, 10, 0); [void]$pnl.Children.Add($cb) }
+    $res = @{ V = $null }
+    $rbOnce = $w.FindName('rbOnce'); $rbDaily = $w.FindName('rbDaily'); $rbWeekly = $w.FindName('rbWeekly')
+    $w.FindName('ok').Add_Click({
+        $t = [datetime]::MinValue
+        if (-not [datetime]::TryParseExact("$($txtTime.Text)".Trim(), 'H:mm', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$t)) {
+            [void][System.Windows.MessageBox]::Show($w, 'Uhrzeit bitte als HH:MM eingeben (z.B. 22:00).', 'Zeitplan', 'OK', 'Warning'); return
+        }
+        $mode = if ($rbDaily.IsChecked) { 'Daily' } elseif ($rbWeekly.IsChecked) { 'Weekly' } else { 'Once' }
+        $at = (Get-Date).Date.AddHours($t.Hour).AddMinutes($t.Minute)
+        $sel = @()
+        if ($mode -eq 'Once') {
+            $dd = [datetime]::MinValue
+            if (-not [datetime]::TryParseExact("$($txtDate.Text)".Trim(), 'd.M.yyyy', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$dd)) {
+                [void][System.Windows.MessageBox]::Show($w, 'Datum bitte als TT.MM.JJJJ eingeben.', 'Zeitplan', 'OK', 'Warning'); return
+            }
+            $at = $dd.Date.AddHours($t.Hour).AddMinutes($t.Minute)
+            if ($at -le (Get-Date)) { [void][System.Windows.MessageBox]::Show($w, 'Der Zeitpunkt liegt in der Vergangenheit.', 'Zeitplan', 'OK', 'Warning'); return }
+        } elseif ($mode -eq 'Weekly') {
+            $sel = @($pnl.Children | Where-Object { $_.IsChecked } | ForEach-Object { "$($_.Tag)" })
+            if (-not $sel.Count) { [void][System.Windows.MessageBox]::Show($w, 'Mindestens einen Wochentag waehlen.', 'Zeitplan', 'OK', 'Warning'); return }
+        }
+        $res.V = @{ Mode = $mode; At = $at; Days = $sel }
+        $w.DialogResult = $true
+    }.GetNewClosure())
+    $w.Owner = $script:Window; Set-HMWindowScale $w
+    if ($w.ShowDialog() -eq $true) { return $res.V }
+    return $null
+}
+function New-HMSbSchedule {
+    $p = Get-HMSbProfile
+    if (-not $p) { Out-Console 'Zeitplan: zuerst ein Profil waehlen/anlegen.' 'Warning'; return }
+    $vms = @(Get-HMSbCheckedVms)
+    $hc = [bool]$ui.chkSbHostConfig.IsChecked; $hs = [bool]$ui.chkSbHostSystem.IsChecked; $vf = [bool]$ui.chkSbVerify.IsChecked
+    if (-not $vms.Count -and -not $hs -and -not $hc) { Out-Console 'Zeitplan: nichts gewaehlt (VMs, Host-Konfiguration oder Host-System).' 'Warning'; return }
+    foreach ($x in @($p.Name) + $vms) { if ("$x" -match '["|]') { Out-Console "Zeitplan: Name '$x' enthaelt ein nicht erlaubtes Zeichen (Anfuehrungszeichen oder |)." 'Error'; return } }
+    $info = "Profil: $($p.Name)   (Platten $($p.DiskPrefix)-...)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })   Pruefen: $(if ($vf) { 'ja' } else { 'nein' })   Host-System: $(if ($hs) { 'ja' } else { 'nein' })`n`nEs gelten die aktuell angehakten VMs und Optionen."
+    $r = Show-HMSbScheduleDialog $info
+    if (-not $r) { return }
+    $task = Join-Path $script:AppRoot 'Functions\ServerBackup-Task.ps1'
+    $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$task`" -ProfileName `"$($p.Name)`""
+    if ($vms.Count) { $arg += " -VMs `"$($vms -join '|')`"" }
+    if ($hc) { $arg += ' -HostConfig' }
+    if ($hs) { $arg += ' -HostSystem' }
+    if (-not $vf) { $arg += ' -NoVerify' }
+    $dayNames = @{ Monday = 'Mo'; Tuesday = 'Di'; Wednesday = 'Mi'; Thursday = 'Do'; Friday = 'Fr'; Saturday = 'Sa'; Sunday = 'So' }
+    try {
+        $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument $arg -WorkingDirectory $script:AppRoot
+        $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 23) -MultipleInstances IgnoreNew
+        switch ($r.Mode) {
+            'Once' {
+                $t = New-ScheduledTaskTrigger -Once -At $r.At
+                $t.EndBoundary = $r.At.AddDays(1).ToString('s')
+                $s.DeleteExpiredTaskAfter = 'P7D'
+                $when = 'einmalig ' + $r.At.ToString('dd.MM.yyyy HH-mm')
+            }
+            'Daily' { $t = New-ScheduledTaskTrigger -Daily -At $r.At; $when = 'taeglich ' + $r.At.ToString('HH-mm') }
+            default { $t = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $r.Days -At $r.At; $when = (@($r.Days | ForEach-Object { $dayNames[$_] }) -join ',') + ' ' + $r.At.ToString('HH-mm') }
+        }
+        $pr = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $base = ('Server-Backup - {0} - {1}' -f ($p.Name -replace '[\\/:*?"<>|]', '_'), $when)
+        $name = $base; $i = 2
+        while (Get-ScheduledTask -TaskPath $script:SbTaskPath -TaskName $name -ErrorAction SilentlyContinue) { $name = "$base ($i)"; $i++ }
+        $desc = "HUMig Server-Backup, Profil $($p.Name), VMs: $(if ($vms.Count) { $vms -join ', ' } else { '-' }). Verwalten: HUMig > Server-Backup > Zeitplan (Rechtsklick)."
+        Register-ScheduledTask -TaskName $name -TaskPath $script:SbTaskPath -Action $a -Trigger $t -Principal $pr -Settings $s -Description $desc -ErrorAction Stop | Out-Null
+        Out-Console "Geplant: '$name' (Aufgabenplanung \HUMig) - laeuft als SYSTEM, Protokoll Logs\ServerBackup\Aufgabe_*.log" 'Success'
+    } catch { Out-Console "Zeitplan konnte nicht angelegt werden: $($_.Exception.Message)" 'Error' }
+    Update-HMSbSchedules
+}
+function Get-HMSbScheduleRows {
+    $rows = @()
+    foreach ($t in @(Get-ScheduledTask -TaskPath $script:SbTaskPath -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'Server-Backup*' })) {
+        $i = $null; try { $i = Get-ScheduledTaskInfo -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction Stop } catch { }
+        $next = if ($i -and $i.NextRunTime) { $i.NextRunTime.ToString('dd.MM.yyyy HH:mm') } else { '' }
+        $last = if ($i -and $i.LastRunTime -and $i.LastRunTime.Year -gt 2000) { $i.LastRunTime.ToString('dd.MM.yyyy HH:mm') } else { '' }
+        $res = ''
+        if ($last) { $res = switch ([int64]$i.LastTaskResult) { 0 { 'OK' } 1 { 'Warnung' } 2 { 'Fehler' } 267009 { 'laeuft' } default { '0x{0:X}' -f [int64]$i.LastTaskResult } } }
+        $rows += [pscustomobject]@{ Name = $t.TaskName; State = "$($t.State)"; Next = $next; Last = $last; Result = $res; Args = "$(@($t.Actions)[0].Arguments)" }
+    }
+    return ,$rows
+}
+function Update-HMSbSchedules {
+    try {
+        $rows = Get-HMSbScheduleRows
+        $rows = @($rows)
+        $p = Get-HMSbProfile
+        $mine = @($rows | Where-Object { -not $p -or $_.Name -like "Server-Backup - $($p.Name -replace '[\\/:*?"<>|]', '_') - *" })
+        if ($mine.Count) {
+            $ui.lblSbSchedule.Text = 'Geplant: ' + (@($mine | ForEach-Object { "$(($_.Name -split ' - ', 3)[-1])$(if ($_.Next) { " (naechster Lauf $($_.Next))" })$(if ($_.Result) { " letzter: $($_.Result)" })" }) -join '   |   ')
+        } else { $ui.lblSbSchedule.Text = 'Kein Zeitplan fuer dieses Profil (Button Zeitplan ...)' }
+    } catch { $ui.lblSbSchedule.Text = '' }
+}
+function Show-HMSbSchedules {
+    $rows = Get-HMSbScheduleRows
+    $rows = @($rows)
+    if (-not $rows.Count) { Out-Console 'Keine geplanten Server-Backups (Aufgabenplanung \HUMig).' 'Info'; return }
+    $list = New-Object System.Collections.Generic.List[object]
+    foreach ($r in $rows) { $list.Add(@($r.Name, $r.State, $r.Next, $r.Last, $r.Result, $r.Args)) }
+    Show-DataGridWindow -Title 'Geplante Server-Backups (Aufgabenplanung \HUMig)' -Width 1200 -Height 420 `
+        -Columns @('Name', 'Zustand', 'Naechster_Lauf', 'Letzter_Lauf', 'Ergebnis', 'Aufruf') -Rows $list.ToArray() `
+        -CountText 'Ergebnis: OK / Warnung / Fehler - Details im Verlauf und in Logs\ServerBackup\Aufgabe_*.log' `
+        -Actions @(
+            @{ Text = 'Jetzt starten'; Color = '#FFA6E3A1'; Handler = { param($sel, $w, $c) foreach ($r in $sel) { try { Start-ScheduledTask -TaskPath $script:SbTaskPath -TaskName "$($r.Name)" -ErrorAction Stop; Out-Console "Gestartet: $($r.Name) (laeuft im Hintergrund als SYSTEM)" 'Success' } catch { Out-Console "$($r.Name): $($_.Exception.Message)" 'Error' } }; $w.Close(); Update-HMSbSchedules } },
+            @{ Text = 'Loeschen'; Color = '#FFF38BA8'; Handler = { param($sel, $w, $c)
+                    if (-not (Confirm-Action "$(@($sel).Count) geplante(s) Server-Backup(s) loeschen?")) { return }
+                    foreach ($r in $sel) { try { Unregister-ScheduledTask -TaskPath $script:SbTaskPath -TaskName "$($r.Name)" -Confirm:$false -ErrorAction Stop; Out-Console "Zeitplan geloescht: $($r.Name)" 'Info' } catch { Out-Console "$($r.Name): $($_.Exception.Message)" 'Error' } }
+                    $w.Close(); Update-HMSbSchedules } }
+        )
+}
+
+# ----------------------------------------------------------------------------
 # Initialisierung (nach dem Laden des Hauptfensters)
 # ----------------------------------------------------------------------------
 function Initialize-HMServerBackupTab {
@@ -634,7 +780,7 @@ function Initialize-HMServerBackupTab {
     $tab = $ui.tabServerBackup
     if (-not $tab) { return }
     if ($script:UserMode -or -not $IsAdmin -or -not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { $tab.Visibility = 'Collapsed'; return }
-    $script:SbButtons = @($ui.btnSbBackup, $ui.btnSbProfileNew, $ui.btnSbProfileSave, $ui.btnSbProfileEdit, $ui.btnSbProfileDel, $ui.btnSbDrives, $ui.btnSbDiskSetup, $ui.btnSbEject, $ui.btnSbHostOnly, $ui.btnSbFeature)
+    $script:SbButtons = @($ui.btnSbBackup, $ui.btnSbSchedule, $ui.btnSbProfileNew, $ui.btnSbProfileSave, $ui.btnSbProfileEdit, $ui.btnSbProfileDel, $ui.btnSbDrives, $ui.btnSbDiskSetup, $ui.btnSbEject, $ui.btnSbHostOnly, $ui.btnSbFeature)
     $ui.btnSbBackup.Add_Click({ Start-HMSbBackup })
     $ui.btnSbCancel.Add_Click($cancelAction)
     $ui.btnSbProfileNew.Add_Click({ New-HMSbProfile })
@@ -654,6 +800,8 @@ function Initialize-HMServerBackupTab {
     $ui.btnSbOverview.Add_Click({ Show-HMSbOverview })
     $ui.btnSbOverview.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMSbAllRuns })
     $ui.btnSbHostOnly.Add_Click({ Start-HMSbHostOnly })
+    $ui.btnSbSchedule.Add_Click({ New-HMSbSchedule })
+    $ui.btnSbSchedule.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMSbSchedules })
     $ui.btnSbRestore.Add_Click({ Show-HMSbRestoreHelp })
     $ui.btnSbFeature.Add_Click({ Install-HMSbFeature })
     $ui.chkSbHostSystem.Add_Click({ if ($ui.chkSbHostSystem.IsChecked) { Out-Console 'Host-System-Sicherung: alle kritischen Volumes des Hosts (Bare-Metal). Liegen VMs auf dem Systemlaufwerk, werden sie dabei zusaetzlich gesichert (Platz!).' 'Info' } })

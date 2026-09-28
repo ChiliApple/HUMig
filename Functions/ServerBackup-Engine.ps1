@@ -233,6 +233,41 @@ function Add-HMSbHistory([string]$Path, $Entry) {
     ConvertTo-Json -InputObject @($arr) -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
+# Platte gehoert zum Profil, wenn die Bezeichnung = Praefix oder Praefix-<...> ist
+function Test-HMSbLabelMatch([string]$Label, [string]$Prefix) {
+    if (-not $Label -or -not $Prefix) { return $false }
+    return ($Label -ieq $Prefix -or $Label.StartsWith("$Prefix-", [System.StringComparison]::OrdinalIgnoreCase))
+}
+
+# Bezeichnung einer Platte wurde geaendert: Verlauf auf der Platte (alle Eintraege gehoeren zu ihr) und
+# die passenden Eintraege im Tool-Ordner (gleicher Lauf = Datum/Host/Profil auch auf der Platte) nachziehen
+function Sync-HMSbDiskLabel([string]$Letter, [string]$Label, [string]$LocalHistory) {
+    if (-not $Label) { return 0 }
+    $f = "$($Letter):\$($script:SbDirName)\history.json"
+    if (-not (Test-Path -LiteralPath $f)) { return 0 }
+    $disk = Read-HMSbHistory $f
+    $disk = @($disk)
+    if (-not $disk.Count) { return 0 }
+    $n = 0
+    $keys = @{}
+    foreach ($e in $disk) {
+        $keys["$($e.Date)|$($e.Host)|$($e.Profile)"] = $true
+        if ("$($e.Disk)" -ne $Label) { $e.Disk = $Label; $n++ }
+    }
+    if ($n) { ConvertTo-Json -InputObject @($disk) -Depth 5 | Set-Content -LiteralPath $f -Encoding UTF8 }
+    if ($LocalHistory -and (Test-Path -LiteralPath $LocalHistory)) {
+        $loc = Read-HMSbHistory $LocalHistory
+        $loc = @($loc)
+        $m = 0
+        foreach ($e in $loc) {
+            if ($keys.ContainsKey("$($e.Date)|$($e.Host)|$($e.Profile)") -and "$($e.Disk)" -ne $Label) { $e.Disk = $Label; $m++ }
+        }
+        if ($m) { ConvertTo-Json -InputObject @($loc) -Depth 5 | Set-Content -LiteralPath $LocalHistory -Encoding UTF8 }
+        $n += $m
+    }
+    return $n
+}
+
 # Profile auf der Platte (profiles.json) - Wiederherstellung der Profile nach Verlust des Hosts
 function Read-HMSbDiskProfiles([string]$Dir) {
     $f = Join-Path $Dir 'profiles.json'
