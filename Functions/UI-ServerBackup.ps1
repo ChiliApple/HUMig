@@ -40,10 +40,22 @@ function Get-HMSbConfig {
     $c = Read-JsonFile $script:SbCfgFile
     $list = @()
     if ($c -and $c.Profiles) { foreach ($p in @($c.Profiles)) { if ($p -and "$($p.Name)".Trim()) { $list += (ConvertTo-HMSbProfile $p) } } }
-    return [pscustomobject]@{ LastProfile = "$($c.LastProfile)"; Profiles = $list }
+    $ren = @()
+    if ($c -and $c.Renames) { foreach ($r in @($c.Renames)) { if ($r -and "$($r.Old)" -and "$($r.New)") { $ren += [pscustomobject]@{ Old = "$($r.Old)"; New = "$($r.New)" } } } }
+    return [pscustomobject]@{ LastProfile = "$($c.LastProfile)"; Profiles = $list; Renames = $ren }
 }
 function Save-HMSbConfig($Cfg) {
-    Write-JsonFile $script:SbCfgFile ([pscustomobject]@{ LastProfile = "$($Cfg.LastProfile)"; Profiles = @($Cfg.Profiles) }) -Depth 6
+    Write-JsonFile $script:SbCfgFile ([pscustomobject]@{ LastProfile = "$($Cfg.LastProfile)"; Profiles = @($Cfg.Profiles); Renames = @($Cfg.Renames) }) -Depth 6
+}
+# Umbenennungen (alter -> neuer Profilname) auf Verlaufseintraege nicht angesteckter Platten anwenden
+function Get-HMSbCurrentName([string]$Name, $Renames) {
+    $n = $Name
+    for ($i = 0; $i -lt 20; $i++) {
+        $r = @($Renames | Where-Object { $_.Old -eq $n })[0]
+        if (-not $r) { break }
+        $n = $r.New
+    }
+    return $n
 }
 function Get-HMSbProfile {
     $n = "$($ui.cmbSbProfile.SelectedItem)"
@@ -146,18 +158,38 @@ function Save-HMSbProfile {
     Out-Console "Profil '$($p.Name)' gespeichert: $(@(Get-HMSbCheckedVms).Count) VM(s)" 'Success'
     Update-HMSbHistory
 }
-function Edit-HMSbProfileDisks {
+function Edit-HMSbProfile {
     $p = Get-HMSbProfile
     if (-not $p) { Out-Console 'Kein Profil gewaehlt' 'Warning'; return }
+    if ($script:JobRunning) { Out-Console 'Waehrend eines Vorgangs nicht moeglich.' 'Warning'; return }
+    $cfg = Get-HMSbConfig
+    $n = Show-TextInputDialog -Title 'Profil bearbeiten' -Label 'Name des Profils (frei waehlbar) - der Verlauf wird uebernommen:' -Text $p.Name
+    if ($null -eq $n) { return }
+    $n = "$n".Trim()
+    if (-not $n) { Out-Console 'Name darf nicht leer sein' 'Error'; return }
+    if ($n -ne $p.Name -and @($cfg.Profiles | Where-Object { $_.Name -eq $n }).Count) { Out-Console "Profil '$n' gibt es bereits" 'Error'; return }
     $pre = Read-HMSbPrefix $p.DiskPrefix
     if (-not $pre) { return }
     $cnt = Read-HMSbDiskCount $p.Disks
     if (-not $cnt) { return }
-    $cfg = Get-HMSbConfig
-    foreach ($x in $cfg.Profiles) { if ($x.Name -eq $p.Name) { $x.DiskPrefix = $pre; $x.Disks = $cnt } }
+    $w = Show-TextInputDialog -Title 'Warnung' -Label 'Warnen, wenn die letzte erfolgreiche Sicherung aelter ist als (Tage):' -Text "$($p.WarnDays)"
+    if ($null -eq $w) { return }
+    $wd = 0
+    if (-not [int]::TryParse("$w".Trim(), [ref]$wd) -or $wd -lt 1 -or $wd -gt 365) { Out-Console "Ungueltige Tage '$w' (1-365)" 'Error'; return }
+    foreach ($x in $cfg.Profiles) { if ($x.Name -eq $p.Name) { $x.Name = $n; $x.DiskPrefix = $pre; $x.Disks = $cnt; $x.WarnDays = $wd } }
+    if ($n -ne $p.Name) { $cfg.Renames = @(@($cfg.Renames) | Where-Object { $_.Old -ne $n }) + @([pscustomobject]@{ Old = $p.Name; New = $n }) }
+    if ($cfg.LastProfile -eq $p.Name) { $cfg.LastProfile = $n }
     Save-HMSbConfig $cfg
-    Out-Console "Profil '$($p.Name)': Platten $pre-1 bis $pre-$cnt" 'Success'
-    Set-HMSbFromProfile
+    if ($n -ne $p.Name) {
+        # Verlauf und Profil-Kopien mitnehmen: Tool-Ordner + alle angesteckten Platten
+        $cnt2 = 0
+        $files = @($script:SbHistFile)
+        foreach ($d in @($script:SbDrives)) { $files += "$($d.Letter):\$($script:SbDirName)\history.json"; $files += "$($d.Letter):\$($script:SbDirName)\profiles.json" }
+        foreach ($f in $files) { try { $cnt2 += (Rename-HMSbProfileInFile $f $p.Name $n) } catch { Out-Console "Umbenennen in $f`: $($_.Exception.Message)" 'Warning' } }
+        Out-Console "Profil '$($p.Name)' umbenannt in '$n' - $cnt2 Verlaufseintrag/-eintraege angepasst (Tool-Ordner und angesteckte Platten; nicht angesteckte Platten beim naechsten Backup)" 'Success'
+    }
+    Out-Console "Profil '$n': Platten $pre-1 bis $pre-$cnt, Warnung nach $wd Tagen" 'Success'
+    Update-HMSbProfileList $n
 }
 function Remove-HMSbProfile {
     $p = Get-HMSbProfile
@@ -230,6 +262,35 @@ function Update-HMSbDrives {
         $script:SbSuppressDrive = $false
         Select-HMSbDriveForProfile
         Update-HMSbHistory
+        Import-HMSbDiskProfiles
+    }
+}
+# Profile von angesteckten Platten anbieten, die es am Host nicht gibt (z.B. nach Neuinstallation)
+function Import-HMSbDiskProfiles {
+    if (-not $script:SbImportAsked) { $script:SbImportAsked = @{} }
+    $cfg = Get-HMSbConfig
+    $added = @()
+    foreach ($d in @($script:SbDrives)) {
+        $list = Read-HMSbDiskProfiles "$($d.Letter):\$($script:SbDirName)"
+        foreach ($x in @($list)) {
+            if (-not $x -or -not "$($x.Name)".Trim()) { continue }
+            $n = Get-HMSbCurrentName "$($x.Name)".Trim() @($cfg.Renames)
+            if (@($cfg.Profiles | Where-Object { $_.Name -eq $n }).Count) { continue }
+            $key = "$($d.Letter)|$n"
+            if ($script:SbImportAsked.ContainsKey($key)) { continue }
+            $script:SbImportAsked[$key] = $true
+            $pr = ConvertTo-HMSbProfile $x
+            $pr.Name = $n
+            if (Confirm-Action "Auf der Platte $($d.Letter): $($d.Label) ist das Server-Backup-Profil '$n' gespeichert, das es auf diesem Host nicht gibt.`n`nPlatten: $($pr.DiskPrefix)-1 bis -$($pr.Disks)`nVMs: $(@($pr.VMs) -join ', ')`n`nProfil uebernehmen?" 'Server-Backup') {
+                $cfg.Profiles = @($cfg.Profiles) + @($pr)
+                $added += $n
+            }
+        }
+    }
+    if ($added.Count) {
+        Save-HMSbConfig $cfg
+        Out-Console "Profil(e) von der Platte uebernommen: $($added -join ', ')" 'Success'
+        Update-HMSbProfileList $added[0]
     }
 }
 function Select-HMSbDriveForProfile {
@@ -283,9 +344,11 @@ function Get-HMSbAllHistory {
         $f = "$($d.Letter):\$($script:SbDirName)\history.json"
         if (Test-Path -LiteralPath $f) { $h2 = Read-HMSbHistory $f; $all += @($h2) }
     }
+    $ren = @((Get-HMSbConfig).Renames)
     $seen = @{}; $out = @()
     foreach ($e in $all) {
         if (-not $e) { continue }
+        if ($ren.Count -and $e.PSObject.Properties['Profile']) { $e.Profile = Get-HMSbCurrentName "$($e.Profile)" $ren }
         $k = "$($e.Date)|$($e.Host)|$($e.Profile)|$($e.Disk)"
         if (-not $seen.ContainsKey($k)) { $seen[$k] = $true; $out += $e }
     }
@@ -399,6 +462,7 @@ function Start-HMSbBackup {
         Profile = $pName; DiskPrefix = $(if ($p) { $p.DiskPrefix } else { '' }); Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
         VMs = $vms; HostConfig = $hc; HostSystem = $hs; Verify = [bool]$ui.chkSbVerify.IsChecked
         LocalHistory = $script:SbHistFile; LocalReportDir = $script:SbReportDir; Version = $script:Version
+        ProfileData = $(if ($p) { $p } else { $null })
     }
     Start-EngineJob -Command 'Start-HMServerBackup -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'Server-Backup' -ScriptFiles @($script:SbEngine) -OnFinished {
         param($j)
@@ -522,7 +586,7 @@ function Show-HMSbRestoreHelp {
         "4. Datum/Uhrzeit der Sicherung waehlen (Button 'Versionen auf der Platte' zeigt alle).`n" +
         "5. Wiederherstellungstyp 'Hyper-V' > VM(s) auswaehlen.`n" +
         "6. 'Am urspruenglichen Speicherort' (ueberschreibt die vorhandene VM!) oder 'An anderem Speicherort'.`n`n" +
-        "Hinweis: VMs mit 2 oder mehr Pruefpunkten stellt die Windows Server-Sicherung nicht direkt wieder her (MS KB 958662) - vorher Pruefpunkte zusammenfuehren.`n`n" +
+        "Hinweis: Ein aelterer MS-Artikel (KB 958662, Server 2008) nennt Einschraenkungen bei VMs mit 2 oder mehr Pruefpunkten - fuer aktuelle Server nicht belegt. Wiederherstellung einmal testen (z.B. an anderem Speicherort).`n`n" +
         'Windows Server-Sicherung jetzt oeffnen?'
     if ([System.Windows.MessageBox]::Show($script:Window, $txt, 'Server-Backup - Wiederherstellen', 'YesNo', 'Information') -eq 'Yes') {
         try { Start-Process 'wbadmin.msc' } catch { Out-Console "wbadmin.msc: $($_.Exception.Message) - Feature 'Windows Server-Sicherung' installiert?" 'Error' }
@@ -575,7 +639,7 @@ function Initialize-HMServerBackupTab {
     $ui.btnSbCancel.Add_Click($cancelAction)
     $ui.btnSbProfileNew.Add_Click({ New-HMSbProfile })
     $ui.btnSbProfileSave.Add_Click({ Save-HMSbProfile })
-    $ui.btnSbProfileEdit.Add_Click({ Edit-HMSbProfileDisks })
+    $ui.btnSbProfileEdit.Add_Click({ Edit-HMSbProfile })
     $ui.btnSbProfileDel.Add_Click({ Remove-HMSbProfile })
     $ui.btnSbDrives.Add_Click({ Update-HMSbVms; Update-HMSbDrives })
     $ui.btnSbDiskSetup.Add_Click({ Show-HMSbDiskSetup })
