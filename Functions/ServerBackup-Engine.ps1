@@ -22,6 +22,11 @@ function Get-HMSbOemEncoding {
 
 function ConvertTo-HMSbPsString([string]$s) { return "'" + ("$s" -replace "'", "''") + "'" }
 
+# PartitionStyle kommt je nach Umgebung als Text (RAW/MBR/GPT) oder als Zahl (0/1/2)
+function ConvertTo-HMSbPartStyle($v) {
+    switch ("$v") { '0' { return 'RAW' } '1' { return 'MBR' } '2' { return 'GPT' } default { return "$v" } }
+}
+
 function ConvertTo-HMSbSafeName([string]$s) {
     $r = ("$s" -replace '[^A-Za-z0-9_\-]', '_').Trim('_')
     if (-not $r) { $r = 'Profil' }
@@ -109,7 +114,7 @@ function Get-HMSbDiskList {
         if (@($letters | Where-Object { $vmLetters -contains $_ }).Count) { continue }
         $out += [pscustomobject]@{
             Number = [int]$d.Number; Model = "$($d.FriendlyName)".Trim(); Serial = "$($d.SerialNumber)".Trim(); Bus = "$($d.BusType)"
-            SizeBytes = [long]$d.Size; Style = "$($d.PartitionStyle)"; Offline = [bool]$d.IsOffline; Volumes = ($labels -join ', ')
+            SizeBytes = [long]$d.Size; Style = (ConvertTo-HMSbPartStyle $d.PartitionStyle); Offline = [bool]$d.IsOffline; Volumes = ($labels -join ', ')
         }
     }
     return ,$out
@@ -124,9 +129,9 @@ function Initialize-HMSbDisk([int]$Number, [string]$Label, [string]$Profile = ''
     if ($d.IsOffline) { Set-Disk -Number $Number -IsOffline $false -ErrorAction Stop }
     if ($d.IsReadOnly) { Set-Disk -Number $Number -IsReadOnly $false -ErrorAction Stop }
     $d = Get-Disk -Number $Number -ErrorAction Stop
-    if ("$($d.PartitionStyle)" -ne 'RAW') { Clear-Disk -Number $Number -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop }
+    if ((ConvertTo-HMSbPartStyle $d.PartitionStyle) -ne 'RAW') { Clear-Disk -Number $Number -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop }
     $d = Get-Disk -Number $Number -ErrorAction Stop
-    if ("$($d.PartitionStyle)" -eq 'RAW') { Initialize-Disk -Number $Number -PartitionStyle GPT -ErrorAction Stop }
+    if ((ConvertTo-HMSbPartStyle $d.PartitionStyle) -eq 'RAW') { Initialize-Disk -Number $Number -PartitionStyle GPT -ErrorAction Stop }
     $p = New-Partition -DiskNumber $Number -UseMaximumSize -AssignDriveLetter -ErrorAction Stop
     $v = $p | Format-Volume -FileSystem NTFS -NewFileSystemLabel $Label -AllocationUnitSize 65536 -Confirm:$false -Force -ErrorAction Stop
     $p = Get-Partition -DiskNumber $Number -PartitionNumber $p.PartitionNumber -ErrorAction Stop
@@ -226,6 +231,33 @@ function Add-HMSbHistory([string]$Path, $Entry) {
     $dir = Split-Path $Path -Parent
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     ConvertTo-Json -InputObject @($arr) -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+# Profile auf der Platte (profiles.json) - Wiederherstellung der Profile nach Verlust des Hosts
+function Read-HMSbDiskProfiles([string]$Dir) {
+    $f = Join-Path $Dir 'profiles.json'
+    return (Read-HMSbHistory $f)
+}
+function Save-HMSbDiskProfile([string]$Dir, $Profile) {
+    $f = Join-Path $Dir 'profiles.json'
+    $old = Read-HMSbHistory $f
+    $name = "$($Profile.Name)"
+    $arr = @(@($old) | Where-Object { "$($_.Name)" -ne $name }) + @($Profile)
+    if (-not (Test-Path -LiteralPath $Dir)) { New-Item -ItemType Directory -Path $Dir -Force | Out-Null }
+    ConvertTo-Json -InputObject @($arr) -Depth 5 | Set-Content -LiteralPath $f -Encoding UTF8
+}
+# Profil umbenennen in Verlauf/Profil-Dateien (Tool-Ordner oder Platte); Rueckgabe: Anzahl geaenderter Eintraege
+function Rename-HMSbProfileInFile([string]$Path, [string]$Old, [string]$New) {
+    if (-not (Test-Path -LiteralPath $Path)) { return 0 }
+    $arr = Read-HMSbHistory $Path
+    $arr = @($arr)
+    $n = 0
+    foreach ($e in $arr) {
+        if ($e.PSObject.Properties['Profile'] -and "$($e.Profile)" -eq $Old) { $e.Profile = $New; $n++ }
+        if ($e.PSObject.Properties['DiskPrefix'] -and $e.PSObject.Properties['Name'] -and "$($e.Name)" -eq $Old) { $e.Name = $New; $n++ }
+    }
+    if ($n) { ConvertTo-Json -InputObject @($arr) -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8 }
+    return $n
 }
 
 # ----------------------------------------------------------------------------
@@ -494,7 +526,7 @@ function Start-HMServerBackup {
             $v = @($all | Where-Object { $_.Name -eq $n })[0]
             if (-not $v) { throw "VM '$n' gibt es auf diesem Host nicht (umbenannt/geloescht?) - Profil anpassen" }
             foreach ($p in @($v.Paths) + @($v.VmPath)) { if ("$p" -match "^$L`:") { throw "VM '$n' liegt (teilweise) auf dem Ziel-Laufwerk $target ($p)" } }
-            if ([int]$v.Checkpoints -ge 2) { Write-HMSbLog "Hinweis: VM '$n' hat $($v.Checkpoints) Pruefpunkte - die Windows Server-Sicherung stellt VMs mit 2+ Pruefpunkten nicht direkt wieder her (MS KB 958662). Pruefpunkte moeglichst zusammenfuehren." 'Warning' }
+            if ([int]$v.Checkpoints -ge 2) { Write-HMSbLog "Hinweis: VM '$n' hat $($v.Checkpoints) Pruefpunkte. Die Sicherung funktioniert; ein aelterer MS-Artikel (KB 958662, Server 2008) nennt Einschraenkungen beim Wiederherstellen von VMs mit 2+ Pruefpunkten - fuer aktuelle Server nicht belegt. Nicht mehr benoetigte Pruefpunkte zusammenfuehren, Wiederherstellung einmal testen." 'Warning' }
             $info += $v
         }
         $res.SizeBytes = [long](@($info | Measure-Object -Property SizeBytes -Sum).Sum)
@@ -511,6 +543,10 @@ function Start-HMServerBackup {
     $rep = Join-Path "$target\$($script:SbDirName)" ("{0}_{1}" -f $stamp, (ConvertTo-HMSbSafeName $Ctx.Profile))
     New-Item -ItemType Directory -Path $rep -Force | Out-Null
     $res.Report = $rep
+    if ($Ctx.ProfileData) {
+        try { Save-HMSbDiskProfile "$target\$($script:SbDirName)" $Ctx.ProfileData; Write-HMSbLog "Profil '$($Ctx.Profile)' auf der Platte gespeichert (profiles.json)" 'Info' }
+        catch { Write-HMSbLog "Profil nicht auf der Platte gespeichert: $($_.Exception.Message)" 'Warning' }
+    }
 
     # --- Host-Konfiguration
     $hostCfgOk = $false
@@ -529,6 +565,7 @@ function Start-HMServerBackup {
     # --- VMs sichern
     $verId = ''
     if ($vms.Count) {
+        $Job.Status = 'VMs: Schattenkopie wird erstellt ...'
         Write-HMSbLog "wbadmin: VMs sichern -> $target (Online-Sicherung ueber VSS, VMs laufen weiter)" 'Header'
         $argList = "start backup -backupTarget:$target -hyperv:""$($vms -join ',')"" -quiet"
         $r = Invoke-HMSbWbadmin -Arguments $argList -Phase 'VMs' -PBase 2 -PSpan $spanVm -LogFile (Join-Path $rep 'wbadmin-VMs.log')
@@ -568,6 +605,7 @@ function Start-HMServerBackup {
     # --- Host-System (Bare-Metal)
     $hostSysOk = $false
     if ($Ctx.HostSystem) {
+        $Job.Status = 'Host-System: wird vorbereitet ...'
         Write-HMSbLog "wbadmin: Host-System (alle kritischen Volumes, Bare-Metal) -> $target" 'Header'
         $r2 = Invoke-HMSbWbadmin -Arguments "start backup -backupTarget:$target -allCritical -quiet" -Phase 'Host-System' -PBase (2 + $spanVm) -PSpan (97 - 2 - $spanVm) -LogFile (Join-Path $rep 'wbadmin-HostSystem.log')
         if ($Job.Cancel) {

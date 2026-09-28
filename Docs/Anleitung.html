@@ -383,7 +383,8 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <li><span class="ui g">Server-Backup starten</span>. Ablauf: Host-Konfiguration → VMs (<code>wbadmin start backup -hyperv</code>) → Prüfung (Version und enthaltene VMs) → optional Host-System (<code>-allCritical</code>, Bare-Metal) → Bericht.</li>
     <li><span class="ui t">Auswerfen</span> leert den Schreibcache und wirft die Platte aus – danach abziehen.</li>
   </ol>
-  <p>Die angehakten VMs gelten für diesen Lauf; <span class="ui g">Profil speichern</span> übernimmt Auswahl und Optionen ins Profil.</p>
+  <p>Die angehakten VMs gelten für diesen Lauf; <span class="ui g">Profil speichern</span> übernimmt Auswahl und Optionen ins Profil. <span class="ui">Bearbeiten …</span> ändert Name (frei wählbar, der Verlauf wird übernommen), Platten-Bezeichnung, Anzahl Platten und die Warnfrist. Mehrere Profile dürfen dieselbe Platten-Bezeichnung verwenden (z. B. zwei Schulen am selben Host mit gemeinsamen Platten).</p>
+  <p>Das Profil wird bei jeder Sicherung auch auf der Platte gespeichert (<code>HUMig-ServerBackup\profiles.json</code>). Wird die Platte an einem Host ohne dieses Profil angesteckt (z. B. nach einer Neuinstallation), bietet HUMig an, es zu übernehmen.</p>
   <h3>Was wird gesichert</h3>
   <table>
     <tr><th style="width:230px">Teil</th><th>Inhalt</th></tr>
@@ -393,14 +394,15 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   </table>
   <p>Auf der Platte: <code>WindowsImageBackup\</code> (Windows Server-Sicherung) und <code>HUMig-ServerBackup\</code> mit einem Ordner je Lauf (<code>Bericht.html</code>, wbadmin-Ausgabe, Versionen, Inhalt, Host-Konfiguration) und <code>history.json</code>. Kopien der Berichte liegen im Tool-Ordner unter <code>Logs\ServerBackup</code>.</p>
   <h3>Verlauf, Rotation, Statistik</h3>
-  <p>Rechts im Reiter: letzte Sicherung je Platte des Profils, Warnung, wenn die letzte erfolgreiche Sicherung älter als 14 Tage ist, und die <b>nächste Platte laut Rotation</b> (am längsten nicht verwendet). <span class="ui m">Statistik / Übersicht</span> zeigt alle Profile und Platten (letzte Sicherung, Alter, Anzahl Läufe, mittlere Dauer, Host-System) – Rechtsklick: alle Läufe. Grundlage: Verlauf im Tool-Ordner (<code>Config\ServerBackup\history.json</code>) und auf allen angesteckten Platten.</p>
+  <p>Rechts im Reiter: letzte Sicherung je Platte des Profils, Warnung, wenn die letzte erfolgreiche Sicherung älter als die Warnfrist ist (Standard 14 Tage), und die <b>nächste Platte laut Rotation</b> (am längsten nicht verwendet). <span class="ui m">Statistik / Übersicht</span> zeigt alle Profile und Platten (letzte Sicherung, Alter, Anzahl Läufe, mittlere Dauer, Host-System) – Rechtsklick: alle Läufe. Grundlage: Verlauf im Tool-Ordner (<code>Config\ServerBackup\history.json</code>) und auf allen angesteckten Platten.</p>
   <p>Die Windows Server-Sicherung behält mehrere Versionen auf einer Platte und löscht bei Platzmangel automatisch die ältesten. <span class="ui b">Versionen auf der Platte</span> listet sie (<code>wbadmin get versions</code>, Versions-ID in UTC).</p>
   <h3>Wiederherstellen</h3>
   <ol>
     <li>Neu installierter Host: zuerst <code>Restore-VMSwitches.ps1</code> aus dem Berichtsordner prüfen und als Administrator ausführen (gleiche Switch-Namen – die VMs finden ihr Netzwerk dann selbst).</li>
     <li><span class="ui p">Wiederherstellen …</span> öffnet die Windows Server-Sicherung: <i>Wiederherstellen › an einem anderen Speicherort gespeicherte Sicherung › Lokale Laufwerke</i> › Datum › Typ <b>Hyper-V</b> › VM(s) › ursprünglicher oder anderer Speicherort.</li>
   </ol>
-  <div class="note warn"><b class="h">Prüfpunkte</b>VMs mit zwei oder mehr Prüfpunkten stellt die Windows Server-Sicherung nicht direkt wieder her – Prüfpunkte vorher zusammenführen (HUMig warnt beim Sichern).</div>
+  <div class="note warn"><b class="h">Prüfpunkte</b>VMs mit Prüfpunkten werden normal gesichert. Ein älterer Microsoft-Artikel (KB 958662, Server 2008) nennt Einschränkungen beim Wiederherstellen von VMs mit zwei oder mehr Prüfpunkten – für aktuelle Server-Versionen nicht belegt. Nicht mehr benötigte Prüfpunkte zusammenführen und die Wiederherstellung einmal testen (z. B. an einem anderen Speicherort).</div>
+  <div class="note tip"><b class="h">Dauer und Platz</b>Hyper-V-VMs werden bei jedem Lauf vollständig gelesen – die Dauer hängt von der Größe der VMs ab (über USB 3 grob 1–2 GB pro Minute). Auf der Platte speichert die Windows Server-Sicherung aber nur die geänderten Blöcke: jede weitere Version braucht meist nur wenig Platz. Bei Platzmangel werden die ältesten Versionen automatisch gelöscht.</div>
 </section>
 
 <section id="einstellungen">
