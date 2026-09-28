@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.25 - 2026-09-28
+### Behoben
+- *Groesse ermitteln* / *Vorab-Pruefung*: mit genau einem angehakten Modul (z.B. nur Zusaetzliche Ordner) kam "Keine Module gewaehlt" und keine Groesse
+
 ## v2.0.24 - 2026-09-28
 ### Neu
 - Backup: **Zeitplan** - eigenes Profil automatisch sichern (taeglich, woechentlich oder bei Anmeldung), fortlaufend oder als neues Backup, auf USB-Laufwerk (Erkennung ueber die Bezeichnung) oder Netzlaufwerk (UNC); geplante Aufgabe im Konto des Benutzers ohne Kennwort, auch im Benutzer-Modus; HUMig muss nicht geoeffnet sein

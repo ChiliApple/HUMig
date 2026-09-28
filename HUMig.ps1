@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.24'
+$script:Version   = '2.0.25'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -889,7 +889,8 @@ function Start-SizeMeasure([bool]$All) {
     $p = Get-SelectedProfile
     if (-not $p -or $p.NoProfile) { Out-Console 'Bitte zuerst einen Benutzer waehlen.' 'Warning'; return }
     $ctx = New-BaseCtx
-    $ctx.Modules = if ($All) { @($script:Modules | Where-Object { $script:BackupChecks.ContainsKey($_.Id) }) } else { @(Get-BackupModules) }
+    # @(...) um das if: sonst wird eine Auswahl mit genau einem Modul zum Einzelobjekt (PS 5.1: .Count fehlt -> 'Keine Module')
+    $ctx.Modules = @(if ($All) { $script:Modules | Where-Object { $script:BackupChecks.ContainsKey($_.Id) } } else { Get-BackupModules })
     if (-not $ctx.Modules.Count) { Out-Console 'Keine Module gewaehlt.' 'Warning'; return }
     $script:MeasureKey = Get-SizeKey
     Start-EngineJob -Command 'Measure-HMBackup -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'Groesse ermitteln' -OnFinished {
