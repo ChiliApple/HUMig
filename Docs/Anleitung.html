@@ -371,6 +371,22 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 <section id="serverbackup">
   <h2><span class="n">10</span>Server-Backup (Hyper-V)</h2>
   <p>Reiter <span class="ui">Server-Backup</span> – nur sichtbar, wenn HUMig <b>als Administrator auf einem Hyper-V-Host</b> läuft. Sichert virtuelle Computer mit der <b>Windows Server-Sicherung</b> (<code>wbadmin</code>) auf USB-Platten, die angesteckt und nach der Sicherung wieder abgezogen werden. Die VMs laufen dabei weiter (Online-Sicherung über VSS).</p>
+  <h3>Schnellstart in 5 Schritten</h3>
+  <ol>
+    <li>HUMig <b>als Administrator am Hyper-V-Host</b> starten, Reiter <span class="ui">Server-Backup</span>.</li>
+    <li>USB-Platte anstecken, <span class="ui">Aktualisieren</span>. Unter <i>Ziel-Platte</i> die USB-Platte wählen – <b>nie</b> ein internes Laufwerk (RAID), HUMig markiert es orange.</li>
+    <li>VMs anhaken, <span class="ui b">Neu …</span> (Name, Platten-Bezeichnung, Anzahl Platten), dann <span class="ui g">Profil speichern</span>. Hat die Platte schon eine Bezeichnung, mit <span class="ui">Bearbeiten …</span> die Platten-Bezeichnung des Profils anpassen – nicht neu einrichten.</li>
+    <li>Die Zeile unter der Ziel-Platte muss <b>grün</b> sein („Platte des Profils erkannt“) – dann <span class="ui g">Server-Backup starten</span>.</li>
+    <li>Am Ende steht „SERVER-BACKUP …: erfolgreich“. <span class="ui t">Auswerfen</span>, Platte abziehen. Beim nächsten Mal die Platte nehmen, die rechts als <i>Nächste Platte laut Rotation</i> angezeigt wird.</li>
+  </ol>
+  <h3>Erfahrungswerte</h3>
+  <table>
+    <tr><th style="width:230px">Thema</th><th>Wert</th></tr>
+    <tr><td>Laufende VMs</td><td>werden online gesichert (VSS, „Online“ in der Ausgabe) – kein Ausfall</td></tr>
+    <tr><td>Dauer</td><td>jede Sicherung liest die VMs vollständig: über USB 3 rund 2 GB pro Minute (Beispiel: 34-GB-VM ≈ 18 min, 750 GB ≈ 6 h) – große Server am besten über Nacht oder am Nachmittag</td></tr>
+    <tr><td>Platz</td><td>die erste Sicherung braucht etwa die Größe der VMs, jede weitere nur die Änderungen (Beispiel: zweite Version einer 34-GB-VM unter 1 GB)</td></tr>
+    <tr><td>Host-Konfiguration</td><td>etwa 30–60 Sekunden, läuft vor den VMs</td></tr>
+  </table>
   <h3>Einmalig einrichten</h3>
   <ol>
     <li>Fehlt die Windows Server-Sicherung, erscheint <span class="ui">Windows Server-Sicherung installieren</span> (kein Neustart nötig).</li>

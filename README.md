@@ -161,6 +161,12 @@ Reiter **Server-Backup** (nur als Administrator auf einem Hyper-V-Host sichtbar)
 
 Voraussetzung: Feature *Windows Server-Sicherung* (installierbar aus dem Reiter).
 
+**Schnellstart:** HUMig als Administrator am Hyper-V-Host starten -> USB-Platte anstecken, *Aktualisieren* -> VMs anhaken, *Neu ...*, *Profil speichern*
+-> Zeile unter der Ziel-Platte gruen (Platte des Profils erkannt) -> *Server-Backup starten* -> *Auswerfen*, abziehen, naechstes Mal die Platte laut Rotation.
+
+Erfahrungswerte: VMs laufen weiter (Online-Sicherung). Jede Sicherung liest die VMs komplett (USB 3 rund 2 GB/min, 34-GB-VM ca. 18 min);
+auf der Platte braucht jede weitere Version nur die Aenderungen (zweite Version einer 34-GB-VM unter 1 GB).
+
 ## Grenzen
 
 - Gespeicherte Browser-Kennwoerter/Cookies: durch Windows-Verschluesselung meist nicht uebertragbar -> Browser-Sync verwenden
