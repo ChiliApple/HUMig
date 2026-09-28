@@ -451,18 +451,6 @@ function Update-PresetList {
     if ($last -and @($script:Presets | Where-Object { $_.Name -eq $last }).Count) { $ui.cmbPreset.SelectedItem = $last }
     $script:SuppressPresetSave = $false
 }
-$ui.cmbPreset.Add_SelectionChanged({
-    $p = @($script:Presets | Where-Object { $_.Name -eq $ui.cmbPreset.SelectedItem }) | Select-Object -First 1
-    if (-not $p) { return }
-    $all = @($p.Modules) -contains '*'
-    foreach ($k in $script:BackupChecks.Keys) { $script:BackupChecks[$k].IsChecked = ($all -or (@($p.Modules) -contains $k)) }
-    Sync-ExtraFoldersCheck
-    if ($p.Hint) { $ui.cmbPreset.ToolTip = "$($p.Hint)" } else { $ui.cmbPreset.ToolTip = $null }
-    if (-not $script:SuppressPresetSave) { Save-LocalSetting 'LastPreset' "$($p.Name)" }
-})
-Update-PresetList
-$ui.btnAllOn.Add_Click({ foreach ($c in $script:BackupChecks.Values) { $c.IsChecked = $true } })
-$ui.btnAllOff.Add_Click({ foreach ($c in $script:BackupChecks.Values) { $c.IsChecked = $false }; Sync-ExtraFoldersCheck })
 # Eingetragene Zusaetzliche Ordner -> Modul 'Zusaetzliche Ordner' bleibt angehakt (auch nach 'Keine' oder Vorlagenwechsel)
 function Sync-ExtraFoldersCheck {
     if ($ui.lstExtra.Items.Count -and $script:BackupChecks.ContainsKey('ExtraFolders')) { $script:BackupChecks['ExtraFolders'].IsChecked = $true }
@@ -480,6 +468,18 @@ function Get-BackupModules {
     }
     return $mods
 }
+$ui.cmbPreset.Add_SelectionChanged({
+    $p = @($script:Presets | Where-Object { $_.Name -eq $ui.cmbPreset.SelectedItem }) | Select-Object -First 1
+    if (-not $p) { return }
+    $all = @($p.Modules) -contains '*'
+    foreach ($k in $script:BackupChecks.Keys) { $script:BackupChecks[$k].IsChecked = ($all -or (@($p.Modules) -contains $k)) }
+    Sync-ExtraFoldersCheck
+    if ($p.Hint) { $ui.cmbPreset.ToolTip = "$($p.Hint)" } else { $ui.cmbPreset.ToolTip = $null }
+    if (-not $script:SuppressPresetSave) { Save-LocalSetting 'LastPreset' "$($p.Name)" }
+})
+Update-PresetList
+$ui.btnAllOn.Add_Click({ foreach ($c in $script:BackupChecks.Values) { $c.IsChecked = $true } })
+$ui.btnAllOff.Add_Click({ foreach ($c in $script:BackupChecks.Values) { $c.IsChecked = $false }; Sync-ExtraFoldersCheck })
 
 foreach ($t in @(1, 4, 8, 16, 32, 64, 128)) { [void]$ui.cmbThreads.Items.Add("$t") }
 $ui.cmbThreads.SelectedItem = "$([int]$script:Settings.Threads)"
