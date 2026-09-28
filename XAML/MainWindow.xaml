@@ -328,6 +328,8 @@
                                 </WrapPanel>
                                 <Button x:Name="btnBackup" Content="Backup starten" Style="{StaticResource BtnGreen}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
                                 <Button x:Name="btnCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False"/>
+                                <Button x:Name="btnBackupSchedule" Content="Zeitplan ..." Style="{StaticResource BtnBlue}" Margin="0,10,0,2" ToolTip="Links: dieses Backup (angehakte Module, Optionen, Zusaetzliche Ordner, Backup-Ordner) automatisch ausfuehren - taeglich, woechentlich oder bei Anmeldung. Nur eigenes Profil an diesem PC, HUMig muss dafuer nicht offen sein. | Rechts: Zeitplaene verwalten (jetzt starten, Protokoll, Bericht, loeschen)"/>
+                                <TextBlock x:Name="lblBackupSchedule" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,4"/>
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>
