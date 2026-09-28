@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.23 - 2026-09-28
+### Doku
+- USMT: klargestellt, dass USMT auch fuer den Restore auf einen **neuen PC ohne Profil** noetig ist (LoadState legt das Profil an); ohne USMT muss sich der Benutzer vorher einmal anmelden (INSTALL.md, BIN\LIESMICH.txt, Anleitung)
+
 ## v2.0.22 - 2026-09-28
 ### Neu
 - Server-Backup: **Laufwerke dieses Servers** sichern (Volume-Sicherung per wbadmin -include, blockbasiert) - auch auf Servern **ohne Hyper-V**; mit Pruefung, Verlauf, Bericht und Zeitplan

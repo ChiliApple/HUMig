@@ -478,7 +478,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <ol class="steps">
     <li><b>Neu installieren:</b> <code>Pull.ps1</code> in den Zielordner legen und ausführen: <code>powershell -ExecutionPolicy Bypass -File Pull.ps1</code></li>
     <li><b>Update:</b> Knopf <span class="ui">Update</span> – lädt die aktuelle Version und startet neu. BACKUPS, Config, Softwareverteilung und HUMig.exe bleiben erhalten.</li>
-    <li><b>USMT</b> (nur für das Modul <i>Windows-Einstellungen</i>): Werkzeug <span class="ui">USMT einrichten (ADK)</span> oder siehe <code>BIN\LIESMICH.txt</code>.</li>
+    <li><b>USMT</b> (für das Modul <i>Windows-Einstellungen</i> – und damit für den Restore auf einen <b>neuen PC ohne Profil</b>: LoadState legt das Profil an; ohne USMT muss sich der Benutzer vorher einmal anmelden): Werkzeug <span class="ui">USMT einrichten (ADK)</span> oder siehe <code>BIN\LIESMICH.txt</code>.</li>
     <li><b>Selbsttest:</b> <code>powershell -NoProfile -ExecutionPolicy Bypass -File .\Test-HUMig.ps1</code> – Ergebnis in <code>Test-HUMig.result.txt</code>.</li>
   </ol>
 </section>
