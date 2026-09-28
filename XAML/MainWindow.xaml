@@ -508,7 +508,7 @@
                                     <TextBlock DockPanel.Dock="Top" Text="PLATTEN / VERLAUF DES PROFILS" Style="{StaticResource SectionLabel}"/>
                                     <TextBlock x:Name="lblSbDisks" DockPanel.Dock="Top" Text="" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,2"/>
                                     <TextBlock x:Name="lblSbSchedule" DockPanel.Dock="Top" Text="" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatMauve}" Margin="0,0,0,6"/>
-                                    <DataGrid x:Name="dgSbHistory" Style="{StaticResource DarkGrid}">
+                                    <DataGrid x:Name="dgSbHistory" Style="{StaticResource DarkGrid}" ToolTip="Doppelklick = Bericht des Laufs oeffnen (Details, wbadmin-Ausgabe, Pruefung)">
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="115"/>
                                             <DataGridTextColumn Header="Platte" Binding="{Binding Platte}" Width="140"/>
@@ -516,6 +516,7 @@
                                             <DataGridTextColumn Header="Min." Binding="{Binding Minuten}" Width="50"/>
                                             <DataGridTextColumn Header="GB" Binding="{Binding GB}" Width="55"/>
                                             <DataGridTextColumn Header="VMs" Binding="{Binding VMs}" Width="*"/>
+                                            <DataGridTextColumn Header="Hinweis" Binding="{Binding Hinweis}" Width="1.5*"/>
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 </DockPanel>

@@ -221,6 +221,11 @@ function Update-HMSbVms {
             $cb.Content = ('{0}   [{1}]   {2:N1} GB{3}' -f $v.Name, (Format-HMSbState $v.State), ($v.SizeBytes / 1GB), $(if ([int]$v.Checkpoints) { "   $($v.Checkpoints) Pruefpunkt(e)" } else { '' }))
             $cb.Tag = $v.Name
             $cb.ToolTip = "Speicherort: $($v.VmPath)`nFestplatten: $(@($v.Paths) -join ', ')"
+            if ($v.OfflineHint) {
+                $cb.Content = "$($cb.Content)   ! nur offline ($($v.OfflineHint))"
+                $cb.Foreground = New-Brush '#FFFAB387'
+                $cb.ToolTip = "$($cb.ToolTip)`n`nWird OFFLINE gesichert: die VM wird zu Beginn der Sicherung kurz angehalten (gespeicherter Zustand), danach laeuft sie weiter.`nLaut Hyper-V-Protokoll: $($v.OfflineDetail)$(if ($v.OfflineHint -match 'dynamisch') { "`n`nAbhilfe: Laufwerke im Gast auf Basisdatentraeger umstellen (neue Basis-VHDX anhaengen, Daten kopieren) - Details in der Anleitung." })"
+            }
             $cb.Add_Click({ Update-HMSbSize })
             [void]$ui.pnlSbVms.Children.Add($cb)
         }
@@ -364,7 +369,9 @@ function Update-HMSbHistory {
     if (-not $p) { $ui.dgSbHistory.ItemsSource = $rows; $ui.lblSbDisks.Text = ''; $ui.lblSbHostSystem.Text = ''; return }
     $mine = @($all | Where-Object { "$($_.Profile)" -eq $p.Name })
     foreach ($e in @($mine | Select-Object -First 300)) {
-        $rows += [pscustomobject]@{ Datum = "$($e.Date)"; Platte = "$($e.Disk)"; Status = (Format-HMSbStatus "$($e.Status)"); Minuten = $e.Minutes; GB = $e.SizeGB; VMs = "$($e.VMs)" }
+        $hin = "$($e.Note)"
+        if (-not $hin -and "$($e.Status)" -eq 'OK') { $hin = 'alles in Ordnung' }
+        $rows += [pscustomobject]@{ Datum = "$($e.Date)"; Platte = "$($e.Disk)"; Status = (Format-HMSbStatus "$($e.Status)"); Minuten = $e.Minutes; GB = $e.SizeGB; VMs = "$($e.VMs)"; Hinweis = $hin; Entry = $e }
     }
     $ui.dgSbHistory.ItemsSource = $rows
     # Plattenstatus + Rotationsempfehlung
@@ -458,6 +465,8 @@ function Start-HMSbBackup {
         $a = @($p.VMs | Sort-Object) -join '|'; $b = @($vms | Sort-Object) -join '|'
         if ($a -ne $b) { $msg += "`n`nHinweis: Die VM-Auswahl weicht vom gespeicherten Profil ab (gilt nur fuer diesen Lauf - 'Profil speichern' uebernimmt sie)." }
     }
+    $off = @($vms | ForEach-Object { $n = $_; @($script:SbVms | Where-Object { $_.Name -eq $n -and $_.OfflineHint })[0] } | Where-Object { $_ })
+    if ($off.Count) { $msg += "`n`nACHTUNG - nur OFFLINE sicherbar (VM wird zu Beginn kurz angehalten):`n" + (@($off | ForEach-Object { "  $($_.Name): $($_.OfflineHint)" }) -join "`n") + "`nTipp: solche VMs ausserhalb der Unterrichtszeit sichern (Zeitplan)." }
     if (-not (Confirm-Action $msg 'Server-Backup')) { return }
     if ($p) { Save-HMSbLastProfile $p.Name }
     $ctx = @{
@@ -626,6 +635,38 @@ function Update-HMSbAll {
     Update-HMSbProfileList
     Update-HMSbVms
     Update-HMSbDrives
+}
+
+# Bericht eines Laufs finden (Platte oder Tool-Ordner\Logs\ServerBackup) und oeffnen
+function Open-HMSbReport($Entry) {
+    if (-not $Entry) { return }
+    $bases = @()
+    foreach ($d in @($script:SbDrives)) { $bases += "$($d.Letter):\$($script:SbDirName)" }
+    $bases += $script:SbReportDir
+    $cands = @()
+    if ("$($Entry.Report)") { foreach ($b in $bases) { $cands += (Join-Path $b "$($Entry.Report)") } }
+    # aeltere Eintraege ohne Report-Feld: Ordner <yyyy-MM-dd_HHmm>_<Profil> mit +-3 Minuten
+    $dt = Get-HMSbDate "$($Entry.Date)"
+    if ($dt) {
+        $safe = ConvertTo-HMSbSafeName "$($Entry.Profile)"
+        foreach ($b in $bases) {
+            if (-not (Test-Path -LiteralPath $b)) { continue }
+            foreach ($f in @(Get-ChildItem -LiteralPath $b -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*_$safe" })) {
+                if ($f.Name -match '^(\d{4}-\d{2}-\d{2}_\d{4})_') {
+                    $fd = $null; try { $fd = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd_HHmm', [System.Globalization.CultureInfo]::InvariantCulture) } catch { }
+                    if ($fd -and [math]::Abs(($fd - $dt).TotalMinutes) -le 3) { $cands += $f.FullName }
+                }
+            }
+        }
+    }
+    foreach ($c in $cands) {
+        $h = Join-Path $c 'Bericht.html'
+        if (Test-Path -LiteralPath $h) { try { Start-Process $h; return } catch { } }
+        if (Test-Path -LiteralPath $c) { try { Start-Process explorer.exe -ArgumentList "`"$c`""; return } catch { } }
+    }
+    $msg = "Bericht zum Lauf $($Entry.Date) nicht gefunden (Platte $($Entry.Disk) angesteckt?)."
+    if ("$($Entry.Note)") { $msg += " Hinweis: $($Entry.Note)" }
+    Out-Console $msg 'Warning'
 }
 
 # ----------------------------------------------------------------------------
@@ -797,6 +838,7 @@ function Initialize-HMServerBackupTab {
         try { Start-Process explorer.exe -ArgumentList "`"$f`"" } catch { }
     })
     $ui.btnSbVersions.Add_Click({ Show-HMSbVersions })
+    $ui.dgSbHistory.Add_MouseDoubleClick({ $it = $ui.dgSbHistory.SelectedItem; if ($it -and $it.Entry) { Open-HMSbReport $it.Entry } })
     $ui.btnSbOverview.Add_Click({ Show-HMSbOverview })
     $ui.btnSbOverview.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMSbAllRuns })
     $ui.btnSbHostOnly.Add_Click({ Start-HMSbHostOnly })
