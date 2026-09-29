@@ -2131,6 +2131,13 @@ function Restore-HMFolderItem {
     if (-not $src -or -not (Test-Path -LiteralPath $src)) { return [pscustomobject]@{ Name = $Item.Name; Status = 'Skip'; Msg = 'nicht im Backup' } }
     $dstLocal = if ($DestOverride) { $DestOverride } else { Resolve-HMToken $TEnv $Item.Path }
     $dst = Convert-HMPath $Ctx $dstLocal
+    # Ziel-Laufwerk fehlt am Ziel-PC (z.B. D:\Daten, am neuen PC gibt es kein D:) -> verstaendlicher Hinweis statt Kopierfehler
+    if ($dstLocal -match '^([A-Za-z]):') {
+        $drv = $Matches[1].ToUpper()
+        if (-not (Test-Path -LiteralPath (Convert-HMPath $Ctx "${drv}:\"))) {
+            return [pscustomobject]@{ Name = $Item.Name; Status = 'Warning'; Msg = "Laufwerk ${drv}: gibt es an $($Ctx.Computer) nicht (oder nicht erreichbar) - $dstLocal nicht zurueckgeschrieben. Die Daten liegen im Backup: $src - bei Bedarf von Hand an einen anderen Ort kopieren oder Laufwerk anlegen und Restore wiederholen" }
+        }
+    }
     $files = @(); $noRec = $false
     if ($Item.Type -eq 'Files') { $files = @($Item.Filter); $noRec = $true }
     if ("$($Item.Role)" -eq 'Database' -and $files.Count) { $files = @(Add-HMDbCompanions $files) }

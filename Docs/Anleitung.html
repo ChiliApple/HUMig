@@ -268,6 +268,16 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <li><b>Nicht übertragbar:</b> gespeicherte Kennwörter, die Windows verschlüsselt (DPAPI – z. B. in Browsern, FileZilla, WinSCP, mRemoteNG), Store-Apps und Standard-Programm-Zuordnungen. Einstellungen einer älteren Programmversion passen nicht immer zu einer neueren – Hinweis unter <i>Version</i>.</li>
   </ul>
 
+  <h3 id="db-suche">Datenbanken suchen</h3>
+  <p>Welche Datei eine Datenbank ist, muss man nicht wissen: <span class="ui p">Datenbanken suchen</span> (Werkzeuge › Benutzerprofil) durchsucht das Profil des gewählten Benutzers (auf Wunsch alle Profile), ProgramData, die Programmordner, das Systemlaufwerk und alle weiteren Festplatten nach SQLite-, Access-, KeePass-, SQL-Server- und Firebird-Dateien und listet Datenbank-Dienste (SQL Server, Firebird, MySQL/MariaDB, PostgreSQL). Windows, Caches, Browser- und Mail-Profile (sichern eigene Module) und Backup-Ordner werden ausgelassen.</p>
+  <ul>
+    <li>Ergebnis <b>je Ordner</b>: Art, Ort (AppData, ProgramData, Programmordner, Laufwerk D: …), Anzahl, Größe, zuletzt geändert und <b>Geöffnet</b> – dann läuft gerade das Programm dazu.</li>
+    <li><span class="ui g">Ordner als "Zusaetzliche Ordner" aufnehmen</span> – schnell, aber das Programm muss man vor dem Backup selbst schließen.</li>
+    <li><span class="ui m">Als Katalog-Eintrag anlegen …</span> – öffnet den Editor vorausgefüllt (Rolle Datenbank, Pfad mit Platzhaltern, markierte Dienste). Nur noch Name und Erkennung (Programm, zu dem die Datenbank gehört) eintragen und unter <i>Schließen &amp; Dienste</i> das Programm wählen – dann schließt HUMig es vor Backup und Restore selbst. Nur als Administrator.</li>
+    <li>Im Benutzer-Modus werden nur das eigene Profil, ProgramData, Programmordner und Laufwerke durchsucht (soweit lesbar).</li>
+  </ul>
+  <div class="note tip"><b class="h">Anderes Laufwerk am neuen PC</b>Liegt eine Datenbank (oder ein Zusätzlicher Ordner) z. B. auf <code>D:\Daten</code> und gibt es am neuen PC kein Laufwerk D:, meldet der Restore das verständlich als Warnung – die Daten bleiben im Backup und können von Hand an einen anderen Ort kopiert werden.</div>
+
   <h3>Eigene Programme</h3>
   <p>Am einfachsten im Editor (<span class="ui b">+ Neu</span>). Von Hand in <code>Config\apps.json</code> (Aufbau wie <code>apps.default.json</code>, Felder siehe <code>_Info</code> dort), z. B. mit Lizenzdatei:</p>
   <p><code>{ "Apps": [ { "Id": "App_MeinTool", "Name": "Mein Tool", "Detect": "^Mein Tool", "Items": [ { "Type": "Files", "Name": "LIC", "Path": "{PROGRAMFILES}\\MeinTool", "Filter": [ "*.lic" ], "License": true } ] } ] }</code></p>
@@ -326,7 +336,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h3>Was geht – was nicht</h3>
   <table>
     <tr><th style="width:50%">Möglich</th><th>Ausgeblendet (braucht Administratorrechte)</th></tr>
-    <tr><td>Benutzerprofil (Dateien), Zusätzliche Ordner<br>Edge, Chrome, Firefox<br>Office-Signaturen, Vorlagen, PST, Office-Einstellungen<br>Taskleiste, Hintergrund, Desktop-Symbole, Schnellzugriff<br>Netzlaufwerke, Netzwerkdrucker, VPN-Verbindungen<br>Programme aus dem Katalog (Einstellungen im Profil)<br>Restore-Vorschau, Checkliste, Backup prüfen, Vergleichen<br><a href="#zeitplan-backup">Zeitplan</a> (automatisches Backup des eigenen Profils)<br>Werkzeuge: <span class="ui t">Im Backup suchen</span>, <span class="ui p">Wichtige Dateien suchen</span>, Anmeldedaten, Profilordner</td>
+    <tr><td>Benutzerprofil (Dateien), Zusätzliche Ordner<br>Edge, Chrome, Firefox<br>Office-Signaturen, Vorlagen, PST, Office-Einstellungen<br>Taskleiste, Hintergrund, Desktop-Symbole, Schnellzugriff<br>Netzlaufwerke, Netzwerkdrucker, VPN-Verbindungen<br>Programme aus dem Katalog (Einstellungen im Profil)<br>Restore-Vorschau, Checkliste, Backup prüfen, Vergleichen<br><a href="#zeitplan-backup">Zeitplan</a> (automatisches Backup des eigenen Profils)<br>Werkzeuge: <span class="ui t">Im Backup suchen</span>, <span class="ui p">Wichtige Dateien suchen</span>, <span class="ui p">Datenbanken suchen</span>, Anmeldedaten, Profilordner</td>
         <td>andere Computer und Benutzer, Active Directory<br>Daten auf Systemlaufwerk, WLAN, Schriftarten, ODBC<br>Drucker mit Treibern, Treiber, Freigaben, Aufgaben, USMT<br>Einträge in Programme/Windows/HKLM (werden beim Restore übersprungen)<br>Fehlende Programme installieren, Softwareverteilung<br>Nacharbeiten mit Systemzugriff, Einstellungen, Update<br>alle übrigen Werkzeuge</td></tr>
   </table>
   <ul>
@@ -388,6 +398,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><span class="ui">Aufgaben aus Backup importieren</span></td><td>Geplante Aufgaben aus dem markierten Backup einzeln importieren</td></tr>
     <tr><td><span class="ui r">Alte Profile loeschen</span></td><td>Profile mit letzter Anmeldung, markierte sauber löschen (Ordner + Registry) – Dienstkonten werden nicht angezeigt</td></tr>
     <tr><td><span class="ui p">Wichtige Dateien suchen</span></td><td>PST, KeePass, Access, OneNote, CAD … außerhalb der gesicherten Bereiche finden und als Zusätzliche Ordner aufnehmen</td></tr>
+    <tr><td><span class="ui p">Datenbanken suchen</span></td><td>Lokale Datenbanken und Datenbank-Dienste finden – siehe <a href="#db-suche">Datenbanken suchen</a></td></tr>
     <tr><td><span class="ui t">Im Backup suchen</span></td><td>Dateien im markierten Backup suchen und einzeln herauskopieren</td></tr>
     <tr><td>Schnellzugriffe</td><td>AppData · Autostart · Profilordner des Benutzers · Anmeldedaten sichern/wiederherstellen (credwiz) · Gespeicherte Anmeldedaten anzeigen/löschen</td></tr>
   </table>

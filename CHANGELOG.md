@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.28 - 2026-09-29
+### Neu
+- Werkzeug **Datenbanken suchen**: lokale Datenbanken (SQLite, Access, KeePass, SQL Server, Firebird) und Datenbank-Dienste am PC finden, je Ordner mit Art, Ort, Groesse, Datum und *Geoeffnet*; uebernehmen als Zusaetzliche Ordner oder als Katalog-Eintrag (Editor vorausgefuellt); auch im Benutzer-Modus
+### Verbessert
+- Restore: fehlt das Ziel-Laufwerk (z.B. D: am neuen PC), verstaendlicher Hinweis statt Kopierfehler - Daten bleiben im Backup
+- Katalog-Editor: Erkennung, die auf jedes Programm passt (z.B. nur ^), wird abgelehnt; *Ordner waehlen* bzw. Uebernahme wandelt auch Pfade eines Remote-PCs in Platzhalter um
+
 ## v2.0.27 - 2026-09-29
 ### Neu
 - **Katalog-Editor** (Programme > *Katalog bearbeiten ...*, auch Einstellungen > Module): Eintraege mit Suche/Filter bearbeiten, anlegen, exportieren/importieren; Tests am gewaehlten PC (Erkennung, Paket, Pfad/Registry vorhanden + Groesse, laufende Prozesse, Dienste); *Ordner waehlen* wandelt in Platzhalter um; Anzeige Benutzer/Maschine je Eintrag; Pruefung vor dem Speichern; speichert nur in `Config\apps.json` (Sicherung `apps.json.bak`), Standard-Katalog bleibt unveraendert; Benutzer-Modus nur Ansicht

@@ -341,6 +341,138 @@ function Start-HMFileSearch {
 }
 
 # ----------------------------------------------------------------------------
+# Datenbanken am PC suchen (lokale Datei-Datenbanken + Datenbank-Dienste) -> Zusaetzliche Ordner oder Katalog-Eintrag
+# Ergebnis je Ordner gruppiert: Art, Anzahl, Groesse, zuletzt geaendert, in Benutzung (geoeffnet)
+# ----------------------------------------------------------------------------
+$script:RS_DbSearch = {
+    param([string]$ProfilePath, [bool]$AllProfiles)
+    $kinds = @{ '.sqlite' = 'SQLite'; '.sqlite3' = 'SQLite'; '.db3' = 'SQLite'; '.s3db' = 'SQLite'; '.db' = 'Datenbank (.db)'; '.accdb' = 'Access'; '.mdb' = 'Access'
+        '.mdf' = 'SQL Server (Datendatei)'; '.sdf' = 'SQL Server Compact'; '.fdb' = 'Firebird'; '.kdbx' = 'KeePass'; '.kdb' = 'KeePass' }
+    # Ordner, die nie gesucht werden (System, Caches, Browser/Mail-Profile - die sichern eigene Module)
+    $skipRx = '\\(Windows|\$Recycle\.Bin|System Volume Information|Recovery|\$WinREAgent|Windows\.old|PerfLogs|WindowsApps|WinSxS|node_modules|\.git)(\\|$)|' +
+              '\\AppData\\Local\\(Temp|Packages|Microsoft|Google\\Chrome|CrashDumps|D3DSCache|NVIDIA|Mozilla|Comms)(\\|$)|\\AppData\\LocalLow(\\|$)|' +
+              '\\AppData\\Roaming\\(Mozilla|Thunderbird|Microsoft\\(Windows|Protect|Crypto|SystemCertificates))(\\|$)|\\ProgramData\\(Microsoft|Packages|Package Cache)(\\|$)|' +
+              '\\(BACKUPS|WindowsImageBackup|HUMig-ServerBackup)(\\|$)'   # Backups (auch von HUMig) nicht als Datenbank melden
+    $roots = New-Object System.Collections.Generic.List[string]
+    $sys = $env:SystemDrive.TrimEnd('\')
+    if ($AllProfiles) { $roots.Add("$sys\Users") } elseif ($ProfilePath) { $roots.Add($ProfilePath) }
+    foreach ($r in @($env:ProgramData, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $(if (-not $AllProfiles) { $env:PUBLIC }))) { if ($r -and -not $roots.Contains($r)) { $roots.Add($r) } }
+    $roots.Add("$sys\")   # Systemlaufwerk ohne Windows, Programme, Benutzer (siehe unten)
+    foreach ($d in @([System.IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and "$($_.DriveType)" -eq 'Fixed' })) { $n = $d.RootDirectory.FullName; if (-not $n.StartsWith($sys, [StringComparison]::OrdinalIgnoreCase)) { $roots.Add($n) } }
+    $topSkip = @("$sys\Windows", "$sys\Users", "$sys\Program Files", "$sys\Program Files (x86)", "$sys\ProgramData")
+    $groups = @{}
+    $n = 0
+    foreach ($root in $roots) {
+        $stack = New-Object System.Collections.Generic.Stack[string]; $stack.Push($root)
+        while ($stack.Count -and $n -lt 20000) {
+            $dir = $stack.Pop()
+            if ($root -eq "$sys\" -and @($topSkip | Where-Object { $dir.TrimEnd('\') -ieq $_ }).Count) { continue }
+            if ($dir -match $skipRx) { continue }
+            try {
+                foreach ($i in (New-Object System.IO.DirectoryInfo $dir).EnumerateFileSystemInfos()) {
+                    if ($i.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }
+                    if ($i -is [System.IO.DirectoryInfo]) { $stack.Push($i.FullName); continue }
+                    $ext = $i.Extension.ToLowerInvariant()
+                    if (-not $kinds.ContainsKey($ext)) { continue }
+                    if ($i.Name -ieq 'Thumbs.db' -or $i.Length -lt 1024) { continue }
+                    # Nur-Cloud-Platzhalter (OneDrive ...) nie oeffnen
+                    $at = [int]$i.Attributes
+                    if (($at -band 0x00400000) -or ($at -band 0x00040000) -or ($at -band 0x00001000)) { continue }
+                    $n++
+                    $k = $i.DirectoryName
+                    if (-not $groups.ContainsKey($k)) { $groups[$k] = @{ Kinds = @{}; Count = 0; Bytes = [long]0; Newest = [datetime]::MinValue; Files = New-Object System.Collections.Generic.List[string]; Open = 0 } }
+                    $g = $groups[$k]
+                    $g.Kinds[$kinds[$ext]] = 1; $g.Count++; $g.Bytes += $i.Length
+                    if ($i.LastWriteTime -gt $g.Newest) { $g.Newest = $i.LastWriteTime }
+                    if ($g.Files.Count -lt 5) { $g.Files.Add($i.Name) }
+                    if ($g.Count -le 20) { try { $fs = [System.IO.File]::Open($i.FullName, 'Open', 'Read', 'None'); $fs.Close() } catch [System.IO.IOException] { $g.Open++ } catch { } }
+                }
+            } catch { }
+        }
+    }
+    foreach ($k in $groups.Keys) {
+        $g = $groups[$k]
+        [pscustomobject]@{ Typ = 'Ordner'; Ordner = $k; Art = (@($g.Kinds.Keys | Sort-Object) -join ', '); Anzahl = $g.Count; Bytes = $g.Bytes; Geaendert = $g.Newest
+            Offen = $g.Open; Dateien = (@($g.Files) -join ', '); Dienst = ''; Status = '' }
+    }
+    # Datenbank-Dienste (SQL Server, Firebird, MySQL/MariaDB, PostgreSQL)
+    foreach ($s in @(Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(MSSQL\$.+|MSSQLSERVER|FirebirdServer.*|MySQL.*|MariaDB.*|postgresql.*)$' })) {
+        $dataDir = ''
+        if ($s.Name -match '^MSSQL\$(.+)$|^MSSQLSERVER$') {
+            $inst = if ($Matches[1]) { $Matches[1] } else { 'MSSQLSERVER' }
+            try {
+                $id = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL' -ErrorAction Stop).$inst
+                if ($id) { $dataDir = "$((Get-ItemProperty -LiteralPath "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$id\Setup" -ErrorAction Stop).SQLDataRoot)\DATA" }
+            } catch { }
+        }
+        [pscustomobject]@{ Typ = 'Dienst'; Ordner = $dataDir; Art = "Dienst: $($s.DisplayName)"; Anzahl = 0; Bytes = [long]0; Geaendert = $null; Offen = 0; Dateien = ''; Dienst = $s.Name; Status = "$($s.Status)" }
+    }
+}
+function Start-HMDbSearch {
+    $c = Get-TargetComputer
+    $p = Get-SelectedProfile
+    $pp = if ($p -and -not $p.NoProfile) { "$($p.LocalPath)" } else { '' }
+    $all = $false
+    if (-not $script:UserMode) {
+        $f = Show-HMFormDialog -Title "Datenbanken suchen - $c" -OkText 'Suchen' -Width 620 -Fields @(
+            @{ Type = 'Info'; Label = "Sucht lokale Datenbanken (SQLite, Access, KeePass, SQL Server, Firebird ...) im Profil$(if ($p -and $p.Folder) { " von $($p.Folder)" }), in ProgramData, den Programmordnern und auf allen Festplatten - dazu Datenbank-Dienste. Windows, Caches sowie Browser- und Mail-Profile (eigene Module) werden ausgelassen." }
+            @{ Name = 'All'; Label = 'Alle Benutzerprofile durchsuchen (statt nur des gewaehlten)'; Type = 'Check'; Default = (-not $pp) }
+        )
+        if (-not $f) { return }
+        $all = [bool]$f.All
+    }
+    Invoke-HMTool -Title 'Datenbanken suchen' -Computer $c -TimeoutSec 900 -ArgumentList @($pp, $all) -Script $script:RS_DbSearch -OnResult {
+        param($r, $comp)
+        $rows = New-Object System.Collections.Generic.List[object]
+        $ordRx = { param($o) if ($o -match '\\AppData\\Roaming\\') { 'AppData Roaming' } elseif ($o -match '\\AppData\\Local\\') { 'AppData Local' } elseif ($o -match '^[A-Za-z]:\\Users\\') { 'Profil' } elseif ($o -match '\\ProgramData\\') { 'ProgramData' } elseif ($o -match '\\Program Files') { 'Programmordner' } elseif ($o -match '^[A-Za-z]:\\') { "Laufwerk $($o.Substring(0, 2))" } else { '' } }
+        foreach ($x in @($r)) {
+            if (-not $x -or -not $x.Typ) { continue }
+            $ort = if ($x.Typ -eq 'Dienst') { 'Dienst' } else { & $ordRx "$($x.Ordner)" }
+            $offen = if ($x.Typ -eq 'Dienst') { $(if ($x.Status -eq 'Running') { 'Dienst laeuft' } else { "Dienst $($x.Status)" }) } elseif ([int]$x.Offen) { "JA ($($x.Offen))" } else { '' }
+            $rows.Add(@("$($x.Art)", "$($x.Ordner)", $ort, [int]$x.Anzahl, $(if ($x.Bytes) { [math]::Round([long]$x.Bytes / 1MB, 1) } else { $null }), $(if ($x.Geaendert) { [datetime]$x.Geaendert } else { $null }), $offen, "$($x.Dateien)", "$($x.Dienst)"))
+        }
+        if (-not $rows.Count) { Out-Console "Keine lokalen Datenbanken an $comp gefunden." 'Success'; return }
+        Out-Console "$($rows.Count) Datenbank-Ordner/-Dienste an $comp gefunden - Tabelle" 'Success'
+        $acts = @(
+            @{ Text = 'Ordner als "Zusaetzliche Ordner" aufnehmen'; Color = '#FFA6E3A1'; Handler = {
+                param($sel, $win, $ctx)
+                $dirs = @($sel | Where-Object { "$($_.Ordner)" -and -not "$($_.Dienst)" } | ForEach-Object { "$($_.Ordner)" } | Select-Object -Unique)
+                $n = 0
+                foreach ($d in $dirs) { if (-not $ui.lstExtra.Items.Contains($d)) { [void]$ui.lstExtra.Items.Add($d); $n++ } }
+                if ($n -and $script:BackupChecks.ContainsKey('ExtraFolders')) { $script:BackupChecks['ExtraFolders'].IsChecked = $true }
+                Out-Console "$n Ordner in 'Zusaetzliche Ordner' aufgenommen - Programme vorher schliessen (geoeffnete Datenbanken werden nicht vollstaendig kopiert)." 'Success'
+                [void][System.Windows.MessageBox]::Show($win, "$n Ordner aufgenommen (Reiter Backup, 'Zusaetzliche Ordner').`n`nWichtig: das zugehoerige Programm vor dem Backup schliessen. Bequemer: 'Als Katalog-Eintrag anlegen' - dann schliesst HUMig das Programm selbst.", 'Datenbanken', 'OK', 'Information')
+            } }
+        )
+        if (-not $script:UserMode) {
+            $acts += @{ Text = 'Als Katalog-Eintrag anlegen ...'; Color = '#FFCBA6F7'; Handler = { param($sel, $win, $ctx) New-HMDbCatalogEntry @($sel) } }
+        }
+        Show-DataGridWindow -Title "Datenbanken - $comp" -Columns @('Art', 'Ordner', 'Ort', 'Dateien_Anzahl', 'MB', 'Geaendert', 'Geoeffnet', 'Beispiele', 'Dienst') `
+            -ColumnTypes @{ 'Dateien_Anzahl' = [int]; MB = [double]; Geaendert = [datetime] } -Rows $rows.ToArray() -Sort 'Ort ASC, Ordner ASC' `
+            -CountText "$($rows.Count) Eintraege - Geoeffnet = Datei gerade in Benutzung (Programm laeuft). Markieren und uebernehmen." -Width 1400 -Height 620 -Actions $acts
+    }
+}
+# Markierte Datenbank-Ordner/-Dienste als neuen Katalog-Eintrag im Editor vorbelegen
+function New-HMDbCatalogEntry([object[]]$Rows) {
+    $items = New-Object System.Collections.Generic.List[object]
+    $svc = @(); $n = 0
+    foreach ($r in $Rows) {
+        if ("$($r.Dienst)") { $svc += "$($r.Dienst)" }
+        if (-not "$($r.Ordner)") { continue }
+        $n++
+        $isSvc = [bool]"$($r.Dienst)" -or "$($r.Art)" -match 'SQL Server \(Datendatei\)'
+        $items.Add([pscustomobject]@{ Type = 'Folder'; Name = $(if ($n -eq 1) { 'DB' } else { "DB$n" }); Path = (ConvertTo-HMAeToken "$($r.Ordner)"); Role = 'Database'; DbKind = $(if ($isSvc) { 'Service' } else { 'File' }) })
+    }
+    if (-not $items.Count -and -not $svc.Count) { return }
+    $leaf = if ($items.Count) { Split-Path "$(@($Rows | Where-Object { "$($_.Ordner)" })[0].Ordner)" -Leaf } else { "$($svc[0])" }
+    $o = [pscustomobject]@{ Id = ('App_' + (($leaf -replace '[^A-Za-z0-9_\-]', '') | ForEach-Object { if ($_) { $_ } else { 'Datenbank' } })); Name = "Datenbank $leaf"; Detect = '^'
+        Items = @($items); StopService = @($svc | Select-Object -Unique)
+        Transfer = 'Datenbank'; After = @("Datenbank ${leaf}: Programm oeffnen und Daten pruefen")
+        Version = $(if ($svc.Count) { 'Dienst-Datenbank: Dateikopie nur bei gleicher Datenbank-Version am Ziel verlaesslich - sonst Sicherung des Herstellers verwenden' } else { '' }) }
+    Show-HMAppEditor -NewEntry $o
+}
+
+# ----------------------------------------------------------------------------
 # Im Backup suchen und einzelne Dateien herauskopieren
 # ----------------------------------------------------------------------------
 function Start-HMBackupSearch {

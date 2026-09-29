@@ -111,13 +111,20 @@ function Get-HMAeScope($i) {
 function ConvertTo-HMAeToken([string]$Path) {
     $map = New-Object System.Collections.Generic.List[object]
     $add = { param($t, $v) if ($v) { $map.Add([pscustomobject]@{ T = $t; V = "$v".TrimEnd('\') }) } }
+    # Profil des gewaehlten Benutzers (Pfad am Ziel-PC, gilt auch remote)
     $p = Get-SelectedProfile
-    if ($p -and $p.LocalPath -and (Test-HMIsLocal (Get-TargetComputer))) {
+    if ($p -and $p.LocalPath -and -not $p.NoProfile) {
         & $add 'PROFILE' $p.LocalPath; & $add 'APPDATA' (Join-Path $p.LocalPath 'AppData\Roaming'); & $add 'LOCALAPPDATA' (Join-Path $p.LocalPath 'AppData\Local')
     }
-    & $add 'APPDATA' $env:APPDATA; & $add 'LOCALAPPDATA' $env:LOCALAPPDATA; & $add 'PROFILE' $env:USERPROFILE
-    & $add 'PROGRAMFILESX86' ${env:ProgramFiles(x86)}; & $add 'PROGRAMFILES' $env:ProgramFiles; & $add 'PROGRAMDATA' $env:ProgramData
-    & $add 'PUBLIC' $env:PUBLIC; & $add 'WINDIR' $env:windir; & $add 'SYSTEMDRIVE' $env:SystemDrive
+    if (Test-HMIsLocal (Get-TargetComputer)) {
+        & $add 'APPDATA' $env:APPDATA; & $add 'LOCALAPPDATA' $env:LOCALAPPDATA; & $add 'PROFILE' $env:USERPROFILE
+        & $add 'PROGRAMFILESX86' ${env:ProgramFiles(x86)}; & $add 'PROGRAMFILES' $env:ProgramFiles; & $add 'PROGRAMDATA' $env:ProgramData
+        & $add 'PUBLIC' $env:PUBLIC; & $add 'WINDIR' $env:windir; & $add 'SYSTEMDRIVE' $env:SystemDrive
+    } else {
+        # Remote-PC: Windows-Standardorte (Systemlaufwerk C:)
+        & $add 'PROGRAMFILESX86' 'C:\Program Files (x86)'; & $add 'PROGRAMFILES' 'C:\Program Files'; & $add 'PROGRAMDATA' 'C:\ProgramData'
+        & $add 'PUBLIC' 'C:\Users\Public'; & $add 'WINDIR' 'C:\Windows'; & $add 'SYSTEMDRIVE' 'C:'
+    }
     foreach ($m in @($map | Sort-Object { $_.V.Length } -Descending)) {
         if ($Path.Equals($m.V, [StringComparison]::OrdinalIgnoreCase)) { return "{$($m.T)}" }
         if ($Path.StartsWith($m.V + '\', [StringComparison]::OrdinalIgnoreCase)) { return "{$($m.T)}" + $Path.Substring($m.V.Length) }
@@ -130,7 +137,8 @@ function Test-HMAeEntry($e, [bool]$IsNew) {
     if ($e.Id -notmatch '^App_[A-Za-z0-9_\-]+$') { $err.Add("Id muss mit App_ beginnen und darf nur Buchstaben, Ziffern, _ und - enthalten ($($e.Id))") }
     elseif ($IsNew -and @($script:Ae.All | Where-Object { "$($_.Id)" -ieq $e.Id }).Count) { $err.Add("Id $($e.Id) gibt es schon") }
     if (-not "$($e.Name)".Trim()) { $err.Add('Name fehlt') }
-    if (-not "$($e.Detect)".Trim()) { $err.Add('Detect (Erkennung) fehlt - ohne Erkennung wird das Programm nie eingeblendet') }
+    if (-not "$($e.Detect)".Trim()) { $err.Add('Erkennung (Detect) fehlt - ohne Erkennung wird das Programm nie eingeblendet') }
+    else { try { if ([regex]::IsMatch('', "$($e.Detect)")) { $err.Add("Erkennung '$($e.Detect)' ist zu allgemein (passt auf jedes Programm) - Programmnamen eintragen, z.B. ^Mozilla Thunderbird") } } catch { } }
     foreach ($f in @('Detect', 'Package')) { if ("$($e[$f])".Trim()) { try { [void][regex]::new("$($e[$f])") } catch { $err.Add("$f ist kein gueltiger regulaerer Ausdruck: $($_.Exception.InnerException.Message)") } } }
     $known = @($script:Modules | ForEach-Object { "$($_.Id)" })
     foreach ($m in @($e.Modules)) { if ($known -notcontains $m) { $err.Add("Modul '$m' gibt es nicht") } }
@@ -161,7 +169,7 @@ function Test-HMAeEntry($e, [bool]$IsNew) {
 # ----------------------------------------------------------------------------
 # Fenster
 # ----------------------------------------------------------------------------
-function Show-HMAppEditor([string]$SelectId = '', $Owner = $null) {
+function Show-HMAppEditor([string]$SelectId = '', $Owner = $null, $NewEntry = $null) {
     $x = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Programm-Katalog bearbeiten" Width="1280" Height="820" MinWidth="980" MinHeight="600" WindowStartupLocation="CenterOwner" Background="#FF1E1E2E">
@@ -381,7 +389,14 @@ function Show-HMAppEditor([string]$SelectId = '', $Owner = $null) {
     $w.Add_Closing({ param($s, $ev) if (-not (Confirm-HMAeDiscard)) { $ev.Cancel = $true } })
 
     Update-HMAeList
-    if ($SelectId) { Select-HMAeListItem $SelectId }
+    if ($NewEntry -and -not $script:Ae.ReadOnly) {
+        # vorbelegter neuer Eintrag (z.B. aus 'Datenbanken suchen'): Id eindeutig machen
+        $e = ConvertTo-HMAeEntry $NewEntry
+        $base = $e.Id; $c = 2
+        while (@($script:Ae.All | Where-Object { $_.Id -ieq $e.Id }).Count) { $e.Id = "$base$c"; $c++ }
+        Set-HMAeForm $e 'eigen' $true
+        $f.lGen.Text = 'Neuer Eintrag aus der Suche: Name und Erkennung (Programm, zu dem die Datenbank gehoert) eintragen, unter "Schliessen & Dienste" das Programm waehlen, dann Speichern.'
+    } elseif ($SelectId) { Select-HMAeListItem $SelectId }
     if (-not $script:Ae.Cur -and $f.lApps.Items.Count) { $f.lApps.SelectedIndex = 0 }
     $w.Owner = $(if ($Owner) { $Owner } else { $script:Window }); Set-HMWindowScale $w
     [void]$w.ShowDialog()

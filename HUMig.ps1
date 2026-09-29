@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.27'
+$script:Version   = '2.0.28'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -1221,6 +1221,7 @@ Add-ToolButton $tp 'Gruppenrichtlinien-Ergebnis' 'BtnDefault' 'gpresult als HTML
 Add-ToolButton $tp 'Aufgaben aus Backup importieren' 'BtnDefault' 'Geplante Aufgaben aus dem im Reiter Restore markierten Backup einzeln importieren' { Show-HMTaskImport }
 Add-ToolButton $tp 'Alte Profile loeschen' 'BtnRed' 'Alle Profile mit letzter Anmeldung anzeigen, markierte sauber loeschen (Ordner + Registry)' { Show-HMOldProfiles }
 Add-ToolButton $tp 'Wichtige Dateien suchen' 'BtnPeach' 'PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche finden und als Zusaetzliche Ordner aufnehmen' { Start-HMFileSearch }
+Add-ToolButton $tp 'Datenbanken suchen' 'BtnPeach' 'Lokale Datenbanken (SQLite, Access, KeePass, SQL Server, Firebird ...) und Datenbank-Dienste am PC finden - als Zusaetzliche Ordner oder als Katalog-Eintrag uebernehmen (Programm wird dann vor dem Backup geschlossen)' { Start-HMDbSearch }
 Add-ToolButton $tp 'Im Backup suchen' 'BtnTeal' 'Dateien im markierten Backup suchen und einzeln herauskopieren' { Start-HMBackupSearch }
 $td = $ui.pnlToolsDiag
 Add-ToolButton $td 'Ereignisse (Fehler)' 'BtnBlue' 'Links: Fehler der letzten 3 Tage | Rechts: 14 Tage inkl. Warnungen' { Show-HMEventLog 3 $false } { Show-HMEventLog 14 $true }
@@ -1538,7 +1539,7 @@ function Set-HMUserModeUi {
     foreach ($c in @($ui.btnEditExceptions, $ui.chkMinSystemExc, $ui.chkNoSystemFileExc, $ui.btnCleanupBackups, $ui.btnReinstall,
                      $ui.chkGpUpdate, $ui.chkWUDrivers, $ui.chkNumLock, $ui.chkFastBoot, $ui.txtPostScript, $ui.btnPostScript)) { & $hide $c }
     # Werkzeuge: nur Suche und Ordner/Anmeldedaten des eigenen Profils
-    $keep = @('Im Backup suchen', 'Wichtige Dateien suchen')
+    $keep = @('Im Backup suchen', 'Wichtige Dateien suchen', 'Datenbanken suchen')
     foreach ($b in @($ui.pnlToolsProfile.Children)) { if ($keep -notcontains "$($b.Content)") { $b.Visibility = 'Collapsed' } }
     foreach ($p in @($ui.pnlToolsComputer, $ui.pnlToolsDiag, $ui.pnlSysTools, $ui.btnToolSoftDeploy)) {
         # ganze Abschnitte (Border) ausblenden
