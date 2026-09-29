@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.33 - 2026-09-29
+### Behoben
+- Links (Werkzeuge): Seriennummer (`{SERIAL}`, *Seriennummer in Zwischenablage*) und `{COMPUTER}` kommen jetzt vom **gewaehlten Computer** - remote per PowerShell-Remoting, sonst per WMI (DCOM); nicht lesbar = Hinweis, Link ohne Seriennummer (bisher immer der eigene PC)
+
 ## v2.0.32 - 2026-09-29
 ### Neu
 - Treiberverteilung: **Vor Treiber-Updates schuetzen** (je Paket) - nach der Installation setzt HUMig am PC die Richtlinie *Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen* fuer die Geraete mit diesem Treiber (genaueste Hardware-ID, ohne Retroactive); Windows Update ersetzt den Treiber dann nicht mehr. **Nur Windows Pro, Education und Enterprise** (bei Home wird nichts gesetzt, Hinweis im Ergebnis)

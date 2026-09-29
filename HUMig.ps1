@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.32'
+$script:Version   = '2.0.33'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -1267,6 +1267,45 @@ $bc.Add_Click({
 [void]$ui.pnlSysTools.Children.Add($bc)
 
 function Get-LocalSerial { try { return "$((Get-CimInstance Win32_BIOS).SerialNumber)".Trim() } catch { return '' } }
+# Link oeffnen: {SERIAL}/{COMPUTER} vom GEWAEHLTEN Computer (remote: WinRM, sonst WMI/DCOM)
+function Open-HMLinkNow([string]$Url, [bool]$CopySerial, [string]$Serial, [string]$Computer) {
+    if ($CopySerial -and $Serial) { Set-Clipboard -Value $Serial; Out-Console "Seriennummer $Serial ($Computer) in die Zwischenablage kopiert" 'Info' }
+    Start-Process ($Url.Replace('{SERIAL}', [uri]::EscapeDataString($Serial)).Replace('{COMPUTER}', $Computer))
+}
+function Open-HMLink([string]$Url, [bool]$CopySerial) {
+    $comp = Get-TargetComputer
+    $isLocal = ($comp -eq '.' -or $comp -ieq 'localhost' -or $comp -ieq $env:COMPUTERNAME -or $comp -ilike "$($env:COMPUTERNAME).*")
+    if (-not $CopySerial -and $Url -notmatch '\{SERIAL\}') { Open-HMLinkNow $Url $false '' $comp; return }
+    if ($isLocal) { Open-HMLinkNow $Url $CopySerial (Get-LocalSerial) $env:COMPUTERNAME; return }
+    Out-Console "Seriennummer von $comp lesen ..." 'Info'
+    Invoke-AsyncCommand -ScriptBlock {
+        param($h, $cred)
+        $err = @()
+        try {
+            $p = @{ ComputerName = $h; ScriptBlock = { "$((Get-CimInstance Win32_BIOS).SerialNumber)".Trim() }; ErrorAction = 'Stop'; SessionOption = (New-PSSessionOption -OpenTimeout 15000 -OperationTimeout 30000) }
+            if ($cred) { $p.Credential = $cred }
+            $sn = "$(Invoke-Command @p)".Trim()
+            if ($sn) { return "OK|$sn" }
+        } catch { $err += "WinRM: $($_.Exception.Message)" }
+        $cs = $null
+        try {
+            $o = @{ ComputerName = $h; SessionOption = (New-CimSessionOption -Protocol Dcom); ErrorAction = 'Stop'; OperationTimeoutSec = 20 }
+            if ($cred) { $o.Credential = $cred }
+            $cs = New-CimSession @o
+            $sn = "$((Get-CimInstance -CimSession $cs -ClassName Win32_BIOS -ErrorAction Stop).SerialNumber)".Trim()
+            if ($sn) { return "OK|$sn" }
+            $err += 'WMI: keine Seriennummer'
+        } catch { $err += "WMI: $($_.Exception.Message)" }
+        finally { if ($cs) { Remove-CimSession $cs -ErrorAction SilentlyContinue } }
+        "FEHLER|$(($err -join ' / ') -replace '[\r\n]+', ' ')"
+    } -ArgumentList @($comp, $script:RemoteCred) -TimeoutSec 90 -State @{ Url = $Url; Copy = $CopySerial; Comp = $comp } -OnComplete {
+        param($r, $st)
+        $t = "$r"
+        if ($t -like 'OK|*') { Open-HMLinkNow $st.Url $st.Copy $t.Substring(3) $st.Comp; return }
+        Out-Console "Seriennummer von $($st.Comp) nicht lesbar: $(Format-RemoteError ($t -replace '^FEHLER[|:]\s*', '')) - Link ohne Seriennummer geoeffnet" 'Warning'
+        Open-HMLinkNow $st.Url $false '' $st.Comp
+    }
+}
 function Build-LinksPanel {
 $ui.pnlLinks.Children.Clear()
 foreach ($l in @($script:Settings.Links)) {
@@ -1277,10 +1316,7 @@ foreach ($l in @($script:Settings.Links)) {
     $b.Tag = @("$($l.Url)", [bool]$l.CopySerial)
     $b.Add_Click({
         param($src)
-        $url = $src.Tag[0]; $copy = $src.Tag[1]
-        $sn = Get-LocalSerial
-        if ($copy -and $sn) { Set-Clipboard -Value $sn; Out-Console "Seriennummer $sn in die Zwischenablage kopiert" 'Info' }
-        Start-Process ($url.Replace('{SERIAL}', [uri]::EscapeDataString($sn)).Replace('{COMPUTER}', $env:COMPUTERNAME))
+        Open-HMLink -Url $src.Tag[0] -CopySerial ([bool]$src.Tag[1])
     })
     [void]$ui.pnlLinks.Children.Add($b)
 }
