@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.36 - 2026-09-29
+### Verbessert
+- Treiberverteilung, Art INF: zum Client werden nur die Unterordner mit INF-Dateien kopiert (z.B. `driver\` statt des ganzen entpackten Pakets mit Setup); Infofeld und Rueckfrage zeigen die Kopiergroesse
+- *Am gewaehlten PC pruefen* zeigt nur die passenden Geraete - nur wenn keines passt, zum Vergleich die Geraete derselben Klasse
+
 ## v2.0.35 - 2026-09-29
 ### Verbessert
 - Treiberverteilung: wird bei *Ordner hinzufuegen* ein Ordner innerhalb eines Pakets gewaehlt (z.B. entpackter Treiber im Ordner des Setups), kann er als eigenes Paket in den Treiber-Ordner verschoben werden
