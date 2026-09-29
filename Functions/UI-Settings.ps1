@@ -24,7 +24,7 @@ function Show-SettingsDialog {
     foreach ($n in @('lblPath', 'btnOpenConfig', 'btnSave', 'btnCancel', 'tabs', 'txtRoot', 'btnRoot', 'cmbThreads', 'txtRetention', 'txtRetentionKeep', 'cmbUiScale', 'chkOverviewAuto', 'txtChecklist', 'chkChecklistAuto', 'tabSchools', 'dgSchools', 'btnSchoolAdd', 'btnSchoolDel', 'txtUsmt', 'btnUsmt', 'btnUsmtAdk', 'lblUsmt',
         'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript',
         'tabExceptions', 'btnExcDefault', 'txtExPF', 'txtExPFi', 'txtExPMin', 'txtExSF', 'txtExSFi', 'txtExSMin', 'tabModules', 'txtNmName', 'cmbNmGroup',
-        'cmbNmType', 'txtNmFilter', 'txtNmPath', 'btnNmAdd', 'btnModDel', 'btnModJson', 'dgModules', 'btnLinkAdd', 'btnLinkDel', 'dgLinks',
+        'cmbNmType', 'txtNmFilter', 'txtNmPath', 'btnNmAdd', 'btnModDel', 'btnModJson', 'btnAppEditor', 'dgModules', 'btnLinkAdd', 'btnLinkDel', 'dgLinks',
         'txtOwner', 'txtRepo', 'txtBranch', 'lblToken', 'btnTokenSet', 'btnTokenDel')) { $f[$n] = $w.FindName($n) }
     $f.lblPath.Text = $script:ConfigDir
     $st = @{ Saved = $false; Win = $w; F = $f }
@@ -174,6 +174,7 @@ function Show-SettingsDialog {
         & $script:SetDlg.FillMods
         $script:SetDlg.Saved = $true
     })
+    $f.btnAppEditor.Add_Click({ Show-HMAppEditor -Owner $script:SetDlg.Win })
     $f.btnModJson.Add_Click({
         $mp = Join-Path $script:ConfigDir 'modules.json'
         if (-not (Test-Path -LiteralPath $mp)) { Write-JsonFile $mp ([pscustomobject]@{ _Info = 'Eigene Module/Vorlagen. Aufbau wie modules.default.json.'; Modules = @(); Presets = @() }) }
