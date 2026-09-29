@@ -88,9 +88,9 @@ function Import-HMAeData {
     $script:Ae.Default = @{}
     foreach ($a in @($def.Apps | Where-Object { $_ -and $_.Id })) { $script:Ae.Default["$($a.Id)"] = $a }
     $script:Ae.LocalObj = $loc
-    $script:Ae.Local = New-Object System.Collections.Generic.List[object]
+    $script:Ae.Local = [System.Collections.Generic.List[object]]::new()
     foreach ($a in @($loc.Apps | Where-Object { $_ -and $_.Id })) { $script:Ae.Local.Add($a) }
-    $list = New-Object System.Collections.Generic.List[object]
+    $list = [System.Collections.Generic.List[object]]::new()
     foreach ($id in $script:Ae.DefaultIds) {
         $l = @($script:Ae.Local | Where-Object { "$($_.Id)" -eq $id })[0]
         $list.Add([pscustomobject]@{ Id = $id; Kind = $(if ($l) { 'geaendert' } else { 'Standard' }); Obj = $(if ($l) { $l } else { $script:Ae.Default[$id] }) })
@@ -109,12 +109,13 @@ function Get-HMAeScope($i) {
 }
 # Lokalen Pfad in Token-Schreibweise umwandeln (laengster passender Ordner gewinnt)
 function ConvertTo-HMAeToken([string]$Path) {
-    $map = New-Object System.Collections.Generic.List[object]
+    $map = [System.Collections.Generic.List[object]]::new()
     $add = { param($t, $v) if ($v) { $map.Add([pscustomobject]@{ T = $t; V = "$v".TrimEnd('\') }) } }
     # Profil des gewaehlten Benutzers (Pfad am Ziel-PC, gilt auch remote)
     $p = Get-SelectedProfile
     if ($p -and $p.LocalPath -and -not $p.NoProfile) {
-        & $add 'PROFILE' $p.LocalPath; & $add 'APPDATA' (Join-Path $p.LocalPath 'AppData\Roaming'); & $add 'LOCALAPPDATA' (Join-Path $p.LocalPath 'AppData\Local')
+        $pp = "$($p.LocalPath)".TrimEnd('\')   # Pfad am Ziel-PC - kein Join-Path (Laufwerk muss hier nicht existieren)
+        & $add 'PROFILE' $pp; & $add 'APPDATA' "$pp\AppData\Roaming"; & $add 'LOCALAPPDATA' "$pp\AppData\Local"
     }
     if (Test-HMIsLocal (Get-TargetComputer)) {
         & $add 'APPDATA' $env:APPDATA; & $add 'LOCALAPPDATA' $env:LOCALAPPDATA; & $add 'PROFILE' $env:USERPROFILE
@@ -133,7 +134,7 @@ function ConvertTo-HMAeToken([string]$Path) {
 }
 # Eintrag pruefen. Rueckgabe: Liste von Fehlertexten (leer = OK)
 function Test-HMAeEntry($e, [bool]$IsNew) {
-    $err = New-Object System.Collections.Generic.List[string]
+    $err = [System.Collections.Generic.List[string]]::new()
     if ($e.Id -notmatch '^App_[A-Za-z0-9_\-]+$') { $err.Add("Id muss mit App_ beginnen und darf nur Buchstaben, Ziffern, _ und - enthalten ($($e.Id))") }
     elseif ($IsNew -and @($script:Ae.All | Where-Object { "$($_.Id)" -ieq $e.Id }).Count) { $err.Add("Id $($e.Id) gibt es schon") }
     if (-not "$($e.Name)".Trim()) { $err.Add('Name fehlt') }
@@ -181,7 +182,8 @@ function Show-HMAppEditor([string]$SelectId = '', $Owner = $null, $NewEntry = $n
         <Button x:Name="bClose" Content="Schliessen" Style="{DynamicResource BtnDefault}" Margin="0"/>
       </StackPanel>
       <StackPanel Orientation="Horizontal">
-        <Button x:Name="bNew" Content="+ Neu" Style="{DynamicResource BtnBlue}"/>
+        <Button x:Name="bWizard" Content="+ Programm hinzufuegen ..." Style="{DynamicResource BtnGreen}" ToolTip="Assistent: installiertes Programm waehlen - HUMig schlaegt Ordner, Registry, Plug-ins und Lizenzdateien vor"/>
+        <Button x:Name="bNew" Content="+ Leer" Style="{DynamicResource BtnBlue}" ToolTip="Leeren Eintrag von Hand anlegen"/>
         <Button x:Name="bReset" Content="Auf Standard zuruecksetzen" Style="{DynamicResource BtnPeach}" ToolTip="Eigene Aenderung an einem Standard-Eintrag entfernen (Eintrag aus apps.json loeschen)"/>
         <Button x:Name="bDelete" Content="Loeschen" Style="{DynamicResource BtnRed}" ToolTip="Nur eigene Eintraege"/>
         <Button x:Name="bExport" Content="Exportieren ..." Style="{DynamicResource BtnDefault}" ToolTip="Diesen Eintrag als JSON-Datei speichern (weitergeben)"/>
@@ -321,11 +323,11 @@ function Show-HMAppEditor([string]$SelectId = '', $Owner = $null, $NewEntry = $n
     $w.Resources.MergedDictionaries.Add($script:Window.Resources)
     if ($script:AppIcon) { $w.Icon = $script:AppIcon }
     $f = @{}
-    foreach ($n in @('bSave', 'bRevert', 'bClose', 'bNew', 'bReset', 'bDelete', 'bExport', 'bImport', 'lState', 'tSearch', 'cFilter', 'lCount', 'lApps', 'lHead', 'tabs',
+    foreach ($n in @('bSave', 'bRevert', 'bClose', 'bWizard', 'bNew', 'bReset', 'bDelete', 'bExport', 'bImport', 'lState', 'tSearch', 'cFilter', 'lCount', 'lApps', 'lHead', 'tabs',
             'tId', 'tName', 'bDetect', 'tDetect', 'bPackage', 'tPackage', 'tModules', 'lGen', 'bIAdd', 'bIDup', 'bIDel', 'bIUp', 'bIDown', 'cIType', 'tIName', 'cIRole', 'cIDb',
             'lIPath', 'bICheck', 'bIFolder', 'tIPath', 'tIFilter', 'lIScope', 'tIXD', 'tIXF', 'xILic', 'xIHidden', 'lICheck', 'lItems', 'bProc', 'tClose', 'bSvc', 'tSvc',
             'tTransfer', 'tNot', 'tLicense', 'tVersion', 'tAfter', 'tVDate', 'bToday', 'bLinks', 'tSources', 'tVNote')) { $f[$n] = $w.FindName($n) }
-    $script:Ae = @{ Win = $w; F = $f; Cur = $null; CurKind = ''; IsNew = $false; Snapshot = ''; Items = (New-Object System.Collections.Generic.List[object]); Loading = $false; ReadOnly = $false; Saved = $false }
+    $script:Ae = @{ Win = $w; F = $f; Cur = $null; CurKind = ''; IsNew = $false; Snapshot = ''; Items = ([System.Collections.Generic.List[object]]::new()); Loading = $false; ReadOnly = $false; Saved = $false }
 
     foreach ($t in @('alle', 'am PC erkannt', 'geprueft', 'ungeprueft', 'nur Hinweis (ohne Inhalt)', 'eigene', 'geaendert')) { [void]$f.cFilter.Items.Add($t) }
     $f.cFilter.SelectedIndex = 0
@@ -339,7 +341,7 @@ function Show-HMAppEditor([string]$SelectId = '', $Owner = $null, $NewEntry = $n
     if ($script:UserMode -and -not $ro) { $ro = 'Benutzer-Modus - nur Ansicht' }
     if ($ro) {
         $script:Ae.ReadOnly = $true
-        foreach ($b in @($f.bSave, $f.bNew, $f.bReset, $f.bDelete, $f.bImport)) { $b.IsEnabled = $false }
+        foreach ($b in @($f.bSave, $f.bWizard, $f.bNew, $f.bReset, $f.bDelete, $f.bImport)) { $b.IsEnabled = $false }
         $f.lState.Text = $ro
     }
 
@@ -381,6 +383,7 @@ function Show-HMAppEditor([string]$SelectId = '', $Owner = $null, $NewEntry = $n
     $f.bSave.Add_Click({ Save-HMAeEntry })
     $f.bRevert.Add_Click({ if ($script:Ae.Cur) { Set-HMAeForm $script:Ae.Orig $script:Ae.CurKind $script:Ae.IsNew } })
     $f.bNew.Add_Click({ New-HMAeEntry })
+    $f.bWizard.Add_Click({ if (Confirm-HMAeDiscard) { Start-HMAppWizard -ForEditor } })
     $f.bReset.Add_Click({ Reset-HMAeEntry })
     $f.bDelete.Add_Click({ Remove-HMAeEntry })
     $f.bExport.Add_Click({ Export-HMAeEntry })
@@ -696,7 +699,7 @@ function Test-HMAePath {
     }
 }
 # Auswahl-Dialog (Mehrfachauswahl mit Filter). Rueckgabe: gewaehlte Tags
-function Show-HMAePick([string]$Title, [object[]]$Rows) {
+function Show-HMAePick([string]$Title, [object[]]$Rows, [switch]$Single, $Owner = $null) {
     $x = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Width="620" Height="560" WindowStartupLocation="CenterOwner" Background="#FF1E1E2E">
@@ -706,7 +709,7 @@ function Show-HMAePick([string]$Title, [object[]]$Rows) {
       <Button x:Name="ok" Content="Uebernehmen" Style="{DynamicResource BtnGreen}" Width="120" IsDefault="True"/>
       <Button x:Name="cancel" Content="Abbrechen" Style="{DynamicResource BtnDefault}" Width="100" IsCancel="True" Margin="0"/>
     </StackPanel>
-    <ListBox x:Name="l" SelectionMode="Extended"/>
+    <ListBox x:Name="l"/>
   </DockPanel>
 </Window>
 '@
@@ -715,6 +718,7 @@ function Show-HMAePick([string]$Title, [object[]]$Rows) {
     $w.Title = $Title
     if ($script:AppIcon) { $w.Icon = $script:AppIcon }
     $l = $w.FindName('l'); $q = $w.FindName('q')
+    $l.SelectionMode = $(if ($Single) { 'Single' } else { 'Extended' })
     $fill = {
         $l.Items.Clear()
         foreach ($r in $Rows) { if (-not $q.Text -or "$($r.Text)" -like "*$($q.Text)*") { $li = New-Object System.Windows.Controls.ListBoxItem; $li.Content = "$($r.Text)"; $li.Tag = "$($r.Tag)"; [void]$l.Items.Add($li) } }
@@ -723,7 +727,7 @@ function Show-HMAePick([string]$Title, [object[]]$Rows) {
     $q.Add_TextChanged($fill)
     $w.FindName('ok').Add_Click({ $w.DialogResult = $true }.GetNewClosure())
     $l.Add_MouseDoubleClick({ $w.DialogResult = $true }.GetNewClosure())
-    $w.Owner = $script:Ae.Win; Set-HMWindowScale $w
+    $w.Owner = $(if ($Owner) { $Owner } elseif ($script:Ae -and $script:Ae.Win) { $script:Ae.Win } else { $script:Window }); Set-HMWindowScale $w
     if ($w.ShowDialog() -ne $true) { return @() }
     return @($l.SelectedItems | ForEach-Object { "$($_.Tag)" })
 }
