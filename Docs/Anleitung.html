@@ -440,7 +440,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <div class="card t"><b>Ein Unterordner</b>= ein Paket mit Installer + Zubehör. Ordner mit <code>_</code> am Anfang werden ignoriert.</div>
   </div>
   <p>HUMig liest den Installer aus und schlägt die Silent-Parameter vor (MSI, Inno Setup, NSIS, WiX Burn, InstallShield, Advanced Installer, Squirrel, 7-Zip-SFX – bei unbekanntem Typ nur geraten, Herstellerdoku prüfen). Je Paket gespeichert: Name, Installer, Parameter, Erkennung (ProductCode oder Name + Mindestversion), Erfolgs-ExitCodes, Timeout.</p>
-  <p>Installiert wird auf dem gewählten Computer oder auf <b>mehreren PCs</b> (bis zu 8 gleichzeitig); bereits installierte werden übersprungen.</p>
+  <p>Installiert wird auf dem gewählten Computer oder auf <b>mehreren PCs</b> (<span class="ui g">Mehrere PCs …</span> öffnet die PC-Auswahl aus dem AD mit OU und Filter, weitere Namen eintragbar; bis zu 8 gleichzeitig); bereits installierte werden übersprungen.</p>
   <h3>Installierte Software</h3>
   <p>Liste des gewählten Computers mit Filter, CSV und Drucken. Markierte Programme lassen sich still <b>deinstallieren</b> (MSI per <code>msiexec /x</code>, sonst stiller Herstellerbefehl) – Ergebnis je Programm in der Konsole.</p>
 </section>
@@ -464,7 +464,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h3>Prüfen und installieren</h3>
   <ol class="steps">
     <li>Oben den Computer wählen, Paket markieren, <span class="ui t">Am gewaehlten PC pruefen</span>: passende Geräte, aktive Version und ob installiert würde (installiert nichts).</li>
-    <li><span class="ui g">Gewaehlten Computer</span> oder <span class="ui g">Mehrere PCs …</span> (bis zu 8 gleichzeitig; auch über <a href="#mehrfach">Mehrfachaktionen</a> › Treiber verteilen).</li>
+    <li><span class="ui g">Gewaehlten Computer</span> oder <span class="ui g">Mehrere PCs …</span> – öffnet die PC-Auswahl aus dem AD (OU, Filter, anhaken, weitere Namen eintragen), bis zu 8 gleichzeitig; auch über <a href="#mehrfach">Mehrfachaktionen</a> › Treiber verteilen.</li>
     <li>Ergebnis je PC: <b>OK</b> mit aktiver Version (ggf. <i>NEUSTART erforderlich</i>), <b>übersprungen</b> (keine passende Hardware / Version schon aktiv / Windows behält neueren Treiber) oder <b>Fehler</b> mit Log <code>C:\Windows\Temp\HU_DRV_*.log</code> (Details: <code>C:\Windows\INF\setupapi.dev.log</code>).</li>
   </ol>
   <p>PCs, auf denen dieselbe Version schon aktiv ist, werden übersprungen – außer mit <span class="ui">auch wenn diese Version schon aktiv ist</span>.</p>

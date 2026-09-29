@@ -470,7 +470,7 @@ function Show-SoftwareWindow {
         <StackPanel Orientation="Horizontal">
           <TextBlock Text="Installieren auf:" Margin="0,0,8,0" Foreground="#FFF9E2AF"/>
           <Button x:Name="btnClient" Content="Gewaehlten Computer" Background="#FFA6E3A1"/>
-          <Button x:Name="btnMultiSel" Content="Mehrere PCs ..." Background="#FFA6E3A1"/>
+          <Button x:Name="btnMultiSel" Content="Mehrere PCs ..." Background="#FFA6E3A1" ToolTip="PCs aus dem Active Directory anhaken (OU, Filter) oder Namen eintragen - installiert wird parallel (bis zu 8 gleichzeitig)"/>
           <TextBlock x:Name="lblTarget" Margin="8,0,0,0"/>
         </StackPanel>
       </DockPanel>
@@ -573,13 +573,16 @@ function Show-SoftwareWindow {
     $w.FindName('btnMultiSel').Add_Click({
         $sw = $script:SwUi
         $p = Save-SwForm; if (-not $p) { return }
-        $t = Show-TextInputDialog -Title 'Mehrere PCs' -Label 'PC-Namen (je Zeile oder mit Komma/Leerzeichen getrennt). Installiert wird parallel (bis zu 8 gleichzeitig).' -Owner $sw.Win -MultiLine
-        if (-not $t) { return }
-        $hosts = @($t -split '[\s,;]+' | Where-Object { $_ } | Sort-Object -Unique)
-        if (-not $hosts.Count) { return }
-        $force = [bool]$sw.ChkForce.IsChecked
-        if (-not (Confirm-SwDeploy -Package $p -Hosts $hosts -Force $force)) { return }
-        Start-SoftwareDeploy -Hosts $hosts -Package $p -Force $force -Label 'Mehrere PCs'
+        $script:SwPick = @{ Package = $p; Force = [bool]$sw.ChkForce.IsChecked }
+        # PCs aus dem AD anhaken (Filter/OU) oder Namen eintragen
+        Show-HMMultiDialog -PickTitle "Paket '$($p.Settings.Name)'" -Owner $sw.Win -OnPick {
+            param($hosts)
+            $pp = $script:SwPick; if (-not $pp) { return }
+            $hosts = @($hosts | Where-Object { $_ } | Sort-Object -Unique)
+            if (-not $hosts.Count) { return }
+            if (-not (Confirm-SwDeploy -Package $pp.Package -Hosts $hosts -Force $pp.Force)) { return }
+            Start-SoftwareDeploy -Hosts $hosts -Package $pp.Package -Force $pp.Force -Label 'Mehrere PCs'
+        }
     })
     $w.Add_Closed({ $script:SwUi = $null })
     $w.Owner = $script:Window; Set-HMWindowScale $w

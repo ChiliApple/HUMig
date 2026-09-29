@@ -85,7 +85,10 @@ $script:HMMultiActions = @(
     [pscustomobject]@{ Key = 'message';   Text = 'Nachricht senden';                     Desc = 'Text an alle angemeldeten Benutzer.' }
     [pscustomobject]@{ Key = 'restart';   Text = 'Neustart (in 2 min)';                  Desc = 'Neustart mit 120 Sekunden Vorwarnung.' }
 )
-function Show-HMMultiDialog {
+# -OnPick: nur PCs auswaehlen (ohne Aktionsliste), Rueckgabe an den Aufrufer: & $OnPick <string[]>
+function Show-HMMultiDialog([scriptblock]$OnPick = $null, [string]$PickTitle = '', $Owner = $null) {
+    if ($script:MultiDlg -and $script:MultiDlg.W) { try { $script:MultiDlg.W.Close() } catch { } }
+    $script:MultiPick = if ($OnPick) { @{ On = $OnPick; Title = $PickTitle; Owner = $Owner } } else { $null }
     Start-HMADLoad { Show-HMMultiDialogCore }
 }
 function Show-HMMultiDialogCore {
@@ -131,7 +134,7 @@ function Show-HMMultiDialogCore {
           </DataGrid.Columns>
         </DataGrid>
       </DockPanel>
-      <DockPanel Grid.Column="1">
+      <DockPanel x:Name="pnlAct" Grid.Column="1">
         <TextBlock DockPanel.Dock="Top" Text="Aktion fuer die angehakten PCs:" Foreground="#FFA6ADC8" Margin="0,0,0,4"/>
         <TextBlock x:Name="lblDesc" DockPanel.Dock="Bottom" Foreground="#FFF9E2AF" TextWrapping="Wrap" Margin="0,6,0,0" MinHeight="48"/>
         <ListBox x:Name="lstA" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" FontSize="13"/>
@@ -142,7 +145,15 @@ function Show-HMMultiDialogCore {
 "@
     $w = [System.Windows.Markup.XamlReader]::Load([System.Xml.XmlNodeReader]::new(([xml]$mx)))
     if ($script:AppIcon) { $w.Icon = $script:AppIcon }
-    $w.Owner = $script:Window; Set-HMWindowScale $w
+    $pk = $script:MultiPick
+    $w.Owner = $(if ($pk -and $pk.Owner) { $pk.Owner } else { $script:Window }); Set-HMWindowScale $w
+    if ($pk) {
+        $w.Title = "PCs auswaehlen$(if ($pk.Title) { " - $($pk.Title)" })"
+        $w.FindName('pnlAct').Visibility = 'Collapsed'
+        $w.FindName('pnlAct').Parent.ColumnDefinitions[1].Width = [System.Windows.GridLength]::new(0)
+        $w.FindName('btnTake').Visibility = 'Collapsed'
+        $w.FindName('btnOk').Content = 'PCs uebernehmen'
+    }
     $dt = New-Object System.Data.DataTable
     [void]$dt.Columns.Add('Sel', [bool]); [void]$dt.Columns.Add('Name', [string]); [void]$dt.Columns.Add('OU', [string]); [void]$dt.Columns.Add('OS', [string]); [void]$dt.Columns.Add('Last', [datetime]); [void]$dt.Columns.Add('Desc', [string])
     $pre = @{}; foreach ($h in @($script:MultiHosts)) { $pre["$h".ToUpper()] = $true }
@@ -200,6 +211,7 @@ function Show-HMMultiDialogCore {
         $s.Add.Text = ''; & $script:MultiDlgCount
     })
     $take = {
+        if ($script:MultiPick) { return }
         $s = $script:MultiDlg
         $rv = $s.Dg.SelectedItem
         if (-not $rv) { return }
@@ -215,6 +227,13 @@ function Show-HMMultiDialogCore {
         $s.Dg.CommitEdit(); $s.Dg.CommitEdit()
         $hosts = @($s.Dt.Rows | Where-Object { $_.Sel -eq $true } | ForEach-Object { "$($_.Name)" })
         if (-not $hosts.Count) { [void][System.Windows.MessageBox]::Show($s.W, 'Bitte PCs anhaken (Spalte X, Leertaste fuer markierte Zeilen).', 'Aktion', 'OK', 'Information'); return }
+        if ($script:MultiPick) {
+            $script:MultiHosts = $hosts
+            $on = $script:MultiPick.On; $script:MultiPick = $null
+            $s.W.Close()
+            & $on $hosts
+            return
+        }
         if ($s.Lst.SelectedIndex -lt 0) { [void][System.Windows.MessageBox]::Show($s.W, 'Bitte rechts eine Aktion waehlen.', 'Aktion', 'OK', 'Information'); return }
         $script:MultiHosts = $hosts
         $act = $script:HMMultiActions[$s.Lst.SelectedIndex]
