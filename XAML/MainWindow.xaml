@@ -432,9 +432,10 @@
                             </Border>
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="SOFTWARE (GEWAEHLTER COMPUTER)" Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock Text="SOFTWARE + TREIBER (GEWAEHLTER COMPUTER)" Style="{StaticResource SectionLabel}"/>
                                     <WrapPanel>
                                         <Button x:Name="btnToolSoftDeploy" Content="Software installieren (Softwareverteilung)" Style="{StaticResource BtnGreen}" ToolTip="Pakete (MSI/EXE/MSP oder Ordner) silent installieren - auf dem gewaehlten Computer oder mehreren PCs. Parameter werden aus dem Installer gelesen und vorgeschlagen, bereits installierte Software wird erkannt."/>
+                                        <Button x:Name="btnToolDrvDeploy" Content="Treiber installieren (Treiberverteilung)" Style="{StaticResource BtnGreen}" ToolTip="Treiber aus einem eigenen Ordner (INF-Ordner per pnputil oder Hersteller-Setup) auf den gewaehlten Computer oder mehrere PCs - mit Hardware-Pruefung und Versionsvergleich, auf Wunsch erzwungen (auch aeltere Version)."/>
                                         <Button x:Name="btnToolSoftList" Content="Installierte Software anzeigen" Style="{StaticResource BtnTeal}" ToolTip="Programme des gewaehlten Computers als Tabelle (Filter, CSV, Drucken)"/>
                                     </WrapPanel>
                                 </StackPanel>

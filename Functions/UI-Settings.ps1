@@ -22,7 +22,7 @@ function Show-SettingsDialog {
     $w.Owner = $script:Window; Set-HMWindowScale $w
     $f = @{}
     foreach ($n in @('lblPath', 'btnOpenConfig', 'btnSave', 'btnCancel', 'tabs', 'txtRoot', 'btnRoot', 'cmbThreads', 'txtRetention', 'txtRetentionKeep', 'cmbUiScale', 'chkOverviewAuto', 'txtChecklist', 'chkChecklistAuto', 'tabSchools', 'dgSchools', 'btnSchoolAdd', 'btnSchoolDel', 'txtUsmt', 'btnUsmt', 'btnUsmtAdk', 'lblUsmt',
-        'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript',
+        'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtDrvDir', 'btnDrvDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript',
         'tabExceptions', 'btnExcDefault', 'txtExPF', 'txtExPFi', 'txtExPMin', 'txtExSF', 'txtExSFi', 'txtExSMin', 'tabModules', 'txtNmName', 'cmbNmGroup',
         'cmbNmType', 'txtNmFilter', 'txtNmPath', 'btnNmAdd', 'btnModDel', 'btnModJson', 'btnAppEditor', 'dgModules', 'btnLinkAdd', 'btnLinkDel', 'dgLinks',
         'txtOwner', 'txtRepo', 'txtBranch', 'lblToken', 'btnTokenSet', 'btnTokenDel')) { $f[$n] = $w.FindName($n) }
@@ -44,6 +44,7 @@ function Show-SettingsDialog {
     $f.cmbUiScale.SelectedItem = $cur
     $f.txtUsmt.Text = "$($s.UsmtPath)"
     $f.txtSwDir.Text = "$($s.SoftwareFolder)"
+    $f.txtDrvDir.Text = "$($s.DriverFolder)"
     $f.chkWlanClear.IsChecked = [bool]$s.WlanExportClearKey
     $f.txtSubnet.Text = "$($s.Network.SubnetMask)"
     $f.txtDns.Text = ConvertTo-HMLines $s.Network.DnsServers
@@ -70,6 +71,11 @@ function Show-SettingsDialog {
         $d = New-Object System.Windows.Forms.FolderBrowserDialog
         $d.Description = 'Ordner fuer die Softwareverteilung (Pakete)'
         if ($d.ShowDialog() -eq 'OK') { $script:SetDlg.F.txtSwDir.Text = $d.SelectedPath }
+    })
+    $f.btnDrvDir.Add_Click({
+        $d = New-Object System.Windows.Forms.FolderBrowserDialog
+        $d.Description = 'Ordner fuer die Treiberverteilung (Treiberpakete)'
+        if ($d.ShowDialog() -eq 'OK') { $script:SetDlg.F.txtDrvDir.Text = $d.SelectedPath }
     })
     $f.btnLauncher.Add_Click({
         if (New-HMLauncher -Force -Name 'HUMig-Benutzer.exe') { Out-Console "Starter fuer den Benutzer-Modus erstellt: $(Join-Path $script:AppRoot 'HUMig-Benutzer.exe')" 'Success' }
@@ -193,11 +199,11 @@ function Show-SettingsDialog {
 
     # --- Standorte ---
     $dtS = New-Object System.Data.DataTable
-    foreach ($c in @('Name', 'BackupRoot', 'SoftwareFolder', 'UsmtPath', 'ADServer', 'SubnetMask', 'DnsServers', 'Note')) { [void]$dtS.Columns.Add($c, [string]) }
+    foreach ($c in @('Name', 'BackupRoot', 'SoftwareFolder', 'DriverFolder', 'UsmtPath', 'ADServer', 'SubnetMask', 'DnsServers', 'Note')) { [void]$dtS.Columns.Add($c, [string]) }
     foreach ($pr in @($s.Profiles)) {
         if (-not $pr -or -not "$($pr.Name)".Trim()) { continue }
         $r = $dtS.NewRow()
-        $r.Name = "$($pr.Name)"; $r.BackupRoot = "$($pr.BackupRoot)"; $r.SoftwareFolder = "$($pr.SoftwareFolder)"; $r.UsmtPath = "$($pr.UsmtPath)"; $r.ADServer = "$($pr.ADServer)"
+        $r.Name = "$($pr.Name)"; $r.BackupRoot = "$($pr.BackupRoot)"; $r.SoftwareFolder = "$($pr.SoftwareFolder)"; $r.DriverFolder = "$($pr.DriverFolder)"; $r.UsmtPath = "$($pr.UsmtPath)"; $r.ADServer = "$($pr.ADServer)"
         $r.SubnetMask = "$($pr.SubnetMask)"; $r.DnsServers = (@($pr.DnsServers | Where-Object { $_ }) -join ', '); $r.Note = "$($pr.Note)"
         $dtS.Rows.Add($r)
     }
@@ -230,7 +236,7 @@ function Show-SettingsDialog {
         $F.dgSchools.CommitEdit(); $F.dgSchools.CommitEdit()
         $schools = @(foreach ($r in $script:SetDlg.DtS.Rows) {
             if ($r.RowState -eq 'Deleted' -or -not "$($r.Name)".Trim()) { continue }
-            [ordered]@{ Name = "$($r.Name)".Trim(); BackupRoot = "$($r.BackupRoot)".Trim(); SoftwareFolder = "$($r.SoftwareFolder)".Trim(); UsmtPath = "$($r.UsmtPath)".Trim(); ADServer = "$($r.ADServer)".Trim()
+            [ordered]@{ Name = "$($r.Name)".Trim(); BackupRoot = "$($r.BackupRoot)".Trim(); SoftwareFolder = "$($r.SoftwareFolder)".Trim(); DriverFolder = "$($r.DriverFolder)".Trim(); UsmtPath = "$($r.UsmtPath)".Trim(); ADServer = "$($r.ADServer)".Trim()
                 SubnetMask = "$($r.SubnetMask)".Trim(); DnsServers = @("$($r.DnsServers)" -split '[,;\s]+' | Where-Object { $_ }); Note = "$($r.Note)".Trim() }
         })
         $dup = @($schools | Group-Object { $_.Name.ToUpperInvariant() } | Where-Object { $_.Count -gt 1 })
@@ -259,6 +265,7 @@ function Show-SettingsDialog {
         $h.UsmtPath = "$($F.txtUsmt.Text)".Trim()
         $h.WlanExportClearKey = [bool]$F.chkWlanClear.IsChecked
         $h.SoftwareFolder = "$($F.txtSwDir.Text)".Trim()
+        $h.DriverFolder = "$($F.txtDrvDir.Text)".Trim()
         $h.Network = [ordered]@{ SubnetMask = "$($F.txtSubnet.Text)".Trim(); DnsServers = @(ConvertFrom-HMLines $F.txtDns.Text) }
         $rs = [ordered]@{}
         if ($s.Restore) { foreach ($x in $s.Restore.PSObject.Properties) { $rs[$x.Name] = $x.Value } }

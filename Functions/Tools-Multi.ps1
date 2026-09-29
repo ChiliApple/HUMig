@@ -79,6 +79,7 @@ $script:HMMultiActions = @(
     [pscustomobject]@{ Key = 'doopt';     Text = 'Uebermittlungsoptimierung setzen';     Desc = 'Delivery Optimization: Peer-Modus (LAN/Gruppe) per lokaler Richtlinie - Updates werden zwischen den PCs geteilt.' }
     [pscustomobject]@{ Key = 'cleanup';   Text = 'Speicher aufraeumen';                  Desc = 'Temp, Update-Cache, Fehlerberichte - optional Windows.old und Papierkorb.' }
     [pscustomobject]@{ Key = 'software';  Text = 'Software verteilen';                   Desc = 'Paket aus der Softwareverteilung installieren (bis 8 PCs gleichzeitig).' }
+    [pscustomobject]@{ Key = 'drivers';   Text = 'Treiber verteilen';                    Desc = 'Treiber aus der Treiberverteilung installieren (INF/Setup, Hardware-Pruefung, bis 8 PCs gleichzeitig).' }
     [pscustomobject]@{ Key = 'gpupdate';  Text = 'GPUpdate /force';                      Desc = 'Gruppenrichtlinien aktualisieren (Computer + Benutzer).' }
     [pscustomobject]@{ Key = 'intune';    Text = 'Intune-Synchronisierung';              Desc = 'MDM-Sync anstossen (geplante Aufgabe EnterpriseMgmt) + Intune Management Extension neu starten.' }
     [pscustomobject]@{ Key = 'message';   Text = 'Nachricht senden';                     Desc = 'Text an alle angemeldeten Benutzer.' }
@@ -246,6 +247,19 @@ function Invoke-HMMultiAction([string[]]$Hosts, [string]$Key, [string]$Text, $Ow
             if (-not $f) { return }
             $p = @($pk | Where-Object { "$($_.Settings.Name)  [$($_.Id)]" -eq $f.P })[0]
             if ($p -and (Confirm-SwDeploy $p $Hosts ([bool]$f.Force))) { Start-SoftwareDeploy -Hosts $Hosts -Package $p -Force ([bool]$f.Force) -Label 'Mehrfachauswahl' }
+            return
+        }
+        'drivers' {
+            $pk = @(Get-DrvPackages)
+            if (-not $pk.Count) { Out-Console 'Keine Pakete in der Treiberverteilung.' 'Warning'; return }
+            $f = Show-HMFormDialog -Title "Treiber verteilen - $n PC(s)" -OkText 'Installieren' -Fields @(
+                @{ Name = 'P'; Label = 'Treiber:'; Type = 'Combo'; Items = @($pk | ForEach-Object { "$($_.Settings.Name)  [$($_.Id)]" }) }
+                @{ Name = 'Force'; Label = 'Auch installieren, wenn diese Version schon aktiv ist'; Type = 'Check' }
+                @{ Type = 'Info'; Label = 'Einstellungen (Art, Erzwingen, nur passende Hardware) aus dem Fenster Treiberverteilung.' }
+            )
+            if (-not $f) { return }
+            $p = @($pk | Where-Object { "$($_.Settings.Name)  [$($_.Id)]" -eq $f.P })[0]
+            if ($p -and (Confirm-DrvDeploy $p $Hosts ([bool]$f.Force))) { Start-DriverDeploy -Hosts $Hosts -Package $p -Force ([bool]$f.Force) -Label 'Mehrfachauswahl' }
             return
         }
         'enable' {

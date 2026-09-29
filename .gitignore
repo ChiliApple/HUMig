@@ -14,6 +14,7 @@ Config/GitHubToken_*.xml
 Test-HUMig.result.txt
 HUMig.exe
 Softwareverteilung/
+Treiberverteilung/
 Config/WindowState.json
 Config/apps.json
 Config/mac_cache.json

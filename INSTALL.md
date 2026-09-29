@@ -22,8 +22,12 @@ Das Tool zeigt beim *Verbinden* an, was erreichbar ist.
 Installer in `Softwareverteilung\` legen (oder im Fenster *Datei hinzufuegen*). Fuer andere PCs wird PowerShell-Remoting (WinRM) benoetigt,
 der eigene PC wird direkt installiert.
 
+## Treiberverteilung
+Entpackte Treiber (Ordner mit INF-Dateien) oder Hersteller-Setups in `Treiberverteilung\` legen (oder im Fenster *Ordner/Datei hinzufuegen*,
+ZIP/CAB werden entpackt). Remote wie die Softwareverteilung ueber PowerShell-Remoting (WinRM), Administratorrechte noetig.
+
 ## Update
-Button **Update** laedt die aktuelle Version (Pull.ps1). Lokale Daten (BACKUPS, Config, Softwareverteilung, HUMig.exe) bleiben erhalten.
+Button **Update** laedt die aktuelle Version (Pull.ps1). Lokale Daten (BACKUPS, Config, Softwareverteilung, Treiberverteilung, HUMig.exe) bleiben erhalten.
 Nur bei einem privaten Repository: einmalig einen Nur-Lese-Token eingeben (Rechtsklick auf *Update* oder Einstellungen > Update).
 
 ## Anleitung

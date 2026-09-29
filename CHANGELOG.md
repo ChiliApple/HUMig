@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.0.30 - 2026-09-29
+### Neu
+- **Treiberverteilung** (Werkzeuge > *Treiber installieren*): eigene Funktion mit eigenem Ordner `Treiberverteilung\` (Einstellungen > Allgemein bzw. je Standort), Paketliste und Verwaltung; Pakete = Ordner mit INF-Dateien und/oder Setup, EXE/MSI, ZIP/CAB werden beim Hinzufuegen entpackt
+- Art **INF** per `pnputil /add-driver /subdirs /install` oder **Setup** mit Silent-Parametern; **Treiber erzwingen** installiert eine bestimmte (auch aeltere) Version ueber einen neueren/besser bewerteten Treiber
+- INF-Auswertung (Klasse, Anbieter, Version, Datum, Geraete/Hardware-IDs); **Am gewaehlten PC pruefen** zeigt passende Geraete und aktiven Treiber ohne Installation
+- Verteilen auf gewaehlten Computer, mehrere PCs oder als Mehrfachaktion *Treiber verteilen* (bis 8 parallel): ueberspringt PCs ohne passende Hardware bzw. mit derselben aktiven Version, Ergebnis mit aktiver Version, Neustart-Hinweis und Log
+- Einstellung `DriverFolder` (Allgemein + Standorte)
+
 ## v2.0.29 - 2026-09-29
 ### Neu
 - Assistent **Programm hinzufuegen** (Programme > *+ Programm hinzufuegen ...*, auch im Katalog-Editor): installiertes Programm waehlen, HUMig schlaegt Ordner (AppData, Dokumente, ProgramData), Registry-Schluessel (HKCU/HKLM) sowie Plug-ins, Vorlagen, Konfiguration und Lizenzdateien im Programmordner vor - mit Groesse zum Abhaken; Caches/Logs automatisch ausgelassen; Erkennung und Programm-Schliessen automatisch vorbelegt; Speichern oder im Editor verfeinern

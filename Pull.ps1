@@ -8,7 +8,7 @@
       2. Pull.ps1 liegt in einer HUMig-Installation -> Update an Ort und Stelle (USB-Laufwerk, Desktop, Share ...)
       3. Pull.ps1 liegt allein                      -> $env:USERPROFILE\Desktop\HUMig
 
-    Lokale Daten bleiben unangetastet: BACKUPS\, Logs\, BIN\USMT\, Softwareverteilung\, HUMig.exe, Config\settings.json, exceptions.json, modules.json.
+    Lokale Daten bleiben unangetastet: BACKUPS\, Logs\, BIN\USMT\, Softwareverteilung\, Treiberverteilung\, HUMig.exe, Config\settings.json, exceptions.json, modules.json.
     Jede Datei wird zuerst als *.pulltmp geladen und dann ersetzt (5 Versuche bei Sperre).
     -WaitPid <PID>: vom Update-Button uebergeben - wartet bis HUMig beendet ist.
 
