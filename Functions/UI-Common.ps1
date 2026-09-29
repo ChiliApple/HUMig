@@ -103,6 +103,8 @@ function Show-DataGridWindow {
         $tb = New-Object System.Windows.Controls.TextBlock
         $tb.Text = ("$($e.PropertyName)" -replace '_', ' ')
         $e.Column.Header = $tb
+        # Breite nach Inhalt (ganzer Text sichtbar, sonst waagrechter Bildlauf)
+        $e.Column.Width = [System.Windows.Controls.DataGridLength]::Auto
     })
     $dg.ItemsSource = $dv
     $baseCount = if ($CountText) { $CountText } else { "$($dt.Rows.Count) Eintraege" }

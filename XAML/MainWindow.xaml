@@ -354,13 +354,13 @@
                             </WrapPanel>
                             <DataGrid x:Name="dgBackups" Style="{StaticResource DarkGrid}" SelectionMode="Single">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="120"/>
-                                    <DataGridTextColumn Header="Computer" Binding="{Binding Computer}" Width="130"/>
-                                    <DataGridTextColumn Header="Benutzer" Binding="{Binding Benutzer}" Width="160"/>
-                                    <DataGridTextColumn Header="Groesse" Binding="{Binding Groesse}" Width="80"/>
-                                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="80"/>
-                                    <DataGridTextColumn Header="Module" Binding="{Binding Anzahl}" Width="60"/>
-                                    <DataGridTextColumn Header="Ordner" Binding="{Binding Name}" Width="*"/>
+                                    <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Computer" Binding="{Binding Computer}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Benutzer" Binding="{Binding Benutzer}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Groesse" Binding="{Binding Groesse}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Module" Binding="{Binding Anzahl}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Ordner" Binding="{Binding Name}" Width="Auto"/>
                                 </DataGrid.Columns>
                             </DataGrid>
                         </DockPanel>
@@ -513,13 +513,13 @@
                                     <TextBlock x:Name="lblSbSchedule" DockPanel.Dock="Top" Text="" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatMauve}" Margin="0,0,0,6"/>
                                     <DataGrid x:Name="dgSbHistory" Style="{StaticResource DarkGrid}" ToolTip="Doppelklick = Bericht des Laufs oeffnen (Details, wbadmin-Ausgabe, Pruefung)">
                                         <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="115"/>
-                                            <DataGridTextColumn Header="Platte" Binding="{Binding Platte}" Width="140"/>
-                                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="70"/>
-                                            <DataGridTextColumn Header="Dauer" Binding="{Binding Minuten}" Width="80"/>
-                                            <DataGridTextColumn Header="GB" Binding="{Binding GB}" Width="55"/>
-                                            <DataGridTextColumn Header="VMs" Binding="{Binding VMs}" Width="*"/>
-                                            <DataGridTextColumn Header="Hinweis" Binding="{Binding Hinweis}" Width="1.5*"/>
+                                            <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="Auto"/>
+                                            <DataGridTextColumn Header="Platte" Binding="{Binding Platte}" Width="Auto"/>
+                                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="Auto"/>
+                                            <DataGridTextColumn Header="Dauer" Binding="{Binding Minuten}" Width="Auto"/>
+                                            <DataGridTextColumn Header="GB" Binding="{Binding GB}" Width="Auto"/>
+                                            <DataGridTextColumn Header="VMs" Binding="{Binding VMs}" Width="Auto"/>
+                                            <DataGridTextColumn Header="Hinweis" Binding="{Binding Hinweis}" Width="Auto"/>
                                         </DataGrid.Columns>
                                     </DataGrid>
                                 </DockPanel>

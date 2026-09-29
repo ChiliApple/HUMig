@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.40 - 2026-09-29
+### Verbessert
+- Alle Tabellen (Backups, Server-Backup-Verlauf, Ergebnis-/Listenfenster, Geraete (AD), Einstellungen): Spaltenbreite richtet sich nach dem Inhalt - Text wird ganz angezeigt, bei Bedarf waagrechter Bildlauf statt abgeschnittener Spalten
+
 ## v2.0.39 - 2026-09-29
 ### Verbessert
 - Dauer ueberall lesbar (z.B. *6 h 12 min*, *3 min 24 s*, *45 s*): Server-Backup (Konsole, Bericht, Verlauf-Spalte *Dauer*, Statistik *Mittlere_Dauer*, alle Laeufe), Backup/Restore (Konsole, Bericht, Manifest, Meldung, geplantes Backup), Software- und Treiberverteilung

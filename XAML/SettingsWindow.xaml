@@ -115,15 +115,15 @@
                     </DockPanel>
                     <DataGrid x:Name="dgSchools" Style="{DynamicResource DarkGrid}" IsReadOnly="False" SelectionMode="Single" CanUserAddRows="False">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
-                            <DataGridTextColumn Header="Backup-Ordner" Binding="{Binding BackupRoot, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                            <DataGridTextColumn Header="Softwareverteilung" Binding="{Binding SoftwareFolder, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                            <DataGridTextColumn Header="Treiberverteilung" Binding="{Binding DriverFolder, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                            <DataGridTextColumn Header="USMT-Ordner" Binding="{Binding UsmtPath, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
-                            <DataGridTextColumn Header="Domaene/DC" Binding="{Binding ADServer, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
-                            <DataGridTextColumn Header="Subnetz" Binding="{Binding SubnetMask, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
-                            <DataGridTextColumn Header="DNS-Server" Binding="{Binding DnsServers, UpdateSourceTrigger=PropertyChanged}" Width="140"/>
-                            <DataGridTextColumn Header="Notiz" Binding="{Binding Note, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
+                            <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
+                            <DataGridTextColumn Header="Backup-Ordner" Binding="{Binding BackupRoot, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
+                            <DataGridTextColumn Header="Softwareverteilung" Binding="{Binding SoftwareFolder, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
+                            <DataGridTextColumn Header="Treiberverteilung" Binding="{Binding DriverFolder, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
+                            <DataGridTextColumn Header="USMT-Ordner" Binding="{Binding UsmtPath, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
+                            <DataGridTextColumn Header="Domaene/DC" Binding="{Binding ADServer, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
+                            <DataGridTextColumn Header="Subnetz" Binding="{Binding SubnetMask, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
+                            <DataGridTextColumn Header="DNS-Server" Binding="{Binding DnsServers, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
+                            <DataGridTextColumn Header="Notiz" Binding="{Binding Note, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>
@@ -180,9 +180,9 @@
                         <DataGrid.Columns>
                             <DataGridCheckBoxColumn Header="Anzeigen" Binding="{Binding Anzeigen, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
                             <DataGridCheckBoxColumn Header="Standard" Binding="{Binding Standard, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
-                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" IsReadOnly="True" Width="*"/>
-                            <DataGridTextColumn Header="Gruppe" Binding="{Binding Gruppe}" IsReadOnly="True" Width="170"/>
-                            <DataGridTextColumn Header="Herkunft" Binding="{Binding Herkunft}" IsReadOnly="True" Width="90"/>
+                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" IsReadOnly="True" Width="Auto" MinWidth="70"/>
+                            <DataGridTextColumn Header="Gruppe" Binding="{Binding Gruppe}" IsReadOnly="True" Width="Auto" MinWidth="70"/>
+                            <DataGridTextColumn Header="Herkunft" Binding="{Binding Herkunft}" IsReadOnly="True" Width="Auto" MinWidth="70"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>
@@ -199,8 +199,8 @@
                     </DockPanel>
                     <DataGrid x:Name="dgLinks" Style="{DynamicResource DarkGrid}" IsReadOnly="False" SelectionMode="Single" CanUserAddRows="False">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
-                            <DataGridTextColumn Header="URL" Binding="{Binding Url, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                            <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
+                            <DataGridTextColumn Header="URL" Binding="{Binding Url, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="250"/>
                             <DataGridCheckBoxColumn Header="SN kopieren" Binding="{Binding CopySerial, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
                         </DataGrid.Columns>
                     </DataGrid>
