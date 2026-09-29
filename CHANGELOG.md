@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.35 - 2026-09-29
+### Verbessert
+- Treiberverteilung: wird bei *Ordner hinzufuegen* ein Ordner innerhalb eines Pakets gewaehlt (z.B. entpackter Treiber im Ordner des Setups), kann er als eigenes Paket in den Treiber-Ordner verschoben werden
+
 ## v2.0.34 - 2026-09-29
 ### Verbessert
 - Treiberverteilung: *Ordner hinzufuegen* und *Datei hinzufuegen* starten im Treiber-Ordner; ein Ordner bzw. eine EXE/MSI, die schon direkt im Treiber-Ordner liegt, wird nicht nochmals kopiert, sondern als Paket ausgewaehlt
