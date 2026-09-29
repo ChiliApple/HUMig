@@ -932,7 +932,17 @@ function Show-DriverWindow {
         if ($src.StartsWith($rootT + '\', [StringComparison]::OrdinalIgnoreCase)) {
             $rel = $src.Substring($rootT.Length + 1)
             if ($rel -notmatch '\\') { Out-Console "Treiberverteilung: '$rel' liegt schon im Treiber-Ordner - ist bereits ein Paket" 'Info'; Update-DrvWindowList "$rel\"; return }
-            [void][System.Windows.MessageBox]::Show($script:DrvUi.Win, "Der Ordner liegt bereits innerhalb eines Pakets:`n`n$src`n`nPakete sind die Ordner direkt im Treiber-Ordner.", 'Treiberverteilung', 'OK', 'Information'); return
+            $pkgName = ($rel -split '\\')[0]
+            $leaf = Split-Path -Leaf $src
+            $ans = "$([System.Windows.MessageBox]::Show($script:DrvUi.Win, "Der Ordner liegt innerhalb des Pakets '$pkgName':`n`n$src`n`nJa = als eigenes Paket '$leaf' direkt in den Treiber-Ordner VERSCHIEBEN (dann nicht mehr Teil von '$pkgName')`nNein = abbrechen (im Paket '$pkgName' kann die Art 'INF (pnputil)' gewaehlt werden - die INF-Dateien werden dort auch gefunden)", 'Treiberverteilung', 'YesNo', 'Question'))"
+            if ($ans -ne 'Yes') { return }
+            $dstName = Get-DrvFreeName $leaf
+            try {
+                Move-Item -LiteralPath $src -Destination ($rootT + '\' + $dstName) -ErrorAction Stop
+                Out-Console "Treiberverteilung: '$leaf' als eigenes Paket '$dstName' verschoben" 'Success'
+                Update-DrvWindowList "$dstName\"
+            } catch { Out-Console "Verschieben fehlgeschlagen: $($_.Exception.Message)" 'Error' }
+            return
         }
         $n = @(Get-ChildItem -LiteralPath $src -Recurse -File -Filter *.inf -ErrorAction SilentlyContinue | Select-Object -First 1).Count
         $e = @(Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe', '.msi' } | Select-Object -First 1).Count
