@@ -110,6 +110,12 @@ Beispiel: `{ "Id": "App_Beispiel", "Name": "Beispiel", "Detect": "^Beispiel", "I
 
 Robocopy-Fehler (z.B. gesperrte Datei) nennen jetzt die betroffenen Dateien im Protokoll und Bericht.
 
+### Datenbanken suchen
+
+Werkzeuge > Benutzerprofil > **Datenbanken suchen**: findet lokale Datenbanken (SQLite, Access, KeePass, SQL Server, Firebird) im Profil (auf Wunsch aller Benutzer), in ProgramData, Programmordnern und auf allen Festplatten sowie Datenbank-Dienste (SQL Server, Firebird, MySQL/MariaDB, PostgreSQL).
+Ergebnis je Ordner mit Art, Ort, Anzahl, Groesse, zuletzt geaendert und *Geoeffnet* (Programm laeuft). Uebernehmen als **Zusaetzliche Ordner** oder **Als Katalog-Eintrag anlegen** (Editor vorausgefuellt: Rolle Datenbank, Platzhalter-Pfad, Dienste - dann schliesst HUMig das Programm vor Backup/Restore selbst).
+Fehlt beim Restore das Ziel-Laufwerk (z.B. `D:` am neuen PC), kommt ein verstaendlicher Hinweis statt eines Kopierfehlers - die Daten bleiben im Backup.
+
 ## Backup-Optionen
 
 | Option | Wirkung |
@@ -172,7 +178,7 @@ Ergebnis je Programm in der Konsole (entfernt / Neustart noetig / Fehler mit Exi
 | Bereich | Werkzeuge |
 |---|---|
 | Computer | Fernwartung aktivieren (WinRM, RDP, C$, Firewall - ueber WMI), Umbenennen, IP-Adresse/DHCP, lokale Gruppen (Admins, Netzwerkkonfigurations-Operatoren, RDP, Benutzer), Autologon (LSA-Geheimnis), Sperrbildschirm/Energie, Firewall/Netzwerkprofil, angemeldete Benutzer abmelden, Nachricht, Neustart/Herunterfahren, Netzwerktest, **Geraete (AD) / Mehrfach** (Aktionen auf vielen PCs parallel), **Remote-PowerShell/-CMD**, **Inventar mehrerer PCs** (CSV, optional mit Software), **BitLocker-Schluessel** (in AD/Entra ID sichern), **Autopilot-Hash** (auch viele PCs in einer CSV), **Wake-on-LAN**, **Laufwerke (C$)** (auch USB-Sticks und Freigaben am Remote-PC im Explorer), **Uebermittlungsoptimierung**, **Ordnerfreigaben** (Rechte anzeigen, aus Backup uebernehmen), **USMT einrichten (ADK)** |
-| Benutzerprofil | Profil erneuern (Test) + zurueckholen, Profilordner umbenennen, **Profil einem anderen Konto zuweisen** (Domaene -> lokal), Windows-Apps neu registrieren, Gruppenrichtlinien-Ergebnis, Aufgaben aus Backup importieren, **alte Profile loeschen**, **wichtige Dateien suchen** (PST, KeePass, Access ... ausserhalb des Profils), **im Backup suchen** (einzelne Dateien herauskopieren) |
+| Benutzerprofil | Profil erneuern (Test) + zurueckholen, Profilordner umbenennen, **Profil einem anderen Konto zuweisen** (Domaene -> lokal), Windows-Apps neu registrieren, Gruppenrichtlinien-Ergebnis, Aufgaben aus Backup importieren, **alte Profile loeschen**, **Datenbanken suchen** (lokale Datenbanken + Datenbank-Dienste, als Zusatzordner oder Katalog-Eintrag uebernehmen), **wichtige Dateien suchen** (PST, KeePass, Access ... ausserhalb des Profils), **im Backup suchen** (einzelne Dateien herauskopieren) |
 | Diagnose / Wartung | Ereignisse, Akku-Bericht, Aktivierung Windows/Office, Entra ID/Intune (Status + Sync), Domaene/Zeit/Kerberos, Druckwarteschlange, Speicher aufraeumen (inkl. Windows.old), Systemdateien reparieren (DISM/SFC) |
 | Software | Softwareverteilung, installierte Software + Deinstallation |
 | Dieser PC | Systemprogramme, .exe als Admin, Anmeldedaten (credwiz, anzeigen/loeschen), Hersteller-Treiber-Links |
