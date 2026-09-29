@@ -127,10 +127,10 @@ function Show-HMMultiDialogCore {
           <DataGrid.ColumnHeaderStyle><Style TargetType="DataGridColumnHeader"><Setter Property="Background" Value="#FF181825"/><Setter Property="Foreground" Value="#FFCDD6F4"/><Setter Property="Padding" Value="6,3"/></Style></DataGrid.ColumnHeaderStyle>
           <DataGrid.Columns>
             <DataGridTemplateColumn Header="X" Width="32"><DataGridTemplateColumn.CellTemplate><DataTemplate><CheckBox IsChecked="{Binding Sel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center" VerticalAlignment="Center"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
-            <DataGridTextColumn Header="Computer" Binding="{Binding Name}" IsReadOnly="True" Width="150"/>
-            <DataGridTextColumn Header="OU" Binding="{Binding OU}" IsReadOnly="True" Width="*"/>
-            <DataGridTextColumn Header="Windows" Binding="{Binding OS}" IsReadOnly="True" Width="190"/>
-            <DataGridTextColumn Header="Zuletzt im AD" Binding="{Binding Last, StringFormat=dd.MM.yyyy}" IsReadOnly="True" Width="95"/>
+            <DataGridTextColumn Header="Computer" Binding="{Binding Name}" IsReadOnly="True" Width="Auto"/>
+            <DataGridTextColumn Header="OU" Binding="{Binding OU}" IsReadOnly="True" Width="Auto"/>
+            <DataGridTextColumn Header="Windows" Binding="{Binding OS}" IsReadOnly="True" Width="Auto"/>
+            <DataGridTextColumn Header="Zuletzt im AD" Binding="{Binding Last, StringFormat=dd.MM.yyyy}" IsReadOnly="True" Width="Auto"/>
           </DataGrid.Columns>
         </DataGrid>
       </DockPanel>
