@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.34 - 2026-09-29
+### Verbessert
+- Treiberverteilung: *Ordner hinzufuegen* und *Datei hinzufuegen* starten im Treiber-Ordner; ein Ordner bzw. eine EXE/MSI, die schon direkt im Treiber-Ordner liegt, wird nicht nochmals kopiert, sondern als Paket ausgewaehlt
+
 ## v2.0.33 - 2026-09-29
 ### Behoben
 - Links (Werkzeuge): Seriennummer (`{SERIAL}`, *Seriennummer in Zwischenablage*) und `{COMPUTER}` kommen jetzt vom **gewaehlten Computer** - remote per PowerShell-Remoting, sonst per WMI (DCOM); nicht lesbar = Hinweis, Link ohne Seriennummer (bisher immer der eigene PC)

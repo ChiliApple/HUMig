@@ -922,8 +922,18 @@ function Show-DriverWindow {
     $w.FindName('btnAddDir').Add_Click({
         $d = New-Object System.Windows.Forms.FolderBrowserDialog
         $d.Description = 'Entpackten Treiber-Ordner waehlen (mit INF-Dateien und/oder Setup) - wird als Paket kopiert'
+        $root = Get-DrvFolder
+        if (Test-Path -LiteralPath $root) { $d.SelectedPath = $root }
         if ($d.ShowDialog() -ne 'OK' -or -not $d.SelectedPath) { return }
-        $src = $d.SelectedPath
+        $src = $d.SelectedPath.TrimEnd('\')
+        $rootT = $root.TrimEnd('\')
+        # Ordner liegt schon in der Treiberverteilung: nicht kopieren
+        if ($src -ieq $rootT) { Update-DrvWindowList; return }
+        if ($src.StartsWith($rootT + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            $rel = $src.Substring($rootT.Length + 1)
+            if ($rel -notmatch '\\') { Out-Console "Treiberverteilung: '$rel' liegt schon im Treiber-Ordner - ist bereits ein Paket" 'Info'; Update-DrvWindowList "$rel\"; return }
+            [void][System.Windows.MessageBox]::Show($script:DrvUi.Win, "Der Ordner liegt bereits innerhalb eines Pakets:`n`n$src`n`nPakete sind die Ordner direkt im Treiber-Ordner.", 'Treiberverteilung', 'OK', 'Information'); return
+        }
         $n = @(Get-ChildItem -LiteralPath $src -Recurse -File -Filter *.inf -ErrorAction SilentlyContinue | Select-Object -First 1).Count
         $e = @(Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe', '.msi' } | Select-Object -First 1).Count
         if (-not $n -and -not $e) { [void][System.Windows.MessageBox]::Show($script:DrvUi.Win, "Im Ordner sind weder INF-Dateien noch ein Setup (EXE/MSI).`n`n$src", 'Treiberverteilung', 'OK', 'Warning'); return }
@@ -934,8 +944,12 @@ function Show-DriverWindow {
         $d.Filter = 'Treiber (*.exe;*.msi;*.zip;*.cab)|*.exe;*.msi;*.zip;*.cab'
         $d.Multiselect = $true
         $d.Title = 'Setup kopieren bzw. ZIP/CAB entpacken (Treiberverteilung)'
+        $root = Get-DrvFolder
+        if (Test-Path -LiteralPath $root) { $d.InitialDirectory = $root }
         if ($d.ShowDialog() -ne $true) { return }
         foreach ($f in $d.FileNames) {
+            # EXE/MSI direkt im Treiber-Ordner ist schon ein Paket
+            if ([IO.Path]::GetExtension($f) -in '.exe', '.msi' -and [IO.Path]::GetDirectoryName($f).TrimEnd('\') -ieq $root.TrimEnd('\')) { Update-DrvWindowList ([IO.Path]::GetFileName($f)); continue }
             $k = switch ([IO.Path]::GetExtension($f).ToLower()) { '.zip' { 'Zip' } '.cab' { 'Cab' } default { 'File' } }
             Add-DrvPackage -Source $f -Kind $k
         }
