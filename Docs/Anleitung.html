@@ -238,11 +238,38 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 
 <section id="programme">
   <h2><span class="n">4</span>Programm-Katalog und Lizenzen</h2>
-  <p><span class="ui">Programme</span> (Reiter Backup) erkennt installierte Programme am Quell-PC. Für bekannte Programme werden passende Module eingeblendet und angehakt; die Übersicht zeigt, was übertragbar ist, welche Lizenz-Hinweise gelten und was nach dem Restore zu tun ist. Rechtsklick = nur Übersicht.</p>
+  <p><span class="ui">Programme</span> (Reiter Backup) erkennt installierte Programme am Quell-PC. Für bekannte Programme werden passende Module eingeblendet und angehakt; die Übersicht zeigt, was übertragbar und was nicht übertragbar ist, welche Lizenz-Hinweise gelten, ob eine Datenbank dabei ist, welches Programm vorher geschlossen wird, was nach dem Restore zu tun ist und ob der Eintrag <b>geprüft</b> ist (Datum). Rechtsklick = nur Übersicht.</p>
   <p>Der Katalog kennt u. a.: Firefox, Chrome, Edge, Microsoft 365, Thunderbird, Notepad++, 7-Zip, VLC, LibreOffice, Acrobat Reader, Foxit, GIMP, Inkscape, Audacity, Paint.NET, IrfanView, Greenshot, OBS, VS Code, KeePass/KeePassXC, FileZilla, PuTTY, WinSCP, mRemoteNG, AnyDesk, TeamViewer, FortiClient VPN, Zotero, Citavi, Obsidian, Arduino, GeoGebra, SketchUp, Autodesk, SMART Notebook, ActivInspire, Untis, Packet Tracer, Zoom, Teams, WinRAR, Total Commander, Beyond Compare, Sublime Text.</p>
   <div class="note tip"><b class="h">Lizenzen mitnehmen</b>Programme mit Lizenzdatei/-schlüssel (z. B. WinRAR <code>rarreg.key</code>, Total Commander <code>wincmd.key</code>, Beyond Compare, Sublime Text) werden mit Lizenz gesichert und sind am neuen PC gleich registriert – Modulname mit <i>(+ Lizenz)</i>. Nicht übertragbar sind Lizenzen, die an Konto oder Hardware gebunden sind (Microsoft 365, Adobe, Autodesk …) – dafür gibt es Hinweise in der Checkliste.</div>
+  <h3 id="katalog-editor">Katalog bearbeiten</h3>
+  <p>Im Fenster <span class="ui">Programme</span> (oder Einstellungen › Module) öffnet <span class="ui m">Katalog bearbeiten …</span> den Editor. Links alle Einträge mit Suche und Filter (<i>am PC erkannt, geprüft, ungeprüft, nur Hinweis, eigene, geändert</i>), rechts die Reiter:</p>
+  <table>
+    <tr><th style="width:190px">Reiter</th><th>Inhalt</th></tr>
+    <tr><td>Allgemein</td><td>Id (<code>App_…</code>), Name, <b>Erkennung</b> (regulärer Ausdruck auf den Programmnamen in <i>Apps &amp; Features</i>) mit <span class="ui t">Testen am PC</span>, Paket der Softwareverteilung mit <span class="ui t">Testen</span>, optional vorhandene Module mitverwenden</td></tr>
+    <tr><td>Sichern</td><td>Einträge vom Typ <i>Ordner</i>, <i>Dateien</i> (mit Filter, ohne Unterordner) oder <i>Registry</i> – Rolle (Einstellungen, Plug-ins/Add-ins, Daten, <b>Datenbank</b>, Lizenz, Vorlagen), Ordner/Dateien auslassen, Lizenzdatei. <span class="ui">Ordner waehlen …</span> wandelt den Pfad in Platzhalter um (z. B. <code>{APPDATA}\Hersteller\Programm</code>), <span class="ui t">Pfad pruefen</span> zeigt am oben gewählten PC für den gewählten Benutzer, ob Ordner/Schlüssel vorhanden sind und wie groß. Je Eintrag steht, ob er zum <b>Benutzer</b> oder zur <b>Maschine</b> gehört (Maschine = Restore nur mit Administratorrechten).</td></tr>
+    <tr><td>Schließen &amp; Dienste</td><td>Programm vorher schließen (Prozessnamen ohne <code>.exe</code>, <span class="ui t">Laufende Prozesse am PC …</span>) und Dienste vorher stoppen (<span class="ui t">Dienste am PC …</span>)</td></tr>
+    <tr><td>Hinweise</td><td>Was übertragen wird, was <b>nicht</b> übertragbar ist, Lizenz, Versionsverhalten, Nacharbeiten für die Checkliste</td></tr>
+    <tr><td>Quelle</td><td>Geprüft am (Knopf <i>heute</i>), Links auf Hersteller-Doku, Notiz – fehlt das Datum, gilt der Eintrag als ungeprüft</td></tr>
+  </table>
+  <ul>
+    <li>Gespeichert wird <b>nur</b> in <code>Config\apps.json</code> (vorher Sicherung <code>apps.json.bak</code>). <code>apps.default.json</code> bleibt unverändert – ein geänderter Standard-Eintrag wird als Kopie mit gleicher Id abgelegt, <span class="ui p">Auf Standard zuruecksetzen</span> entfernt sie wieder. Löschen geht nur bei eigenen Einträgen.</li>
+    <li><span class="ui">Exportieren …</span> / <span class="ui">Importieren …</span>: einzelne Einträge als JSON-Datei weitergeben (z. B. an andere Standorte).</li>
+    <li>Nach dem Speichern lädt HUMig den Katalog neu; Haken im Reiter Backup bleiben erhalten, erkannte Programme werden neu ermittelt.</li>
+    <li>Im Benutzer-Modus (oder ohne Schreibrecht auf <code>Config</code>) ist der Editor nur zur Ansicht.</li>
+  </ul>
+
+  <h3>Programm schließen, Dienste, Datenbanken</h3>
+  <ul>
+    <li><b>Programm schließen:</b> Läuft ein Programm mit Eintrag unter <i>Schließen</i>, fragt HUMig vor Backup bzw. Restore <b>einmal für alle</b>: <i>Schließen</i> (wie der Benutzer das Fenster schließt – ungespeicherte Arbeit fragt das Programm selbst nach), <i>Schließen, notfalls beenden</i> (nach 20 s hart beenden – ungespeicherte Daten gehen verloren), <i>Modul überspringen</i> oder <i>Trotzdem kopieren</i> (geöffnete Dateien können fehlen oder inkonsistent sein). Die <span class="ui t">Vorab-Pruefung</span> zeigt laufende Programme schon vorher an. <b>Geplante Backups beenden nie ein Programm</b> – das Modul wird übersprungen und gemeldet. Was passiert ist, steht im Bericht und im <code>manifest.json</code>.</li>
+    <li><b>Dienste stoppen:</b> Für Datenbanken, die ein Dienst geöffnet hält (SQL Server Express, Firebird, MySQL). Nur mit Administratorrechten; der Dienst wird nach dem Kopieren <b>immer</b> wieder gestartet (auch bei Fehler oder Abbruch). Im Benutzer-Modus werden Dienst-Datenbanken mit Hinweis ausgelassen.</li>
+    <li><b>Datei-Datenbanken</b> (SQLite, Access, KeePass …): Rolle <i>Datenbank</i>, Art <i>Datei</i>. Bei SQLite kopiert HUMig die Begleitdateien <code>-wal</code>, <code>-shm</code> und <code>-journal</code> automatisch mit. Liegt neben einer Access-Datenbank eine Sperrdatei (<code>.laccdb</code>/<code>.ldb</code>), ist sie geöffnet – HUMig warnt.</li>
+    <li><b>Dienst-Datenbanken</b> per Dateikopie sind nur bei <b>gleicher Datenbank-Version</b> am Ziel verlässlich. Sicherer ist die Sicherung des Herstellers bzw. der Datenbank – die Checkliste erinnert daran.</li>
+    <li><b>Gesperrte Dateien</b> (z. B. geöffnete Datenbank) stehen mit Dateiname im Protokoll und Bericht des Moduls.</li>
+    <li><b>Nicht übertragbar:</b> gespeicherte Kennwörter, die Windows verschlüsselt (DPAPI – z. B. in Browsern, FileZilla, WinSCP, mRemoteNG), Store-Apps und Standard-Programm-Zuordnungen. Einstellungen einer älteren Programmversion passen nicht immer zu einer neueren – Hinweis unter <i>Version</i>.</li>
+  </ul>
+
   <h3>Eigene Programme</h3>
-  <p>In <code>Config\apps.json</code> (Aufbau wie <code>apps.default.json</code>), z. B. mit Lizenzdatei:</p>
+  <p>Am einfachsten im Editor (<span class="ui b">+ Neu</span>). Von Hand in <code>Config\apps.json</code> (Aufbau wie <code>apps.default.json</code>, Felder siehe <code>_Info</code> dort), z. B. mit Lizenzdatei:</p>
   <p><code>{ "Apps": [ { "Id": "App_MeinTool", "Name": "Mein Tool", "Detect": "^Mein Tool", "Items": [ { "Type": "Files", "Name": "LIC", "Path": "{PROGRAMFILES}\\MeinTool", "Filter": [ "*.lic" ], "License": true } ] } ] }</code></p>
 </section>
 

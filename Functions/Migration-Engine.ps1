@@ -625,6 +625,191 @@ function Resolve-HMRegKey {
 }
 
 # ============================================================================
+# PROGRAMM-KATALOG: Programm vorher schliessen (CloseProcess), Dienst stoppen (StopService), Datenbanken
+# ============================================================================
+# Laufende Prozesse (Namen ohne .exe) des Zielbenutzers am Ziel-PC. OwnSession = nur Prozesse der eigenen Sitzung (Benutzer-Modus)
+$script:HMProcScript = {
+    param([string[]]$Names, [string]$Sid, [bool]$OwnSession)
+    $mySess = (Get-Process -Id $PID).SessionId
+    foreach ($n in @($Names | Where-Object { $_ })) {
+        foreach ($p in @(Get-Process -Name ("$n" -replace '\.exe$', '') -ErrorAction SilentlyContinue)) {
+            $ok = $true
+            if ($OwnSession) { $ok = ($p.SessionId -eq $mySess) }
+            elseif ($Sid) {
+                try {
+                    $w = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction Stop
+                    $o = Invoke-CimMethod -InputObject $w -MethodName GetOwnerSid -ErrorAction Stop
+                    if ("$($o.Sid)") { $ok = ("$($o.Sid)" -eq $Sid) }
+                } catch { $ok = $true }   # Besitzer nicht lesbar -> vorsichtshalber als "laeuft" werten
+            }
+            if ($ok) { [pscustomobject]@{ Name = "$($p.ProcessName)"; Id = [int]$p.Id; SessionId = [int]$p.SessionId; Title = "$($p.MainWindowTitle)" } }
+        }
+    }
+}
+function Get-HMRunningProcs([hashtable]$Ctx, [string[]]$Names, [string]$Sid) {
+    $n = @($Names | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() -replace '\.exe$', '' } | Select-Object -Unique)
+    if (-not $n.Count) { return @() }
+    return @(Invoke-HMTarget $Ctx $script:HMProcScript @($n, $Sid, [bool]$Ctx.UserMode) | Where-Object { $_ })
+}
+
+# Programme sanft schliessen (Fenster schliessen wie der Benutzer), nach Timeout optional hart beenden.
+# Gleiche Sitzung: CloseMainWindow direkt. Andere Sitzung/Remote: einmalige Aufgabe in der Sitzung des Benutzers.
+$script:HMCloseInSessionScript = {
+    param([string]$Acct, [int[]]$Ids)
+    $mySess = (Get-Process -Id $PID).SessionId
+    $direct = @(); $other = @()
+    foreach ($i in $Ids) { $p = Get-Process -Id $i -ErrorAction SilentlyContinue; if ($p) { if ($p.SessionId -eq $mySess) { $direct += $p } else { $other += $i } } }
+    foreach ($p in $direct) { try { [void]$p.CloseMainWindow() } catch { } }
+    if ($other.Count -and $Acct) {
+        $code = "foreach (`$i in @($($other -join ','))) { try { `$p = Get-Process -Id `$i -ErrorAction Stop; [void]`$p.CloseMainWindow() } catch { } }"
+        $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
+        $n = 'HUMig_Close_' + [guid]::NewGuid().ToString('N')
+        try {
+            $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand $enc"
+            $pr = New-ScheduledTaskPrincipal -UserId $Acct -LogonType Interactive -RunLevel Limited
+            $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+            Register-ScheduledTask -TaskName $n -Action $a -Principal $pr -Settings $s -Force -ErrorAction Stop | Out-Null
+            Start-ScheduledTask -TaskName $n
+            Start-Sleep -Seconds 3
+        } catch { } finally { Unregister-ScheduledTask -TaskName $n -Confirm:$false -ErrorAction SilentlyContinue }
+    }
+}
+function Close-HMProcs([hashtable]$Ctx, $Job, [object[]]$Procs, [bool]$Force, [int]$TimeoutSec = 20) {
+    $ids = @($Procs | ForEach-Object { [int]$_.Id } | Select-Object -Unique)
+    if (-not $ids.Count) { return @() }
+    try { Invoke-HMTarget $Ctx $script:HMCloseInSessionScript @("$($Ctx.Account)", $ids) | Out-Null } catch { Write-HMLog $Job "      Schliessen nicht moeglich: $($_.Exception.Message)" 'Debug' }
+    $left = $ids
+    $t0 = Get-Date
+    while ($left.Count -and ((Get-Date) - $t0).TotalSeconds -lt $TimeoutSec -and -not (Test-HMCancel $Job)) {
+        Start-Sleep -Milliseconds 700
+        $left = @(Invoke-HMTarget $Ctx { param($x) foreach ($i in $x) { if (Get-Process -Id $i -ErrorAction SilentlyContinue) { $i } } } @(, $ids) | Where-Object { $_ })
+    }
+    if ($left.Count -and $Force) {
+        try { Invoke-HMTarget $Ctx { param($x) foreach ($i in $x) { Stop-Process -Id $i -Force -ErrorAction SilentlyContinue } } @(, $left) | Out-Null } catch { }
+        Start-Sleep -Seconds 2
+        $left = @(Invoke-HMTarget $Ctx { param($x) foreach ($i in $x) { if (Get-Process -Id $i -ErrorAction SilentlyContinue) { $i } } } @(, $left) | Where-Object { $_ })
+    }
+    return @($left)
+}
+
+# SQLite: zur Datenbankdatei gehoerende Begleitdateien (-wal, -shm, -journal) immer mitkopieren
+function Add-HMDbCompanions([string[]]$Filter) {
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($f in @($Filter | Where-Object { $_ })) {
+        if (-not $out.Contains($f)) { $out.Add($f) }
+        if ($f -match '-(wal|shm|journal)$') { continue }
+        foreach ($s in @('-wal', '-shm', '-journal')) { if (-not $out.Contains("$f$s")) { $out.Add("$f$s") } }
+    }
+    return $out.ToArray()
+}
+function Test-HMServiceItem($Item) { return ("$($Item.Role)" -eq 'Database' -and "$($Item.DbKind)" -eq 'Service') }
+
+# Vor einem Modul: Programm schliessen, Dienste stoppen, Access-Sperrdateien pruefen.
+# Rueckgabe: @{ Skip; Warn (Liste); ProcAction; ServiceAction; Stopped (Dienste zum Wiederstarten); SkipServiceItems }
+function Enter-HMModule([hashtable]$Ctx, $Job, $Module, [hashtable]$TEnv, [string]$Phase) {
+    $st = @{ Skip = $false; Warn = @(); ProcAction = ''; ServiceAction = ''; Stopped = @(); SkipServiceItems = $false }
+    # --- Programm schliessen ---
+    $names = @($Module.CloseProcess | Where-Object { "$_".Trim() })
+    if ($names.Count) {
+        $run = @()
+        try { $run = @(Get-HMRunningProcs $Ctx $names $Ctx.UserSid) } catch { Write-HMLog $Job "   Laufende Programme nicht pruefbar: $($_.Exception.Message)" 'Debug' }
+        if ($run.Count) {
+            $pn = (@($run | ForEach-Object { $_.Name } | Select-Object -Unique) -join ', ')
+            $dec = ''
+            if ($Ctx.ProcDecisions -and $Ctx.ProcDecisions.ContainsKey("$($Module.Id)")) { $dec = "$($Ctx.ProcDecisions["$($Module.Id)"])" }
+            switch ($dec) {
+                'Copy' {
+                    $st.ProcAction = 'trotzdem kopiert'
+                    $st.Warn += "$pn lief - trotzdem kopiert (Daten evtl. nicht aktuell/inkonsistent)"
+                }
+                { $_ -in @('Close', 'CloseForce') } {
+                    Write-HMLog $Job "   $pn wird geschlossen ..." 'Info'
+                    $left = @(Close-HMProcs $Ctx $Job $run ($dec -eq 'CloseForce'))
+                    if ($left.Count) {
+                        $st.Skip = $true; $st.ProcAction = 'uebersprungen (liess sich nicht schliessen)'
+                        $st.Warn += "$pn liess sich nicht schliessen - Modul uebersprungen"
+                    } else {
+                        $st.ProcAction = $(if ($dec -eq 'CloseForce') { 'geschlossen (notfalls beendet)' } else { 'geschlossen' })
+                        Write-HMLog $Job "   $pn geschlossen" 'Success'
+                    }
+                }
+                default {
+                    # keine Entscheidung (geplantes Backup, Programm erst nach der Abfrage gestartet) oder "Ueberspringen": nie hart beenden
+                    $st.Skip = $true; $st.ProcAction = 'uebersprungen (Programm lief)'
+                    $st.Warn += "$pn laeuft - Modul uebersprungen (Programm vorher schliessen)"
+                }
+            }
+        }
+    }
+    if ($st.Skip) { return $st }
+    # --- Dienste stoppen (Dienst-Datenbanken) ---
+    $svc = @($Module.StopService | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
+    if ($svc.Count) {
+        if ($Ctx.UserMode) {
+            $st.SkipServiceItems = $true; $st.ServiceAction = 'nicht gestoppt (Benutzer-Modus)'
+            $st.Warn += "Dienst-Datenbank nur als Administrator: $($svc -join ', ') nicht gestoppt, Datenbank-Dateien ausgelassen"
+        } else {
+            try {
+                $r = @(Invoke-HMTarget $Ctx {
+                    param([string[]]$Names)
+                    foreach ($n in $Names) {
+                        $s = Get-Service -Name $n -ErrorAction SilentlyContinue
+                        if (-not $s) { [pscustomobject]@{ Name = $n; Result = 'Missing'; Msg = '' }; continue }
+                        if ("$($s.Status)" -ne 'Running') { [pscustomobject]@{ Name = $n; Result = 'NotRunning'; Msg = "$($s.Status)" }; continue }
+                        try {
+                            Stop-Service -Name $n -Force -ErrorAction Stop
+                            $s.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(60))
+                            [pscustomobject]@{ Name = $n; Result = 'Stopped'; Msg = '' }
+                        } catch { [pscustomobject]@{ Name = $n; Result = 'Failed'; Msg = $_.Exception.Message } }
+                    }
+                } @(, $svc))
+                foreach ($x in $r) {
+                    switch ("$($x.Result)") {
+                        'Stopped'    { $st.Stopped += "$($x.Name)"; Write-HMLog $Job "   Dienst $($x.Name) gestoppt" 'Info' }
+                        'NotRunning' { Write-HMLog $Job "   Dienst $($x.Name) laeuft nicht ($($x.Msg))" 'Debug' }
+                        'Missing'    { Write-HMLog $Job "   Dienst $($x.Name) gibt es an $($Ctx.Computer) nicht" 'Debug' }
+                        default      { $st.SkipServiceItems = $true; $st.Warn += "Dienst $($x.Name) liess sich nicht stoppen ($($x.Msg)) - Datenbank-Dateien ausgelassen" }
+                    }
+                }
+                $st.ServiceAction = $(if ($st.Stopped.Count) { "gestoppt und wieder gestartet: $($st.Stopped -join ', ')" } elseif ($st.SkipServiceItems) { 'nicht gestoppt' } else { 'lief nicht' })
+            } catch {
+                $st.SkipServiceItems = $true; $st.ServiceAction = 'Fehler'
+                $st.Warn += "Dienste nicht steuerbar: $($_.Exception.Message) - Datenbank-Dateien ausgelassen"
+            }
+        }
+    }
+    # --- Access-Datenbank geoeffnet? (Sperrdatei .laccdb/.ldb neben der Datenbank) ---
+    if ($Phase -eq 'Backup' -and $TEnv) {
+        foreach ($it in @($Module.Items | Where-Object { "$($_.Role)" -eq 'Database' -and "$($_.DbKind)" -ne 'Service' -and $_.Path })) {
+            try {
+                $p = Convert-HMPath $Ctx (Resolve-HMToken $TEnv $it.Path)
+                if (-not (Test-Path -LiteralPath $p -PathType Container)) { continue }
+                $lk = @(Get-ChildItem -LiteralPath $p -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.laccdb', '.ldb') } | Select-Object -First 3)
+                if ($lk.Count) { $st.Warn += "Datenbank vermutlich geoeffnet (Sperrdatei $(@($lk | ForEach-Object { $_.Name }) -join ', ')) - Kopie evtl. inkonsistent" }
+            } catch { }
+        }
+    }
+    return $st
+}
+# Nach einem Modul: gestoppte Dienste immer wieder starten (auch bei Fehler/Abbruch)
+function Exit-HMModule([hashtable]$Ctx, $Job, [hashtable]$State) {
+    if (-not $State -or -not @($State.Stopped).Count) { return }
+    try {
+        $r = @(Invoke-HMTarget $Ctx {
+            param([string[]]$Names)
+            foreach ($n in $Names) {
+                try { Start-Service -Name $n -ErrorAction Stop; [pscustomobject]@{ Name = $n; Ok = $true; Msg = '' } }
+                catch { [pscustomobject]@{ Name = $n; Ok = $false; Msg = $_.Exception.Message } }
+            }
+        } @(, @($State.Stopped)))
+        foreach ($x in $r) {
+            if ($x.Ok) { Write-HMLog $Job "   Dienst $($x.Name) wieder gestartet" 'Info' }
+            else { Write-HMLog $Job "   Dienst $($x.Name) konnte NICHT wieder gestartet werden: $($x.Msg) - bitte von Hand starten!" 'Error' }
+        }
+    } catch { Write-HMLog $Job "   Dienste NICHT wieder gestartet ($($_.Exception.Message)) - bitte von Hand starten: $(@($State.Stopped) -join ', ')" 'Error' }
+}
+
+# ============================================================================
 # ROBOCOPY
 # ============================================================================
 function Get-HMRobocopySummary([string]$Text) {
@@ -684,10 +869,17 @@ function Invoke-HMRobocopy {
         Remove-Item -LiteralPath $tmpLog -Force -ErrorAction SilentlyContinue
     }
     $sum = Get-HMRobocopySummary $text
+    # Fehlgeschlagene Dateien (gesperrt/keine Rechte): Fehlerzeilen stehen auch mit /NFL im Protokoll, z.B. "... ERROR 32 (0x00000020) Copying File C:\x\y.db"
+    $failed = @()
+    if ($sum.FilesFailed -gt 0) {
+        $failed = @(foreach ($line in ($text -split "`r?`n")) {
+            if ($line -match '\(0x[0-9A-Fa-f]{8}\)\s+.*?\s((?:[A-Za-z]:\\|\\\\).+?)\s*$') { $Matches[1] }
+        }) | Select-Object -Unique | Select-Object -First 5
+    }
     $lvl = if (Test-HMCancel $Job) { 'Cancel' } elseif ($code -ge 8) { 'Error' } elseif ($code -ge 4) { 'Warning' } else { 'OK' }
     return [pscustomobject]@{ ExitCode = $code; Level = $lvl; FilesTotal = $sum.FilesTotal; FilesCopied = $sum.FilesCopied
         FilesSkipped = $sum.FilesSkipped; FilesFailed = $sum.FilesFailed; BytesTotal = $sum.BytesTotal; BytesCopied = $sum.BytesCopied
-        BytesSkipped = $sum.BytesSkipped; Args = $psi.Arguments }
+        BytesSkipped = $sum.BytesSkipped; Args = $psi.Arguments; FailedFiles = @($failed) }
 }
 
 # ============================================================================
@@ -1219,6 +1411,7 @@ function Backup-HMFolderItem {
     $files = @()
     $noRec = $false
     if ($Item.Type -eq 'Files') { $files = @($Item.Filter); $noRec = $true }
+    if ("$($Item.Role)" -eq 'Database' -and $files.Count) { $files = @(Add-HMDbCompanions $files) }
     $rp = @{ Job = $Job; Source = $src; Dest = $dst; Files = $files; XD = $xd; XF = $xf; NoHidden = [bool]$Item.NoHidden; NoRecurse = $noRec
              ListOnly = [bool]$Ctx.ListOnly; Threads = $Ctx.Threads; LogFile = $Ctx.RoboLog }
     if ($Ctx.MeasureStats) { $rp.ListFiles = $true; $rp.Stats = $Ctx.MeasureStats; $rp.StatsRoot = $src; $rp.StatsModule = $Module.Name }
@@ -1242,7 +1435,11 @@ function Backup-HMFolderItem {
         $msg = "{0} Dateien, {1}" -f $rc.FilesTotal, (Format-HMSize $rc.BytesTotal)
         if ($rc.FilesCopied -lt $rc.FilesTotal) { $msg += " ($($rc.FilesCopied) neu/geaendert kopiert, $($rc.FilesSkipped) unveraendert oder ausgelassen: $exWhy)" }
     }
-    if ($rc.FilesFailed -gt 0) { $msg += ", $($rc.FilesFailed) FEHLGESCHLAGEN (gesperrt/keine Rechte - siehe Robocopy-Log)" }
+    if ($rc.FilesFailed -gt 0) {
+        $msg += ", $($rc.FilesFailed) FEHLGESCHLAGEN (gesperrt/keine Rechte - siehe Robocopy-Log)"
+        if (@($rc.FailedFiles).Count) { $msg += ': ' + (@($rc.FailedFiles | ForEach-Object { ConvertFrom-HMPath "$_" }) -join '; ') }
+        if ($st -eq 'OK') { $st = 'Warning' }
+    }
     if ($rc.Level -eq 'Error') { $msg += " (Robocopy-Code $($rc.ExitCode))" }
 
     # Cloud-Ordner innerhalb der Quelle: auslassen (Standard) oder nur lokal vorhandene Dateien sichern
@@ -1710,8 +1907,20 @@ function Start-HMBackup {
             Write-HMLog $Job $mod.Name 'Info'
             $Job.Status = $mod.Name
             $mres = [ordered]@{ Id = $mod.Id; Name = $mod.Name; Status = 'OK'; Bytes = [long]0; Items = @() }
+            # Programm-Katalog: Programm schliessen / Dienst stoppen (Dienste werden im finally immer wieder gestartet)
+            $pre = Enter-HMModule $Ctx $Job $mod $tenv 'Backup'
+            foreach ($w in @($pre.Warn)) { Write-HMLog $Job "   $w" 'Warning'; $mres.Items += [pscustomobject]@{ Name = 'Hinweis'; Status = 'Warning'; Msg = $w; Bytes = [long]0; Source = '' } }
+            if (@($pre.Warn).Count) { $mres.Status = 'Warning' }
+            if ($pre.ProcAction) { $mres.Process = $pre.ProcAction }
+            if ($pre.ServiceAction) { $mres.Service = $pre.ServiceAction }
+            try {
             foreach ($it in @($mod.Items)) {
                 if (Test-HMCancel $Job) { break }
+                if ($pre.Skip) { $done++; continue }
+                if ($pre.SkipServiceItems -and (Test-HMServiceItem $it)) {
+                    $mres.Items += [pscustomobject]@{ Name = $it.Name; Status = 'Warning'; Msg = 'ausgelassen: Dienst-Datenbank (Dienst nicht gestoppt)'; Bytes = [long]0; Source = "$($it.Path)" }
+                    $done++; continue
+                }
                 try {
                     $r = switch ($it.Type) {
                         'Folder'  { Backup-HMFolderItem $Ctx $Job $mod $it $tenv }
@@ -1731,6 +1940,7 @@ function Start-HMBackup {
                 $done++
                 $Job.Progress = [int](95 * $done / $total)
             }
+            } finally { Exit-HMModule $Ctx $Job $pre }
             if (@($mres.Items | Where-Object { $_.Status -ne 'Skip' }).Count -eq 0) { $mres.Status = 'Skip' }
             $allBytes += $mres.Bytes
             $Ctx.Manifest.Modules += [pscustomobject]$mres
@@ -1923,6 +2133,7 @@ function Restore-HMFolderItem {
     $dst = Convert-HMPath $Ctx $dstLocal
     $files = @(); $noRec = $false
     if ($Item.Type -eq 'Files') { $files = @($Item.Filter); $noRec = $true }
+    if ("$($Item.Role)" -eq 'Database' -and $files.Count) { $files = @(Add-HMDbCompanions $files) }
     # Cloud-Ordner (OneDrive/SharePoint) aus dem Backup nie direkt in den Sync-Ordner schreiben (wuerde neuere Cloud-Versionen ueberschreiben)
     $xd = @(); $syncs = @()
     $mf = if ($Ctx.Backup) { $Ctx.Backup.Manifest } else { $null }
@@ -2348,8 +2559,17 @@ function Start-HMRestore {
             $Job.Status = $mod.Name
             $worst = 'OK'
             $itemLog = @()
+            $pre = Enter-HMModule $Ctx $Job $mod $tenv 'Restore'
+            foreach ($w in @($pre.Warn)) { Write-HMLog $Job "   $w" 'Warning'; $itemLog += [pscustomobject]@{ Name = 'Hinweis'; Status = 'Warning'; Msg = $w }; $worst = 'Warning' }
+            try {
             foreach ($it in @($mod.Items)) {
                 if (Test-HMCancel $Job) { break }
+                if ($pre.Skip) { $done++; continue }
+                if ($pre.SkipServiceItems -and (Test-HMServiceItem $it)) {
+                    $itemLog += [pscustomobject]@{ Name = $it.Name; Status = 'Warning'; Msg = 'ausgelassen: Dienst-Datenbank (Dienst nicht gestoppt)' }
+                    if ($worst -eq 'OK') { $worst = 'Warning' }
+                    $done++; continue
+                }
                 try {
                     $r = if ($Ctx.UserMode -and (Test-HMItemNeedsAdmin $it)) {
                         [pscustomobject]@{ Name = "$($it.Name)"; Status = 'Skip'; Msg = "uebersprungen: $($it.Path)$($it.Key) braucht Administratorrechte (Benutzer-Modus)" }
@@ -2370,8 +2590,9 @@ function Start-HMRestore {
                 $done++
                 $Job.Progress = [int](100 * $done / $total)
             }
+            } finally { Exit-HMModule $Ctx $Job $pre }
             if (@($itemLog | Where-Object { $_.Status -ne 'Skip' }).Count -eq 0 -and $worst -eq 'OK') { $worst = 'Skip' }
-            $results += [pscustomobject]@{ Id = $mod.Id; Name = $mod.Name; Status = $worst; Items = $itemLog }
+            $results += [pscustomobject]@{ Id = $mod.Id; Name = $mod.Name; Status = $worst; Items = $itemLog; Process = $pre.ProcAction; Service = $pre.ServiceAction }
         }
 
         # Explorer-/Taskleisten-Einstellungen greifen erst nach Explorer-Neustart

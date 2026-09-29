@@ -53,7 +53,7 @@ T 'XAML Einstellungsfenster laden' {
     [xml]$y = Get-Content (Join-Path $root 'XAML\SettingsWindow.xaml') -Raw -Encoding UTF8
     $w = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $y))
     $w.Resources.MergedDictionaries.Add($main.Resources)
-    $need = 'txtRoot', 'cmbThreads', 'dgModules', 'dgLinks', 'txtExPF', 'btnSave', 'btnNmAdd', 'btnLauncher', 'txtRetentionKeep', 'chkOverviewAuto', 'txtChecklist', 'chkChecklistAuto', 'dgSchools', 'btnSchoolAdd', 'btnUsmtAdk', 'cmbUiScale'
+    $need = 'txtRoot', 'cmbThreads', 'dgModules', 'dgLinks', 'txtExPF', 'btnSave', 'btnNmAdd', 'btnLauncher', 'txtRetentionKeep', 'chkOverviewAuto', 'txtChecklist', 'chkChecklistAuto', 'dgSchools', 'btnSchoolAdd', 'btnUsmtAdk', 'cmbUiScale', 'btnAppEditor'
     $miss = @($need | Where-Object { -not $w.FindName($_) })
     if ($miss.Count) { throw "fehlt: $($miss -join ', ')" }
     $true

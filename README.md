@@ -25,7 +25,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 | | |
 |---|---|
 | **Backup & Restore** | Dateien, Browser, Office, Windows-Einstellungen, Drucker, WLAN, Netzlaufwerke – Robocopy mit bis zu 128 Threads, inkrementell, mit Prüfung, **Zeitplan** (automatisch auf USB/Netz) |
-| **Programm-Katalog** | erkennt 45+ Programme, sichert deren Einstellungen und **Lizenzdateien** mit, installiert fehlende am neuen PC nach |
+| **Programm-Katalog** | erkennt 45+ Programme, sichert deren Einstellungen, Plug-ins, Datenbanken und **Lizenzdateien** mit, schliesst Programme vorher, installiert fehlende am neuen PC nach - mit **Katalog-Editor** |
 | **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
 | **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Softwareverteilung |
 | **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |
@@ -87,6 +87,28 @@ Nacharbeiten (landen in der Checkliste) und passendes Paket der Softwareverteilu
 Eigene Programme in `Config\apps.json` - Eintrag mit `"License": true`, z.B.:
 `{ "Apps": [ { "Id": "App_MeinTool", "Name": "Mein Tool", "Detect": "^Mein Tool", "Items": [ { "Type": "Files", "Name": "LIC", "Path": "{PROGRAMFILES}\\MeinTool", "Filter": [ "*.lic" ], "License": true } ] } ] }`
 Nicht uebertragbar sind Lizenzen, die an Konto oder Hardware gebunden sind (Microsoft 365, Adobe, Autodesk ...) - dafuer gibt es Hinweise in der Checkliste.
+
+### Katalog-Editor
+
+*Programme* > **Katalog bearbeiten ...** (auch Einstellungen > Module): alle Eintraege mit Suche und Filter (am PC erkannt, geprueft, ungeprueft, nur Hinweis, eigene, geaendert).
+Reiter **Allgemein** (Id, Name, Erkennung + *Testen am PC*, Paket + *Testen*), **Sichern** (Ordner, Dateien, Registry - *Ordner waehlen* wandelt in Platzhalter um, *Pfad pruefen* am gewaehlten PC mit Groesse, Anzeige Benutzer/Maschine),
+**Schliessen & Dienste**, **Hinweise** (uebertragbar, nicht uebertragbar, Lizenz, Version, Nacharbeiten), **Quelle** (geprueft am, Links, Notiz).
+Gespeichert wird nur in `Configpps.json` (vorher `apps.json.bak`); `apps.default.json` bleibt unveraendert. Eintrag exportieren/importieren (JSON), *Auf Standard zuruecksetzen*. Benutzer-Modus: nur Ansicht.
+
+| Feld | Bedeutung |
+|---|---|
+| `Id`, `Name`, `Detect` | `App_...`, Anzeigename, regulaerer Ausdruck auf den Programmnamen in *Apps & Features* |
+| `Items` | `Type` Folder/Files/Reg, `Name` (Ordner im Backup), `Path` mit Platzhaltern `{APPDATA}` `{LOCALAPPDATA}` `{PROFILE}` `{PROGRAMFILES}` `{PROGRAMFILESX86}` `{PROGRAMDATA}` `{SYSTEMDRIVE}` `{WINDIR}` `{PUBLIC}` oder `Key` (HKCU/HKLM), `Filter`, `XD`, `XF`, `NoHidden`, `License` |
+| `Role`, `DbKind` (je Item) | Settings / Plugins / Data / **Database** / License / Template; bei Database `File` (SQLite, Access, KeePass - SQLite `-wal`/`-shm`/`-journal` werden mitkopiert) oder `Service` |
+| `CloseProcess` | Prozessnamen ohne .exe - laeuft das Programm, fragt HUMig vor Backup/Restore: **schliessen**, *schliessen, notfalls beenden*, *ueberspringen* oder *trotzdem kopieren*. Geplante Backups beenden nie ein Programm (Modul wird uebersprungen) |
+| `StopService` | Dienstnamen - vor dem Kopieren gestoppt, danach **immer** wieder gestartet (nur als Administrator; fuer Dienst-Datenbanken wie SQL Server Express) |
+| `Transfer`, `NotTransfer`, `License`, `Version`, `After` | Hinweise; `NotTransfer`, `Version` und Datenbank-Hinweise kommen zusaetzlich zu `After` in die Checkliste nach dem Restore |
+| `Package` | regulaerer Ausdruck auf das Paket in der Softwareverteilung |
+| `Verified` | `{ "Date": "JJJJ-MM-TT", "Sources": [ "https://..." ], "Note": "..." }` - fehlt = ungeprueft (Spalte *Geprueft* in der Uebersicht) |
+
+Beispiel: `{ "Id": "App_Beispiel", "Name": "Beispiel", "Detect": "^Beispiel", "Items": [ { "Type": "Folder", "Name": "CFG", "Path": "{APPDATA}\\Beispiel", "Role": "Settings" }, { "Type": "Files", "Name": "DB", "Path": "{APPDATA}\\Beispiel\\data", "Filter": [ "*.sqlite" ], "Role": "Database", "DbKind": "File" } ], "CloseProcess": [ "beispiel" ], "NotTransfer": "Gespeicherte Kennwoerter (DPAPI)", "Verified": { "Date": "2026-09-29", "Sources": [ "https://..." ] } }`
+
+Robocopy-Fehler (z.B. gesperrte Datei) nennen jetzt die betroffenen Dateien im Protokoll und Bericht.
 
 ## Backup-Optionen
 
@@ -195,7 +217,8 @@ auf der Platte braucht jede weitere Version nur die Aenderungen (zweite Version 
 - USMT: keine Migration zwischen AD- und Entra-ID-Geraeten (laut Microsoft)
 - OneDrive/SharePoint: Standard = auslassen (Cloud); Nur-Cloud-Dateien werden auch mit Option nie heruntergeladen
 - Pruefsummen-Stichprobe direkt nach dem Backup = Stichprobe; die Vollpruefung macht *Backup pruefen* mit dem Katalog
-- Programm-Katalog: Pfade/Registry-Schluessel nach Herstellerangaben bzw. Erfahrung (best effort) - Lizenzdateien nur bei Programmen mit *(+ Lizenz)*, konto-/hardwaregebundene Lizenzen nie
+- Programm-Katalog: Pfade/Registry-Schluessel nach Herstellerangaben bzw. Erfahrung (best effort, Spalte *Geprueft*) - Lizenzdateien nur bei Programmen mit *(+ Lizenz)*, konto-/hardwaregebundene Lizenzen nie; gespeicherte Kennwoerter (DPAPI) und Store-Apps sind nicht uebertragbar
+- Dienst-Datenbanken per Dateikopie nur bei gleicher Datenbank-Version am Ziel verlaesslich - sonst die Sicherung des Herstellers verwenden
 - Wake-on-LAN ueber VPN/Router meist nur mit *Senden ueber PC* im selben Netz
 
 ## Konfiguration

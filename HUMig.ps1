@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.26'
+$script:Version   = '2.0.27'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -115,7 +115,7 @@ $script:SplashShown = Get-Date
 # ============================================================================
 # FUNKTIONEN LADEN
 # ============================================================================
-foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1')) {
+foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1')) {
     $mp = Join-Path $script:AppRoot "Functions\$mod"
     try { . $mp } catch { [System.Windows.MessageBox]::Show("$mod konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null; exit 1 }
 }
@@ -841,7 +841,8 @@ $ui.btnBackup.Add_Click({
         Out-Console 'Hinweis: Das Backup-Laufwerk (USB) ist NICHT verschluesselt - Benutzerdaten sind bei Verlust lesbar. Knopf "Verschluesseln ..." neben dem Backup-Ordner.' 'Warning'
     }
     Out-Separator
-    Start-BackupJob $ctx
+    # Katalog-Programme, die vorher geschlossen werden sollen: Sammelabfrage, danach Start-BackupJob
+    Invoke-HMProcCheck -Ctx $ctx -Kind 'Backup'
 })
 function Start-BackupJob([hashtable]$Ctx) {
     $script:LastBackupCtx = $Ctx
@@ -921,8 +922,10 @@ $ui.btnPrecheck.Add_Click({
     else { Out-Console $(if ($isAdmin) { 'OK Tool laeuft als Administrator' } else { 'WARN Tool laeuft NICHT als Administrator' }) $(if ($isAdmin) { 'Success' } else { 'Warning' }) }
     $u = Find-HMUsmt @{ Settings = $script:Settings; ToolRoot = $script:AppRoot }
     Out-Console $(if ($u) { "OK USMT gefunden: $u" } else { 'INFO USMT nicht gefunden (nur fuer das Modul Windows-Einstellungen noetig) - Windows ADK installieren oder nach BIN\USMT\amd64 kopieren' }) $(if ($u) { 'Success' } else { 'Debug' })
+    # Katalog-Module, deren Programm vor dem Backup geschlossen werden soll
+    $procSpec = @(foreach ($m in @(Get-CheckedModules $script:BackupChecks)) { $cp = @(@($m.CloseProcess) | Where-Object { "$_".Trim() }); if ($cp.Count) { [pscustomobject]@{ Name = "$($m.Name)"; Procs = $cp } } })
     Invoke-AsyncCommand -ScriptBlock {
-        param($eng, $comp, $cred, $sid, $pp)
+        param($eng, $comp, $cred, $sid, $pp, $procSpec, $um)
         . $eng
         $o = @()
         $isL = Test-HMIsLocal $comp
@@ -958,8 +961,14 @@ $ui.btnPrecheck.Add_Click({
                 foreach ($cr in @(Get-HMSyncRoots $ctx $sid $pp)) { $o += "INFO Cloud-Ordner: $cr - wird ausgelassen (mit Option 'OneDrive/SharePoint: lokale Dateien mitsichern' nur lokal vorhandene Dateien, ohne Download)" }
             } catch { $o += "FEHLER Pruefung am Ziel: $($_.Exception.Message)" }
         }
+        foreach ($s in @($procSpec | Where-Object { $_ })) {
+            try {
+                $run = @(Get-HMRunningProcs @{ Computer = $comp; IsRemote = -not $isL; Credential = $cred; UserMode = [bool]$um } @($s.Procs) $sid)
+                if ($run.Count) { $o += "WARN Programm laeuft: $($s.Name) ($(@($run | ForEach-Object { $_.Name } | Select-Object -Unique) -join ', ')) - beim Start wird gefragt: schliessen, ueberspringen oder trotzdem kopieren" }
+            } catch { }
+        }
         $o -join "`n"
-    } -ArgumentList @($script:Engine, $ctx.Computer, $script:RemoteCred, $p.SID, $p.LocalPath) -TimeoutSec 90 -OnComplete {
+    } -ArgumentList @($script:Engine, $ctx.Computer, $script:RemoteCred, $p.SID, $p.LocalPath, $procSpec, [bool]$script:UserMode) -TimeoutSec 90 -OnComplete {
         param($r)
         foreach ($l in ("$r" -split "`n")) {
             if (-not $l.Trim()) { continue }
@@ -1123,7 +1132,11 @@ $ui.btnRestore.Add_Click({
     if (-not $ctx) { return }
     Out-Separator
     $script:RestoreBackupForChecklist = $b
-    Start-EngineJob -Command 'Start-HMRestore -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'Restore' -OnFinished {
+    # Katalog-Programme am Ziel-PC, die vorher geschlossen werden sollen: Sammelabfrage, danach Start-RestoreJob
+    Invoke-HMProcCheck -Ctx $ctx -Kind 'Restore'
+})
+function Start-RestoreJob([hashtable]$Ctx) {
+    Start-EngineJob -Command 'Start-HMRestore -Ctx $Ctx -Job $Job' -Ctx $Ctx -Title 'Restore' -OnFinished {
         param($j)
         if ($j.Result -and $j.Result.Report) { Out-Console "Protokoll: $($j.Result.Report)  (Knopf 'Protokoll')" 'Info' }
         Connect-Target
@@ -1135,7 +1148,7 @@ $ui.btnRestore.Add_Click({
             $script:Window.Dispatcher.BeginInvoke([action]{ $pc = $script:PendingChecklist; $script:PendingChecklist = $null; if ($pc) { Show-HMChecklist -ReportPath $pc.Report -Extra $pc.Extra } }) | Out-Null
         }
     }
-})
+}
 $ui.btnRestorePreview.Add_Click({ if (-not $script:JobRunning) { Start-HMRestorePreviewUi } })
 $ui.btnChecklist.Add_Click({ Show-HMChecklist })
 $ui.btnVerifyBackup.Add_Click({ if (-not $script:JobRunning) { Start-HMVerifyBackup $false } })

@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.0.27 - 2026-09-29
+### Neu
+- **Katalog-Editor** (Programme > *Katalog bearbeiten ...*, auch Einstellungen > Module): Eintraege mit Suche/Filter bearbeiten, anlegen, exportieren/importieren; Tests am gewaehlten PC (Erkennung, Paket, Pfad/Registry vorhanden + Groesse, laufende Prozesse, Dienste); *Ordner waehlen* wandelt in Platzhalter um; Anzeige Benutzer/Maschine je Eintrag; Pruefung vor dem Speichern; speichert nur in `Config\apps.json` (Sicherung `apps.json.bak`), Standard-Katalog bleibt unveraendert; Benutzer-Modus nur Ansicht
+- Katalog-Felder: `NotTransfer`, `Version`, `CloseProcess`, `StopService`, `Verified` (Datum, Quellen, Notiz), je Eintrag `Role` und `DbKind` (abwaertskompatibel)
+- **Programm vorher schliessen:** laeuft ein Programm, fragt HUMig vor Backup/Restore einmal fuer alle: schliessen, schliessen (notfalls beenden), ueberspringen oder trotzdem kopieren - auch remote (Schliessen in der Sitzung des Benutzers); geplante Backups beenden nie ein Programm, das Modul wird uebersprungen und gemeldet; Vorab-Pruefung zeigt laufende Programme
+- **Dienste stoppen** fuer Dienst-Datenbanken (nur als Administrator), danach immer wieder starten (auch bei Fehler/Abbruch)
+- Datenbanken: SQLite-Begleitdateien (-wal/-shm/-journal) werden mitkopiert, Warnung bei geoeffneter Access-Datenbank (.laccdb/.ldb)
+- Uebersicht *Programme*: Spalten Nicht uebertragbar, DB, Schliessen, Geprueft; Checkliste nach dem Restore mit nicht Uebertragbarem, Versionshinweis und Datenbank-Hinweisen
+### Verbessert
+- Robocopy-Fehler nennen die betroffenen (z.B. gesperrten) Dateien in Protokoll und Bericht; fehlgeschlagene Dateien machen den Eintrag mindestens zur Warnung
+- Manifest/Bericht halten je Modul fest, ob ein Programm geschlossen/uebersprungen/trotzdem kopiert und ob Dienste gestoppt wurden
+
 ## v2.0.26 - 2026-09-28
 ### Verbessert
 - Zeitplan-Verwaltung (Rechtsklick auf *Zeitplan ...*): neue Spalte **Was** - gesicherte Module, Zusaetzliche Ordner mit Pfad

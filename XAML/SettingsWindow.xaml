@@ -1,4 +1,4 @@
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="HUMig - Einstellungen" Width="880" Height="680" MinWidth="700" MinHeight="500"
         WindowStartupLocation="CenterOwner" Background="#FF1E1E2E" Foreground="#FFCDD6F4" FontFamily="Segoe UI" FontSize="12">
@@ -164,6 +164,7 @@
                     </Border>
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button x:Name="btnAppEditor" Content="Programm-Katalog bearbeiten ..." Style="{DynamicResource BtnMauve}" ToolTip="Programme, deren Einstellungen, Plug-ins, Lizenzdateien und Datenbanken mitgesichert werden (Config\apps.json)"/>
                             <Button x:Name="btnModDel" Content="Eigenes Modul loeschen" Style="{DynamicResource BtnRed}"/>
                             <Button x:Name="btnModJson" Content="modules.json (Experten)" Style="{DynamicResource BtnDefault}" Margin="0"/>
                         </StackPanel>
