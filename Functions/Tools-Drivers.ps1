@@ -227,7 +227,7 @@ function Get-DrvPackages {
     $list = [System.Collections.Generic.List[object]]::new()
     $setupExt = @('.exe', '.msi')
     foreach ($f in @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue | Where-Object { $setupExt -contains $_.Extension.ToLower() } | Sort-Object Name)) {
-        $list.Add([pscustomobject]@{ Id = $f.Name; IsDir = $false; SrcPath = $f.FullName; Candidates = @($f.Name); InfFiles = @(); ConfigPath = "$($f.FullName).hu-driver.json"; SizeMB = [math]::Round($f.Length / 1MB, 1) })
+        $list.Add([pscustomobject]@{ Id = $f.Name; IsDir = $false; SrcPath = $f.FullName; Candidates = @($f.Name); InfFiles = @(); InfTop = @(); InfSizeMB = 0; ConfigPath = "$($f.FullName).hu-driver.json"; SizeMB = [math]::Round($f.Length / 1MB, 1) })
     }
     foreach ($d in @(Get-ChildItem -LiteralPath $dir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike '_*' } | Sort-Object Name)) {
         $all = @(Get-ChildItem -LiteralPath $d.FullName -File -Recurse -ErrorAction SilentlyContinue)
@@ -239,7 +239,11 @@ function Get-DrvPackages {
         $cand = @($cand | Sort-Object @{ E = { if ($_.Name -match '(?i)^(setup|install|installer)[^\\]*\.exe$') { 0 } elseif ($_.Extension -ieq '.msi') { 1 } else { 2 } } }, Name | ForEach-Object { $_.FullName.Substring($base.Length) })
         if ($infs.Count -eq 0 -and $cand.Count -eq 0) { continue }
         $size = ($all | Measure-Object Length -Sum).Sum
-        $list.Add([pscustomobject]@{ Id = "$($d.Name)\"; IsDir = $true; SrcPath = $d.FullName; Candidates = $cand; InfFiles = $infs; ConfigPath = ($base + 'hu-driver.json'); SizeMB = [math]::Round($size / 1MB, 1) })
+        # Art INF: nur die obersten Unterordner mit INF-Dateien werden kopiert (liegt ein INF direkt im Paket = ganzer Ordner)
+        $top = @()
+        if ($infs.Count -gt 0 -and @($infs | Where-Object { $_ -notmatch '\\' }).Count -eq 0) { $top = @($infs | ForEach-Object { ($_ -split '\\')[0] } | Sort-Object -Unique) }
+        $infSize = if ($top.Count) { ($all | Where-Object { $top -contains ($_.FullName.Substring($base.Length) -split '\\')[0] } | Measure-Object Length -Sum).Sum } else { $size }
+        $list.Add([pscustomobject]@{ Id = "$($d.Name)\"; IsDir = $true; SrcPath = $d.FullName; Candidates = $cand; InfFiles = $infs; InfTop = $top; InfSizeMB = [math]::Round($infSize / 1MB, 1); ConfigPath = ($base + 'hu-driver.json'); SizeMB = [math]::Round($size / 1MB, 1) })
     }
     foreach ($p in $list) {
         $cfg = $null
@@ -277,6 +281,12 @@ function Save-DrvSettings($Package, $Settings) {
     } catch { Out-Console "Einstellungen nicht gespeichert ($($Package.ConfigPath)): $($_.Exception.Message)" 'Error'; return $false }
 }
 
+# Was wird zum Client kopiert (Art INF: nur Unterordner mit INF-Dateien)
+function Get-DrvCopyMB($Package) { if ("$($Package.Settings.Mode)" -eq 'Inf' -and $Package.IsDir -and @($Package.InfTop).Count) { return [double]$Package.InfSizeMB }; return [double]$Package.SizeMB }
+function Get-DrvCopyText($Package) {
+    if ("$($Package.Settings.Mode)" -eq 'Inf' -and $Package.IsDir -and @($Package.InfTop).Count) { return "$($Package.InfSizeMB) MB (nur $((@($Package.InfTop) | ForEach-Object { "$_\" }) -join ', ') von $($Package.SizeMB) MB)" }
+    return "$($Package.SizeMB) MB$(if ($Package.IsDir) { ' (ganzer Ordner)' })"
+}
 function Confirm-DrvDeploy($Package, [string[]]$Hosts, [bool]$Force) {
     $s = $Package.Settings
     $how = if ($s.Mode -eq 'Inf') {
@@ -286,7 +296,7 @@ function Confirm-DrvDeploy($Package, [string[]]$Hosts, [bool]$Force) {
     $hw = if ($s.OnlyMatching) { 'nur PCs mit passender Hardware' } else { 'auch ohne passende Hardware (Treiberspeicher)' }
     $prot = if ($s.ProtectDriver) { "`n  Schutz:   danach vor Treiber-Updates schuetzen (Geraete-Sperre, nur Windows Pro/Education/Enterprise)" } else { '' }
     $ziel = if ($Hosts.Count -le 5) { $Hosts -join ', ' } else { "$($Hosts.Count) PCs" }
-    return (Confirm-Action "Treiber '$($s.Name)' installieren auf: $ziel`n`n  Art:      $how`n  Hardware: $hw$prot`n  Version:  $(if ($Force) { 'auch wenn dieselbe Version schon aktiv ist' } else { 'PCs mit derselben aktiven Version werden uebersprungen' })`n  Groesse:  $($Package.SizeMB) MB`n`nGeraete koennen dabei kurz ausfallen (Bildschirm flackert, Netzwerk trennt kurz).`nFortfahren?" 'Treiberverteilung')
+    return (Confirm-Action "Treiber '$($s.Name)' installieren auf: $ziel`n`n  Art:      $how`n  Hardware: $hw$prot`n  Version:  $(if ($Force) { 'auch wenn dieselbe Version schon aktiv ist' } else { 'PCs mit derselben aktiven Version werden uebersprungen' })`n  Groesse:  $(Get-DrvCopyText $Package)`n`nGeraete koennen dabei kurz ausfallen (Bildschirm flackert, Netzwerk trennt kurz).`nFortfahren?" 'Treiberverteilung')
 }
 
 # ----------------------------------------------------------------------------
@@ -471,6 +481,9 @@ $script:RS_DrvCheckBody = {
     foreach ($e in @($o.Map)) { if ($e.H) { $map["$($e.H)"] = @("$($e.V)" -split '/') } }
     $rows = @(Get-HUDrvState $map @($o.Cls))
     if ($rows.Count -eq 0) { return 'INFO|keine passenden Geraete und keine Geraete derselben Klasse' }
+    # nur passende Geraete; gibt es keine, die derselben Klasse (zum Vergleich)
+    $mOnly = @($rows | Where-Object { $_.Match })
+    if ($mOnly.Count) { $rows = $mOnly }
     $ed = Get-HUEdition
     'EDI|' + $ed.Name + '|' + $ed.Ok
     $deny = @{}; foreach ($d in @(Get-HUDenyIds)) { $deny[$d.ToUpperInvariant()] = $true }
@@ -509,9 +522,9 @@ function Start-DriverCheck($Package, [string]$Computer) {
             if ($f.Count -ge 10) { $rows.Add(@($f[0], $f[1], $f[2], $f[3], $f[4], $f[5], $f[6], $f[7], $f[8], $f[9])) }
         }
         $m = @($rows | Where-Object { $_[1] -notlike 'passt nicht*' }).Count
-        Out-Console "Treiber pruefen ($comp): $m passende Geraet(e), $($rows.Count - $m) weitere derselben Klasse" $(if ($m) { 'Success' } else { 'Warning' })
+        Out-Console "Treiber pruefen ($comp): $(if ($m) { "$m passende Geraet(e)" } else { "KEIN passendes Geraet - $($rows.Count) Geraete derselben Klasse zum Vergleich" })" $(if ($m) { 'Success' } else { 'Warning' })
         Show-DataGridWindow -Title "Treiber pruefen - $($pkg.Settings.Name) - $comp" -Columns @('Geraet', 'Status', 'Aktive Version', 'Paket-Version', 'Gesperrt', 'Anbieter', 'Datum', 'INF', 'Hardware-ID', 'Instanz') `
-            -Rows $rows.ToArray() -Sort 'Status DESC, Geraet ASC' -CountText "$($rows.Count) Geraete ($m passend)" -Width 1300 -Height 520
+            -Rows $rows.ToArray() -Sort 'Geraet ASC' -CountText $(if ($m) { "$m passende(s) Geraet(e)" } else { "kein passendes Geraet - $($rows.Count) derselben Klasse" }) -Width 1300 -Height 420
     }
 }
 
@@ -586,7 +599,19 @@ function Start-DriverDeploy {
     $pkgJson = [pscustomobject]$pkg | ConvertTo-Json -Compress
     Out-Console "Treiberverteilung '$($s.Name)' auf $($Hosts.Count) PC(s)$(if ($Label) { " [$Label]" })$(if ($Force) { ' - auch wenn gleiche Version aktiv' }) ..." 'Info'
     $tmo = [int]$s.TimeoutMin; if ($tmo -lt 1) { $tmo = 20 }
-    $jobSec = [int][Math]::Max(1800, ([Math]::Ceiling($Hosts.Count / 8.0) * (($tmo + 15) * 60 + [double]$Package.SizeMB)))
+    $copyMB = Get-DrvCopyMB $Package
+    $worker = $script:SwWorkerText
+    if ("$($s.Mode)" -eq 'Inf' -and $Package.IsDir -and @($Package.InfTop).Count) {
+        # Worker-Kopie auf die INF-Unterordner beschraenken
+        $incLit = (@($Package.InfTop) | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ','
+        $old = '@(Get-ChildItem -LiteralPath $src -Force)'
+        $nl = $worker.IndexOf("`n")
+        if ($nl -gt 0 -and ($worker.Split([string[]]@($old), [StringSplitOptions]::None).Count - 1) -eq 2) {
+            $worker = $worker.Substring(0, $nl + 1) + "`$inc = @($incLit)`n" + $worker.Substring($nl + 1)
+            $worker = $worker.Replace($old, '@(Get-ChildItem -LiteralPath $src -Force | Where-Object { $inc -contains $_.Name })')
+        } else { $copyMB = [double]$Package.SizeMB }
+    }
+    $jobSec = [int][Math]::Max(1800, ([Math]::Ceiling($Hosts.Count / 8.0) * (($tmo + 15) * 60 + $copyMB)))
     Invoke-AsyncCommand -ScriptBlock {
         param($hostStr, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $workerText, $sizeMB, $timeoutMin, $deadlineSec)
         $list = @($hostStr -split '\|' | Where-Object { $_ })
@@ -613,7 +638,7 @@ function Start-DriverDeploy {
         }
         if ($stuck -eq 0) { try { $pool.Close(); $pool.Dispose() } catch { } }
         $out -join "`n"
-    } -ArgumentList @(($Hosts -join '|'), $Package.SrcPath, [bool]$Package.IsDir, $pkgJson, $Force, $script:RS_SwPrep.ToString(), (Get-DrvInstallText), $script:RS_SwCleanup.ToString(), $script:SwWorkerText, [double]$Package.SizeMB, $tmo, ($jobSec - 60)) `
+    } -ArgumentList @(($Hosts -join '|'), $Package.SrcPath, [bool]$Package.IsDir, $pkgJson, $Force, $script:RS_SwPrep.ToString(), (Get-DrvInstallText), $script:RS_SwCleanup.ToString(), $worker, $copyMB, $tmo, ($jobSec - 60)) `
       -TimeoutSec $jobSec -State @{ Name = "$($s.Name)"; Hosts = $Hosts; Package = $Package; Force = $Force } -OnComplete {
         param($result, $st)
         $r = "$result".Trim()
@@ -754,7 +779,8 @@ function Show-DrvPackageDetails($p) {
         $dw.ChkMatch.IsChecked = [bool]$s.OnlyMatching; $dw.ChkForceDrv.IsChecked = [bool]$s.ForceDriver; $dw.ChkProtect.IsChecked = [bool]$s.ProtectDriver
         Set-DrvModeUi
         $lines = [System.Collections.Generic.List[string]]::new()
-        $lines.Add("Paket:        $($p.Id)   ($($p.SizeMB) MB$(if ($p.IsDir) { ', ganzer Ordner wird kopiert' }))$(if (-not $p.Configured) { '   - noch nicht gespeichert' })")
+        $lines.Add("Paket:        $($p.Id)   ($($p.SizeMB) MB)$(if (-not $p.Configured) { '   - noch nicht gespeichert' })")
+        $lines.Add("Kopiert:      $(Get-DrvCopyText $p)   (Art INF: nur Unterordner mit INF-Dateien)")
         if ($hasInf) {
             $sum = Get-DrvInfSummary $p
             $inf = @($sum.Infs | ForEach-Object { $_.Inf })
