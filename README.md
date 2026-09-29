@@ -27,7 +27,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 | **Backup & Restore** | Dateien, Browser, Office, Windows-Einstellungen, Drucker, WLAN, Netzlaufwerke – Robocopy mit bis zu 128 Threads, inkrementell, mit Prüfung, **Zeitplan** (automatisch auf USB/Netz) |
 | **Programm-Katalog** | erkennt 45+ Programme, sichert deren Einstellungen, Plug-ins, Datenbanken und **Lizenzdateien** mit, schliesst Programme vorher, installiert fehlende am neuen PC nach - mit **Katalog-Editor** |
 | **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
-| **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Softwareverteilung |
+| **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung |
 | **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |
 | **Benutzer-Modus** | ohne Administratorrechte: eigenes Profil sichern/wiederherstellen, Dateien aus dem Backup holen |
 | **Anleitung** | im Tool mit **F1** – immer aktuell aus diesem Repository |
@@ -69,7 +69,7 @@ Alle Haekchen, Optionen und die zuletzt gewaehlte Vorlage werden gespeichert und
 Am Ende laengerer Vorgaenge: Ton, Windows-Hinweis und blinkendes Taskleisten-Symbol (mit Fortschritt im Symbol).
 Start ueber **HUMig.exe** (wird beim ersten Start erzeugt, an Taskleiste anheftbar) oder **Start.cmd**.
 **Benutzer-Modus** (ohne Administratorrechte): **HUMig-Benutzer.exe** bzw. **Start-Benutzer.cmd** - nur das eigene Profil auf diesem PC, Module mit Systemzugriff und die meisten Werkzeuge sind ausgeblendet, die Backup-Liste zeigt nur eigene Backups.
-Mehrere Standorte: Einstellungen > **Standorte** (Name frei waehlbar; eigener Backup-Ordner, Softwareverteilung, USMT, Netzwerk-Standardwerte je Standort) - Umschalten oben rechts im Hauptfenster.
+Mehrere Standorte: Einstellungen > **Standorte** (Name frei waehlbar; eigener Backup-Ordner, Software-/Treiberverteilung, USMT, Netzwerk-Standardwerte je Standort) - Umschalten oben rechts im Hauptfenster.
 
 ## Module (Auszug)
 
@@ -178,6 +178,22 @@ lassen sich direkt **deinstallieren** (nacheinander, still, ohne automatischen N
 stille Befehl des Herstellers bzw. der Deinstaller mit Parametern (Vorschlag fuer Inno Setup/NSIS, vor dem Start pruefbar).
 Ergebnis je Programm in der Konsole (entfernt / Neustart noetig / Fehler mit ExitCode), danach wird die Liste neu geladen.
 
+## Treiberverteilung
+
+Eigene Treiber (z.B. eine bestimmte Grafiktreiber-Version) aus einem eigenen Ordner `Treiberverteilung\` ausrollen
+(Werkzeuge > *Treiber installieren*; anderer Ordner/Freigabe: Einstellungen > Allgemein oder je Standort):
+- **ein Unterordner** = ein Paket: entpackter Treiber mit INF-Dateien (auch in Unterordnern) und/oder Hersteller-Setup; `_` am Anfang = ignoriert
+- **eine EXE/MSI** direkt im Ordner = Setup-Paket; *Datei hinzufuegen* entpackt ZIP und CAB (z.B. Microsoft Update-Katalog) als eigenes Paket
+
+Pro Paket (`hu-driver.json`): Art **INF** (`pnputil /add-driver *.inf /subdirs /install` - Windows installiert, wenn der Treiber besser/neuer ist)
+oder **Setup** (Silent-Parameter, Erfolgs-ExitCodes, Timeout), *nur passende Hardware* (sonst nur in den Treiberspeicher),
+**Treiber erzwingen** (nur INF: diese Version auch ueber einen neueren/besser bewerteten Treiber, per `UpdateDriverForPlugAndPlayDevices` mit Force).
+Das Tool liest die INF-Dateien (Klasse, Anbieter, Version, Hardware-IDs) und vergleicht am Ziel-PC mit den Geraeten
+(`Win32_PnPEntity`) und dem aktiven Treiber (`Win32_PnPSignedDriver`): *Am gewaehlten PC pruefen* zeigt das ohne Installation;
+beim Verteilen (gewaehlter Computer, mehrere PCs oder Mehrfachaktion, bis zu 8 gleichzeitig) werden PCs ohne passende Hardware
+bzw. mit derselben aktiven Version uebersprungen. Ergebnis je PC mit aktiver Version und Neustart-Hinweis, Log `C:\Windows\Temp\HU_DRV_*.log`.
+Hinweis: Windows Update/Intune koennen einen erzwungenen aelteren Treiber spaeter ersetzen - Treiber-Updates dort steuern.
+
 ## Werkzeuge
 
 | Bereich | Werkzeuge |
@@ -185,7 +201,7 @@ Ergebnis je Programm in der Konsole (entfernt / Neustart noetig / Fehler mit Exi
 | Computer | Fernwartung aktivieren (WinRM, RDP, C$, Firewall - ueber WMI), Umbenennen, IP-Adresse/DHCP, lokale Gruppen (Admins, Netzwerkkonfigurations-Operatoren, RDP, Benutzer), Autologon (LSA-Geheimnis), Sperrbildschirm/Energie, Firewall/Netzwerkprofil, angemeldete Benutzer abmelden, Nachricht, Neustart/Herunterfahren, Netzwerktest, **Geraete (AD) / Mehrfach** (Aktionen auf vielen PCs parallel), **Remote-PowerShell/-CMD**, **Inventar mehrerer PCs** (CSV, optional mit Software), **BitLocker-Schluessel** (in AD/Entra ID sichern), **Autopilot-Hash** (auch viele PCs in einer CSV), **Wake-on-LAN**, **Laufwerke (C$)** (auch USB-Sticks und Freigaben am Remote-PC im Explorer), **Uebermittlungsoptimierung**, **Ordnerfreigaben** (Rechte anzeigen, aus Backup uebernehmen), **USMT einrichten (ADK)** |
 | Benutzerprofil | Profil erneuern (Test) + zurueckholen, Profilordner umbenennen, **Profil einem anderen Konto zuweisen** (Domaene -> lokal), Windows-Apps neu registrieren, Gruppenrichtlinien-Ergebnis, Aufgaben aus Backup importieren, **alte Profile loeschen**, **Datenbanken suchen** (lokale Datenbanken + Datenbank-Dienste, als Zusatzordner oder Katalog-Eintrag uebernehmen), **wichtige Dateien suchen** (PST, KeePass, Access ... ausserhalb des Profils), **im Backup suchen** (einzelne Dateien herauskopieren) |
 | Diagnose / Wartung | Ereignisse, Akku-Bericht, Aktivierung Windows/Office, Entra ID/Intune (Status + Sync), Domaene/Zeit/Kerberos, Druckwarteschlange, Speicher aufraeumen (inkl. Windows.old), Systemdateien reparieren (DISM/SFC) |
-| Software | Softwareverteilung, installierte Software + Deinstallation |
+| Software | Softwareverteilung, **Treiberverteilung**, installierte Software + Deinstallation |
 | Dieser PC | Systemprogramme, .exe als Admin, Anmeldedaten (credwiz, anzeigen/loeschen), Hersteller-Treiber-Links |
 
 Remote-Werkzeuge brauchen PowerShell-Remoting (WinRM) am Ziel-PC - fehlt es, schaltet *Fernwartung aktivieren* es ueber WMI (Port 135) ein. Aenderungen erfolgen immer mit Rueckfrage;
@@ -238,7 +254,7 @@ Alles ueber **Einstellungen** (Fenster). Die Werte landen in:
 
 | Datei | Inhalt |
 |---|---|
-| `Config\settings.json` | Backup-Ordner, Threads, Aufbewahrung (Tage + Anzahl je PC/Benutzer), USMT-Pfad, Softwareverteilung-Ordner, WLAN-Klartext, Backup-Optionen, Nacharbeiten, Checkliste, Standorte (`Profiles`, `ActiveProfile`), Links, Modul-Anzeige, letzte Vorlage, Benachrichtigung (`Notify`), Uebersicht (`OverviewAuto`) |
+| `Config\settings.json` | Backup-Ordner, Threads, Aufbewahrung (Tage + Anzahl je PC/Benutzer), USMT-Pfad, Software-/Treiberverteilung-Ordner (`SoftwareFolder`, `DriverFolder`), WLAN-Klartext, Backup-Optionen, Nacharbeiten, Checkliste, Standorte (`Profiles`, `ActiveProfile`), Links, Modul-Anzeige, letzte Vorlage, Benachrichtigung (`Notify`), Uebersicht (`OverviewAuto`) |
 | `Config\apps.json` | eigene Eintraege fuer den Programm-Katalog (Aufbau wie `apps.default.json`) |
 | `Config\exceptions.json` | Ausnahmen Ordner/Dateitypen fuer Profil und C:\ |
 | `Config\modules.json` | eigene Module und Vorlagen |

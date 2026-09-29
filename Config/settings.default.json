@@ -6,6 +6,7 @@
   "RetentionKeepPerUser": 3,
   "UsmtPath": "",
   "SoftwareFolder": "",
+  "DriverFolder": "",
   "WlanExportClearKey": false,
   "NewNameSuffix": "",
   "Notify": true,

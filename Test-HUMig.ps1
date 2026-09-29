@@ -42,7 +42,7 @@ T 'XAML MainWindow laden' {
     $w = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $x))
     $need = 'cmbComputer', 'cmbUser', 'btnBackup', 'btnRestore', 'dgBackups', 'rtbConsole', 'pnlBackupModules', 'pnlRestoreModules', 'imgLogo', 'pbMain',
         'lblSizeTotal', 'lstExclude', 'btnBigFiles', 'chkIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport', 'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag',
-        'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnReinstall', 'btnADDevices', 'btnBackupSchedule', 'lblBackupSchedule'
+        'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnReinstall', 'btnADDevices', 'btnBackupSchedule', 'lblBackupSchedule', 'btnToolDrvDeploy'
     $miss = @($need | Where-Object { -not $w.FindName($_) })
     if ($miss.Count) { throw "fehlt: $($miss -join ', ')" }
     $true
@@ -53,7 +53,7 @@ T 'XAML Einstellungsfenster laden' {
     [xml]$y = Get-Content (Join-Path $root 'XAML\SettingsWindow.xaml') -Raw -Encoding UTF8
     $w = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $y))
     $w.Resources.MergedDictionaries.Add($main.Resources)
-    $need = 'txtRoot', 'cmbThreads', 'dgModules', 'dgLinks', 'txtExPF', 'btnSave', 'btnNmAdd', 'btnLauncher', 'txtRetentionKeep', 'chkOverviewAuto', 'txtChecklist', 'chkChecklistAuto', 'dgSchools', 'btnSchoolAdd', 'btnUsmtAdk', 'cmbUiScale', 'btnAppEditor'
+    $need = 'txtRoot', 'cmbThreads', 'dgModules', 'dgLinks', 'txtExPF', 'btnSave', 'btnNmAdd', 'btnLauncher', 'txtRetentionKeep', 'chkOverviewAuto', 'txtChecklist', 'chkChecklistAuto', 'dgSchools', 'btnSchoolAdd', 'btnUsmtAdk', 'cmbUiScale', 'btnAppEditor', 'txtDrvDir', 'btnDrvDir'
     $miss = @($need | Where-Object { -not $w.FindName($_) })
     if ($miss.Count) { throw "fehlt: $($miss -join ', ')" }
     $true
@@ -242,6 +242,16 @@ T 'Werkzeug: Inventar lokal (v0.0.5)' { $r = & $script:RS_Inventory $false; if (
 
 # 5. Softwareverteilung / Starter
 . (Join-Path $root 'Functions\Tools-Software.ps1')
+T 'Treiberverteilung: INF lesen (v2.0.30)' {
+    . (Join-Path $root 'Functions\Tools-Drivers.ps1')
+    $inf = @(Get-ChildItem (Join-Path $env:windir 'INF') -Filter 'machine.inf' -ErrorAction SilentlyContinue)[0]
+    if (-not $inf) { $inf = @(Get-ChildItem (Join-Path $env:windir 'INF') -Filter '*.inf' | Select-Object -First 1)[0] }
+    $i = Read-HUInf $inf.FullName
+    if (-not $i.Class -or @($i.HwIds).Count -eq 0) { throw "$($inf.Name): Klasse/Hardware-IDs nicht gelesen" }
+    $m = @{}; foreach ($h in @($i.HwIds)) { $m[$h] = @($i.Version) }
+    $d = @(Get-HUDrvState $m | Where-Object { $_.Match })
+    "$($inf.Name): $($i.Class) $($i.Version), $(@($i.HwIds).Count) IDs, $($d.Count) passende Geraete"
+}
 T 'Installer-Erkennung (EXE)' { $i = Get-SwInstallerInfo (Join-Path $env:windir 'System32\robocopy.exe'); if (-not $i -or $i.Type -ne 'EXE') { throw 'keine Info' }; "$($i.Framework)" }
 T 'Starter HUMig.exe erzeugen (TEMP)' {
     . (Join-Path $root 'Functions\UI-Shell.ps1')

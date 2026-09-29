@@ -30,7 +30,7 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Text="Backup-Ordner:" Style="{DynamicResource Lbl}"/>
                         <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,8">
@@ -64,13 +64,18 @@
                             <Button x:Name="btnSwDir" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0"/>
                             <TextBox x:Name="txtSwDir" Style="{DynamicResource DarkTextBox}" ToolTip="Leer = Unterordner Softwareverteilung im Tool-Ordner. Auch Netzwerkfreigabe moeglich."/>
                         </DockPanel>
-                        <TextBlock Grid.Row="11" Text="Anzeige-Groesse:" Style="{DynamicResource Lbl}"/>
-                        <StackPanel Grid.Row="11" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
+                        <TextBlock Grid.Row="10" Text="Treiberverteilung-Ordner:" Style="{DynamicResource Lbl}"/>
+                        <DockPanel Grid.Row="10" Grid.Column="1" Margin="0,8,0,0">
+                            <Button x:Name="btnDrvDir" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0"/>
+                            <TextBox x:Name="txtDrvDir" Style="{DynamicResource DarkTextBox}" ToolTip="Leer = Unterordner Treiberverteilung im Tool-Ordner. Auch Netzwerkfreigabe moeglich."/>
+                        </DockPanel>
+                        <TextBlock Grid.Row="12" Text="Anzeige-Groesse:" Style="{DynamicResource Lbl}"/>
+                        <StackPanel Grid.Row="12" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
                             <ComboBox x:Name="cmbUiScale" Width="140"/>
                             <TextBlock Text="Text + Oberflaeche skalieren. Automatisch = verkleinert auf kleinen Bildschirmen. Im Hauptfenster: Strg + Mausrad, Strg + 0 = automatisch" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap" MaxWidth="440"/>
                         </StackPanel>
-                        <TextBlock Grid.Row="10" Text="Backup-Uebersicht:" Style="{DynamicResource Lbl}"/>
-                        <CheckBox x:Name="chkOverviewAuto" Grid.Row="10" Grid.Column="1" Content="Backups.html im Backup-Ordner nach jedem Backup/Restore aktualisieren" Margin="0,10,0,0"/>
+                        <TextBlock Grid.Row="11" Text="Backup-Uebersicht:" Style="{DynamicResource Lbl}"/>
+                        <CheckBox x:Name="chkOverviewAuto" Grid.Row="11" Grid.Column="1" Content="Backups.html im Backup-Ordner nach jedem Backup/Restore aktualisieren" Margin="0,10,0,0"/>
                         <TextBlock Grid.Row="8" Text="Starter:" Style="{DynamicResource Lbl}"/>
                         <StackPanel Grid.Row="8" Grid.Column="1" Orientation="Horizontal">
                             <Button x:Name="btnLauncher" Content="HUMig.exe neu erstellen" Style="{DynamicResource BtnMauve}" ToolTip="Starter mit Logo (startet HUMig ohne Konsolenfenster, kann an die Taskleiste angeheftet werden)"/>
@@ -113,6 +118,7 @@
                             <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
                             <DataGridTextColumn Header="Backup-Ordner" Binding="{Binding BackupRoot, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
                             <DataGridTextColumn Header="Softwareverteilung" Binding="{Binding SoftwareFolder, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                            <DataGridTextColumn Header="Treiberverteilung" Binding="{Binding DriverFolder, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
                             <DataGridTextColumn Header="USMT-Ordner" Binding="{Binding UsmtPath, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
                             <DataGridTextColumn Header="Domaene/DC" Binding="{Binding ADServer, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
                             <DataGridTextColumn Header="Subnetz" Binding="{Binding SubnetMask, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
