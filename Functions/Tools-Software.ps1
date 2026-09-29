@@ -584,6 +584,7 @@ function Show-SoftwareWindow {
             Start-SoftwareDeploy -Hosts $hosts -Package $pp.Package -Force $pp.Force -Label 'Mehrere PCs'
         }
     })
+    $w.Add_Activated({ if ($script:SwUi) { $script:SwUi.LblTarget.Text = "Gewaehlter Computer: $(Get-TargetComputer)" } })
     $w.Add_Closed({ $script:SwUi = $null })
     $w.Owner = $script:Window; Set-HMWindowScale $w
     $w.Show()
