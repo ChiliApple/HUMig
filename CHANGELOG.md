@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.37 - 2026-09-29
+### Verbessert
+- Treiberverteilung: Erweiterungs-INFs (Klasse Extension/SoftwareComponent, z.B. Audio-Bus-Erweiterung im Intel-Grafikpaket) zaehlen nicht mehr fuer Versionsvergleich, Erzwingen und Schutz - sie werden per pnputil mitinstalliert; Pruefung zeigt sie als *Erweiterung* statt *wuerde installiert*
+
 ## v2.0.36 - 2026-09-29
 ### Verbessert
 - Treiberverteilung, Art INF: zum Client werden nur die Unterordner mit INF-Dateien kopiert (z.B. `driver\` statt des ganzen entpackten Pakets mit Setup); Infofeld und Rueckfrage zeigen die Kopiergroesse

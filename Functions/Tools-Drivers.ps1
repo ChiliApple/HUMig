@@ -96,8 +96,19 @@ function Read-HUInf([string]$Path) {
         Date = $date; Version = $version; Catalog = "$($ver['CATALOGFILE'])"; Devices = $devs.ToArray(); HwIds = $ids.ToArray()
     }
 }
+# Hardware-IDs, die NUR in Erweiterungs-/Softwarekomponenten-INFs stehen (Extension, SoftwareComponent):
+# diese Treiber kommen ZUSAETZLICH zum Geraetetreiber - deren Version ist am Geraet nicht ablesbar
+function Get-HUExtIds($Infs) {
+    $main = @{}; $ext = @{}
+    foreach ($i in @($Infs)) {
+        $isExt = ("$($i.Class)" -in 'Extension', 'SoftwareComponent')
+        foreach ($h in @($i.HwIds)) { if ($isExt) { $ext[$h] = $true } else { $main[$h] = $true } }
+    }
+    foreach ($k in @($ext.Keys)) { if ($main.ContainsKey($k)) { $ext.Remove($k) } }
+    return $ext
+}
 # Passende Geraete + aktiver Treiber. $HwMap: Hardware-ID (GROSS) -> Paket-Versionen (Array). $ClassGuids: nur fuer die Anzeige "gleiche Klasse"
-function Get-HUDrvState($HwMap, [string[]]$ClassGuids = @()) {
+function Get-HUDrvState($HwMap, [string[]]$ClassGuids = @(), $ExtIds = @{}) {
     $rows = [System.Collections.Generic.List[object]]::new()
     $cls = @{}; foreach ($g in @($ClassGuids)) { if ($g) { $cls["$g".ToUpperInvariant()] = $true } }
     foreach ($e in @(Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue)) {
@@ -115,7 +126,7 @@ function Get-HUDrvState($HwMap, [string[]]$ClassGuids = @()) {
         $lk = @($hwl | Where-Object { $_ -notmatch '&REV_' })[0]; if (-not $lk) { $lk = @($hwl)[0] }
         $rows.Add([pscustomobject]@{ Id = "$($e.PNPDeviceID)"; Name = "$($e.Name)"; Hw = $hit; FirstHw = "$(@($e.HardwareID)[0])"; Match = [bool]$hit
                                      PkgVer = $(if ($hit) { (@($HwMap[$hit]) -join '/') } else { '' }); Err = [int]$e.ConfigManagerErrorCode
-                                     Version = ''; Provider = ''; Date = ''; Inf = ''; LockId = "$lk"
+                                     Version = ''; Provider = ''; Date = ''; Inf = ''; LockId = "$lk"; Ext = [bool]($hit -and $ExtIds -and $ExtIds.ContainsKey($hit))
                                      AllIds = @($hwl + @(@($e.CompatibleID) | Where-Object { $_ } | ForEach-Object { "$_".ToUpperInvariant() })) })
     }
     if ($rows.Count -gt 0) {
@@ -218,7 +229,7 @@ function Get-DrvInfSummary($Package) {
             if (-not $map[$h].Contains($v)) { $map[$h].Add($v) }
         }
     }
-    return [pscustomobject]@{ Infs = $infs.ToArray(); HwMap = $map; ClassGuids = $cls.ToArray() }
+    return [pscustomobject]@{ Infs = $infs.ToArray(); HwMap = $map; ClassGuids = $cls.ToArray(); ExtIds = (Get-HUExtIds @($infs | ForEach-Object { $_.Inf })) }
 }
 
 function Get-DrvPackages {
@@ -306,7 +317,8 @@ $script:RS_DrvInstallBody = {
     $ErrorActionPreference = 'SilentlyContinue'
     function ConvertTo-HUVer([string]$v) { if ("$v" -match '^\d+(\.\d+){0,3}') { $t = $Matches[0]; if ($t -notmatch '\.') { $t += '.0' }; try { return [version]$t } catch { } }; return $null }
     function Format-HUState($rows) {
-        $m = @($rows | Where-Object { $_.Match })
+        $m = @($rows | Where-Object { $_.Match -and -not $_.Ext })
+        if ($m.Count -eq 0) { $m = @($rows | Where-Object { $_.Match }) }
         if ($m.Count -eq 0) { return 'keine passenden Geraete' }
         return ((@($m | Group-Object { "$($_.Version) ($($_.Provider))" } | ForEach-Object { "$($_.Name) x$($_.Count)" })) -join ', ')
     }
@@ -325,13 +337,16 @@ $script:RS_DrvInstallBody = {
             $v = if ($i.Version) { $i.Version } else { '?' }
             foreach ($h in @($i.HwIds)) { if (-not $map.ContainsKey($h)) { $map[$h] = @() }; if ($map[$h] -notcontains $v) { $map[$h] += $v } }
         }
-        $before = @(Get-HUDrvState $map)
+        $extIds = Get-HUExtIds $parsed
+        $before = @(Get-HUDrvState $map @() $extIds)
         $matched = @($before | Where-Object { $_.Match })
+        # Hauptgeraete (ohne reine Erweiterungen) fuer Versionsvergleich, Erzwingen und Schutz
+        $main = @($matched | Where-Object { -not $_.Ext })
         if ($map.Count -gt 0 -and $matched.Count -eq 0 -and [bool]$p.OnlyMatching) { return "SKIP|keine passende Hardware ($(@($parsed).Count) INF, $($map.Count) Hardware-IDs)" }
         $protect = [bool]$p.ProtectDriver
-        if (-not $Force -and $matched.Count -gt 0) {
-            $same = @($matched | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
-            if ($same.Count -eq $matched.Count) {
+        if (-not $Force -and $main.Count -gt 0) {
+            $same = @($main | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
+            if ($same.Count -eq $main.Count) {
                 $ln = ''
                 if ($protect) {
                     $own = Get-HULocks
@@ -359,7 +374,7 @@ $script:RS_DrvInstallBody = {
         $reboot = $false; $note = ''
         if ("$($p.Mode)" -eq 'Inf') {
             if ($infs.Count -eq 0) { return 'FEHLER|keine INF-Datei im Paket' }
-            if ([bool]$p.ForceDriver -and $matched.Count -gt 0) {
+            if ([bool]$p.ForceDriver -and $main.Count -gt 0) {
                 # Erzwingen: je passender Hardware-ID das INF, das sie enthaelt (INSTALLFLAG_FORCE 0x1 | INSTALLFLAG_NONINTERACTIVE 0x4)
                 if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { return 'FEHLER|Erzwingen braucht 64-Bit-PowerShell am Ziel-PC' }
                 if (-not ('HUDrv.NewDev' -as [type])) {
@@ -369,7 +384,7 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
 '@
                 }
                 $done = @(); $errs = @()
-                foreach ($hw in @($matched | ForEach-Object { $_.Hw } | Sort-Object -Unique)) {
+                foreach ($hw in @($main | ForEach-Object { $_.Hw } | Sort-Object -Unique)) {
                     $inf = @($parsed | Where-Object { @($_.HwIds) -contains $hw } | Sort-Object { ConvertTo-HUVer $_.Version } -Descending | Select-Object -First 1)
                     if ($inf.Count -eq 0) { continue }
                     $rb = $false
@@ -441,8 +456,8 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
         $dur = "$([int]$sw.Elapsed.TotalSeconds) s"
         $rbTxt = if ($reboot) { ' - NEUSTART erforderlich' } else { '' }
         if ($map.Count -eq 0) { return "OK|installiert$rbTxt ($dur)$note" }
-        $after = @(Get-HUDrvState $map)
-        $am = @($after | Where-Object { $_.Match })
+        $after = @(Get-HUDrvState $map @() $extIds)
+        $am = @($after | Where-Object { $_.Match -and -not $_.Ext })
         $newOk = @($am | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
         $notNew = @($am | Where-Object { -not ($_.Version -and (@($map[$_.Hw]) -contains $_.Version)) })
         $warn = if ($am.Count -gt 0 -and $notNew.Count -gt 0 -and -not $reboot) { " | ACHTUNG: $($notNew.Count) Geraet(e) noch mit anderer Version - Neustart pruefen" } else { '' }
@@ -479,7 +494,8 @@ $script:RS_DrvCheckBody = {
     $o = $InfoJson | ConvertFrom-Json
     $map = @{}
     foreach ($e in @($o.Map)) { if ($e.H) { $map["$($e.H)"] = @("$($e.V)" -split '/') } }
-    $rows = @(Get-HUDrvState $map @($o.Cls))
+    $ext = @{}; foreach ($x in @($o.Ext)) { if ($x) { $ext["$x"] = $true } }
+    $rows = @(Get-HUDrvState $map @($o.Cls) $ext)
     if ($rows.Count -eq 0) { return 'INFO|keine passenden Geraete und keine Geraete derselben Klasse' }
     # nur passende Geraete; gibt es keine, die derselben Klasse (zum Vergleich)
     $mOnly = @($rows | Where-Object { $_.Match })
@@ -493,6 +509,7 @@ $script:RS_DrvCheckBody = {
         foreach ($i in @($r.AllIds)) { if ($deny.ContainsKey($i)) { $lk = if ($own.Contains($i)) { 'HUMig' } else { 'Richtlinie' }; break } }
         $st = 'passt - wuerde installiert'
         if (-not $r.Match) { $st = 'passt nicht' }
+        elseif ($r.Ext) { $st = 'Erweiterung - wird mitinstalliert (Version am Geraet nicht pruefbar)' }
         elseif ($r.Version -and (@($map[$r.Hw]) -contains $r.Version)) { $st = 'gleiche Version aktiv' }
         else {
             $cv = $null; try { $cv = [version]$r.Version } catch { }
@@ -509,7 +526,7 @@ function Start-DriverCheck($Package, [string]$Computer) {
     if (@($Package.InfFiles).Count -eq 0) { Out-Console "Treiber pruefen: '$($Package.Settings.Name)' enthaelt keine INF-Dateien - Hardware-Pruefung nicht moeglich (reines Setup)." 'Warning'; return }
     $sum = Get-DrvInfSummary $Package
     if ($sum.HwMap.Count -eq 0) { Out-Console "Treiber pruefen: keine Hardware-IDs in den INF-Dateien gefunden." 'Warning'; return }
-    $json = [pscustomobject]@{ Map = @(foreach ($k in $sum.HwMap.Keys) { [pscustomobject]@{ H = $k; V = (@($sum.HwMap[$k]) -join '/') } }); Cls = @($sum.ClassGuids) } | ConvertTo-Json -Depth 4 -Compress
+    $json = [pscustomobject]@{ Map = @(foreach ($k in $sum.HwMap.Keys) { [pscustomobject]@{ H = $k; V = (@($sum.HwMap[$k]) -join '/') } }); Cls = @($sum.ClassGuids); Ext = @($sum.ExtIds.Keys) } | ConvertTo-Json -Depth 4 -Compress
     Invoke-HMTool -Title "Treiber pruefen '$($Package.Settings.Name)'" -Computer $Computer -Script ([scriptblock]::Create((Get-DrvCheckText))) -ArgumentList @($json) -TimeoutSec 240 -State $Package -OnResult {
         param($r, $comp, $pkg)
         $rows = [System.Collections.Generic.List[object]]::new()
