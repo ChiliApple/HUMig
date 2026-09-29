@@ -192,7 +192,9 @@ Das Tool liest die INF-Dateien (Klasse, Anbieter, Version, Hardware-IDs) und ver
 (`Win32_PnPEntity`) und dem aktiven Treiber (`Win32_PnPSignedDriver`): *Am gewaehlten PC pruefen* zeigt das ohne Installation;
 beim Verteilen (gewaehlter Computer, mehrere PCs aus der AD-Auswahl oder Mehrfachaktion, bis zu 8 gleichzeitig) werden PCs ohne passende Hardware
 bzw. mit derselben aktiven Version uebersprungen. Ergebnis je PC mit aktiver Version und Neustart-Hinweis, Log `C:\Windows\Temp\HU_DRV_*.log`.
-Hinweis: Windows Update/Intune koennen einen erzwungenen aelteren Treiber spaeter ersetzen - Treiber-Updates dort steuern.
+**Vor Treiber-Updates schuetzen** (je Paket, nur Windows **Pro/Education/Enterprise**): nach der Installation setzt HUMig die Richtlinie
+*Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen* fuer die betroffenen Geraete - Windows Update ersetzt den Treiber dann nicht mehr.
+Eigene Sperren hebt HUMig fuer spaetere Installationen selbst auf; *Sperren am PC ...* zeigt und entfernt sie. GPO/Intune-Richtlinien zur Geraeteinstallation haben Vorrang.
 
 ## Werkzeuge
 

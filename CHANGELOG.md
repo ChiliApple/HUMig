@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.0.32 - 2026-09-29
+### Neu
+- Treiberverteilung: **Vor Treiber-Updates schuetzen** (je Paket) - nach der Installation setzt HUMig am PC die Richtlinie *Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen* fuer die Geraete mit diesem Treiber (genaueste Hardware-ID, ohne Retroactive); Windows Update ersetzt den Treiber dann nicht mehr. **Nur Windows Pro, Education und Enterprise** (bei Home wird nichts gesetzt, Hinweis im Ergebnis)
+- HUMig hebt eigene Sperren fuer spaetere Installationen automatisch auf und stellt sie bei Fehlern wieder her; fremde Sperren (GPO/Intune) werden gemeldet; ist die Version schon aktiv, wird nur der Schutz gesetzt
+- **Sperren am PC ...**: gesperrte Hardware-IDs des gewaehlten Computers mit Geraet, Paket, Version und Herkunft, HUMig-Sperren aufheben; *Am gewaehlten PC pruefen* zeigt Spalte *Gesperrt* und warnt bei nicht unterstuetzter Windows-Edition
+### Behoben
+- Software-/Treiberverteilung: Anzeige *Gewaehlter Computer* wird beim Aktivieren des Fensters aktualisiert (zeigte den PC beim Oeffnen)
+
 ## v2.0.31 - 2026-09-29
 ### Verbessert
 - Software- und Treiberverteilung: *Mehrere PCs ...* oeffnet die PC-Auswahl aus dem Active Directory (anhaken mit OU/Filter, weitere Namen eintragbar, zuletzt gewaehlte PCs vorgehakt) statt eines Textfelds

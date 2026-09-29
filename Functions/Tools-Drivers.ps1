@@ -110,9 +110,13 @@ function Get-HUDrvState($HwMap, [string[]]$ClassGuids = @()) {
         }
         $sameCls = ($e.ClassGuid -and $cls.ContainsKey("$($e.ClassGuid)".ToUpperInvariant()))
         if (-not $hit -and -not $sameCls) { continue }
+        $hwl = @(@($e.HardwareID) | Where-Object { $_ } | ForEach-Object { "$_".ToUpperInvariant() })
+        # Sperr-ID: genaueste Hardware-ID ohne Revision (PCI: VEN&DEV&SUBSYS), sonst die erste
+        $lk = @($hwl | Where-Object { $_ -notmatch '&REV_' })[0]; if (-not $lk) { $lk = @($hwl)[0] }
         $rows.Add([pscustomobject]@{ Id = "$($e.PNPDeviceID)"; Name = "$($e.Name)"; Hw = $hit; FirstHw = "$(@($e.HardwareID)[0])"; Match = [bool]$hit
                                      PkgVer = $(if ($hit) { (@($HwMap[$hit]) -join '/') } else { '' }); Err = [int]$e.ConfigManagerErrorCode
-                                     Version = ''; Provider = ''; Date = ''; Inf = '' })
+                                     Version = ''; Provider = ''; Date = ''; Inf = ''; LockId = "$lk"
+                                     AllIds = @($hwl + @(@($e.CompatibleID) | Where-Object { $_ } | ForEach-Object { "$_".ToUpperInvariant() })) })
     }
     if ($rows.Count -gt 0) {
         $sd = @{}
@@ -125,6 +129,63 @@ function Get-HUDrvState($HwMap, [string[]]$ClassGuids = @()) {
         }
     }
     return $rows.ToArray()
+}
+# --- Geraete-Sperre (Richtlinie "Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen", DeviceInstallation.admx)
+#     nur Windows Pro/Education/Enterprise; HUMig merkt sich eigene Eintraege unter HKLM\SOFTWARE\HUMig\DriverLocks (Locks = ID|Paket|Version|Datum)
+$HUDenyKey = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions'
+$HULockKey = 'HKLM:\SOFTWARE\HUMig\DriverLocks'
+function Get-HUEdition {
+    $ed = "$((Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name EditionID -ErrorAction SilentlyContinue).EditionID)"
+    [pscustomobject]@{ Name = $ed; Ok = [bool]($ed -and $ed -notmatch '^Core') }
+}
+function Get-HUDenyIds {
+    $k = $HUDenyKey + '\DenyDeviceIDs'
+    if (-not (Test-Path -LiteralPath $k)) { return @() }
+    $it = Get-Item -LiteralPath $k
+    $names = @($it.GetValueNames() | Where-Object { $_ } | Sort-Object { $n = 0; [void][int]::TryParse($_, [ref]$n); $n }, { $_ })
+    return @($names | ForEach-Object { "$($it.GetValue($_))".Trim() } | Where-Object { $_ })
+}
+function Set-HUDenyIds([string[]]$Ids) {
+    $list = [System.Collections.Generic.List[string]]::new(); $seen = @{}
+    foreach ($i in @($Ids)) { if ($i -and -not $seen.ContainsKey($i.ToUpperInvariant())) { $seen[$i.ToUpperInvariant()] = $true; $list.Add($i) } }
+    $k = $HUDenyKey + '\DenyDeviceIDs'
+    if (-not (Test-Path -LiteralPath $HUDenyKey)) { New-Item -Path $HUDenyKey -Force -ErrorAction Stop | Out-Null }
+    if (Test-Path -LiteralPath $k) { Remove-Item -LiteralPath $k -Recurse -Force -ErrorAction Stop }
+    if ($list.Count -gt 0) {
+        New-Item -Path $k -Force -ErrorAction Stop | Out-Null
+        for ($n = 0; $n -lt $list.Count; $n++) { New-ItemProperty -LiteralPath $k -Name "$($n + 1)" -Value $list[$n] -PropertyType String -Force -ErrorAction Stop | Out-Null }
+        New-ItemProperty -LiteralPath $HUDenyKey -Name DenyDeviceIDs -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+        if ($null -eq (Get-ItemProperty -LiteralPath $HUDenyKey -Name DenyDeviceIDsRetroactive -ErrorAction SilentlyContinue)) { New-ItemProperty -LiteralPath $HUDenyKey -Name DenyDeviceIDsRetroactive -Value 0 -PropertyType DWord -Force | Out-Null }
+    } else {
+        Remove-ItemProperty -LiteralPath $HUDenyKey -Name DenyDeviceIDs, DenyDeviceIDsRetroactive -ErrorAction SilentlyContinue
+    }
+}
+function Get-HULocks {
+    $h = [ordered]@{}
+    foreach ($l in @((Get-ItemProperty -LiteralPath $HULockKey -Name Locks -ErrorAction SilentlyContinue).Locks)) { if ("$l" -match '^([^|]+)\|(.*)$') { $h[$Matches[1].ToUpperInvariant()] = $Matches[2] } }
+    return $h
+}
+function Save-HULocks($Locks) {
+    $arr = @(foreach ($k in @($Locks.Keys)) { "$k|$($Locks[$k])" })
+    if ($arr.Count -gt 0) {
+        if (-not (Test-Path -LiteralPath $HULockKey)) { New-Item -Path $HULockKey -Force -ErrorAction Stop | Out-Null }
+        New-ItemProperty -LiteralPath $HULockKey -Name Locks -Value ([string[]]$arr) -PropertyType MultiString -Force -ErrorAction Stop | Out-Null
+    } elseif (Test-Path -LiteralPath $HULockKey) { Remove-ItemProperty -LiteralPath $HULockKey -Name Locks -ErrorAction SilentlyContinue }
+}
+# Sperre fuer die Zeilen (Get-HUDrvState) setzen, Rueckgabe = Hinweistext
+function Set-HUDrvLock($Rows, [string]$Pkg) {
+    $ed = Get-HUEdition
+    if (-not $ed.Ok) { return " | Schutz NICHT gesetzt: Windows-Edition '$($ed.Name)' (Geraete-Sperre nur bei Pro/Education/Enterprise)" }
+    $ret = (Get-ItemProperty -LiteralPath $HUDenyKey -Name DenyDeviceIDsRetroactive -ErrorAction SilentlyContinue).DenyDeviceIDsRetroactive
+    if ("$ret" -eq '1') { return ' | Schutz NICHT gesetzt: DenyDeviceIDsRetroactive=1 ist aktiv (wuerde vorhandene Geraete entfernen)' }
+    $ids = @($Rows | Where-Object { $_.LockId } | ForEach-Object { $_.LockId } | Sort-Object -Unique)
+    if ($ids.Count -eq 0) { return ' | Schutz NICHT gesetzt: keine Hardware-ID' }
+    $deny = @(Get-HUDenyIds)
+    Set-HUDenyIds (@($deny) + @($ids))
+    $l = Get-HULocks
+    foreach ($r in @($Rows | Where-Object { $_.LockId })) { $l[$r.LockId] = "$Pkg|$($r.Version)|$(Get-Date -Format 'yyyy-MM-dd')" }
+    Save-HULocks $l
+    return " | vor Treiber-Updates geschuetzt (Geraete-Sperre: $($ids -join ', '))"
 }
 '@
 # Lokal verfuegbar machen (UI: Paket-Info)
@@ -190,7 +251,7 @@ function Get-DrvPackages {
             Name = $(if (-not $p.IsDir -and $info -and $info.ProductName) { "$($info.ProductName) $($info.Version)".Trim() } elseif ($p.IsDir) { $p.Id.TrimEnd('\') } else { [IO.Path]::GetFileNameWithoutExtension($p.Id) })
             Mode = $(if (@($p.InfFiles).Count -gt 0) { 'Inf' } else { 'Setup' })
             Installer = $inst; Arguments = $(if ($info) { $info.Suggested } else { '' }); SuccessCodes = '0'
-            TimeoutMin = 20; OnlyMatching = $true; ForceDriver = $false; Note = ''
+            TimeoutMin = 20; OnlyMatching = $true; ForceDriver = $false; ProtectDriver = $false; Note = ''
         }
         $set = [ordered]@{}
         foreach ($k in @($def.Keys)) {
@@ -201,7 +262,7 @@ function Get-DrvPackages {
         if ($set.Mode -ne 'Inf' -and $set.Mode -ne 'Setup') { $set.Mode = $def.Mode }
         if ($set.Mode -eq 'Inf' -and @($p.InfFiles).Count -eq 0) { $set.Mode = 'Setup' }
         if ($set.Mode -eq 'Setup' -and -not $inst) { $set.Mode = 'Inf' }
-        $set.OnlyMatching = [bool]$set.OnlyMatching; $set.ForceDriver = [bool]$set.ForceDriver
+        $set.OnlyMatching = [bool]$set.OnlyMatching; $set.ForceDriver = [bool]$set.ForceDriver; $set.ProtectDriver = [bool]$set.ProtectDriver
         $p | Add-Member -NotePropertyName Settings -NotePropertyValue ([pscustomobject]$set) -Force
         $p | Add-Member -NotePropertyName Info -NotePropertyValue $info -Force
         $p | Add-Member -NotePropertyName Configured -NotePropertyValue ([bool]$cfg) -Force
@@ -223,8 +284,9 @@ function Confirm-DrvDeploy($Package, [string[]]$Hosts, [bool]$Force) {
         else { "pnputil /add-driver *.inf /subdirs /install - $(@($Package.InfFiles).Count) INF-Datei(en), Windows waehlt den besten Treiber" }
     } else { "Setup: `"$($s.Installer)`" $($s.Arguments)" }
     $hw = if ($s.OnlyMatching) { 'nur PCs mit passender Hardware' } else { 'auch ohne passende Hardware (Treiberspeicher)' }
+    $prot = if ($s.ProtectDriver) { "`n  Schutz:   danach vor Treiber-Updates schuetzen (Geraete-Sperre, nur Windows Pro/Education/Enterprise)" } else { '' }
     $ziel = if ($Hosts.Count -le 5) { $Hosts -join ', ' } else { "$($Hosts.Count) PCs" }
-    return (Confirm-Action "Treiber '$($s.Name)' installieren auf: $ziel`n`n  Art:      $how`n  Hardware: $hw`n  Version:  $(if ($Force) { 'auch wenn dieselbe Version schon aktiv ist' } else { 'PCs mit derselben aktiven Version werden uebersprungen' })`n  Groesse:  $($Package.SizeMB) MB`n`nGeraete koennen dabei kurz ausfallen (Bildschirm flackert, Netzwerk trennt kurz).`nFortfahren?" 'Treiberverteilung')
+    return (Confirm-Action "Treiber '$($s.Name)' installieren auf: $ziel`n`n  Art:      $how`n  Hardware: $hw$prot`n  Version:  $(if ($Force) { 'auch wenn dieselbe Version schon aktiv ist' } else { 'PCs mit derselben aktiven Version werden uebersprungen' })`n  Groesse:  $($Package.SizeMB) MB`n`nGeraete koennen dabei kurz ausfallen (Bildschirm flackert, Netzwerk trennt kurz).`nFortfahren?" 'Treiberverteilung')
 }
 
 # ----------------------------------------------------------------------------
@@ -256,9 +318,30 @@ $script:RS_DrvInstallBody = {
         $before = @(Get-HUDrvState $map)
         $matched = @($before | Where-Object { $_.Match })
         if ($map.Count -gt 0 -and $matched.Count -eq 0 -and [bool]$p.OnlyMatching) { return "SKIP|keine passende Hardware ($(@($parsed).Count) INF, $($map.Count) Hardware-IDs)" }
+        $protect = [bool]$p.ProtectDriver
         if (-not $Force -and $matched.Count -gt 0) {
             $same = @($matched | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
-            if ($same.Count -eq $matched.Count) { return "SKIP|Version bereits aktiv: $(Format-HUState $before)" }
+            if ($same.Count -eq $matched.Count) {
+                $ln = ''
+                if ($protect) {
+                    $own = Get-HULocks
+                    $open = @($same | Where-Object { $_.LockId -and -not $own.Contains($_.LockId) })
+                    $ln = if ($open.Count) { Set-HUDrvLock $same "$($p.Name)" } else { ' | Schutz bereits aktiv' }
+                }
+                return "SKIP|Version bereits aktiv: $(Format-HUState $before)$ln"
+            }
+        }
+        # Geraete-Sperren: eigene (HUMig) fuer die Installation aufheben, fremde (GPO/Intune/Hand) melden
+        $devIds = @{}; foreach ($m in $matched) { foreach ($i in @($m.AllIds)) { $devIds[$i] = $true } }
+        $denyOrig = @(Get-HUDenyIds); $locksOrig = Get-HULocks
+        $hitOwn = @($denyOrig | Where-Object { $devIds.ContainsKey($_.ToUpperInvariant()) -and $locksOrig.Contains($_.ToUpperInvariant()) })
+        $hitForeign = @($denyOrig | Where-Object { $devIds.ContainsKey($_.ToUpperInvariant()) -and -not $locksOrig.Contains($_.ToUpperInvariant()) })
+        if ($hitForeign.Count) { return "FEHLER|Geraet ist durch eine Richtlinie gesperrt ($($hitForeign -join ', ')) - Installation wuerde blockiert (GPO/Intune: Geraeteinstallation einschraenken pruefen)" }
+        $lockRestore = $false; $lockNote = ''
+        if ($hitOwn.Count) {
+            $hitU = @($hitOwn | ForEach-Object { $_.ToUpperInvariant() })
+            Set-HUDenyIds @($denyOrig | Where-Object { $hitU -notcontains $_.ToUpperInvariant() })
+            $lockRestore = $true
         }
         $sw = [Diagnostics.Stopwatch]::StartNew()
         $tmo = [int]$p.TimeoutMin; if ($tmo -lt 1) { $tmo = 20 }
@@ -350,11 +433,28 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
         if ($map.Count -eq 0) { return "OK|installiert$rbTxt ($dur)$note" }
         $after = @(Get-HUDrvState $map)
         $am = @($after | Where-Object { $_.Match })
+        $newOk = @($am | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
         $notNew = @($am | Where-Object { -not ($_.Version -and (@($map[$_.Hw]) -contains $_.Version)) })
         $warn = if ($am.Count -gt 0 -and $notNew.Count -gt 0 -and -not $reboot) { " | ACHTUNG: $($notNew.Count) Geraet(e) noch mit anderer Version - Neustart pruefen" } else { '' }
-        return "OK|installiert$rbTxt ($dur) - aktiv: $(Format-HUState $after)$warn$note"
+        # Schutz setzen: nur Geraete, auf denen die Paket-Version jetzt aktiv ist
+        if ($protect) {
+            if ($newOk.Count) {
+                $own = Get-HULocks
+                foreach ($k in @($own.Keys)) { if ($hitOwn -contains $k) { $own.Remove($k) } }
+                Save-HULocks $own
+                $lockNote = Set-HUDrvLock $newOk "$($p.Name)"
+            } else { $lockNote = ' | Schutz noch NICHT gesetzt (Version erst nach Neustart aktiv) - danach erneut verteilen, setzt dann nur den Schutz'; $lockRestore = $false }
+            if ($lockNote -notlike ' | vor Treiber*') { $l2 = Get-HULocks; foreach ($k in @($hitOwn)) { $l2.Remove($k.ToUpperInvariant()) }; Save-HULocks $l2 }
+        } elseif ($hitOwn.Count) {
+            $l2 = Get-HULocks; foreach ($k in @($hitOwn)) { $l2.Remove($k.ToUpperInvariant()) }; Save-HULocks $l2
+            $lockNote = ' | bisherige Geraete-Sperre aufgehoben (Paket ohne Schutz)'
+        }
+        $lockRestore = $false
+        return "OK|installiert$rbTxt ($dur) - aktiv: $(Format-HUState $after)$warn$note$lockNote"
     } catch { return "FEHLER|$($_.Exception.Message -replace '[\r\n|]+', ' ')" }
     finally {
+        # Installation fehlgeschlagen/abgebrochen: vorherige Geraete-Sperren wiederherstellen
+        if ($lockRestore) { try { Set-HUDenyIds $denyOrig; Save-HULocks $locksOrig } catch { } }
         Set-Location -Path $env:SystemRoot
         if ($Dir -like "$env:ProgramData\HU_SW_*") { Start-Sleep -Seconds 1; Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction SilentlyContinue }
     }
@@ -371,7 +471,13 @@ $script:RS_DrvCheckBody = {
     foreach ($e in @($o.Map)) { if ($e.H) { $map["$($e.H)"] = @("$($e.V)" -split '/') } }
     $rows = @(Get-HUDrvState $map @($o.Cls))
     if ($rows.Count -eq 0) { return 'INFO|keine passenden Geraete und keine Geraete derselben Klasse' }
+    $ed = Get-HUEdition
+    'EDI|' + $ed.Name + '|' + $ed.Ok
+    $deny = @{}; foreach ($d in @(Get-HUDenyIds)) { $deny[$d.ToUpperInvariant()] = $true }
+    $own = Get-HULocks
     foreach ($r in $rows) {
+        $lk = ''
+        foreach ($i in @($r.AllIds)) { if ($deny.ContainsKey($i)) { $lk = if ($own.Contains($i)) { 'HUMig' } else { 'Richtlinie' }; break } }
         $st = 'passt - wuerde installiert'
         if (-not $r.Match) { $st = 'passt nicht' }
         elseif ($r.Version -and (@($map[$r.Hw]) -contains $r.Version)) { $st = 'gleiche Version aktiv' }
@@ -381,7 +487,7 @@ $script:RS_DrvCheckBody = {
             if ($cv -and $pv.Count -and @($pv | Where-Object { $_ -ge $cv }).Count -eq 0) { $st = 'passt - NEUERER Treiber aktiv (nur mit Erzwingen)' }
         }
         if ($r.Err) { $st += " (Geraetefehler $($r.Err))" }
-        'ROW|' + ((@($r.Name, $st, $r.Version, $r.PkgVer, $r.Provider, $r.Date, $r.Inf, $(if ($r.Hw) { $r.Hw } else { $r.FirstHw }), $r.Id) | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|')
+        'ROW|' + ((@($r.Name, $st, $r.Version, $r.PkgVer, $lk, $r.Provider, $r.Date, $r.Inf, $(if ($r.Hw) { $r.Hw } else { $r.FirstHw }), $r.Id) | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|')
     }
 }
 function Get-DrvCheckText { return "param([string]`$InfoJson)`n" + $script:DrvLibText + "`n" + $script:RS_DrvCheckBody.ToString() }
@@ -397,14 +503,73 @@ function Start-DriverCheck($Package, [string]$Computer) {
         foreach ($l in @($r)) {
             $t = "$l"
             if ($t -like 'INFO|*') { Out-Console "Treiber pruefen ($comp): $($t.Substring(5))" 'Warning'; return }
+            if ($t -like 'EDI|*') { $e = $t -split '\|'; if ($e[2] -ne 'True') { Out-Console "Treiber pruefen ($comp): Windows-Edition '$($e[1])' - Schutz vor Treiber-Updates (Geraete-Sperre) nur bei Pro/Education/Enterprise" 'Warning' }; continue }
             if ($t -notlike 'ROW|*') { continue }
             $f = $t.Substring(4) -split '\|'
-            if ($f.Count -ge 9) { $rows.Add(@($f[0], $f[1], $f[2], $f[3], $f[4], $f[5], $f[6], $f[7], $f[8])) }
+            if ($f.Count -ge 10) { $rows.Add(@($f[0], $f[1], $f[2], $f[3], $f[4], $f[5], $f[6], $f[7], $f[8], $f[9])) }
         }
         $m = @($rows | Where-Object { $_[1] -notlike 'passt nicht*' }).Count
         Out-Console "Treiber pruefen ($comp): $m passende Geraet(e), $($rows.Count - $m) weitere derselben Klasse" $(if ($m) { 'Success' } else { 'Warning' })
-        Show-DataGridWindow -Title "Treiber pruefen - $($pkg.Settings.Name) - $comp" -Columns @('Geraet', 'Status', 'Aktive Version', 'Paket-Version', 'Anbieter', 'Datum', 'INF', 'Hardware-ID', 'Instanz') `
+        Show-DataGridWindow -Title "Treiber pruefen - $($pkg.Settings.Name) - $comp" -Columns @('Geraet', 'Status', 'Aktive Version', 'Paket-Version', 'Gesperrt', 'Anbieter', 'Datum', 'INF', 'Hardware-ID', 'Instanz') `
             -Rows $rows.ToArray() -Sort 'Status DESC, Geraet ASC' -CountText "$($rows.Count) Geraete ($m passend)" -Width 1300 -Height 520
+    }
+}
+
+# Geraete-Sperren am Ziel-PC anzeigen / aufheben
+$script:RS_DrvLocksBody = {
+    $ErrorActionPreference = 'SilentlyContinue'
+    $ed = Get-HUEdition
+    $out = [System.Collections.Generic.List[string]]::new()
+    try {
+        if ($Remove) {
+            $rm = @($Remove -split '\|' | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() })
+            $own = Get-HULocks
+            $rm = @($rm | Where-Object { $own.Contains($_) })
+            Set-HUDenyIds @(Get-HUDenyIds | Where-Object { $rm -notcontains $_.ToUpperInvariant() })
+            foreach ($k in $rm) { $own.Remove($k) }
+            Save-HULocks $own
+            $out.Add("DONE|$($rm.Count)")
+        }
+    } catch { $out.Add("ERR|$($_.Exception.Message -replace '[\r\n|]+', ' ')") }
+    $out.Add('EDI|' + $ed.Name + '|' + $ed.Ok)
+    $ret = (Get-ItemProperty -LiteralPath $HUDenyKey -Name DenyDeviceIDsRetroactive -ErrorAction SilentlyContinue).DenyDeviceIDsRetroactive
+    $out.Add("RET|$ret")
+    $own = Get-HULocks
+    $names = @{}
+    foreach ($e in @(Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue)) { foreach ($i in (@($e.HardwareID) + @($e.CompatibleID))) { if ($i -and -not $names.ContainsKey("$i".ToUpperInvariant())) { $names["$i".ToUpperInvariant()] = "$($e.Name)" } } }
+    foreach ($d in @(Get-HUDenyIds)) {
+        $u = $d.ToUpperInvariant()
+        $inf = if ($own.Contains($u)) { @("$($own[$u])" -split '\|') } else { @('', '', '') }
+        $out.Add('LOCK|' + ((@($d, $(if ($own.Contains($u)) { 'HUMig' } else { 'Richtlinie/andere' }), "$($names[$u])", $inf[0], $(if ($inf.Count -gt 1) { $inf[1] }), $(if ($inf.Count -gt 2) { $inf[2] })) | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|'))
+    }
+    $out.ToArray()
+}
+function Get-DrvLocksText { return "param([string]`$Remove = '')`n" + $script:DrvLibText + "`n" + $script:RS_DrvLocksBody.ToString() }
+function Show-DriverLocks([string]$Computer, [string]$Remove = '') {
+    Invoke-HMTool -Title $(if ($Remove) { 'Geraete-Sperre aufheben' } else { 'Geraete-Sperren anzeigen' }) -Computer $Computer -Script ([scriptblock]::Create((Get-DrvLocksText))) -ArgumentList @($Remove) -TimeoutSec 180 -OnResult {
+        param($r, $comp, $st)
+        $rows = [System.Collections.Generic.List[object]]::new(); $edTxt = ''; $retTxt = ''
+        foreach ($l in @($r)) {
+            $t = "$l"; $f = $t -split '\|'
+            switch -Wildcard ($t) {
+                'DONE|*' { Out-Console "Geraete-Sperre ($comp): $($f[1]) Sperre(n) aufgehoben" 'Success' }
+                'ERR|*'  { Out-Console "Geraete-Sperre ($comp): FEHLER $($f[1])" 'Error' }
+                'EDI|*'  { $edTxt = "Windows-Edition: $($f[1])$(if ($f[2] -ne 'True') { ' - Geraete-Sperre wird hier NICHT unterstuetzt (nur Pro/Education/Enterprise)' })" }
+                'RET|*'  { if ("$($f[1])" -eq '1') { $retTxt = '  |  ACHTUNG: DenyDeviceIDsRetroactive=1 (Richtlinie gilt auch fuer installierte Geraete)' } }
+                'LOCK|*' { if ($f.Count -ge 7) { $rows.Add(@($f[1], $f[2], $f[3], $f[4], $f[5], $f[6])) } }
+            }
+        }
+        Out-Console "Geraete-Sperren ($comp): $($rows.Count) Hardware-ID(s) gesperrt. $edTxt" 'Info'
+        Show-DataGridWindow -Title "Geraete-Sperren (Schutz vor Treiber-Updates) - $comp" -Columns @('Hardware-ID', 'Von', 'Geraet', 'Paket', 'Version', 'Seit') -Rows $rows.ToArray() -Sort 'Von ASC, Geraet ASC' `
+            -CountText "$($rows.Count) gesperrt  |  $edTxt$retTxt" -Width 1150 -Height 460 -ActionContext @{ Computer = $comp } `
+            -Actions @(@{ Text = 'Sperre aufheben (markierte, nur HUMig)'; Color = '#FFFAB387'; Handler = {
+                param($rows, $win, $ctx)
+                $sel = @(@($rows) | Where-Object { "$($_.Von)" -eq 'HUMig' } | ForEach-Object { "$($_.'Hardware-ID')" })
+                if (-not $sel.Count) { [void][System.Windows.MessageBox]::Show($win, "Nur von HUMig gesetzte Sperren koennen hier aufgehoben werden.`n`nAndere kommen aus einer Richtlinie (GPO/Intune) oder wurden von Hand gesetzt.", 'Geraete-Sperre', 'OK', 'Information'); return }
+                if ("$([System.Windows.MessageBox]::Show($win, "Sperre fuer $($sel.Count) Hardware-ID(s) an $($ctx.Computer) aufheben?`n`nDanach kann Windows Update den Treiber wieder ersetzen.", 'Geraete-Sperre', 'YesNo', 'Question'))" -ne 'Yes') { return }
+                $win.Close()
+                Show-DriverLocks -Computer $ctx.Computer -Remove ($sel -join '|')
+            } })
     }
 }
 
@@ -417,7 +582,7 @@ function Start-DriverDeploy {
     if ($Hosts.Count -eq 0 -or -not $Package) { return }
     $s = $Package.Settings
     $pkg = [ordered]@{ Name = "$($s.Name)"; Mode = "$($s.Mode)"; Installer = "$($s.Installer)"; Arguments = "$($s.Arguments)"; SuccessCodes = "$($s.SuccessCodes)"
-                       TimeoutMin = [int]$s.TimeoutMin; OnlyMatching = [bool]$s.OnlyMatching; ForceDriver = [bool]$s.ForceDriver }
+                       TimeoutMin = [int]$s.TimeoutMin; OnlyMatching = [bool]$s.OnlyMatching; ForceDriver = [bool]$s.ForceDriver; ProtectDriver = [bool]$s.ProtectDriver }
     $pkgJson = [pscustomobject]$pkg | ConvertTo-Json -Compress
     Out-Console "Treiberverteilung '$($s.Name)' auf $($Hosts.Count) PC(s)$(if ($Label) { " [$Label]" })$(if ($Force) { ' - auch wenn gleiche Version aktiv' }) ..." 'Info'
     $tmo = [int]$s.TimeoutMin; if ($tmo -lt 1) { $tmo = 20 }
@@ -544,7 +709,7 @@ function Update-DrvWindowList([string]$SelectId = '') {
     $dw.Loading = $true
     $dw.Lst.Items.Clear()
     foreach ($p in $dw.Pkgs) {
-        $k = if ($p.Settings.Mode -eq 'Inf') { "INF x$(@($p.InfFiles).Count)$(if ($p.Settings.ForceDriver) { ', erzwingen' })" } else { 'Setup' }
+        $k = if ($p.Settings.Mode -eq 'Inf') { "INF x$(@($p.InfFiles).Count)$(if ($p.Settings.ForceDriver) { ', erzwingen' })$(if ($p.Settings.ProtectDriver) { ', geschuetzt' })" } else { 'Setup' }
         [void]$dw.Lst.Items.Add("$(if ($p.Configured) { '' } else { '* ' })$($p.Settings.Name)   [$k]")
     }
     $dw.Loading = $false
@@ -559,6 +724,8 @@ function Set-DrvModeUi {
     $inf = ("$($dw.CmbMode.SelectedItem)" -like 'INF*')
     foreach ($c in 'CmbInst', 'CmbArgs', 'TxtCodes') { $dw[$c].IsEnabled = (-not $inf) }
     $dw.ChkForceDrv.IsEnabled = $inf
+    $i = $dw.Lst.SelectedIndex
+    $dw.ChkProtect.IsEnabled = ($inf -or ($i -ge 0 -and $i -lt $dw.Pkgs.Count -and @($dw.Pkgs[$i].InfFiles).Count -gt 0))
     if ($dw.CmbInst.Items.Count -le 1) { $dw.CmbInst.IsEnabled = $false }
 }
 function Show-DrvPackageDetails($p) {
@@ -568,7 +735,7 @@ function Show-DrvPackageDetails($p) {
         $dw.CmbInst.Items.Clear(); $dw.CmbArgs.Items.Clear(); $dw.CmbMode.Items.Clear()
         if (-not $p) {
             foreach ($c in 'TxtName', 'TxtCodes', 'TxtTimeout', 'TxtNote') { $dw[$c].Text = '' }
-            $dw.CmbArgs.Text = ''; $dw.ChkMatch.IsChecked = $true; $dw.ChkForceDrv.IsChecked = $false
+            $dw.CmbArgs.Text = ''; $dw.ChkMatch.IsChecked = $true; $dw.ChkForceDrv.IsChecked = $false; $dw.ChkProtect.IsChecked = $false
             $dw.TxtInfo.Text = "Noch keine Treiber.`n`n'Ordner hinzufuegen': entpackter Treiber mit INF-Dateien (z.B. vom Hersteller oder aus dem Microsoft Update-Katalog).`n'Datei hinzufuegen': Setup (EXE/MSI) oder ZIP/CAB (wird entpackt).`n`nJeder Unterordner im Treiberverteilungs-Ordner ist ein Paket."
             return
         }
@@ -584,7 +751,7 @@ function Show-DrvPackageDetails($p) {
         if ($p.Info) { foreach ($a in @($p.Info.Alternatives)) { if ($a) { [void]$dw.CmbArgs.Items.Add($a) } } }
         $dw.CmbArgs.Text = "$($s.Arguments)"
         $dw.TxtCodes.Text = "$($s.SuccessCodes)"; $dw.TxtTimeout.Text = "$($s.TimeoutMin)"; $dw.TxtNote.Text = "$($s.Note)"
-        $dw.ChkMatch.IsChecked = [bool]$s.OnlyMatching; $dw.ChkForceDrv.IsChecked = [bool]$s.ForceDriver
+        $dw.ChkMatch.IsChecked = [bool]$s.OnlyMatching; $dw.ChkForceDrv.IsChecked = [bool]$s.ForceDriver; $dw.ChkProtect.IsChecked = [bool]$s.ProtectDriver
         Set-DrvModeUi
         $lines = [System.Collections.Generic.List[string]]::new()
         $lines.Add("Paket:        $($p.Id)   ($($p.SizeMB) MB$(if ($p.IsDir) { ', ganzer Ordner wird kopiert' }))$(if (-not $p.Configured) { '   - noch nicht gespeichert' })")
@@ -616,7 +783,8 @@ function Show-DrvPackageDetails($p) {
         $lines.Add('')
         $lines.Add('INF: Windows installiert nur, wenn der Treiber besser/neuer ist als der vorhandene.')
         $lines.Add("     'Treiber erzwingen' installiert diese Version trotzdem (z.B. aeltere, besser funktionierende Version).")
-        $lines.Add('     Windows Update / Intune koennen den Treiber spaeter wieder ersetzen (Treiber-Updates dort steuern).')
+        $lines.Add("     'Vor Treiber-Updates schuetzen' sperrt danach die Geraete (Windows Pro/Education/Enterprise) -")
+        $lines.Add('     Windows Update und andere Treiber-Installationen aendern den Treiber dann nicht mehr.')
         $dw.TxtInfo.Text = ($lines -join "`r`n")
     } finally { $dw.Loading = $false }
 }
@@ -629,7 +797,7 @@ function Get-DrvFormSettings {
     $tmo = 0; if (-not [int]::TryParse("$($dw.TxtTimeout.Text)".Trim(), [ref]$tmo) -or $tmo -lt 1 -or $tmo -gt 600) { throw 'Timeout: 1 bis 600 Minuten' }
     return [ordered]@{
         Name = $name; Mode = $mode; Installer = "$($dw.CmbInst.SelectedItem)"; Arguments = "$($dw.CmbArgs.Text)".Trim(); SuccessCodes = $codes
-        TimeoutMin = $tmo; OnlyMatching = [bool]$dw.ChkMatch.IsChecked; ForceDriver = [bool]$dw.ChkForceDrv.IsChecked; Note = "$($dw.TxtNote.Text)".Trim()
+        TimeoutMin = $tmo; OnlyMatching = [bool]$dw.ChkMatch.IsChecked; ForceDriver = [bool]$dw.ChkForceDrv.IsChecked; ProtectDriver = [bool]$dw.ChkProtect.IsChecked; Note = "$($dw.TxtNote.Text)".Trim()
     }
 }
 function Save-DrvForm {
@@ -643,6 +811,9 @@ function Save-DrvForm {
     }
     if ($set.Mode -eq 'Inf' -and $set.ForceDriver -and -not [bool]$p.Settings.ForceDriver) {
         if ("$([System.Windows.MessageBox]::Show($dw.Win, "Treiber erzwingen: Diese Version wird auf passende Geraete installiert, auch wenn Windows einen neueren oder besser bewerteten Treiber hat.`n`nNur verwenden, wenn genau diese Version gewuenscht ist. Weiter?", 'Treiberverteilung', 'YesNo', 'Warning'))" -ne 'Yes') { return $null }
+    }
+    if ($set.ProtectDriver -and -not [bool]$p.Settings.ProtectDriver) {
+        if ("$([System.Windows.MessageBox]::Show($dw.Win, "Vor Treiber-Updates schuetzen:`n`nNach der Installation setzt HUMig am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die betroffenen Geraete. Windows Update (und jede andere Treiber-Installation) aendert den Treiber dieser Geraete dann nicht mehr.`n`n- Nur Windows Pro, Education und Enterprise (bei Home wird nichts gesetzt).`n- Eine GPO/Intune-Richtlinie zur Geraeteinstallation ueberschreibt die lokale Einstellung.`n- Neue Treiber aus HUMig: die Sperre wird dafuer automatisch kurz aufgehoben.`n- Aufheben: 'Sperren am PC ...'.`n`nWeiter?", 'Treiberverteilung', 'YesNo', 'Question'))" -ne 'Yes') { return $null }
     }
     if (-not (Save-DrvSettings $p $set)) { return $null }
     Out-Console "Treiberverteilung: Einstellungen fuer '$($set.Name)' gespeichert" 'Success'
@@ -694,7 +865,7 @@ function Show-DriverWindow {
       <DockPanel Grid.Column="1">
         <Grid DockPanel.Dock="Top">
           <Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+          <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
           <TextBlock Grid.Row="0" Text="Name:"/>              <TextBox x:Name="txtName" Grid.Row="0" Grid.Column="1"/>
           <TextBlock Grid.Row="1" Text="Art:"/>               <ComboBox x:Name="cmbMode" Grid.Row="1" Grid.Column="1" Width="220" HorizontalAlignment="Left" Margin="0,2,0,2" ToolTip="INF = Treiber aus INF-Dateien per pnputil (empfohlen). Setup = Hersteller-Installer mit Silent-Parametern"/>
           <TextBlock Grid.Row="2" Text="Setup:"/>             <ComboBox x:Name="cmbInst" Grid.Row="2" Grid.Column="1" Margin="0,2,0,2"/>
@@ -703,11 +874,13 @@ function Show-DriverWindow {
           <TextBlock Grid.Row="5" Text="Timeout (Minuten):"/> <TextBox x:Name="txtTimeout" Grid.Row="5" Grid.Column="1" Width="80" HorizontalAlignment="Left"/>
           <TextBlock Grid.Row="6" Text="Hardware:"/>          <CheckBox x:Name="chkMatch" Grid.Row="6" Grid.Column="1" Content="nur installieren, wenn passende Hardware vorhanden ist (sonst: in den Treiberspeicher aufnehmen)"/>
           <TextBlock Grid.Row="7" Text="Erzwingen:"/>         <CheckBox x:Name="chkForceDrv" Grid.Row="7" Grid.Column="1" Content="Treiber erzwingen - auch wenn Windows einen neueren/besser bewerteten Treiber hat (nur INF)"/>
-          <TextBlock Grid.Row="8" Text="Notiz:"/>             <TextBox x:Name="txtNote" Grid.Row="8" Grid.Column="1"/>
+          <TextBlock Grid.Row="8" Text="Schutz:"/>            <CheckBox x:Name="chkProtect" Grid.Row="8" Grid.Column="1" Content="nach der Installation vor Treiber-Updates schuetzen (Geraete-Sperre - nur Windows Pro/Education/Enterprise)" ToolTip="Setzt am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die Geraete mit diesem Treiber. Windows Update ersetzt den Treiber dann nicht mehr. HUMig hebt die Sperre fuer eigene spaetere Installationen selbst auf."/>
+          <TextBlock Grid.Row="9" Text="Notiz:"/>             <TextBox x:Name="txtNote" Grid.Row="9" Grid.Column="1"/>
         </Grid>
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,6,0,6">
           <Button x:Name="btnSave" Content="Speichern" Background="#FFF9E2AF"/>
           <Button x:Name="btnCheck" Content="Am gewaehlten PC pruefen" Background="#FF94E2D5" ToolTip="Zeigt passende Geraete und den aktiven Treiber am gewaehlten Computer - installiert nichts"/>
+          <Button x:Name="btnLocks" Content="Sperren am PC ..." Background="#FFCBA6F7" ToolTip="Geraete-Sperren (Schutz vor Treiber-Updates) am gewaehlten Computer anzeigen und aufheben"/>
         </StackPanel>
         <TextBox x:Name="txtInfo" IsReadOnly="True" FontFamily="Consolas" FontSize="11" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
       </DockPanel>
@@ -723,7 +896,7 @@ function Show-DriverWindow {
         Lst = $w.FindName('lstPkg'); LblFolder = $w.FindName('lblFolder'); LblTarget = $w.FindName('lblTarget')
         TxtName = $w.FindName('txtName'); CmbMode = $w.FindName('cmbMode'); CmbInst = $w.FindName('cmbInst'); CmbArgs = $w.FindName('cmbArgs')
         TxtCodes = $w.FindName('txtCodes'); TxtTimeout = $w.FindName('txtTimeout'); ChkMatch = $w.FindName('chkMatch'); ChkForceDrv = $w.FindName('chkForceDrv')
-        TxtNote = $w.FindName('txtNote'); TxtInfo = $w.FindName('txtInfo'); ChkForce = $w.FindName('chkForce')
+        TxtNote = $w.FindName('txtNote'); TxtInfo = $w.FindName('txtInfo'); ChkForce = $w.FindName('chkForce'); ChkProtect = $w.FindName('chkProtect')
     }
     # Handler ohne GetNewClosure -> Skript-Funktionen sichtbar; Zustand in $script:DrvUi
     $script:DrvUi.Lst.Add_SelectionChanged({
@@ -775,6 +948,8 @@ function Show-DriverWindow {
         if ($i -lt 0 -or $i -ge $dw.Pkgs.Count) { return }
         Start-DriverCheck -Package $dw.Pkgs[$i] -Computer (Get-TargetComputer)
     })
+    $w.FindName('btnLocks').Add_Click({ Show-DriverLocks -Computer (Get-TargetComputer) })
+    $w.Add_Activated({ if ($script:DrvUi) { $script:DrvUi.LblTarget.Text = "Gewaehlter Computer: $(Get-TargetComputer)" } })
     $w.FindName('btnClient').Add_Click({
         $dw = $script:DrvUi
         $h = Get-TargetComputer
