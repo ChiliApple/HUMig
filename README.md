@@ -204,7 +204,7 @@ Eigene Sperren hebt HUMig fuer spaetere Installationen selbst auf; *Sperren am P
 | Benutzerprofil | Profil erneuern (Test) + zurueckholen, Profilordner umbenennen, **Profil einem anderen Konto zuweisen** (Domaene -> lokal), Windows-Apps neu registrieren, Gruppenrichtlinien-Ergebnis, Aufgaben aus Backup importieren, **alte Profile loeschen**, **Datenbanken suchen** (lokale Datenbanken + Datenbank-Dienste, als Zusatzordner oder Katalog-Eintrag uebernehmen), **wichtige Dateien suchen** (PST, KeePass, Access ... ausserhalb des Profils), **im Backup suchen** (einzelne Dateien herauskopieren) |
 | Diagnose / Wartung | Ereignisse, Akku-Bericht, Aktivierung Windows/Office, Entra ID/Intune (Status + Sync), Domaene/Zeit/Kerberos, Druckwarteschlange, Speicher aufraeumen (inkl. Windows.old), Systemdateien reparieren (DISM/SFC) |
 | Software | Softwareverteilung, **Treiberverteilung**, installierte Software + Deinstallation |
-| Dieser PC | Systemprogramme, .exe als Admin, Anmeldedaten (credwiz, anzeigen/loeschen), Hersteller-Treiber-Links |
+| Dieser PC | Systemprogramme, .exe als Admin, Anmeldedaten (credwiz, anzeigen/loeschen), Hersteller-Treiber-Links (Seriennummer des gewaehlten Computers, auch remote) |
 
 Remote-Werkzeuge brauchen PowerShell-Remoting (WinRM) am Ziel-PC - fehlt es, schaltet *Fernwartung aktivieren* es ueber WMI (Port 135) ein. Aenderungen erfolgen immer mit Rueckfrage;
 Profil-Werkzeuge sichern vorher Registry (und Dateirechte) unter `C:\ProgramData\HUMig` am Ziel-PC.

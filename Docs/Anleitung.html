@@ -429,7 +429,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   </table>
 
   <h3 id="w-pc">Dieser PC</h3>
-  <p>Direktaufrufe: Taskmanager, Autostart-Apps, Netzwerkadapter, Systemsteuerung, Verwaltung, Firewall, Ereignisanzeige, Maus, Geräte-Manager, Dienste, Programme (alt), Computerverwaltung, Lokale Sicherheit, Zertifikate (PC/Benutzer), Speicherdiagnose, Treiberüberprüfung, Schrittaufzeichnung, Datenträger, Registry, <span class="ui m">.exe als Admin starten</span> – dazu eigene Links (Einstellungen › Links) und Hersteller-Treiberseiten.</p>
+  <p>Direktaufrufe: Taskmanager, Autostart-Apps, Netzwerkadapter, Systemsteuerung, Verwaltung, Firewall, Ereignisanzeige, Maus, Geräte-Manager, Dienste, Programme (alt), Computerverwaltung, Lokale Sicherheit, Zertifikate (PC/Benutzer), Speicherdiagnose, Treiberüberprüfung, Schrittaufzeichnung, Datenträger, Registry, <span class="ui m">.exe als Admin starten</span> – dazu eigene Links (Einstellungen › Links) und Hersteller-Treiberseiten. Seriennummer (<code>{SERIAL}</code>) und Name (<code>{COMPUTER}</code>) kommen vom <b>gewählten Computer</b> (remote per PowerShell-Remoting, sonst WMI).</p>
 </section>
 
 <section id="software">
@@ -561,7 +561,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td id="standorte">Standorte</td><td>Beliebig viele Standorte (Standort 1, 2, … frei benennbar): je Standort Backup-Ordner, Softwareverteilung, Treiberverteilung, USMT-Ordner, Domäne/DC, Subnetz, DNS-Server, Notiz. Umschalten oben im Hauptfenster.</td></tr>
     <tr><td>Ausnahmen</td><td>Ordner und Dateitypen, die im Profil und auf C:\ nicht gesichert werden · Standard wiederherstellen</td></tr>
     <tr><td>Module</td><td>Module ein-/ausblenden, eigene Module anlegen/löschen, <code>modules.json</code> für Experten</td></tr>
-    <tr><td>Links</td><td>Eigene Links (Name + URL) für den Werkzeug-Reiter</td></tr>
+    <tr><td>Links</td><td>Eigene Links (Name + URL) für den Werkzeug-Reiter; Platzhalter <code>{SERIAL}</code> und <code>{COMPUTER}</code> des gewählten Computers, optional Seriennummer in die Zwischenablage</td></tr>
     <tr><td>Update</td><td>GitHub-Token eingeben/löschen (nur bei privatem Repository nötig)</td></tr>
   </table>
   <h3>Konfigurationsdateien</h3>
