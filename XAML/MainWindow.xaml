@@ -516,7 +516,7 @@
                                             <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="115"/>
                                             <DataGridTextColumn Header="Platte" Binding="{Binding Platte}" Width="140"/>
                                             <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="70"/>
-                                            <DataGridTextColumn Header="Min." Binding="{Binding Minuten}" Width="50"/>
+                                            <DataGridTextColumn Header="Dauer" Binding="{Binding Minuten}" Width="80"/>
                                             <DataGridTextColumn Header="GB" Binding="{Binding GB}" Width="55"/>
                                             <DataGridTextColumn Header="VMs" Binding="{Binding VMs}" Width="*"/>
                                             <DataGridTextColumn Header="Hinweis" Binding="{Binding Hinweis}" Width="1.5*"/>
