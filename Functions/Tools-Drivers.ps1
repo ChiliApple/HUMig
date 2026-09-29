@@ -606,6 +606,96 @@ function Show-DriverLocks([string]$Computer, [string]$Remove = '') {
 # ----------------------------------------------------------------------------
 # Verteilung (Worker, Temp-Ordner und Kopie wie Softwareverteilung)
 # ----------------------------------------------------------------------------
+# Vorpruefung am Ziel (ohne Kopie): SKIP/FEHLER oder GO
+$script:RS_DrvPreBody = {
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $p = $PkgJson | ConvertFrom-Json
+        $o = $MapJson | ConvertFrom-Json
+        $map = @{}; foreach ($e in @($o.Map)) { if ($e.H) { $map["$($e.H)"] = @("$($e.V)" -split '/') } }
+        $ext = @{}; foreach ($x in @($o.Ext)) { if ($x) { $ext["$x"] = $true } }
+        $before = @(Get-HUDrvState $map @() $ext)
+        $matched = @($before | Where-Object { $_.Match })
+        $main = @($matched | Where-Object { -not $_.Ext })
+        if ($map.Count -gt 0 -and $matched.Count -eq 0 -and [bool]$p.OnlyMatching) { return "SKIP|keine passende Hardware (vor der Kopie geprueft)" }
+        if (-not $Force -and $main.Count -gt 0) {
+            $same = @($main | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
+            if ($same.Count -eq $main.Count) {
+                $ln = ''
+                if ([bool]$p.ProtectDriver) {
+                    $own = Get-HULocks
+                    $open = @($same | Where-Object { $_.LockId -and -not $own.Contains($_.LockId) })
+                    $ln = if ($open.Count) { Set-HUDrvLock $same "$($p.Name)" } else { ' | Schutz bereits aktiv' }
+                }
+                $st = (@($same | Group-Object { "$($_.Version) ($($_.Provider))" } | ForEach-Object { "$($_.Name) x$($_.Count)" })) -join ', '
+                return "SKIP|Version bereits aktiv: $st$ln"
+            }
+        }
+        $devIds = @{}; foreach ($m in $matched) { foreach ($i in @($m.AllIds)) { $devIds[$i] = $true } }
+        $own = Get-HULocks
+        $foreign = @(Get-HUDenyIds | Where-Object { $devIds.ContainsKey($_.ToUpperInvariant()) -and -not $own.Contains($_.ToUpperInvariant()) })
+        if ($foreign.Count) { return "FEHLER|Geraet ist durch eine Richtlinie gesperrt ($($foreign -join ', ')) - Installation wuerde blockiert (GPO/Intune: Geraeteinstallation einschraenken pruefen)" }
+        return 'GO'
+    } catch { return 'GO' }
+}
+function Get-DrvPreText { return "param([string]`$PkgJson, [string]`$MapJson, [bool]`$Force)`n" + $script:DrvLibText + "`n" + $script:RS_DrvPreBody.ToString() }
+
+# Worker je PC (wie Softwareverteilung) + Vorpruefung vor der Kopie, Kopie per SMB (C$) mit Robocopy, sonst ueber WinRM
+$script:DrvWorkerText = @'
+param($h, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $sizeMB, $timeoutMin, $preText, $mapJson, $incStr)
+$isLocal = ($h -eq '.' -or $h -eq 'localhost' -or $h -ieq $env:COMPUTERNAME -or $h -ilike "$($env:COMPUTERNAME).*")
+$inc = @("$incStr" -split '\|' | Where-Object { $_ })
+$s = $null; $remote = ''; $done = $false
+try {
+    if (-not $isLocal) {
+        $opt = New-PSSessionOption -OpenTimeout 15000 -OperationTimeout ([int](($timeoutMin + 30) * 60000))
+        $s = New-PSSession -ComputerName $h -SessionOption $opt -ErrorAction Stop
+    }
+    if ($preText -and $mapJson) {
+        $pre = if ($isLocal) { "$(& ([scriptblock]::Create($preText)) $pkgJson $mapJson $force)".Trim() } else { "$(Invoke-Command -Session $s -ErrorAction Stop -ScriptBlock ([scriptblock]::Create($preText)) -ArgumentList $pkgJson, $mapJson, $force)".Trim() }
+        if ($pre -match '^(SKIP|FEHLER)\|') { $done = $true; return "RES:$h|$pre" }
+    }
+    if ($isLocal) { $prep = "$(& ([scriptblock]::Create($prepText)))".Trim() }
+    else { $prep = "$(Invoke-Command -Session $s -ErrorAction Stop -ScriptBlock ([scriptblock]::Create($prepText)))".Trim() }
+    if ($prep -notmatch '^READY\|([^|]+)\|(\d*)$') { return "RES:$h|FEHLER|Vorbereitung: $prep" }
+    $remote = $Matches[1]
+    if ($Matches[2] -and ([int]$Matches[2]) -lt ($sizeMB * 3 + 500)) { return "RES:$h|FEHLER|Zu wenig Speicher am Systemlaufwerk ($($Matches[2]) MB frei)" }
+    $items = if ($isDir) { @(Get-ChildItem -LiteralPath $src -Force | Where-Object { $inc.Count -eq 0 -or $inc -contains $_.Name }) } else { @(Get-Item -LiteralPath $src -Force) }
+    if ($isLocal) {
+        foreach ($it in $items) { Copy-Item -LiteralPath $it.FullName -Destination $remote -Recurse -Force -ErrorAction Stop }
+        $r = "$(& ([scriptblock]::Create($instText)) $remote $pkgJson $force)".Trim()
+    } else {
+        $unc = '\\' + $h + '\' + ($remote -replace '^([A-Za-z]):', '$1$')
+        $smb = $false
+        try { $smb = [bool](Test-Path -LiteralPath $unc -ErrorAction Stop) } catch { $smb = $false }
+        $copied = $false
+        if ($smb) {
+            try {
+                foreach ($it in $items) {
+                    if ($it.PSIsContainer) {
+                        $null = & robocopy.exe "$($it.FullName)" "$unc\$($it.Name)" /E /R:1 /W:2 /MT:8 /NP /NFL /NDL /NJH /NJS 2>&1
+                        if ($LASTEXITCODE -ge 8) { throw "Robocopy $LASTEXITCODE" }
+                    } else { Copy-Item -LiteralPath $it.FullName -Destination $unc -Force -ErrorAction Stop }
+                }
+                $copied = $true
+            } catch { $copied = $false }
+        }
+        # ohne Admin-Freigabe (C$) oder bei Fehler: ueber die PowerShell-Sitzung (langsamer)
+        if (-not $copied) { foreach ($it in $items) { Copy-Item -LiteralPath $it.FullName -Destination $remote -ToSession $s -Recurse -Force -ErrorAction Stop } }
+        $r = "$(Invoke-Command -Session $s -ErrorAction Stop -ScriptBlock ([scriptblock]::Create($instText)) -ArgumentList $remote, $pkgJson, $force)".Trim()
+    }
+    $done = $true
+    if ($r -notmatch '^(OK|SKIP|FEHLER)\|') { $r = "FEHLER|Unerwartete Antwort: $r" }
+    "RES:$h|$r"
+} catch { "RES:$h|FEHLER|$($_.Exception.Message -replace '[\r\n|]+', ' ')" }
+finally {
+    if (-not $done -and $remote) {
+        try { if ($isLocal) { $null = & ([scriptblock]::Create($cleanText)) $remote } elseif ($s) { $null = Invoke-Command -Session $s -ErrorAction Stop -ScriptBlock ([scriptblock]::Create($cleanText)) -ArgumentList $remote } } catch { }
+    }
+    if ($s) { Remove-PSSession $s -ErrorAction SilentlyContinue }
+}
+'@
+
 function Start-DriverDeploy {
     param([string[]]$Hosts, [object]$Package, [bool]$Force = $false, [string]$Label = '')
     $Hosts = @($Hosts | Where-Object { $_ } | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Sort-Object -Unique)
@@ -617,25 +707,22 @@ function Start-DriverDeploy {
     Out-Console "Treiberverteilung '$($s.Name)' auf $($Hosts.Count) PC(s)$(if ($Label) { " [$Label]" })$(if ($Force) { ' - auch wenn gleiche Version aktiv' }) ..." 'Info'
     $tmo = [int]$s.TimeoutMin; if ($tmo -lt 1) { $tmo = 20 }
     $copyMB = Get-DrvCopyMB $Package
-    $worker = $script:SwWorkerText
-    if ("$($s.Mode)" -eq 'Inf' -and $Package.IsDir -and @($Package.InfTop).Count) {
-        # Worker-Kopie auf die INF-Unterordner beschraenken
-        $incLit = (@($Package.InfTop) | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ','
-        $old = '@(Get-ChildItem -LiteralPath $src -Force)'
-        $nl = $worker.IndexOf("`n")
-        if ($nl -gt 0 -and ($worker.Split([string[]]@($old), [StringSplitOptions]::None).Count - 1) -eq 2) {
-            $worker = $worker.Substring(0, $nl + 1) + "`$inc = @($incLit)`n" + $worker.Substring($nl + 1)
-            $worker = $worker.Replace($old, '@(Get-ChildItem -LiteralPath $src -Force | Where-Object { $inc -contains $_.Name })')
-        } else { $copyMB = [double]$Package.SizeMB }
+    # Kopie auf die INF-Unterordner beschraenken (Art INF)
+    $incStr = if ("$($s.Mode)" -eq 'Inf' -and $Package.IsDir -and @($Package.InfTop).Count) { (@($Package.InfTop) -join '|') } else { '' }
+    # Vorpruefung VOR der Kopie (Hardware, Version, Sperren) - spart die Kopie bei uebersprungenen PCs
+    $mapJson = ''
+    if (@($Package.InfFiles).Count -gt 0) {
+        $sum = Get-DrvInfSummary $Package
+        if ($sum.HwMap.Count -gt 0) { $mapJson = [pscustomobject]@{ Map = @(foreach ($k in $sum.HwMap.Keys) { [pscustomobject]@{ H = $k; V = (@($sum.HwMap[$k]) -join '/') } }); Ext = @($sum.ExtIds.Keys) } | ConvertTo-Json -Depth 4 -Compress }
     }
     $jobSec = [int][Math]::Max(1800, ([Math]::Ceiling($Hosts.Count / 8.0) * (($tmo + 15) * 60 + $copyMB)))
     Invoke-AsyncCommand -ScriptBlock {
-        param($hostStr, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $workerText, $sizeMB, $timeoutMin, $deadlineSec)
+        param($hostStr, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $workerText, $sizeMB, $timeoutMin, $deadlineSec, $preText, $mapJson, $incStr)
         $list = @($hostStr -split '\|' | Where-Object { $_ })
         $deadline = (Get-Date).AddSeconds($deadlineSec)
         $pool = [runspacefactory]::CreateRunspacePool(1, 8); $pool.Open()
         $jobs = foreach ($h in $list) {
-            $ps = [PowerShell]::Create().AddScript($workerText).AddArgument($h).AddArgument($src).AddArgument($isDir).AddArgument($pkgJson).AddArgument($force).AddArgument($prepText).AddArgument($instText).AddArgument($cleanText).AddArgument($sizeMB).AddArgument($timeoutMin)
+            $ps = [PowerShell]::Create().AddScript($workerText).AddArgument($h).AddArgument($src).AddArgument($isDir).AddArgument($pkgJson).AddArgument($force).AddArgument($prepText).AddArgument($instText).AddArgument($cleanText).AddArgument($sizeMB).AddArgument($timeoutMin).AddArgument($preText).AddArgument($mapJson).AddArgument($incStr)
             $ps.RunspacePool = $pool
             [pscustomobject]@{ PS = $ps; Handle = $ps.BeginInvoke(); Host = $h }
         }
@@ -655,7 +742,7 @@ function Start-DriverDeploy {
         }
         if ($stuck -eq 0) { try { $pool.Close(); $pool.Dispose() } catch { } }
         $out -join "`n"
-    } -ArgumentList @(($Hosts -join '|'), $Package.SrcPath, [bool]$Package.IsDir, $pkgJson, $Force, $script:RS_SwPrep.ToString(), (Get-DrvInstallText), $script:RS_SwCleanup.ToString(), $worker, $copyMB, $tmo, ($jobSec - 60)) `
+    } -ArgumentList @(($Hosts -join '|'), $Package.SrcPath, [bool]$Package.IsDir, $pkgJson, $Force, $script:RS_SwPrep.ToString(), (Get-DrvInstallText), $script:RS_SwCleanup.ToString(), $script:DrvWorkerText, $copyMB, $tmo, ($jobSec - 60), (Get-DrvPreText), $mapJson, $incStr) `
       -TimeoutSec $jobSec -State @{ Name = "$($s.Name)"; Hosts = $Hosts; Package = $Package; Force = $Force } -OnComplete {
         param($result, $st)
         $r = "$result".Trim()

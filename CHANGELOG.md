@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.38 - 2026-09-29
+### Verbessert
+- Treiberverteilung: **Vorpruefung vor der Kopie** - PCs ohne passende Hardware, mit derselben aktiven Version (setzt ggf. nur den Schutz) oder mit fremder Geraete-Sperre werden sofort erledigt, ohne das Paket zu kopieren
+- Treiberverteilung: Kopie zum Client per Admin-Freigabe (C$) mit Robocopy (mehrere Threads) statt ueber die PowerShell-Sitzung - bei grossen Paketen deutlich schneller; ohne C$-Zugriff wie bisher ueber WinRM
+
 ## v2.0.37 - 2026-09-29
 ### Verbessert
 - Treiberverteilung: Erweiterungs-INFs (Klasse Extension/SoftwareComponent, z.B. Audio-Bus-Erweiterung im Intel-Grafikpaket) zaehlen nicht mehr fuer Versionsvergleich, Erzwingen und Schutz - sie werden per pnputil mitinstalliert; Pruefung zeigt sie als *Erweiterung* statt *wuerde installiert*
