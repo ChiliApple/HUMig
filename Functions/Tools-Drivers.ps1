@@ -418,12 +418,12 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
                     1641 { $reboot = $true }
                     259 {
                         $st = Format-HUState (Get-HUDrvState $map)
-                        if ($matched.Count -eq 0) { return "OK|in den Treiberspeicher aufgenommen (keine passende Hardware - wird beim Anstecken verwendet) ($([int]$sw.Elapsed.TotalSeconds) s)" }
+                        if ($matched.Count -eq 0) { return "OK|in den Treiberspeicher aufgenommen (keine passende Hardware - wird beim Anstecken verwendet) ($(if ($sw.Elapsed.TotalSeconds -lt 60) { '{0} s' -f [int]$sw.Elapsed.TotalSeconds } else { '{0} min {1} s' -f [int][Math]::Floor($sw.Elapsed.TotalMinutes), $sw.Elapsed.Seconds }))" }
                         return "SKIP|Windows behaelt den vorhandenen Treiber (neuer oder besser bewertet) - aktiv: $st. Fuer diese Version 'Treiber erzwingen' einschalten | Log: $log"
                     }
                     default { return "FEHLER|pnputil ExitCode $rc | Log: $log (Details: C:\Windows\INF\setupapi.dev.log)" }
                 }
-                if ($matched.Count -eq 0) { return "OK|in den Treiberspeicher aufgenommen (keine passende Hardware) ($([int]$sw.Elapsed.TotalSeconds) s)" }
+                if ($matched.Count -eq 0) { return "OK|in den Treiberspeicher aufgenommen (keine passende Hardware) ($(if ($sw.Elapsed.TotalSeconds -lt 60) { '{0} s' -f [int]$sw.Elapsed.TotalSeconds } else { '{0} min {1} s' -f [int][Math]::Floor($sw.Elapsed.TotalMinutes), $sw.Elapsed.Seconds }))" }
             }
         } else {
             $inst = $Dir.TrimEnd('\') + '\' + "$($p.Installer)"
@@ -450,10 +450,10 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
             $okCodes = @("$($p.SuccessCodes)" -split '[,;\s]+' | Where-Object { $_ -match '^-?\d+$' } | ForEach-Object { [int]$_ })
             if ($okCodes.Count -eq 0) { $okCodes = @(0) }
             if ($rc -eq 3010 -or $rc -eq 1641) { $reboot = $true }
-            elseif ($okCodes -notcontains $rc) { return "FEHLER|Setup ExitCode $rc ($([int]$sw.Elapsed.TotalSeconds) s)$(if ($argLine -match '/l\*v') { " | Log: $log" })" }
+            elseif ($okCodes -notcontains $rc) { return "FEHLER|Setup ExitCode $rc ($(if ($sw.Elapsed.TotalSeconds -lt 60) { '{0} s' -f [int]$sw.Elapsed.TotalSeconds } else { '{0} min {1} s' -f [int][Math]::Floor($sw.Elapsed.TotalMinutes), $sw.Elapsed.Seconds }))$(if ($argLine -match '/l\*v') { " | Log: $log" })" }
         }
         # Nachkontrolle
-        $dur = "$([int]$sw.Elapsed.TotalSeconds) s"
+        $dur = "$(if ($sw.Elapsed.TotalSeconds -lt 60) { '{0} s' -f [int]$sw.Elapsed.TotalSeconds } else { '{0} min {1} s' -f [int][Math]::Floor($sw.Elapsed.TotalMinutes), $sw.Elapsed.Seconds })"
         $rbTxt = if ($reboot) { ' - NEUSTART erforderlich' } else { '' }
         if ($map.Count -eq 0) { return "OK|installiert$rbTxt ($dur)$note" }
         $after = @(Get-HUDrvState $map @() $extIds)

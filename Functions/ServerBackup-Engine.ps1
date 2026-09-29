@@ -9,6 +9,17 @@
     Wird im UI-Thread (Hilfsfunktionen, Invoke-AsyncCommand) und im Hintergrund-Runspace (Start-HMServerBackup) geladen.
 #>
 
+# Dauer lesbar: "45 s", "3 min 20 s", "12 min", "6 h 12 min" - Wert: TimeSpan oder Minuten (Zahl)
+function Format-HMDuration($Value) {
+    if ($null -eq $Value -or "$Value" -eq '') { return '' }
+    try { $ts = if ($Value -is [TimeSpan]) { $Value } else { [TimeSpan]::FromMinutes([double]$Value) } } catch { return "$Value" }
+    $s = [long][Math]::Round($ts.TotalSeconds)
+    if ($s -lt 60) { return "$s s" }
+    $h = [long][Math]::Floor($s / 3600); $m = [long][Math]::Floor(($s % 3600) / 60); $sec = $s % 60
+    if ($h -gt 0) { return "$h h $m min" }
+    if ($m -lt 10 -and $sec) { return "$m min $sec s" }
+    return "$m min"
+}
 $script:SbDirName = 'HUMig-ServerBackup'
 $script:SbJob = $null
 
@@ -619,7 +630,7 @@ function Write-HMSbReport {
         @('Platte', "$($Entry.Disk)$(if ($Entry.DiskSerial) { "  (Seriennummer $($Entry.DiskSerial))" })"),
         @('Virtuelle Computer', $(if ($Entry.VMs) { $Entry.VMs } else { '-' })),
         @('Laufwerke dieses Servers', $(if ($Entry.Volumes) { "$($Entry.Volumes)$(if ($Entry.VolVersionId) { " - Version $($Entry.VolVersionId) (UTC)" })" } else { '-' })),
-        @('Dauer', "$($Entry.Minutes) Minuten"), @('Gesicherte Datenmenge', "ca. $($Entry.SizeGB) GB (virtuelle Festplatten der VMs + belegter Platz der Laufwerke)"),
+        @('Dauer', (Format-HMDuration $Entry.Minutes)), @('Gesicherte Datenmenge', "ca. $($Entry.SizeGB) GB (virtuelle Festplatten der VMs + belegter Platz der Laufwerke)"),
         @('Sicherungsversion', $(if ($Entry.VersionId) { "$($Entry.VersionId) (UTC) - fuer die Wiederherstellung" } else { '-' })),
         @('Host-Konfiguration', (& $ja $Entry.HostConfig)),
         @('Host-System (Bare-Metal)', "$(& $ja $Entry.HostSystem)$(if ($Entry.HostVersionId) { " - Version $($Entry.HostVersionId) (UTC)" })"),
@@ -895,7 +906,7 @@ function Start-HMServerBackup {
     $Job.Result = [pscustomobject]$res
     $Job.Progress = 100
     $lvl = switch ($status) { 'OK' { 'Success' } 'Warning' { 'Warning' } default { 'Error' } }
-    Write-HMSbLog ("SERVER-BACKUP {0}: {1} in {2} min - Bericht: {3}" -f $Ctx.Profile, $(switch ($status) { 'OK' { if ($notes.Count) { 'erfolgreich (mit Hinweis - siehe Bericht)' } else { 'erfolgreich' } } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }), $dur, (Join-Path $rep 'Bericht.html')) $lvl
+    Write-HMSbLog ("SERVER-BACKUP {0}: {1} in {2} - Bericht: {3}" -f $Ctx.Profile, $(switch ($status) { 'OK' { if ($notes.Count) { 'erfolgreich (mit Hinweis - siehe Bericht)' } else { 'erfolgreich' } } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }), (Format-HMDuration $dur), (Join-Path $rep 'Bericht.html')) $lvl
     $script:SbRunLog = $null
     if ($status -eq 'Error') { $Job.Error = ($notes -join '; ') }
 }

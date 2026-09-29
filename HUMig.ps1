@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.38'
+$script:Version   = '2.0.39'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -740,7 +740,7 @@ function Start-EngineJob {
         $rs = if ($j.Cancel) { 'Cancelled' } elseif ($j.Error) { 'Error' } elseif ($res -and $res.Status) { "$($res.Status)" } else { 'OK' }
         $kind = switch ($rs) { 'OK' { 'Info' } 'Created' { 'Info' } 'Warning' { 'Warning' } 'NoCatalog' { 'Warning' } default { 'Error' } }
         $stTxt = switch ($rs) { 'OK' { 'erfolgreich' } 'Created' { 'erstellt' } 'NoCatalog' { 'ohne Katalog - nur Kurzpruefung' } 'Warning' { 'mit Warnungen' } 'NoSpace' { 'nicht gestartet - zu wenig Platz' } 'Cancelled' { 'abgebrochen' } default { 'mit Fehlern' } }
-        $det = "Dauer $($ui.lblElapsed.Text)"
+        $det = "Dauer $(Format-HMDuration ((Get-Date) - $j.Started))"
         if ($res -and $res.SizeBytes) { $det = "$(Format-HMSize ([long]$res.SizeBytes)), $det" } elseif ($res -and $res.Total) { $det = "$(Format-HMSize ([long]$res.Total)), $det" }
         $long = ((Get-Date) - $j.Started).TotalSeconds -gt 20
         if ($rs -eq 'NoSpace') { }

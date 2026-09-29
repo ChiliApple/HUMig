@@ -416,6 +416,17 @@ function Test-HMItemNeedsAdmin($Item) {
     }
 }
 
+# Dauer lesbar: "45 s", "3 min 20 s", "12 min", "6 h 12 min" - Wert: TimeSpan oder Minuten (Zahl)
+function Format-HMDuration($Value) {
+    if ($null -eq $Value -or "$Value" -eq '') { return '' }
+    try { $ts = if ($Value -is [TimeSpan]) { $Value } else { [TimeSpan]::FromMinutes([double]$Value) } } catch { return "$Value" }
+    $s = [long][Math]::Round($ts.TotalSeconds)
+    if ($s -lt 60) { return "$s s" }
+    $h = [long][Math]::Floor($s / 3600); $m = [long][Math]::Floor(($s % 3600) / 60); $sec = $s % 60
+    if ($h -gt 0) { return "$h h $m min" }
+    if ($m -lt 10 -and $sec) { return "$m min $sec s" }
+    return "$m min"
+}
 function Format-HMSize([double]$Bytes) {
     if ($Bytes -ge 1TB) { return ('{0:N2} TB' -f ($Bytes / 1TB)) }
     if ($Bytes -ge 1GB) { return ('{0:N2} GB' -f ($Bytes / 1GB)) }
@@ -2022,7 +2033,7 @@ function Start-HMBackup {
 
     $dur = (Get-Date) - $start
     $Ctx.Manifest.Finished = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-    $Ctx.Manifest.Duration = $dur.ToString('hh\:mm\:ss')
+    $Ctx.Manifest.Duration = Format-HMDuration $dur
     $Ctx.Manifest.SizeBytes = $allBytes
     $errs = @($Ctx.Manifest.Modules | Where-Object { $_.Status -eq 'Error' -and -not $_.FromPrevious }).Count
     $warns = @($Ctx.Manifest.Modules | Where-Object { $_.Status -eq 'Warning' -and -not $_.FromPrevious }).Count
@@ -2618,7 +2629,7 @@ function Start-HMRestore {
         try { Dismount-HMHive $Ctx $Job } catch { }
         if ($shareRoot) { Disconnect-HMShare $shareRoot }
     }
-    $dur = ((Get-Date) - $start).ToString('hh\:mm\:ss')
+    $dur = Format-HMDuration ((Get-Date) - $start)
     $errs = @($results | Where-Object { $_.Status -eq 'Error' }).Count
     $warns = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
     $st = if (Test-HMCancel $Job) { 'Cancelled' } elseif ($errs) { 'Error' } elseif ($warns) { 'Warning' } else { 'OK' }

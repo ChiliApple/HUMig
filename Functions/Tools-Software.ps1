@@ -233,7 +233,7 @@ $script:RS_SwInstall = {
         if ($okCodes.Count -eq 0) { $okCodes = @(0) }
         $after = if ($dn -or $dc) { Find-HUApp $dn $dc '' } else { $null }
         $ver = if ($after) { " - $($after.DisplayName) $($after.DisplayVersion)" } else { '' }
-        $dur = "$([int]$sw.Elapsed.TotalSeconds) s"
+        $dur = "$(if ($sw.Elapsed.TotalSeconds -lt 60) { '{0} s' -f [int]$sw.Elapsed.TotalSeconds } else { '{0} min {1} s' -f [int][Math]::Floor($sw.Elapsed.TotalMinutes), $sw.Elapsed.Seconds })"
         if ($okCodes -contains $rc) {
             if (($dn -or $dc) -and -not $after) { return "FEHLER|ExitCode $rc, aber Programm danach nicht gefunden (Erkennung '$dn$dc' pruefen) ($dur)$(if ($log) { " | Log: $log" })" }
             return "OK|installiert (ExitCode $rc, $dur)$ver"
@@ -679,7 +679,7 @@ $script:RS_SwUninstall = {
                 foreach ($x in (Get-HUUninstProcs $start $exeDir)) { try { Stop-Process -Id $x.ProcessId -Force } catch { } }
                 "RES:$name|FEHLER|Timeout nach $TimeoutMin min (Unterprozesse liefen noch - wartet auf Eingabe?)"; continue
             }
-            $dur = "$([int]$sw.Elapsed.TotalSeconds) s"
+            $dur = "$(if ($sw.Elapsed.TotalSeconds -lt 60) { '{0} s' -f [int]$sw.Elapsed.TotalSeconds } else { '{0} min {1} s' -f [int][Math]::Floor($sw.Elapsed.TotalMinutes), $sw.Elapsed.Seconds })"
             $reboot = ($rc -eq 3010 -or $rc -eq 1641)
             if ($gone) { "RES:$name|OK|entfernt (ExitCode $rc, $dur)$(if ($reboot) { ' - NEUSTART erforderlich' })"; continue }
             if ($rc -eq 1605) { "RES:$name|OK|war laut Windows Installer nicht (mehr) installiert"; continue }

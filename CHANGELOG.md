@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.39 - 2026-09-29
+### Verbessert
+- Dauer ueberall lesbar (z.B. *6 h 12 min*, *3 min 24 s*, *45 s*): Server-Backup (Konsole, Bericht, Verlauf-Spalte *Dauer*, Statistik *Mittlere_Dauer*, alle Laeufe), Backup/Restore (Konsole, Bericht, Manifest, Meldung, geplantes Backup), Software- und Treiberverteilung
+
 ## v2.0.38 - 2026-09-29
 ### Verbessert
 - Treiberverteilung: **Vorpruefung vor der Kopie** - PCs ohne passende Hardware, mit derselben aktiven Version (setzt ggf. nur den Schutz) oder mit fremder Geraete-Sperre werden sofort erledigt, ohne das Paket zu kopieren
