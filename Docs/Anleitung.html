@@ -453,7 +453,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <div class="card t"><b>Eine Datei</b><code>.exe</code>/<code>.msi</code> direkt im Ordner = Setup-Paket. <span class="ui">Datei hinzufuegen</span> entpackt <code>.zip</code> und <code>.cab</code> (z. B. aus dem Microsoft Update-Katalog) als eigenes Paket.</div>
   </div>
   <h3>Pakete verwalten</h3>
-  <p>Links die Pakete (<code>*</code> = noch nicht gespeichert), rechts die Einstellungen (gespeichert in <code>hu-driver.json</code> im Paketordner bzw. <code>&lt;Datei&gt;.hu-driver.json</code>). Das Infofeld zeigt aus den INF-Dateien Klasse, Anbieter, Version/Datum und die unterstützten Geräte (Hardware-IDs).</p>
+  <p>Entpackte Treiber kannst du auch direkt in den Treiber-Ordner legen (<span class="ui">Ordner hinzufuegen</span> startet dort und kopiert solche Ordner nicht nochmals). Links die Pakete (<code>*</code> = noch nicht gespeichert), rechts die Einstellungen (gespeichert in <code>hu-driver.json</code> im Paketordner bzw. <code>&lt;Datei&gt;.hu-driver.json</code>). Das Infofeld zeigt aus den INF-Dateien Klasse, Anbieter, Version/Datum und die unterstützten Geräte (Hardware-IDs).</p>
   <table>
     <tr><th style="width:230px">Einstellung</th><th>Bedeutung</th></tr>
     <tr><td>Art <b>INF (pnputil)</b></td><td>Empfohlen. <code>pnputil /add-driver *.inf /subdirs /install</code> – Windows nimmt den Treiber in den Treiberspeicher auf und installiert ihn auf passenden Geräten, <b>wenn er besser/neuer ist</b> als der vorhandene.</td></tr>
