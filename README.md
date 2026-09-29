@@ -88,6 +88,11 @@ Eigene Programme in `Config\apps.json` - Eintrag mit `"License": true`, z.B.:
 `{ "Apps": [ { "Id": "App_MeinTool", "Name": "Mein Tool", "Detect": "^Mein Tool", "Items": [ { "Type": "Files", "Name": "LIC", "Path": "{PROGRAMFILES}\\MeinTool", "Filter": [ "*.lic" ], "License": true } ] } ] }`
 Nicht uebertragbar sind Lizenzen, die an Konto oder Hardware gebunden sind (Microsoft 365, Adobe, Autodesk ...) - dafuer gibt es Hinweise in der Checkliste.
 
+### Programm hinzufuegen (Assistent)
+
+*Programme* > **+ Programm hinzufuegen ...** (auch im Katalog-Editor): installiertes Programm aus der Liste waehlen - HUMig sucht am gewaehlten PC Ordner und Registry-Schluessel mit Programm-/Herstellernamen (AppData Roaming/Local/LocalLow, Dokumente, ProgramData, HKCU\Software, HKLM\SOFTWARE) sowie im Programmordner Plug-ins/Add-ins, Vorlagen, Konfiguration und Lizenzdateien.
+Vorschlaege mit Groesse zum Abhaken, Caches/Logs automatisch ausgelassen, Programm-Schliessen mit Prozessnamen vorbelegt, Erkennung automatisch. *Speichern* - oder *Erweitert (Editor)*. Vorschlaege beruhen auf Ordnernamen (immer pruefen); so angelegte Eintraege gelten als ungeprueft.
+
 ### Katalog-Editor
 
 *Programme* > **Katalog bearbeiten ...** (auch Einstellungen > Module): alle Eintraege mit Suche und Filter (am PC erkannt, geprueft, ungeprueft, nur Hinweis, eigene, geaendert).

@@ -63,8 +63,8 @@ function Start-HMInventory([bool]$WithSoftware, [string[]]$Hosts = @()) {
     Invoke-AsyncCommand -ScriptBlock {
         param($hosts, $cred, $text, $withSw)
         $sb = [scriptblock]::Create($text)
-        $out = New-Object System.Collections.Generic.List[object]
-        $remote = New-Object System.Collections.Generic.List[string]
+        $out = [System.Collections.Generic.List[object]]::new()
+        $remote = [System.Collections.Generic.List[string]]::new()
         foreach ($h in $hosts) {
             if ($h -eq '.' -or $h -ieq 'localhost' -or $h -ieq $env:COMPUTERNAME -or $h -ilike "$($env:COMPUTERNAME).*") { try { $o = & $sb $withSw; $o | Add-Member -NotePropertyName Ziel -NotePropertyValue $h -Force; $out.Add($o) } catch { $out.Add([pscustomobject]@{ Ziel = $h; Fehler = $_.Exception.Message }) } }
             else { $remote.Add($h) }
@@ -86,9 +86,9 @@ function Start-HMInventory([bool]$WithSoftware, [string[]]$Hosts = @()) {
         param($r, $st)
         if ("$r" -match '^FEHLER' -and -not ($r -is [System.Array])) { Out-Console "Inventar: $r" 'Error'; return }
         $cols = @('Ziel', 'Status', 'Computer', 'Hersteller', 'Modell', 'Seriennummer', 'BIOS', 'Windows', 'Version', 'Build', 'CPU', 'RAM_GB', 'C_GB', 'C_frei_GB', 'Datentraeger', 'BitLocker', 'TPM', 'SecureBoot', 'Beitritt', 'Domaene', 'IP', 'MAC', 'Angemeldet', 'Letzter_Start')
-        $rows = New-Object System.Collections.Generic.List[object]
-        $swRows = New-Object System.Collections.Generic.List[object]
-        $csv = New-Object System.Collections.Generic.List[object]
+        $rows = [System.Collections.Generic.List[object]]::new()
+        $swRows = [System.Collections.Generic.List[object]]::new()
+        $csv = [System.Collections.Generic.List[object]]::new()
         $macs = @{}; try { $mc = Read-JsonFile (Join-Path $script:ConfigDir 'mac_cache.json'); if ($mc) { foreach ($x in $mc.PSObject.Properties) { $macs[$x.Name] = "$($x.Value)" } } } catch { }
         $ok = 0
         foreach ($x in @($r)) {
@@ -137,7 +137,7 @@ function Show-HMOldProfiles {
         }
     } -OnResult {
         param($r, $comp)
-        $rows = New-Object System.Collections.Generic.List[object]
+        $rows = [System.Collections.Generic.List[object]]::new()
         foreach ($x in @($r)) {
             if (-not $x -or -not $x.SID) { continue }
             $last = if ($x.NtUser) { [datetime]$x.NtUser } elseif ($x.Zuletzt) { [datetime]$x.Zuletzt } else { $null }
@@ -187,7 +187,7 @@ function Show-HMBitLockerKeys {
         }
     } -OnResult {
         param($r, $comp)
-        $rows = New-Object System.Collections.Generic.List[object]
+        $rows = [System.Collections.Generic.List[object]]::new()
         foreach ($x in @($r)) { if ($x -and $x.LW) { $rows.Add(@("$($x.LW)", "$($x.Status)", [int]$x.Prozent, "$($x.Methode)", "$($x.Typ)", "$($x.Id)", "$($x.Kennwort)")) } }
         if (-not $rows.Count) { Out-Console "Keine BitLocker-Daten von $comp." 'Warning'; return }
         $hasRp = @($rows | Where-Object { $_[4] -eq 'RecoveryPassword' }).Count
@@ -322,7 +322,7 @@ function Start-HMFileSearch {
         }
     } -OnResult {
         param($r, $comp)
-        $rows = New-Object System.Collections.Generic.List[object]
+        $rows = [System.Collections.Generic.List[object]]::new()
         foreach ($x in @($r)) { if ($x -and $x.Pfad) { $rows.Add(@("$($x.Pfad)", [long]$x.Groesse, [datetime]$x.Geaendert, (Split-Path "$($x.Pfad)" -Parent))) } }
         if (-not $rows.Count) { Out-Console "Keine passenden Dateien an $comp gefunden." 'Success'; return }
         Show-DataGridWindow -Title "Gefundene Dateien - $comp" -Columns @('Pfad', 'Groesse', 'Geaendert', 'Ordner') -ColumnTypes @{ Groesse = [long]; Geaendert = [datetime] } -Rows $rows.ToArray() `
@@ -353,7 +353,7 @@ $script:RS_DbSearch = {
               '\\AppData\\Local\\(Temp|Packages|Microsoft|Google\\Chrome|CrashDumps|D3DSCache|NVIDIA|Mozilla|Comms)(\\|$)|\\AppData\\LocalLow(\\|$)|' +
               '\\AppData\\Roaming\\(Mozilla|Thunderbird|Microsoft\\(Windows|Protect|Crypto|SystemCertificates))(\\|$)|\\ProgramData\\(Microsoft|Packages|Package Cache)(\\|$)|' +
               '\\(BACKUPS|WindowsImageBackup|HUMig-ServerBackup)(\\|$)'   # Backups (auch von HUMig) nicht als Datenbank melden
-    $roots = New-Object System.Collections.Generic.List[string]
+    $roots = [System.Collections.Generic.List[string]]::new()
     $sys = $env:SystemDrive.TrimEnd('\')
     if ($AllProfiles) { $roots.Add("$sys\Users") } elseif ($ProfilePath) { $roots.Add($ProfilePath) }
     foreach ($r in @($env:ProgramData, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $(if (-not $AllProfiles) { $env:PUBLIC }))) { if ($r -and -not $roots.Contains($r)) { $roots.Add($r) } }
@@ -380,7 +380,7 @@ $script:RS_DbSearch = {
                     if (($at -band 0x00400000) -or ($at -band 0x00040000) -or ($at -band 0x00001000)) { continue }
                     $n++
                     $k = $i.DirectoryName
-                    if (-not $groups.ContainsKey($k)) { $groups[$k] = @{ Kinds = @{}; Count = 0; Bytes = [long]0; Newest = [datetime]::MinValue; Files = New-Object System.Collections.Generic.List[string]; Open = 0 } }
+                    if (-not $groups.ContainsKey($k)) { $groups[$k] = @{ Kinds = @{}; Count = 0; Bytes = [long]0; Newest = [datetime]::MinValue; Files = [System.Collections.Generic.List[string]]::new(); Open = 0 } }
                     $g = $groups[$k]
                     $g.Kinds[$kinds[$ext]] = 1; $g.Count++; $g.Bytes += $i.Length
                     if ($i.LastWriteTime -gt $g.Newest) { $g.Newest = $i.LastWriteTime }
@@ -423,7 +423,7 @@ function Start-HMDbSearch {
     }
     Invoke-HMTool -Title 'Datenbanken suchen' -Computer $c -TimeoutSec 900 -ArgumentList @($pp, $all) -Script $script:RS_DbSearch -OnResult {
         param($r, $comp)
-        $rows = New-Object System.Collections.Generic.List[object]
+        $rows = [System.Collections.Generic.List[object]]::new()
         $ordRx = { param($o) if ($o -match '\\AppData\\Roaming\\') { 'AppData Roaming' } elseif ($o -match '\\AppData\\Local\\') { 'AppData Local' } elseif ($o -match '^[A-Za-z]:\\Users\\') { 'Profil' } elseif ($o -match '\\ProgramData\\') { 'ProgramData' } elseif ($o -match '\\Program Files') { 'Programmordner' } elseif ($o -match '^[A-Za-z]:\\') { "Laufwerk $($o.Substring(0, 2))" } else { '' } }
         foreach ($x in @($r)) {
             if (-not $x -or -not $x.Typ) { continue }
@@ -454,7 +454,7 @@ function Start-HMDbSearch {
 }
 # Markierte Datenbank-Ordner/-Dienste als neuen Katalog-Eintrag im Editor vorbelegen
 function New-HMDbCatalogEntry([object[]]$Rows) {
-    $items = New-Object System.Collections.Generic.List[object]
+    $items = [System.Collections.Generic.List[object]]::new()
     $svc = @(); $n = 0
     foreach ($r in $Rows) {
         if ("$($r.Dienst)") { $svc += "$($r.Dienst)" }
@@ -505,7 +505,7 @@ function Start-HMBackupSearch {
         }
     } -ArgumentList @($b.Path, $q) -TimeoutSec 900 -State @{ Backup = $b } -OnComplete {
         param($r, $st)
-        $rows = New-Object System.Collections.Generic.List[object]
+        $rows = [System.Collections.Generic.List[object]]::new()
         foreach ($x in @($r)) { if ($x -and $x.Rel) { $rows.Add(@("$($x.Rel)", [long]$x.Size, [datetime]$x.Time)) } }
         if (-not $rows.Count) { Out-Console 'Keine Treffer im Backup.' 'Info'; return }
         Show-DataGridWindow -Title "Suche im Backup - $($st.Backup.Name)" -Columns @('Pfad', 'Groesse', 'Geaendert') -ColumnTypes @{ Groesse = [long]; Geaendert = [datetime] } -Rows $rows.ToArray() `

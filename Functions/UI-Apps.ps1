@@ -156,6 +156,7 @@ function Show-HMAppCatalog {
     Show-DataGridWindow -Title "Programm-Katalog - $(Get-TargetComputer)" -Columns @('Status', 'Programm', 'Version', 'Uebertragbar', 'Nicht_uebertragbar', 'Lizenz uebertragen', 'Lizenz-Hinweis', 'DB', 'Schliessen', 'Modul', 'Paket', 'Nacharbeit', 'Geprueft', 'Id') -Rows $rows.ToArray() `
         -Sort 'Status DESC, Programm ASC' -CountText "$n von $($rows.Count) Katalog-Programmen installiert - eigene Eintraege: Config\apps.json" -Width 1600 -Height 640 `
         -Actions @(
+            @{ Text = '+ Programm hinzufuegen ...'; Color = '#FFA6E3A1'; NoSelection = $true; Handler = { param($sel, $w, $c) Start-HMAppWizard } }
             @{ Text = 'Katalog bearbeiten ...'; Color = '#FFCBA6F7'; NoSelection = $true; Handler = { param($sel, $w, $c) $id = if (@($sel).Count) { "$(@($sel)[0].Id)" } else { '' }; Show-HMAppEditor -SelectId $id } }
         )
 }

@@ -241,8 +241,19 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <p><span class="ui">Programme</span> (Reiter Backup) erkennt installierte Programme am Quell-PC. Für bekannte Programme werden passende Module eingeblendet und angehakt; die Übersicht zeigt, was übertragbar und was nicht übertragbar ist, welche Lizenz-Hinweise gelten, ob eine Datenbank dabei ist, welches Programm vorher geschlossen wird, was nach dem Restore zu tun ist und ob der Eintrag <b>geprüft</b> ist (Datum). Rechtsklick = nur Übersicht.</p>
   <p>Der Katalog kennt u. a.: Firefox, Chrome, Edge, Microsoft 365, Thunderbird, Notepad++, 7-Zip, VLC, LibreOffice, Acrobat Reader, Foxit, GIMP, Inkscape, Audacity, Paint.NET, IrfanView, Greenshot, OBS, VS Code, KeePass/KeePassXC, FileZilla, PuTTY, WinSCP, mRemoteNG, AnyDesk, TeamViewer, FortiClient VPN, Zotero, Citavi, Obsidian, Arduino, GeoGebra, SketchUp, Autodesk, SMART Notebook, ActivInspire, Untis, Packet Tracer, Zoom, Teams, WinRAR, Total Commander, Beyond Compare, Sublime Text.</p>
   <div class="note tip"><b class="h">Lizenzen mitnehmen</b>Programme mit Lizenzdatei/-schlüssel (z. B. WinRAR <code>rarreg.key</code>, Total Commander <code>wincmd.key</code>, Beyond Compare, Sublime Text) werden mit Lizenz gesichert und sind am neuen PC gleich registriert – Modulname mit <i>(+ Lizenz)</i>. Nicht übertragbar sind Lizenzen, die an Konto oder Hardware gebunden sind (Microsoft 365, Adobe, Autodesk …) – dafür gibt es Hinweise in der Checkliste.</div>
+  <h3 id="programm-hinzufuegen">Programm hinzufügen (Assistent)</h3>
+  <p>Der einfachste Weg, ein weiteres Programm mitzusichern – so wie früher die Programmordner von Hand ins Backup kopiert wurden, nur automatisch:</p>
+  <ol>
+    <li>Oben PC und Benutzer wählen (<span class="ui">Verbinden</span>), dann <span class="ui">Programme</span> › <span class="ui g">+ Programm hinzufuegen …</span> (oder im Editor).</li>
+    <li>Programm aus der Liste der <b>installierten Programme</b> wählen. Ist es schon im Katalog, bietet HUMig an, den vorhandenen Eintrag zu bearbeiten.</li>
+    <li>HUMig sucht am PC Ordner und Registry-Schlüssel mit dem Programm- oder Herstellernamen: AppData Roaming/Local/LocalLow, Dokumente, ProgramData, <code>HKCU\Software</code>, <code>HKLM\SOFTWARE</code> und im Programmordner Unterordner für Plug-ins/Add-ins, Vorlagen und Konfiguration sowie Lizenzdateien. Jeder Vorschlag steht mit Größe da – <b>Haken setzen oder entfernen</b>. Caches, Logs und Temp-Ordner werden automatisch ausgelassen.</li>
+    <li>„Programm vor Backup und Restore schließen“ ist mit dem Prozessnamen vorbelegt (aus dem Programmordner bzw. laufenden Programmen).</li>
+    <li><span class="ui g">Speichern</span> – ab sofort wird das Programm erkannt und mitgesichert. <span class="ui m">Erweitert (Editor) …</span> öffnet den Eintrag stattdessen im Editor zum Verfeinern.</li>
+  </ol>
+  <div class="note warn"><b class="h">Vorschläge prüfen</b>Die Suche arbeitet mit Ordnernamen. Bei den meisten Programmen stimmt das; heißt ein Ordner ganz anders, findet der Assistent ihn nicht (dann im Editor von Hand ergänzen) – ein Herstellerordner kann auch mehrere Programme enthalten (ist dann nicht vorausgewählt). Maschinen-Einträge (Programmordner, HKLM) passen meist nur bei gleicher Programmversion und brauchen für den Restore Administratorrechte. Mit dem Assistenten angelegte Einträge gelten als <i>ungeprüft</i>.</div>
+
   <h3 id="katalog-editor">Katalog bearbeiten</h3>
-  <p>Im Fenster <span class="ui">Programme</span> (oder Einstellungen › Module) öffnet <span class="ui m">Katalog bearbeiten …</span> den Editor. Links alle Einträge mit Suche und Filter (<i>am PC erkannt, geprüft, ungeprüft, nur Hinweis, eigene, geändert</i>), rechts die Reiter:</p>
+  <p>Im Fenster <span class="ui">Programme</span> (oder Einstellungen › Module) öffnet <span class="ui m">Katalog bearbeiten …</span> den Editor (für Feinheiten – neue Programme am einfachsten mit dem <a href="#programm-hinzufuegen">Assistenten</a>, im Editor <span class="ui g">+ Programm hinzufuegen …</span>; <span class="ui b">+ Leer</span> legt einen leeren Eintrag an). Links alle Einträge mit Suche und Filter (<i>am PC erkannt, geprüft, ungeprüft, nur Hinweis, eigene, geändert</i>), rechts die Reiter:</p>
   <table>
     <tr><th style="width:190px">Reiter</th><th>Inhalt</th></tr>
     <tr><td>Allgemein</td><td>Id (<code>App_…</code>), Name, <b>Erkennung</b> (regulärer Ausdruck auf den Programmnamen in <i>Apps &amp; Features</i>) mit <span class="ui t">Testen am PC</span>, Paket der Softwareverteilung mit <span class="ui t">Testen</span>, optional vorhandene Module mitverwenden</td></tr>
@@ -279,7 +290,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <div class="note tip"><b class="h">Anderes Laufwerk am neuen PC</b>Liegt eine Datenbank (oder ein Zusätzlicher Ordner) z. B. auf <code>D:\Daten</code> und gibt es am neuen PC kein Laufwerk D:, meldet der Restore das verständlich als Warnung – die Daten bleiben im Backup und können von Hand an einen anderen Ort kopiert werden.</div>
 
   <h3>Eigene Programme</h3>
-  <p>Am einfachsten im Editor (<span class="ui b">+ Neu</span>). Von Hand in <code>Config\apps.json</code> (Aufbau wie <code>apps.default.json</code>, Felder siehe <code>_Info</code> dort), z. B. mit Lizenzdatei:</p>
+  <p>Am einfachsten mit dem <a href="#programm-hinzufuegen">Assistenten</a> oder im Editor. Von Hand in <code>Config\apps.json</code> (Aufbau wie <code>apps.default.json</code>, Felder siehe <code>_Info</code> dort), z. B. mit Lizenzdatei:</p>
   <p><code>{ "Apps": [ { "Id": "App_MeinTool", "Name": "Mein Tool", "Detect": "^Mein Tool", "Items": [ { "Type": "Files", "Name": "LIC", "Path": "{PROGRAMFILES}\\MeinTool", "Filter": [ "*.lic" ], "License": true } ] } ] }</code></p>
 </section>
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.29 - 2026-09-29
+### Neu
+- Assistent **Programm hinzufuegen** (Programme > *+ Programm hinzufuegen ...*, auch im Katalog-Editor): installiertes Programm waehlen, HUMig schlaegt Ordner (AppData, Dokumente, ProgramData), Registry-Schluessel (HKCU/HKLM) sowie Plug-ins, Vorlagen, Konfiguration und Lizenzdateien im Programmordner vor - mit Groesse zum Abhaken; Caches/Logs automatisch ausgelassen; Erkennung und Programm-Schliessen automatisch vorbelegt; Speichern oder im Editor verfeinern
+### Verbessert
+- Katalog-Editor: Knopf *+ Programm hinzufuegen ...* (Assistent), *+ Leer* fuer einen leeren Eintrag; Platzhalter-Umwandlung fuer Profile am Remote-PC ohne lokales Laufwerk
+
 ## v2.0.28 - 2026-09-29
 ### Neu
 - Werkzeug **Datenbanken suchen**: lokale Datenbanken (SQLite, Access, KeePass, SQL Server, Firebird) und Datenbank-Dienste am PC finden, je Ordner mit Art, Ort, Groesse, Datum und *Geoeffnet*; uebernehmen als Zusaetzliche Ordner oder als Katalog-Eintrag (Editor vorausgefuellt); auch im Benutzer-Modus
