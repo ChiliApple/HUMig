@@ -171,7 +171,7 @@ Pakete in den Ordner `Softwareverteilung\` legen (oder im Fenster *Datei hinzufu
 Das Tool liest die Installer aus und schlaegt die Silent-Parameter vor (MSI-Eigenschaften, Inno Setup, NSIS, WiX Burn, InstallShield,
 Advanced Installer, Squirrel, 7-Zip-SFX - bei unbekanntem Framework nur geraten, Herstellerdoku pruefen). Pro Paket gespeichert:
 Name, Installer, Parameter, Erkennung (ProductCode oder Name + Mindestversion), Erfolgs-ExitCodes, Timeout.
-Installiert wird auf dem **gewaehlten Computer** oder auf **mehreren PCs** (bis zu 8 gleichzeitig); bereits installierte werden uebersprungen.
+Installiert wird auf dem **gewaehlten Computer** oder auf **mehreren PCs** (Auswahl aus dem AD mit OU/Filter oder Namen eintragen; bis zu 8 gleichzeitig); bereits installierte werden uebersprungen.
 
 **Installierte Software** (Werkzeuge): Liste des gewaehlten Computers mit Filter, CSV und Drucken. Markierte Programme
 lassen sich direkt **deinstallieren** (nacheinander, still, ohne automatischen Neustart): MSI per `msiexec /x`, sonst der
@@ -190,7 +190,7 @@ oder **Setup** (Silent-Parameter, Erfolgs-ExitCodes, Timeout), *nur passende Har
 **Treiber erzwingen** (nur INF: diese Version auch ueber einen neueren/besser bewerteten Treiber, per `UpdateDriverForPlugAndPlayDevices` mit Force).
 Das Tool liest die INF-Dateien (Klasse, Anbieter, Version, Hardware-IDs) und vergleicht am Ziel-PC mit den Geraeten
 (`Win32_PnPEntity`) und dem aktiven Treiber (`Win32_PnPSignedDriver`): *Am gewaehlten PC pruefen* zeigt das ohne Installation;
-beim Verteilen (gewaehlter Computer, mehrere PCs oder Mehrfachaktion, bis zu 8 gleichzeitig) werden PCs ohne passende Hardware
+beim Verteilen (gewaehlter Computer, mehrere PCs aus der AD-Auswahl oder Mehrfachaktion, bis zu 8 gleichzeitig) werden PCs ohne passende Hardware
 bzw. mit derselben aktiven Version uebersprungen. Ergebnis je PC mit aktiver Version und Neustart-Hinweis, Log `C:\Windows\Temp\HU_DRV_*.log`.
 Hinweis: Windows Update/Intune koennen einen erzwungenen aelteren Treiber spaeter ersetzen - Treiber-Updates dort steuern.
 
