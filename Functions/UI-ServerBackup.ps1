@@ -810,28 +810,33 @@ function Invoke-HMSbEject {
     if (-not $d) { return }
     $L = $d.Letter
     try { Write-VolumeCache -DriveLetter $L -ErrorAction Stop; Out-Console "Schreibcache von ${L}: geleert" 'Info' } catch { Out-Console "Schreibcache ${L}: $($_.Exception.Message)" 'Warning' }
-    try {
-        $sh = New-Object -ComObject Shell.Application
-        $item = $sh.Namespace(17).ParseName("${L}:")
-        if ($item) { $item.InvokeVerb('Eject') }
-    } catch { Out-Console "Auswerfen: $($_.Exception.Message)" 'Warning' }
-    $script:SbEjectLetter = $L
-    $script:SbEjectLabel = $d.Label
-    $t = New-Object System.Windows.Threading.DispatcherTimer
-    $t.Interval = [TimeSpan]::FromSeconds(4)
-    $t.Add_Tick({
-        param($src)
-        $src.Stop()
-        $L = $script:SbEjectLetter
-        if (Test-Path -LiteralPath "${L}:\") {
-            Out-Console "Platte ${L}: ($($script:SbEjectLabel)) wurde von Windows NICHT ausgeworfen (wird noch verwendet?). Schreibcache ist geleert - Explorer: Rechtsklick > Auswerfen, oder Datentraegerverwaltung > Offline." 'Warning'
-        } else {
-            Out-Console "Platte $($script:SbEjectLabel) ausgeworfen - kann jetzt abgezogen werden." 'Success'
+    # Sicher entfernen ueber die Geraeteverwaltung (CM_Request_Device_Eject) - liefert den Grund, falls Windows ablehnt
+    Invoke-AsyncCommand -ScriptBlock {
+        param($eng, $L)
+        . $eng
+        $disk = Get-Partition -DriveLetter $L -ErrorAction Stop | Get-Disk -ErrorAction Stop
+        if ($disk.IsBoot -or $disk.IsSystem) { throw 'System-/Startplatte' }
+        $r = Invoke-HMSbDiskEjectRetry -Number $disk.Number -Tries 2 -WaitSec 5
+        [pscustomobject]@{ Number = [int]$disk.Number; Result = $r }
+    } -ArgumentList @($script:SbEngine, $L) -TimeoutSec 90 -State $d -BusyTag 'Sb' -BusyText 'Platte wird ausgeworfen ...' -OnComplete {
+        param($r, $d)
+        if ($r -is [string]) { Out-Console "Auswerfen von $($d.Letter): ($($d.Label)): $r" 'Warning'; Update-HMSbDrives; return }
+        if (-not $r.Result) {
+            Out-Console "Platte $($d.Label) ausgeworfen - kann jetzt abgezogen werden." 'Success'
             [System.Media.SystemSounds]::Asterisk.Play()
+            Update-HMSbDrives
+            return
         }
-        Update-HMSbDrives
-    })
-    $t.Start()
+        Out-Console "Platte $($d.Label) wurde von Windows NICHT ausgeworfen: $($r.Result)" 'Warning'
+        if (Confirm-Action "Die Platte $($d.Letter): $($d.Label) laesst sich nicht auswerfen:`n$($r.Result)`n`nStattdessen OFFLINE schalten? (Windows trennt das Volume sofort, die Platte kann danach abgezogen werden.`nWieder online: ""Aktualisieren"" oder der naechste geplante Lauf.)" 'Auswerfen') {
+            Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $lb) . $eng; Set-HMSbDiskOffline -Number $n -Label $lb; 'OK' } -ArgumentList @($script:SbEngine, $r.Number, "$($d.Label)") -TimeoutSec 60 -State $d -BusyTag 'Sb' -BusyText 'Platte wird offline geschaltet ...' -OnComplete {
+                param($x, $d)
+                if ("$x" -eq 'OK') { Out-Console "Platte $($d.Label) offline geschaltet - kann jetzt abgezogen werden." 'Success'; [System.Media.SystemSounds]::Asterisk.Play() }
+                else { Out-Console "Offline schalten von $($d.Label) fehlgeschlagen: $x" 'Error' }
+                Update-HMSbDrives
+            }
+        } else { Update-HMSbDrives }
+    }
 }
 
 function Show-HMSbVersions {

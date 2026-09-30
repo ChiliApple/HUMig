@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.51 - 2026-09-30
+### Behoben
+- Server-Backup *Auswerfen*: warf die Platte auf manchen Servern nicht aus (Explorer-Befehl). Jetzt ueber die Geraeteverwaltung (CM_Request_Device_Eject, zweiter Versuch nach 5 s) mit Grund, falls Windows ablehnt (z. B. Dateien noch geoeffnet), und Angebot, die Platte stattdessen offline zu schalten
+- *Nach Sicherung: auswerfen*: drei Versuche im Abstand von 10 s, danach wird die Platte offline geschaltet
+
 ## v2.0.50 - 2026-09-30
 ### Verbessert
 - Reiter Restore: Knopf **Im Backup suchen ...** neben *Vergleichen ...* (sucht im markierten Backup)
