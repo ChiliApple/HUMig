@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.52 - 2026-09-30
+### Neu
+- Server-Backup **Host-System**: Pruefung, ob VMs Dateien auf C: haben (virtuelle Festplatten = werden mitgesichert, Warnung; nur Konfiguration = Hinweis) - Zeile unter *Host-System mitsichern* (orange, Details im Tooltip), Konsole beim Anhaken, Startabfrage, Zeitplan-Dialog und Protokoll des Laufs
+- Server-Backup schreibt jeden Lauf in die **Ereignisanzeige** (Anwendung, Quelle HUMig): ID 1000 OK, 1001 Warnung, 1002 Fehler - auch geplante Laeufe ohne Platte/Profil
+
 ## v2.0.51 - 2026-09-30
 ### Behoben
 - Server-Backup *Auswerfen*: warf die Platte auf manchen Servern nicht aus (Explorer-Befehl). Jetzt ueber die Geraeteverwaltung (CM_Request_Device_Eject, zweiter Versuch nach 5 s) mit Grund, falls Windows ablehnt (z. B. Dateien noch geoeffnet), und Angebot, die Platte stattdessen offline zu schalten
