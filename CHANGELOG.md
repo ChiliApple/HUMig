@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.49 - 2026-09-30
+### Verbessert
+- Server-Backup, Bereich *Platten / Verlauf des Profils* uebersichtlicher: je Platte eine Zeile (farbiger Punkt, Bezeichnung, Datum, Alter) getrennt nach *Rotation* und *Archiv*, Markierungen *naechste laut Rotation*, *faellig* / *naechste in ... Tagen*, *letzter Lauf fehlgeschlagen*; Warnungen als farbige Hinweiszeilen; groessere Schrift
+
 ## v2.0.48 - 2026-09-30
 ### Neu
 - Server-Backup: **Nach Sicherung** je Platte (Auswahl neben *Auswerfen*, gespeichert im Profil als `DiskAfter`, gilt auch fuer den Zeitplan): *nichts tun*, *auswerfen* (CM_Request_Device_Eject - funktioniert auch ohne Anmeldung als SYSTEM) oder *offline schalten* (Set-Disk -IsOffline); Anzeige in der Zeile unter der Ziel-Platte und in der Startabfrage

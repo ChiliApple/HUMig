@@ -474,12 +474,178 @@ function Remove-HMSbRuns([string[]]$Keys, $Owner = $null) {
     Out-Console "Server-Backup: $($Keys.Count) Lauf/Laeufe aus dem Verlauf entfernt ($n Eintraege in Tool-Ordner/Platten)" 'Success'
     Update-HMSbHistory
 }
+# ----------------------------------------------------------------------------
+# Plattenstatus (rechts oben): Modell + Darstellung
+# ----------------------------------------------------------------------------
+function Format-HMSbAge([int]$Age) {
+    if ($Age -le 0) { return 'heute' }
+    if ($Age -eq 1) { return 'vor 1 Tag' }
+    return "vor $Age Tagen"
+}
+function Get-HMSbDiskStatus($p, $mine) {
+    $mine = @($mine)
+    $now = Get-Date
+    $labels = @(1..$p.Disks | ForEach-Object { "$($p.DiskPrefix)-$_" })
+    $arcLabels = @(); if ($p.ArchiveDisks -gt 0) { $arcLabels = @(1..$p.ArchiveDisks | ForEach-Object { "$($p.DiskPrefix)-A$_" }) }
+    foreach ($x in @($mine | ForEach-Object { "$($_.Disk)" } | Where-Object { $_ } | Select-Object -Unique)) {
+        if (Test-HMSbArchiveLabel $x $p.DiskPrefix) { if ($arcLabels -notcontains $x) { $arcLabels += $x } }
+        elseif ($labels -notcontains $x) { $labels += $x }
+    }
+    $mkRows = {
+        param($list, [bool]$arc)
+        $out = @()
+        foreach ($lb in $list) {
+            $last = @($mine | Where-Object { "$($_.Disk)" -eq $lb -and "$($_.Status)" -ne 'Error' })[0]
+            $any = @($mine | Where-Object { "$($_.Disk)" -eq $lb })[0]
+            $dt = if ($last) { Get-HMSbDate "$($last.Date)" } else { $null }
+            $age = if ($dt) { [int][Math]::Floor(($now - $dt).TotalDays) } else { $null }
+            $tags = New-Object System.Collections.Generic.List[object]
+            if ($any -and "$($any.Status)" -eq 'Error') { $tags.Add([pscustomobject]@{ Text = 'letzter Lauf fehlgeschlagen'; Color = '#FFF38BA8' }) }
+            $out += [pscustomobject]@{ Label = $lb; Archive = $arc; Date = $dt; Age = $age; Dot = '#FF6C7086'; Tags = $tags }
+        }
+        return $out
+    }
+    $rot = @(& $mkRows $labels $false)
+    $arcRows = @(& $mkRows $arcLabels $true)
+    $hints = @()
+    # Rotation: Punkt gruen / orange (aelter als Warnfrist) / grau (nie); naechste = am laengsten nicht verwendet
+    $next = $null
+    foreach ($r in $rot) {
+        if ($null -ne $r.Age) { $r.Dot = $(if ($r.Age -gt $p.WarnDays) { '#FFFAB387' } else { '#FFA6E3A1' }) }
+        if (-not $next) { $next = $r; continue }
+        if ($null -eq $r.Date) { if ($null -ne $next.Date) { $next = $r } }
+        elseif ($null -ne $next.Date -and $r.Date -lt $next.Date) { $next = $r }
+    }
+    if ($next -and $rot.Count -gt 1) { $next.Tags.Insert(0, [pscustomobject]@{ Text = 'naechste laut Rotation'; Color = '#FF89B4FA' }) }
+    $lastOk = @($mine | Where-Object { "$($_.Status)" -ne 'Error' })[0]
+    if (-not $lastOk) { $hints += [pscustomobject]@{ Text = "Noch keine erfolgreiche Sicherung fuer '$($p.Name)'."; Color = '#FFF9E2AF' } }
+    else {
+        $ld = Get-HMSbDate "$($lastOk.Date)"
+        if ($ld) {
+            $age = [int][Math]::Floor(($now - $ld).TotalDays)
+            if ($age -gt $p.WarnDays) { $hints += [pscustomobject]@{ Text = "Letzte erfolgreiche Sicherung vor $age Tagen - aelter als $($p.WarnDays) Tage."; Color = '#FFFAB387' } }
+        }
+    }
+    # Archiv: faellig nach ArchiveDays, Platte = am laengsten nicht verwendet
+    if ($arcRows.Count) {
+        $aLast = $null; $aNext = $null
+        foreach ($r in $arcRows) {
+            if ($r.Date -and (-not $aLast -or $r.Date -gt $aLast)) { $aLast = $r.Date }
+            if (-not $aNext) { $aNext = $r; continue }
+            if ($null -eq $r.Date) { if ($null -ne $aNext.Date) { $aNext = $r } }
+            elseif ($null -ne $aNext.Date -and $r.Date -lt $aNext.Date) { $aNext = $r }
+        }
+        $aAge = if ($aLast) { [int][Math]::Floor(($now - $aLast).TotalDays) } else { $null }
+        $due = ($null -eq $aAge -or $aAge -ge $p.ArchiveDays)
+        foreach ($r in $arcRows) { if ($null -ne $r.Age) { $r.Dot = $(if ($due) { '#FFF9E2AF' } else { '#FFA6E3A1' }) } }
+        if ($due) {
+            $aNext.Tags.Insert(0, [pscustomobject]@{ Text = 'faellig'; Color = '#FFF9E2AF' })
+            $hints += [pscustomobject]@{ Text = "Archiv-Sicherung faellig$(if ($null -ne $aAge) { " (letzte $(Format-HMSbAge $aAge), Abstand $($p.ArchiveDays) Tage)" }): $($aNext.Label) anstecken, sichern, abziehen und getrennt lagern."; Color = '#FFF9E2AF' }
+        } else {
+            $n = $p.ArchiveDays - $aAge
+            $aNext.Tags.Insert(0, [pscustomobject]@{ Text = "naechste in $n Tag$(if ($n -ne 1) { 'en' })"; Color = '#FF94E2D5' })
+        }
+    }
+    return [pscustomobject]@{ Rotation = $rot; Archive = $arcRows; Hints = $hints }
+}
+function New-HMSbTb([string]$Text, [string]$Color, [double]$Size = 12, [switch]$Bold) {
+    $tb = New-Object System.Windows.Controls.TextBlock
+    $tb.Text = $Text
+    $tb.Foreground = New-Brush $Color
+    $tb.FontSize = $Size
+    if ($Bold) { $tb.FontWeight = [System.Windows.FontWeights]::SemiBold }
+    $tb.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $tb.Margin = [System.Windows.Thickness]::new(0, 2, 18, 2)
+    return $tb
+}
+function Add-HMSbCell($Grid, $El, [int]$Row, [int]$Col, [int]$Span = 1) {
+    [System.Windows.Controls.Grid]::SetRow($El, $Row)
+    [System.Windows.Controls.Grid]::SetColumn($El, $Col)
+    if ($Span -gt 1) { [System.Windows.Controls.Grid]::SetColumnSpan($El, $Span) }
+    [void]$Grid.Children.Add($El)
+}
+function Show-HMSbDiskStatus($Model) {
+    $pn = $ui.pnlSbDisks
+    $pn.Children.Clear()
+    if (-not $Model) { return }
+    $g = New-Object System.Windows.Controls.Grid
+    foreach ($w in 1..5) {
+        $cd = New-Object System.Windows.Controls.ColumnDefinition
+        $cd.Width = $(if ($w -eq 5) { [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star) } else { [System.Windows.GridLength]::Auto })
+        $g.ColumnDefinitions.Add($cd)
+    }
+    $row = 0
+    foreach ($grp in @(@{ Title = 'ROTATION'; Sub = ''; Rows = @($Model.Rotation) }, @{ Title = 'ARCHIV'; Sub = 'getrennt vom Server lagern'; Rows = @($Model.Archive) })) {
+        if (-not $grp.Rows.Count) { continue }
+        $rd = New-Object System.Windows.Controls.RowDefinition; $rd.Height = [System.Windows.GridLength]::Auto; $g.RowDefinitions.Add($rd)
+        $h = New-Object System.Windows.Controls.TextBlock
+        $h.Margin = [System.Windows.Thickness]::new(0, $(if ($row) { 8 } else { 0 }), 0, 2)
+        $r1 = New-Object System.Windows.Documents.Run $grp.Title
+        $r1.Foreground = New-Brush '#FFA6ADC8'; $r1.FontSize = 10.5; $r1.FontWeight = [System.Windows.FontWeights]::SemiBold
+        [void]$h.Inlines.Add($r1)
+        if ($grp.Sub) { $r2 = New-Object System.Windows.Documents.Run ("   " + $grp.Sub); $r2.Foreground = New-Brush '#FF6C7086'; $r2.FontSize = 10.5; [void]$h.Inlines.Add($r2) }
+        Add-HMSbCell $g $h $row 0 5
+        $row++
+        foreach ($d in $grp.Rows) {
+            $rd = New-Object System.Windows.Controls.RowDefinition; $rd.Height = [System.Windows.GridLength]::Auto; $g.RowDefinitions.Add($rd)
+            $dot = New-Object System.Windows.Shapes.Ellipse
+            $dot.Width = 9; $dot.Height = 9; $dot.Fill = New-Brush $d.Dot
+            $dot.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+            $dot.Margin = [System.Windows.Thickness]::new(2, 0, 8, 0)
+            Add-HMSbCell $g $dot $row 0
+            Add-HMSbCell $g (New-HMSbTb $d.Label '#FFCDD6F4' -Bold) $row 1
+            if ($d.Date) {
+                Add-HMSbCell $g (New-HMSbTb $d.Date.ToString('dd.MM.yyyy') '#FFCDD6F4') $row 2
+                Add-HMSbCell $g (New-HMSbTb (Format-HMSbAge $d.Age) '#FFA6ADC8') $row 3
+            } else {
+                Add-HMSbCell $g (New-HMSbTb 'noch keine Sicherung' '#FF6C7086') $row 2 2
+            }
+            if ($d.Tags.Count) {
+                $sp = New-Object System.Windows.Controls.WrapPanel
+                $sp.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+                foreach ($t in $d.Tags) {
+                    $chip = New-Object System.Windows.Controls.Border
+                    $chip.BorderBrush = New-Brush $t.Color
+                    $chip.BorderThickness = [System.Windows.Thickness]::new(1)
+                    $chip.CornerRadius = [System.Windows.CornerRadius]::new(3)
+                    $chip.Padding = [System.Windows.Thickness]::new(6, 0, 6, 1)
+                    $chip.Margin = [System.Windows.Thickness]::new(0, 1, 6, 1)
+                    $ct = New-Object System.Windows.Controls.TextBlock
+                    $ct.Text = $t.Text; $ct.Foreground = New-Brush $t.Color; $ct.FontSize = 10.5
+                    $chip.Child = $ct
+                    [void]$sp.Children.Add($chip)
+                }
+                Add-HMSbCell $g $sp $row 4
+            }
+            $row++
+        }
+    }
+    $card = New-Object System.Windows.Controls.Border
+    $card.Background = New-Brush '#FF1E1E2E'
+    $card.CornerRadius = [System.Windows.CornerRadius]::new(4)
+    $card.Padding = [System.Windows.Thickness]::new(10, 6, 10, 6)
+    $card.Margin = [System.Windows.Thickness]::new(0, 2, 0, 4)
+    $card.Child = $g
+    [void]$pn.Children.Add($card)
+    foreach ($hi in @($Model.Hints)) {
+        $b = New-Object System.Windows.Controls.Border
+        $b.BorderBrush = New-Brush $hi.Color
+        $b.BorderThickness = [System.Windows.Thickness]::new(3, 0, 0, 0)
+        $b.Background = New-Brush '#FF1E1E2E'
+        $b.Padding = [System.Windows.Thickness]::new(8, 3, 8, 3)
+        $b.Margin = [System.Windows.Thickness]::new(0, 0, 0, 3)
+        $tb = New-Object System.Windows.Controls.TextBlock
+        $tb.Text = $hi.Text; $tb.Foreground = New-Brush $hi.Color; $tb.FontSize = 12; $tb.TextWrapping = [System.Windows.TextWrapping]::Wrap
+        $b.Child = $tb
+        [void]$pn.Children.Add($b)
+    }
+}
 function Update-HMSbHistory {
     $p = Get-HMSbProfile
     $all = Get-HMSbAllHistory
     $all = @($all)
     $rows = @()
-    if (-not $p) { $ui.dgSbHistory.ItemsSource = $rows; $ui.lblSbDisks.Text = ''; $ui.lblSbHostSystem.Text = ''; return }
+    if (-not $p) { $ui.dgSbHistory.ItemsSource = $rows; Show-HMSbDiskStatus $null; $ui.lblSbHostSystem.Text = ''; return }
     $mine = @($all | Where-Object { "$($_.Profile)" -eq $p.Name })
     foreach ($e in @($mine | Select-Object -First 300)) {
         $hin = "$($e.Note)"
@@ -487,64 +653,8 @@ function Update-HMSbHistory {
         $rows += [pscustomobject]@{ Datum = "$($e.Date)"; Platte = "$($e.Disk)"; Status = (Format-HMSbStatus "$($e.Status)" "$($e.Note)"); Minuten = (Format-HMDuration $e.Minutes); GB = $e.SizeGB; VMs = ((@("$($e.VMs)", $(if ("$($e.Volumes)") { "Laufwerke $($e.Volumes)" })) | Where-Object { $_ }) -join ' | '); Hinweis = $hin; Entry = $e }
     }
     $ui.dgSbHistory.ItemsSource = $rows
-    # Plattenstatus + Rotationsempfehlung
-    $labels = @(1..$p.Disks | ForEach-Object { "$($p.DiskPrefix)-$_" })
-    $arcLabels = @(); if ($p.ArchiveDisks -gt 0) { $arcLabels = @(1..$p.ArchiveDisks | ForEach-Object { "$($p.DiskPrefix)-A$_" }) }
-    foreach ($x in @($mine | ForEach-Object { "$($_.Disk)" } | Where-Object { $_ } | Select-Object -Unique)) {
-        if (Test-HMSbArchiveLabel $x $p.DiskPrefix) { if ($arcLabels -notcontains $x) { $arcLabels += $x } }
-        elseif ($labels -notcontains $x) { $labels += $x }
-    }
-    $parts = @(); $oldest = $null; $oldestDate = [datetime]::MaxValue
-    foreach ($lb in $labels) {
-        $last = @($mine | Where-Object { "$($_.Disk)" -eq $lb -and "$($_.Status)" -ne 'Error' })[0]
-        $dt = if ($last) { Get-HMSbDate "$($last.Date)" } else { $null }
-        if ($dt) {
-            $age = [int][Math]::Floor(((Get-Date) - $dt).TotalDays)
-            $parts += "$lb`: $($dt.ToString('dd.MM.yyyy')) (vor $age Tag$(if ($age -ne 1) { 'en' }))"
-            if ($dt -lt $oldestDate) { $oldestDate = $dt; $oldest = $lb }
-        } else {
-            $parts += "$lb`: noch keine Sicherung"
-            if ($oldestDate -ne [datetime]::MinValue) { $oldestDate = [datetime]::MinValue; $oldest = $lb }
-        }
-    }
-    $t = ($parts -join '   |   ')
-    $lastOk = @($mine | Where-Object { "$($_.Status)" -ne 'Error' })[0]
-    $col = '#FFCDD6F4'
-    if (-not $lastOk) { $t += "`nNoch keine erfolgreiche Sicherung fuer '$($p.Name)'."; $col = '#FFF9E2AF' }
-    else {
-        $ld = Get-HMSbDate "$($lastOk.Date)"
-        if ($ld) {
-            $age = [int][Math]::Floor(((Get-Date) - $ld).TotalDays)
-            if ($age -gt $p.WarnDays) { $t += "`nLetzte erfolgreiche Sicherung vor $age Tagen - aelter als $($p.WarnDays) Tage!"; $col = '#FFFAB387' }
-        }
-    }
-    if ($oldest -and $labels.Count -gt 1) { $t += "`nNaechste Platte laut Rotation: $oldest (am laengsten nicht verwendet)" }
-    if ($arcLabels.Count) {
-        # Archiv: von der Rotation ausgenommen, faellig nach ArchiveDays
-        $ap = @(); $aLast = $null; $aOld = $null; $aOldDate = [datetime]::MaxValue
-        foreach ($lb in $arcLabels) {
-            $last = @($mine | Where-Object { "$($_.Disk)" -eq $lb -and "$($_.Status)" -ne 'Error' })[0]
-            $dt = if ($last) { Get-HMSbDate "$($last.Date)" } else { $null }
-            if ($dt) {
-                $age = [int][Math]::Floor(((Get-Date) - $dt).TotalDays)
-                $ap += "$lb`: $($dt.ToString('dd.MM.yyyy')) (vor $age Tag$(if ($age -ne 1) { 'en' }))"
-                if (-not $aLast -or $dt -gt $aLast) { $aLast = $dt }
-                if ($dt -lt $aOldDate) { $aOldDate = $dt; $aOld = $lb }
-            } else {
-                $ap += "$lb`: noch keine Sicherung"
-                if ($aOldDate -ne [datetime]::MinValue) { $aOldDate = [datetime]::MinValue; $aOld = $lb }
-            }
-        }
-        $t += "`nArchiv (getrennt lagern): " + ($ap -join '   |   ')
-        if (-not $aLast) { $t += "`nArchiv-Sicherung faellig: noch keine - $aOld anstecken und sichern"; if ($col -eq '#FFCDD6F4') { $col = '#FFF9E2AF' } }
-        else {
-            $aAge = [int][Math]::Floor(((Get-Date) - $aLast).TotalDays)
-            if ($aAge -ge $p.ArchiveDays) { $t += "`nArchiv-Sicherung faellig (letzte vor $aAge Tagen, Abstand $($p.ArchiveDays) Tage): $aOld anstecken und sichern"; if ($col -eq '#FFCDD6F4') { $col = '#FFF9E2AF' } }
-            else { $t += "`nNaechste Archiv-Sicherung in $($p.ArchiveDays - $aAge) Tag$(if (($p.ArchiveDays - $aAge) -ne 1) { 'en' }) auf $aOld" }
-        }
-    }
-    $ui.lblSbDisks.Text = $t
-    $ui.lblSbDisks.Foreground = New-Brush $col
+    # Plattenstatus + Rotationsempfehlung + Archiv
+    Show-HMSbDiskStatus (Get-HMSbDiskStatus $p $mine)
     $hs = @($mine | Where-Object { $_.HostSystem -eq $true })[0]
     $ui.lblSbHostSystem.Text = $(if ($hs) { "letzte Host-System-Sicherung: $($hs.Date) auf $($hs.Disk)" } else { 'noch keine Host-System-Sicherung' })
 }

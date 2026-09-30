@@ -518,8 +518,8 @@
                             <Border Grid.Column="2" Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Top" Text="PLATTEN / VERLAUF DES PROFILS" Style="{StaticResource SectionLabel}"/>
-                                    <TextBlock x:Name="lblSbDisks" DockPanel.Dock="Top" Text="" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,2"/>
-                                    <TextBlock x:Name="lblSbSchedule" DockPanel.Dock="Top" Text="" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatMauve}" Margin="0,0,0,6"/>
+                                    <StackPanel x:Name="pnlSbDisks" DockPanel.Dock="Top" Margin="0,0,0,2"/>
+                                    <TextBlock x:Name="lblSbSchedule" DockPanel.Dock="Top" Text="" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource CatMauve}" Margin="2,2,0,8"/>
                                     <DataGrid x:Name="dgSbHistory" Style="{StaticResource DarkGrid}" ToolTip="Doppelklick = Bericht des Laufs oeffnen (Details, wbadmin-Ausgabe, Pruefung)">
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="Auto"/>

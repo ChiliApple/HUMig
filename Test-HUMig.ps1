@@ -42,7 +42,7 @@ T 'XAML MainWindow laden' {
     $w = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $x))
     $need = 'cmbComputer', 'cmbUser', 'btnBackup', 'btnRestore', 'dgBackups', 'rtbConsole', 'pnlBackupModules', 'pnlRestoreModules', 'imgLogo', 'pbMain',
         'lblSizeTotal', 'lstExclude', 'btnBigFiles', 'chkIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport', 'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag',
-        'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnReinstall', 'btnADDevices', 'btnBackupSchedule', 'lblBackupSchedule', 'btnToolDrvDeploy', 'btnSbConflicts', 'dotBusy', 'dotSbBusy', 'lblSbBusy', 'cmbSbAfter'
+        'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnReinstall', 'btnADDevices', 'btnBackupSchedule', 'lblBackupSchedule', 'btnToolDrvDeploy', 'btnSbConflicts', 'dotBusy', 'dotSbBusy', 'lblSbBusy', 'cmbSbAfter', 'pnlSbDisks'
     $miss = @($need | Where-Object { -not $w.FindName($_) })
     if ($miss.Count) { throw "fehlt: $($miss -join ', ')" }
     $true
