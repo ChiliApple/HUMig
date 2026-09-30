@@ -40,6 +40,7 @@ try { if ((Get-Content -LiteralPath (Join-Path $root 'HUMig.ps1') -Raw -Encoding
 
 function Add-HMSbTaskError([string]$Note, [string]$Disk = '') {
     Write-HMSbLog $Note 'Error'
+    Write-HMSbEvent 'Error' "Geplantes Server-Backup '$ProfileName' auf $env:COMPUTERNAME FEHLGESCHLAGEN: $Note`nProtokoll: $($script:TaskLog)`nHUMig $version"
     try {
         Add-HMSbHistory $localHist ([pscustomobject][ordered]@{
             Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Profile = $ProfileName; Host = $env:COMPUTERNAME; Disk = $Disk; DiskSerial = ''

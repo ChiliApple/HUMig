@@ -480,6 +480,48 @@ public static class HMSbEject {
     if (-not $dd) { throw "Datentraeger $Number nicht gefunden" }
     return [HMSbEject]::Eject("$($dd.PNPDeviceID)")
 }
+# Ereignisanzeige (Anwendung, Quelle HUMig): 1000 = OK, 1001 = Warnung, 1002 = Fehler - fuer Ueberwachung/Benachrichtigung
+function Write-HMSbEvent([string]$Status, [string]$Message) {
+    try {
+        $exists = $false
+        try { $exists = [System.Diagnostics.EventLog]::SourceExists('HUMig') } catch { }
+        if (-not $exists) { New-EventLog -LogName Application -Source 'HUMig' -ErrorAction Stop }
+        $type = switch ($Status) { 'OK' { 'Information' } 'Warning' { 'Warning' } default { 'Error' } }
+        $id = switch ($Status) { 'OK' { 1000 } 'Warning' { 1001 } default { 1002 } }
+        if ($Message.Length -gt 30000) { $Message = $Message.Substring(0, 30000) }
+        Write-EventLog -LogName Application -Source 'HUMig' -EntryType $type -EventId $id -Message $Message -ErrorAction Stop
+    } catch { }
+}
+# VMs mit Dateien auf dem Systemlaufwerk (werden beim Host-System / -allCritical beruehrt)
+# $Vms: Objekte mit Name, Paths (virtuelle Festplatten), VmPath, ConfigPath
+function Get-HMSbSysDriveVms($Vms, [string]$SysDrive = $env:SystemDrive) {
+    $sd = "$SysDrive".TrimEnd('\').ToUpper() + '\'
+    $out = @()
+    foreach ($v in @($Vms)) {
+        if (-not $v -or -not "$($v.Name)") { continue }
+        $disks = @(@($v.Paths) | Where-Object { "$_".ToUpper().StartsWith($sd) } | ForEach-Object { "$_" })
+        $cfg = @(@("$($v.VmPath)", "$($v.ConfigPath)") | Where-Object { "$_".ToUpper().StartsWith($sd) } | Select-Object -Unique)
+        if ($disks.Count -or $cfg.Count) { $out += [pscustomobject]@{ Name = "$($v.Name)"; Disks = $disks; Config = $cfg; ConfigOnly = (-not $disks.Count) } }
+    }
+    return $out
+}
+function Format-HMSbSysDriveVms($List, [string]$SysDrive = $env:SystemDrive) {
+    $l = @($List | Where-Object { $_ })
+    if (-not $l.Count) { return '' }
+    $sd = "$SysDrive".TrimEnd('\').ToUpper()
+    $t = @()
+    $a = @($l | Where-Object { -not $_.ConfigOnly })
+    $b = @($l | Where-Object { $_.ConfigOnly })
+    if ($a.Count) {
+        $t += "ACHTUNG - virtuelle Festplatten auf ${sd} - diese VMs werden beim Host-System mitgesichert (deutlich mehr Zeit und Platz, die VM wird dabei evtl. kurz angehalten):"
+        foreach ($x in $a) { $t += "  $($x.Name): $(@($x.Disks) -join ', ')" }
+    }
+    if ($b.Count) {
+        $t += "Hinweis - nur VM-Konfiguration auf ${sd} (klein): $(@($b | ForEach-Object { $_.Name }) -join ', ')"
+        $t += "  Ob die Windows Server-Sicherung diese VMs beim Host-System ganz mitnimmt, ist nicht sicher - nach dem ersten Lauf wbadmin-HostSystem.log im Berichtsordner pruefen."
+    }
+    return ($t -join "`n")
+}
 # Veto-Grund von CM_Request_Device_Eject lesbar machen (PNP_VETO_TYPE)
 function Format-HMSbVeto([string]$Result) {
     if ($Result -notmatch 'Veto (\d+)') { return $Result }
@@ -1086,6 +1128,11 @@ function Start-HMServerBackup {
         if ($Ctx.HostSystem) {
             $Job.Status = 'Host-System: wird vorbereitet ...'
             Write-HMSbLog "wbadmin: Host-System (alle kritischen Volumes, Bare-Metal) -> $target" 'Header'
+            try {
+                $sv = @(Get-VM -ErrorAction Stop | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Paths = @(Get-VMHardDiskDrive -VM $_ -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Path)" }); VmPath = "$($_.Path)"; ConfigPath = "$($_.ConfigurationLocation)" } })
+                $svt = Format-HMSbSysDriveVms (Get-HMSbSysDriveVms $sv)
+                if ($svt) { foreach ($ln in ($svt -split "`n")) { Write-HMSbLog $ln 'Warning' } }
+            } catch { }
             $r2 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -allCritical -quiet" -Phase 'Host-System' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-HostSystem.log') -Job $Job
             if ($Job.Cancel) {
                 Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
@@ -1135,6 +1182,7 @@ function Start-HMServerBackup {
     $Job.Progress = 100
     $lvl = switch ($status) { 'OK' { 'Success' } 'Warning' { 'Warning' } default { 'Error' } }
     Write-HMSbLog ("SERVER-BACKUP {0}: {1} in {2} - Bericht: {3}" -f $Ctx.Profile, $(switch ($status) { 'OK' { if ($notes.Count) { 'erfolgreich (mit Hinweis - siehe Bericht)' } else { 'erfolgreich' } } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }), (Format-HMDuration $dur), (Join-Path $rep 'Bericht.html')) $lvl
+    Write-HMSbEvent $status ("Server-Backup '{0}' auf {1}: {2}`nPlatte: {3}`nVMs: {4}{5}`nHost-System: {6}`nDauer: {7}{8}`nBericht: {9}`nHUMig {10}" -f $Ctx.Profile, $env:COMPUTERNAME, $(switch ($status) { 'OK' { 'erfolgreich' } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }), "$($Ctx.DiskLabel)", $(if ($vms.Count) { $vms -join ', ' } else { '-' }), $(if ($vols.Count) { "`nLaufwerke: $($vols -join ', ')" } else { '' }), $(if ($Ctx.HostSystem) { $(if ($hostSysOk) { 'ja' } else { 'FEHLER' }) } else { 'nein' }), (Format-HMDuration $dur), $(if ($notes.Count) { "`nHinweis: $($notes -join '; ')" } else { '' }), (Join-Path $rep 'Bericht.html'), "$($Ctx.Version)")
     # Nach der Sicherung: Platte auswerfen / offline schalten (Einstellung je Platte)
     if ("$($Ctx.After)") { $Job.Status = 'Platte'; Invoke-HMSbAfterBackup -Letter $L -Mode "$($Ctx.After)" -Label "$($Ctx.DiskLabel)" }
     $script:SbRunLog = $null

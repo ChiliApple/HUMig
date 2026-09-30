@@ -233,6 +233,8 @@ Reiter **Server-Backup** (als Administrator auf Windows Server - Hyper-V-Host: V
 - **Bericht je Lauf** (`Bericht.html`, Doppelklick im Verlauf): Status mit Erklaerung, Hinweise mit "Was tun", alle Dateien als Links mit Erklaerung, komplettes Protokoll. *wbadmin* = Befehlszeile der Windows Server-Sicherung, die HUMig aufruft
 - **Offline-Hinweis**: VMs, die Hyper-V nur offline sichern kann (z.B. dynamische Datentraeger im Gast), werden markiert, vor dem Start gemeldet und der Grund steht im Bericht
 - **Zeitplan**: einmalig, taeglich oder woechentlich als geplante Aufgabe (SYSTEM, ohne Anmeldung) - z.B. grosse VMs ueber Nacht
+- **Ereignisanzeige**: jeder Lauf schreibt ins Protokoll *Anwendung*, Quelle `HUMig` - ID 1000 OK, 1001 Warnung, 1002 Fehler (Ueberwachung der Nachtsicherung)
+- **Host-System-Pruefung**: VMs mit Dateien auf C: werden angezeigt (werden beim Host-System mitgesichert)
 - **Zeitplan-Pruefung**: sucht in der ganzen Aufgabenplanung nach anderen Sicherungsaufgaben (frei definierbare Suchwoerter, Standard *backup, sicherung, wbadmin, veeam, acronis*, `-Wort` schliesst aus) und Zeitplaenen anderer Profile; Ueberschneidungen in den naechsten 14 Tagen werden beim Planen gemeldet
 - **Nur ein Vorgang gleichzeitig**: vor dem Start prueft HUMig auf eine laufende Sicherung/Wiederherstellung am Host - manuell mit Rueckfrage, im Zeitplan automatisch warten (hoechstens 8 h); meldet wbadmin trotzdem einen weiteren Vorgang, bis zu zwei neue Versuche
 - **Verlauf pflegen**: Rechtsklick im Verlauf entfernt markierte oder alle fehlgeschlagenen Laeufe (Sicherung und Bericht auf der Platte bleiben); abgebrochene Laeufe stehen mit Status *Fehler* und Bericht im Verlauf; Dauer lesbar (z.B. *6 h 12 min*)

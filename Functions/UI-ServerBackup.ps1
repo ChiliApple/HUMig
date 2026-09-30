@@ -293,6 +293,7 @@ function Update-HMSbVms {
         $ui.chkSbHostSystem.Content = $(if ($script:SbHyperV) { 'Host-System mitsichern (nur der Host: C:, Boot/EFI - fuer Bare-Metal-Wiederherstellung)' } else { 'System dieses Servers mitsichern (C:, Boot/EFI - fuer Bare-Metal-Wiederherstellung)' })
         $ui.lblSbHost.Text = "$(if ($script:SbHyperV) { 'Hyper-V-Host' } else { 'Server (kein Hyper-V)' }) $env:COMPUTERNAME - $($script:SbVms.Count) VM(s), $($script:SbVols.Count) Laufwerk(e)" + $(if ($script:SbPrereq) { " - Windows Server-Sicherung: $(if ($script:SbPrereq.Feature -eq $false -or -not $script:SbPrereq.Wbadmin) { 'FEHLT' } else { 'OK' })" } else { '' })
         Set-HMSbFromProfile
+        Update-HMSbHostSysInfo
     }
 }
 function Format-HMSbDrive($d) {
@@ -657,6 +658,21 @@ function Update-HMSbHistory {
     Show-HMSbDiskStatus (Get-HMSbDiskStatus $p $mine)
     $hs = @($mine | Where-Object { $_.HostSystem -eq $true })[0]
     $ui.lblSbHostSystem.Text = $(if ($hs) { "letzte Host-System-Sicherung: $($hs.Date) auf $($hs.Disk)" } else { 'noch keine Host-System-Sicherung' })
+    Update-HMSbHostSysInfo
+}
+# Host-System: VMs mit Dateien auf C: anzeigen (Zeile unter "Host-System mitsichern")
+function Update-HMSbHostSysInfo {
+    $base = "$($ui.lblSbHostSystem.Text)" -replace '\s+\|\s+(ACHTUNG|Hinweis):.*$', ''
+    $l = @(Get-HMSbSysDriveVms $script:SbVms)
+    $a = @($l | Where-Object { -not $_.ConfigOnly })
+    $b = @($l | Where-Object { $_.ConfigOnly })
+    $sd = "$env:SystemDrive".TrimEnd('\').ToUpper()
+    $col = '#FF6C7086'
+    if ($a.Count) { $base += "   |   ACHTUNG: $($a.Count) VM(s) mit Festplatten auf ${sd} ($(@($a | ForEach-Object { $_.Name }) -join ', ')) - werden beim Host-System mitgesichert"; $col = '#FFFAB387' }
+    elseif ($b.Count) { $base += "   |   Hinweis: $($b.Count) VM(s) mit Konfiguration auf ${sd}" }
+    $ui.lblSbHostSystem.Text = $base
+    $ui.lblSbHostSystem.Foreground = New-Brush $col
+    $ui.lblSbHostSystem.ToolTip = $(if ($l.Count) { Format-HMSbSysDriveVms $l } else { $null })
 }
 function Show-HMSbOverview {
     $all = Get-HMSbAllHistory
@@ -718,6 +734,7 @@ function Start-HMSbBackup {
     if ($script:SbPrereq -and ($script:SbPrereq.Feature -eq $false -or -not $script:SbPrereq.Wbadmin)) { Out-Console 'Windows Server-Sicherung fehlt - Button "Windows Server-Sicherung installieren".' 'Error'; return }
     $pName = if ($p) { $p.Name } else { '(ohne Profil)' }
     $msg = "Server-Backup starten?`n`nProfil: $pName`nZiel: $($d.Letter): $($d.Label)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })`nSystem (Bare-Metal): $(if ($hs) { 'ja' } else { 'nein' })`n`nVMs und Server laufen weiter (Online-Sicherung ueber VSS)."
+    if ($hs) { $sv = Format-HMSbSysDriveVms (Get-HMSbSysDriveVms $script:SbVms); if ($sv) { $msg += "`n`n$sv" } }
     $after = if ($p -and (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { Get-HMSbAfterMode $p $d.Label } else { '' }
     if ($after -eq 'Eject') { $msg += "`n`nNach der Sicherung wird die Platte automatisch ausgeworfen." }
     elseif ($after -eq 'Offline') { $msg += "`n`nNach der Sicherung wird die Platte automatisch offline geschaltet." }
@@ -1143,6 +1160,7 @@ function New-HMSbSchedule {
     if (-not $vms.Count -and -not $vols.Count -and -not $hs -and -not $hc) { Out-Console 'Zeitplan: nichts gewaehlt (VMs, Laufwerke, Host-Konfiguration oder System).' 'Warning'; return }
     foreach ($x in @($p.Name) + $vms) { if ("$x" -match '["|]') { Out-Console "Zeitplan: Name '$x' enthaelt ein nicht erlaubtes Zeichen (Anfuehrungszeichen oder |)." 'Error'; return } }
     $info = "Profil: $($p.Name)   (Platten $($p.DiskPrefix)-...)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })   Pruefen: $(if ($vf) { 'ja' } else { 'nein' })   Host-System: $(if ($hs) { 'ja' } else { 'nein' })`n`nEs gelten die aktuell angehakten VMs und Optionen."
+    if ($hs) { $sv = Format-HMSbSysDriveVms (Get-HMSbSysDriveVms $script:SbVms); if ($sv) { $info += "`n`n$sv" } }
     $r = Show-HMSbScheduleDialog $info
     if (-not $r) { return }
     # andere Sicherungsaufgaben, die sich ueberschneiden (naechste 14 Tage)
@@ -1285,7 +1303,7 @@ function Initialize-HMServerBackupTab {
     if ($ui.btnSbConflicts) { $ui.btnSbConflicts.Add_Click({ Show-HMSbConflicts }) }
     $ui.btnSbRestore.Add_Click({ Show-HMSbRestoreHelp })
     $ui.btnSbFeature.Add_Click({ Install-HMSbFeature })
-    $ui.chkSbHostSystem.Add_Click({ if ($ui.chkSbHostSystem.IsChecked) { Out-Console 'Host-System: sichert nur den Host (C:, Boot/EFI) fuer eine Bare-Metal-Wiederherstellung - Datenlaufwerke mit VMs (z.B. D:) sind nicht dabei, dafuer die VM-Sicherung. Liegen VMs auf C:, werden sie zusaetzlich gesichert (Platz!).' 'Info' } })
+    $ui.chkSbHostSystem.Add_Click({ if ($ui.chkSbHostSystem.IsChecked) { Out-Console 'Host-System: sichert nur den Host (C:, Boot/EFI) fuer eine Bare-Metal-Wiederherstellung - Datenlaufwerke mit VMs (z.B. D:) sind nicht dabei, dafuer die VM-Sicherung. Liegen VMs auf C:, werden sie zusaetzlich gesichert (Platz!).' 'Info'; $sv = Format-HMSbSysDriveVms (Get-HMSbSysDriveVms $script:SbVms); if ($sv) { foreach ($ln in ($sv -split "`n")) { Out-Console $ln $(if ($ln -like 'ACHTUNG*') { 'Warning' } else { 'Info' }) } } else { Out-Console "Keine VM hat Dateien auf $($env:SystemDrive) - das Host-System bleibt klein." 'Success' } } })
     $ui.cmbSbProfile.Add_SelectionChanged({
         if ($script:SbSuppress -or $null -eq $ui.cmbSbProfile.SelectedItem) { return }
         Save-HMSbLastProfile "$($ui.cmbSbProfile.SelectedItem)"
