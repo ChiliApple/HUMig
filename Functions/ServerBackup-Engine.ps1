@@ -270,6 +270,68 @@ function Invoke-HMSbWbadmin {
     return [pscustomobject]@{ ExitCode = $code; Lines = $lines.ToArray(); Text = ($lines.ToArray() -join "`r`n"); LogFiles = @($logs | Select-Object -Unique) }
 }
 
+# Laeuft am Host schon eine Sicherung/Wiederherstellung? (Get-WBJob + wbadmin-Prozesse mit start ...)
+# Rueckgabe: Liste mit Beschreibungen (leer = frei). Die Windows Server-Sicherung kann nur EINEN Vorgang gleichzeitig.
+function Get-HMSbBusy {
+    $why = @()
+    try {
+        if (Get-Command Get-WBJob -ErrorAction SilentlyContinue) {
+            $j = Get-WBJob -ErrorAction Stop
+            if ($j) {
+                # JobState-Werte sind nicht dokumentiert - nur eindeutig laufende zaehlen (sonst greift die Wiederholung bei der wbadmin-Meldung)
+                $st = "$($j.JobState)"
+                if ($st -match '(?i)running|queued|progress') {
+                    $why += "Windows Server-Sicherung: $($j.JobType) laeuft$(if ($j.StartTime) { ' seit ' + ([datetime]$j.StartTime).ToString('dd.MM. HH:mm') })$(if ("$($j.CurrentOperation)".Trim()) { ' - ' + "$($j.CurrentOperation)".Trim() })"
+                }
+            }
+        }
+    } catch { }
+    $procs = @(); try { $procs = @(Get-CimInstance Win32_Process -Filter "Name='wbadmin.exe'" -ErrorAction Stop) } catch { }
+    foreach ($p in $procs) {
+        $cl = "$($p.CommandLine)"
+        if ($cl -notmatch '(?i)\bstart\s+\w+') { continue }
+        $own = ''
+        try { $o = Invoke-CimMethod -InputObject $p -MethodName GetOwner -ErrorAction Stop; if ($o.User) { $own = " von $($o.Domain)\$($o.User)" } } catch { }
+        $t = ''; try { $t = ' seit ' + ([datetime]$p.CreationDate).ToString('dd.MM. HH:mm') } catch { }
+        $why += "wbadmin (PID $($p.ProcessId))$own$t`: $(($cl -replace '^.*?wbadmin(\.exe)?"?\s*', '').Trim())"
+    }
+    # ohne Komma: leer = $null -> Aufrufer immer mit @() zaehlen
+    return @($why | Select-Object -Unique)
+}
+# Warten, bis der Host frei ist (max. $MaxMin Minuten, Abbruch ueber $Job.Cancel). $true = frei
+function Wait-HMSbIdle($Job, [int]$MaxMin = 480) {
+    $b = Get-HMSbBusy
+    if (-not @($b).Count) { return $true }
+    Write-HMSbLog "Am Host laeuft bereits eine Sicherung/Wiederherstellung - die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig. HUMig wartet (hoechstens $(Format-HMDuration $MaxMin), Abbrechen jederzeit moeglich):" 'Warning'
+    foreach ($x in @($b)) { Write-HMSbLog "  $x" 'Warning' }
+    $t0 = Get-Date; $next = 30
+    while ($true) {
+        for ($i = 0; $i -lt 30; $i++) { if ($Job.Cancel) { return $false }; Start-Sleep -Seconds 2 }
+        $el = ((Get-Date) - $t0).TotalMinutes
+        $b = Get-HMSbBusy
+        if (-not @($b).Count) { Write-HMSbLog "Anderer Vorgang beendet (gewartet $(Format-HMDuration $el)) - HUMig startet" 'Info'; Start-Sleep -Seconds 15; return $true }
+        $Job.Status = "Warte auf andere Sicherung ($(Format-HMDuration $el))"
+        if ($el -ge $next) { Write-HMSbLog "  wartet noch ($(Format-HMDuration $el)) ..."; $next += 30 }
+        if ($el -ge $MaxMin) { Write-HMSbLog "Wartezeit abgelaufen ($(Format-HMDuration $MaxMin)) - der andere Vorgang laeuft noch" 'Error'; return $false }
+    }
+}
+# wbadmin start ... mit Vorab-Pruefung, Warten und bis zu 2 Wiederholungen, wenn wbadmin 'weiterer Vorgang laeuft' meldet
+function Invoke-HMSbStart {
+    param([string]$Arguments, [string]$Phase = '', [double]$PBase = 0, [double]$PSpan = 100, [string]$LogFile = '', $Job)
+    for ($try = 1; $try -le 3; $try++) {
+        if (-not (Wait-HMSbIdle $Job)) {
+            return [pscustomobject]@{ ExitCode = -3; Lines = @(); Text = 'Ein weiterer Sicherungs- oder Wiederherstellungsvorgang wird ausgefuehrt (Wartezeit abgelaufen oder abgebrochen).'; LogFiles = @(); Busy = $true }
+        }
+        $r = Invoke-HMSbWbadmin -Arguments $Arguments -Phase $Phase -PBase $PBase -PSpan $PSpan -LogFile $LogFile
+        $busy = ($r.ExitCode -ne 0 -and "$($r.Text)" -match '(?i)weiterer Sicherungs|anderer Sicherungs|another backup or recovery|operation is already in progress|bereits ausgef')
+        $r | Add-Member -NotePropertyName Busy -NotePropertyValue $busy -Force
+        if (-not $busy -or $Job.Cancel -or $try -eq 3) { return $r }
+        Write-HMSbLog "wbadmin meldet einen anderen laufenden Vorgang - HUMig wartet und versucht es erneut ($($try + 1). Versuch)" 'Warning'
+        for ($i = 0; $i -lt 60; $i++) { if ($Job.Cancel) { return $r }; Start-Sleep -Seconds 2 }
+    }
+}
+$script:HMSbBusyFix = 'Es lief bereits eine andere Sicherung/Wiederherstellung am Host (die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig). Laufenden Vorgang in wbadmin.msc bzw. mit "wbadmin get status" pruefen, Zeitplaene verschiedener Profile am selben Host zeitlich trennen und die Sicherung spaeter erneut starten.'
+
 # Sicherungsversionen auf einem Ziel (wbadmin get versions), neueste zuletzt
 function Get-HMSbVersions([string]$Target) {
     $r = Invoke-HMSbWbadmin -Arguments "get versions -backupTarget:$Target" -Quiet
@@ -308,6 +370,18 @@ function Add-HMSbHistory([string]$Path, $Entry) {
     $dir = Split-Path $Path -Parent
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     ConvertTo-Json -InputObject @($arr) -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+# Eintraege aus einem Verlauf entfernen (Schluessel Datum|Host|Platte), Rueckgabe = Anzahl entfernt
+function Remove-HMSbHistory([string]$Path, [string[]]$Keys) {
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return 0 }
+    $k = @{}; foreach ($x in @($Keys)) { if ($x) { $k[$x.ToUpperInvariant()] = $true } }
+    $old = Read-HMSbHistory $Path
+    $old = @($old)
+    $keep = @($old | Where-Object { -not $k.ContainsKey(("$($_.Date)|$($_.Host)|$($_.Disk)").ToUpperInvariant()) })
+    $n = $old.Count - $keep.Count
+    if ($n -gt 0) { ConvertTo-Json -InputObject @($keep) -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8 }
+    return $n
 }
 
 # Platte gehoert zum Profil, wenn die Bezeichnung = Praefix oder Praefix-<...> ist
@@ -766,14 +840,15 @@ function Start-HMServerBackup {
         $Job.Status = 'VMs: Schattenkopie wird erstellt ...'
         Write-HMSbLog "wbadmin: VMs sichern -> $target (Online-Sicherung ueber VSS, VMs laufen weiter)" 'Header'
         $argList = "start backup -backupTarget:$target -hyperv:""$($vms -join ',')"" -quiet"
-        $r = Invoke-HMSbWbadmin -Arguments $argList -Phase 'VMs' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-VMs.log')
+        $r = Invoke-HMSbStart -Arguments $argList -Phase 'VMs' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-VMs.log') -Job $Job
         if ($Job.Cancel) {
             Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
             [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
             throw 'Abgebrochen'
         }
         foreach ($lf in @($r.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
-        if ($r.ExitCode -ne 0) { $status = 'Error'; $notes += "VM-Sicherung Exitcode $($r.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die VM-Sicherung ist fehlgeschlagen (wbadmin Exitcode $($r.ExitCode))."; Fix = 'Ursache steht in wbadmin-VMs.log und im Backup-/Fehlerprotokoll der Windows Server-Sicherung (Links unten). Haeufig: Platte voll, VM gesperrt, VSS-Fehler im Gast.' }; Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - Details: wbadmin-VMs.log im Berichtsordner" 'Error' }
+        if ($r.ExitCode -ne 0 -and $r.Busy) { $status = 'Error'; $notes += 'VM-Sicherung: anderer Sicherungsvorgang lief'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die VM-Sicherung wurde nicht ausgefuehrt: am Host lief bereits eine andere Sicherung/Wiederherstellung.'; Fix = $script:HMSbBusyFix }; Write-HMSbLog 'VM-Sicherung NICHT ausgefuehrt - am Host lief bereits eine andere Sicherung/Wiederherstellung (spaeter erneut starten)' 'Error' }
+        elseif ($r.ExitCode -ne 0) { $status = 'Error'; $notes += "VM-Sicherung Exitcode $($r.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die VM-Sicherung ist fehlgeschlagen (wbadmin Exitcode $($r.ExitCode))."; Fix = 'Ursache steht in wbadmin-VMs.log und im Backup-/Fehlerprotokoll der Windows Server-Sicherung (Links unten). Haeufig: Platte voll, VM gesperrt, VSS-Fehler im Gast.' }; Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - Details: wbadmin-VMs.log im Berichtsordner" 'Error' }
         else {
             $offVms = @($r.Lines | Where-Object { $_ -match '"(.+?) \(Offline\)"' } | ForEach-Object { if ($_ -match '"(.+?) \(Offline\)"') { $Matches[1] } } | Select-Object -Unique)
             if ($offVms.Count) {
@@ -824,7 +899,7 @@ function Start-HMServerBackup {
     if ($vols.Count) {
         $Job.Status = 'Laufwerke: Schattenkopie wird erstellt ...'
         Write-HMSbLog "wbadmin: Laufwerke sichern ($($vols -join ', ')) -> $target" 'Header'
-        $r3 = Invoke-HMSbWbadmin -Arguments "start backup -backupTarget:$target -include:$($vols -join ',') -quiet" -Phase 'Laufwerke' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-Laufwerke.log')
+        $r3 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -include:$($vols -join ',') -quiet" -Phase 'Laufwerke' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-Laufwerke.log') -Job $Job
         $pb += $span
         if ($Job.Cancel) {
             Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
@@ -833,8 +908,9 @@ function Start-HMServerBackup {
         }
         foreach ($lf in @($r3.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
         if ($r3.ExitCode -ne 0) {
-            $status = 'Error'; $notes += "Laufwerke Exitcode $($r3.ExitCode)"
-            $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die Sicherung der Laufwerke $($vols -join ', ') ist fehlgeschlagen (wbadmin Exitcode $($r3.ExitCode))."; Fix = 'Ursache in wbadmin-Laufwerke.log und im Protokoll der Windows Server-Sicherung. Haeufig: Platte voll, VSS-Fehler (vssadmin list writers).' }
+            $status = 'Error'; $notes += $(if ($r3.Busy) { 'Laufwerke: anderer Sicherungsvorgang lief' } else { "Laufwerke Exitcode $($r3.ExitCode)" })
+            if ($r3.Busy) { $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die Sicherung der Laufwerke wurde nicht ausgefuehrt: am Host lief bereits eine andere Sicherung/Wiederherstellung.'; Fix = $script:HMSbBusyFix } }
+            else { $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die Sicherung der Laufwerke $($vols -join ', ') ist fehlgeschlagen (wbadmin Exitcode $($r3.ExitCode))."; Fix = 'Ursache in wbadmin-Laufwerke.log und im Protokoll der Windows Server-Sicherung. Haeufig: Platte voll, VSS-Fehler (vssadmin list writers).' } }
             Write-HMSbLog "Laufwerks-Sicherung FEHLGESCHLAGEN (Exitcode $($r3.ExitCode)) - wbadmin-Laufwerke.log" 'Error'
         } else {
             $volOk = $true
@@ -864,14 +940,14 @@ function Start-HMServerBackup {
     if ($Ctx.HostSystem) {
         $Job.Status = 'Host-System: wird vorbereitet ...'
         Write-HMSbLog "wbadmin: Host-System (alle kritischen Volumes, Bare-Metal) -> $target" 'Header'
-        $r2 = Invoke-HMSbWbadmin -Arguments "start backup -backupTarget:$target -allCritical -quiet" -Phase 'Host-System' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-HostSystem.log')
+        $r2 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -allCritical -quiet" -Phase 'Host-System' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-HostSystem.log') -Job $Job
         if ($Job.Cancel) {
             Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
             [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
             throw 'Abgebrochen'
         }
         foreach ($lf in @($r2.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
-        if ($r2.ExitCode -ne 0) { if ($status -eq 'OK') { $status = 'Warning' }; $notes += "Host-System Exitcode $($r2.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Host-System-Sicherung ist fehlgeschlagen (Exitcode $($r2.ExitCode)). Die VM-Sicherung ist davon nicht betroffen."; Fix = 'Ursache in wbadmin-HostSystem.log.' }; Write-HMSbLog "Host-System-Sicherung FEHLGESCHLAGEN (Exitcode $($r2.ExitCode)) - wbadmin-HostSystem.log" 'Error' }
+        if ($r2.ExitCode -ne 0) { if ($status -eq 'OK') { $status = 'Warning' }; $notes += "Host-System Exitcode $($r2.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Host-System-Sicherung ist fehlgeschlagen (Exitcode $($r2.ExitCode)). Die VM-Sicherung ist davon nicht betroffen."; Fix = $(if ($r2.Busy) { $script:HMSbBusyFix } else { 'Ursache in wbadmin-HostSystem.log.' }) }; Write-HMSbLog "Host-System-Sicherung FEHLGESCHLAGEN (Exitcode $($r2.ExitCode)) - wbadmin-HostSystem.log" 'Error' }
         else {
             $hostSysOk = $true
             Write-HMSbLog 'Host-System-Sicherung erfolgreich' 'Success'

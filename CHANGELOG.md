@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.41 - 2026-09-30
+### Neu
+- Server-Backup: **Vorab-Pruefung auf eine laufende Sicherung/Wiederherstellung** am Host (Get-WBJob, laufende wbadmin-Befehle mit Benutzer und Startzeit) - manueller Start fragt, ob gewartet werden soll; Zeitplan wartet automatisch (hoechstens 8 h, abbrechbar); meldet wbadmin trotzdem "Ein weiterer Sicherungs- oder Wiederherstellungsvorgang wird ausgefuehrt", wartet HUMig und versucht es bis zu zweimal erneut; verstaendlicher Hinweis im Bericht statt nur Exitcode -3
+- Server-Backup: **Laeufe aus dem Verlauf entfernen** - Rechtsklick im Verlauf (markierte oder alle fehlgeschlagenen des Profils) bzw. im Fenster *alle Laeufe*; entfernt die Eintraege im Tool-Ordner und auf angesteckten Platten, Sicherung und Berichtsordner bleiben
+
 ## v2.0.40 - 2026-09-29
 ### Verbessert
 - Alle Tabellen (Backups, Server-Backup-Verlauf, Ergebnis-/Listenfenster, Geraete (AD), Einstellungen): Spaltenbreite richtet sich nach dem Inhalt - Text wird ganz angezeigt, bei Bedarf waagrechter Bildlauf statt abgeschnittener Spalten

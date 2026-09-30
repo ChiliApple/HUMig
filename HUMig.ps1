@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.40'
+$script:Version   = '2.0.41'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'

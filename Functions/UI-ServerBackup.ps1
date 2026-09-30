@@ -401,6 +401,21 @@ function Get-HMSbAllHistory {
     }
     return ,@($out | Sort-Object { "$($_.Date)" } -Descending)
 }
+# Laeufe aus dem Verlauf entfernen (Tool-Ordner + angesteckte Platten). $Keys: "Datum|Host|Platte"
+function Remove-HMSbRuns([string[]]$Keys, $Owner = $null) {
+    $Keys = @($Keys | Where-Object { $_ } | Select-Object -Unique)
+    if (-not $Keys.Count) { return }
+    $o = if ($Owner) { $Owner } else { $script:Window }
+    if ("$([System.Windows.MessageBox]::Show($o, "$($Keys.Count) Lauf/Laeufe aus dem Verlauf entfernen?`n`n  " + (@($Keys | Select-Object -First 10 | ForEach-Object { $_ -replace '\|', '  ' }) -join "`n  ") + $(if ($Keys.Count -gt 10) { "`n  ..." }) + "`n`nEntfernt wird nur der Eintrag im Verlauf (Tool-Ordner und angesteckte Platten). Die Sicherung selbst und der Berichtsordner auf der Platte bleiben unveraendert.", 'Server-Backup - Verlauf', 'YesNo', 'Question'))" -ne 'Yes') { return }
+    $n = 0
+    try { $n += Remove-HMSbHistory $script:SbHistFile $Keys } catch { Out-Console "Verlauf im Tool-Ordner nicht geaendert: $($_.Exception.Message)" 'Error' }
+    foreach ($d in @($script:SbDrives)) {
+        $f = "$($d.Letter):\$($script:SbDirName)\history.json"
+        try { $n += Remove-HMSbHistory $f $Keys } catch { Out-Console "Verlauf auf $($d.Letter): nicht geaendert: $($_.Exception.Message)" 'Warning' }
+    }
+    Out-Console "Server-Backup: $($Keys.Count) Lauf/Laeufe aus dem Verlauf entfernt ($n Eintraege in Tool-Ordner/Platten)" 'Success'
+    Update-HMSbHistory
+}
 function Update-HMSbHistory {
     $p = Get-HMSbProfile
     $all = Get-HMSbAllHistory
@@ -480,7 +495,13 @@ function Show-HMSbAllRuns {
     }
     Show-DataGridWindow -Title 'Server-Backup - alle Laeufe' -Width 1250 -Height 600 `
         -Columns @('Datum', 'Profil', 'Host', 'Platte', 'Status', 'Dauer', 'GB', 'VMs', 'Host_Konfig', 'Host_System', 'Version', 'Hinweis', 'Tool') `
-        -Rows $rows.ToArray() -Sort 'Datum DESC'
+        -Rows $rows.ToArray() -Sort 'Datum DESC' `
+        -Actions @(@{ Text = 'Markierte aus dem Verlauf entfernen'; Color = '#FFF38BA8'; Handler = {
+            param($rows, $win, $ctx)
+            $k = @(@($rows) | ForEach-Object { "$($_.Datum)|$($_.Host)|$($_.Platte)" })
+            $win.Close()
+            Remove-HMSbRuns $k
+        } })
 }
 
 # ----------------------------------------------------------------------------
@@ -510,6 +531,12 @@ function Start-HMSbBackup {
     $off = @($vms | ForEach-Object { $n = $_; @($script:SbVms | Where-Object { $_.Name -eq $n -and $_.OfflineHint })[0] } | Where-Object { $_ })
     if ($off.Count) { $msg += "`n`nACHTUNG - nur OFFLINE sicherbar (VM wird zu Beginn kurz angehalten):`n" + (@($off | ForEach-Object { "  $($_.Name): $($_.OfflineHint)" }) -join "`n") + "`nTipp: solche VMs ausserhalb der Unterrichtszeit sichern (Zeitplan)." }
     if (-not (Confirm-Action $msg 'Server-Backup')) { return }
+    # Vorab-Pruefung: laeuft schon eine Sicherung/Wiederherstellung am Host?
+    $busy = @(Get-HMSbBusy)
+    if ($busy.Count) {
+        $bm = "Am Host laeuft bereits eine Sicherung oder Wiederherstellung - die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig:`n`n  " + ($busy -join "`n  ") + "`n`nJa = HUMig wartet, bis der andere Vorgang fertig ist, und startet dann automatisch (hoechstens 8 h, Abbrechen jederzeit moeglich)`nNein = jetzt nicht starten"
+        if ("$([System.Windows.MessageBox]::Show($script:Window, $bm, 'Server-Backup', 'YesNo', 'Warning'))" -ne 'Yes') { Out-Console 'Server-Backup nicht gestartet - am Host laeuft bereits eine Sicherung/Wiederherstellung.' 'Warning'; return }
+    }
     if ($p) { Save-HMSbLastProfile $p.Name }
     $ctx = @{
         Profile = $pName; DiskPrefix = $(if ($p) { $p.DiskPrefix } else { '' }); Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
@@ -887,6 +914,21 @@ function Initialize-HMServerBackupTab {
     })
     $ui.btnSbVersions.Add_Click({ Show-HMSbVersions })
     $ui.dgSbHistory.Add_MouseDoubleClick({ $it = $ui.dgSbHistory.SelectedItem; if ($it -and $it.Entry) { Open-HMSbReport $it.Entry } })
+    # Kontextmenue: Bericht oeffnen, markierte / alle fehlgeschlagenen aus dem Verlauf entfernen
+    $cm = New-Object System.Windows.Controls.ContextMenu
+    $mi1 = New-Object System.Windows.Controls.MenuItem; $mi1.Header = 'Bericht oeffnen'
+    $mi1.Add_Click({ $it = $ui.dgSbHistory.SelectedItem; if ($it -and $it.Entry) { Open-HMSbReport $it.Entry } })
+    $mi2 = New-Object System.Windows.Controls.MenuItem; $mi2.Header = 'Markierte aus dem Verlauf entfernen'
+    $mi2.Add_Click({ $k = @(@($ui.dgSbHistory.SelectedItems) | Where-Object { $_.Entry } | ForEach-Object { "$($_.Entry.Date)|$($_.Entry.Host)|$($_.Entry.Disk)" }); if ($k.Count) { Remove-HMSbRuns $k } })
+    $mi3 = New-Object System.Windows.Controls.MenuItem; $mi3.Header = 'Alle fehlgeschlagenen dieses Profils aus dem Verlauf entfernen'
+    $mi3.Add_Click({
+        $k = @(@($ui.dgSbHistory.ItemsSource) | Where-Object { $_.Entry -and "$($_.Entry.Status)" -eq 'Error' } | ForEach-Object { "$($_.Entry.Date)|$($_.Entry.Host)|$($_.Entry.Disk)" })
+        if ($k.Count) { Remove-HMSbRuns $k } else { Out-Console 'Server-Backup: keine fehlgeschlagenen Laeufe in diesem Profil.' 'Info' }
+    })
+    foreach ($m in @($mi1, (New-Object System.Windows.Controls.Separator), $mi2, $mi3)) { [void]$cm.Items.Add($m) }
+    $ui.dgSbHistory.ContextMenu = $cm
+    $ui.dgSbHistory.ToolTip = 'Doppelklick = Bericht des Laufs oeffnen - Rechtsklick = Laeufe aus dem Verlauf entfernen'
+    $ui.dgSbHistory.SelectionMode = 'Extended' 
     $ui.btnSbOverview.Add_Click({ Show-HMSbOverview })
     $ui.btnSbOverview.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMSbAllRuns })
     $ui.btnSbHostOnly.Add_Click({ Start-HMSbHostOnly })
