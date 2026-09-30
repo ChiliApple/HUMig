@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.42 - 2026-09-30
+### Behoben
+- Server-Backup: ein abgebrochener oder mit Fehler beendeter Lauf (nach Anlegen des Berichtsordners) landet jetzt im Verlauf (Status FEHLER, Hinweis *abgebrochen* bzw. Fehlertext) und bekommt einen Bericht - bisher blieb nur ein Berichtsordner auf der Platte ohne Eintrag
+
 ## v2.0.41 - 2026-09-30
 ### Neu
 - Server-Backup: **Vorab-Pruefung auf eine laufende Sicherung/Wiederherstellung** am Host (Get-WBJob, laufende wbadmin-Befehle mit Benutzer und Startzeit) - manueller Start fragt, ob gewartet werden soll; Zeitplan wartet automatisch (hoechstens 8 h, abbrechbar); meldet wbadmin trotzdem "Ein weiterer Sicherungs- oder Wiederherstellungsvorgang wird ausgefuehrt", wartet HUMig und versucht es bis zu zweimal erneut; verstaendlicher Hinweis im Bericht statt nur Exitcode -3
