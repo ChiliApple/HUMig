@@ -66,7 +66,8 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 Linksklick = Hauptfunktion, Rechtsklick = Zweitfunktion (steht im Tooltip). Konsole: Rechtsklick = leeren.
 Anzeige-Groesse: **Strg + Mausrad** bzw. Strg + Plus/Minus, **Strg + 0** = automatisch (kleine Bildschirme werden automatisch verkleinert) - auch in Einstellungen > Allgemein.
 Alle Haekchen, Optionen und die zuletzt gewaehlte Vorlage werden gespeichert und beim naechsten Start wieder gesetzt.
-Am Ende laengerer Vorgaenge: Ton, Windows-Hinweis und blinkendes Taskleisten-Symbol (mit Fortschritt im Symbol).
+Am Ende laengerer Vorgaenge: Ton, Windows-Hinweis und blinkendes Taskleisten-Symbol (mit Fortschritt im Symbol); Dauer immer lesbar (z.B. *1 h 05 min*).
+Ein **pulsierender gruener Punkt** (Statusleiste, Reiter Server-Backup) zeigt, dass im Hintergrund noch gelesen/gearbeitet wird. Tabellenspalten passen sich dem Inhalt an.
 Start ueber **HUMig.exe** (wird beim ersten Start erzeugt, an Taskleiste anheftbar) oder **Start.cmd**.
 **Benutzer-Modus** (ohne Administratorrechte): **HUMig-Benutzer.exe** bzw. **Start-Benutzer.cmd** - nur das eigene Profil auf diesem PC, Module mit Systemzugriff und die meisten Werkzeuge sind ausgeblendet, die Backup-Liste zeigt nur eigene Backups.
 Mehrere Standorte: Einstellungen > **Standorte** (Name frei waehlbar; eigener Backup-Ordner, Software-/Treiberverteilung, USMT, Netzwerk-Standardwerte je Standort) - Umschalten oben rechts im Hauptfenster.
@@ -191,7 +192,9 @@ oder **Setup** (Silent-Parameter, Erfolgs-ExitCodes, Timeout), *nur passende Har
 Das Tool liest die INF-Dateien (Klasse, Anbieter, Version, Hardware-IDs) und vergleicht am Ziel-PC mit den Geraeten
 (`Win32_PnPEntity`) und dem aktiven Treiber (`Win32_PnPSignedDriver`): *Am gewaehlten PC pruefen* zeigt das ohne Installation;
 beim Verteilen (gewaehlter Computer, mehrere PCs aus der AD-Auswahl oder Mehrfachaktion, bis zu 8 gleichzeitig) werden PCs ohne passende Hardware
-bzw. mit derselben aktiven Version uebersprungen. Ergebnis je PC mit aktiver Version und Neustart-Hinweis, Log `C:\Windows\Temp\HU_DRV_*.log`.
+bzw. mit derselben aktiven Version uebersprungen - diese Pruefung laeuft vor der Kopie, uebersprungene PCs bekommen nichts kopiert.
+Kopiert wird ueber die Admin-Freigabe `C$` (Robocopy, schnell; sonst ueber PowerShell-Remoting), bei Art INF nur die Unterordner mit INF-Dateien.
+Erweiterungs-INFs (Klasse Extension/SoftwareComponent) werden mitinstalliert, zaehlen aber nicht fuer Versionsvergleich, Erzwingen und Schutz. Ergebnis je PC mit aktiver Version und Neustart-Hinweis, Log `C:\Windows\Temp\HU_DRV_*.log`.
 **Vor Treiber-Updates schuetzen** (je Paket, nur Windows **Pro/Education/Enterprise**): nach der Installation setzt HUMig die Richtlinie
 *Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen* fuer die betroffenen Geraete - Windows Update ersetzt den Treiber dann nicht mehr.
 Eigene Sperren hebt HUMig fuer spaetere Installationen selbst auf; *Sperren am PC ...* zeigt und entfernt sie. GPO/Intune-Richtlinien zur Geraeteinstallation haben Vorrang.
@@ -229,6 +232,10 @@ Reiter **Server-Backup** (als Administrator auf Windows Server - Hyper-V-Host: V
 - **Bericht je Lauf** (`Bericht.html`, Doppelklick im Verlauf): Status mit Erklaerung, Hinweise mit "Was tun", alle Dateien als Links mit Erklaerung, komplettes Protokoll. *wbadmin* = Befehlszeile der Windows Server-Sicherung, die HUMig aufruft
 - **Offline-Hinweis**: VMs, die Hyper-V nur offline sichern kann (z.B. dynamische Datentraeger im Gast), werden markiert, vor dem Start gemeldet und der Grund steht im Bericht
 - **Zeitplan**: einmalig, taeglich oder woechentlich als geplante Aufgabe (SYSTEM, ohne Anmeldung) - z.B. grosse VMs ueber Nacht
+- **Zeitplan-Pruefung**: sucht in der ganzen Aufgabenplanung nach anderen Sicherungsaufgaben (frei definierbare Suchwoerter, Standard *backup, sicherung, wbadmin, veeam, acronis*, `-Wort` schliesst aus) und Zeitplaenen anderer Profile; Ueberschneidungen in den naechsten 14 Tagen werden beim Planen gemeldet
+- **Nur ein Vorgang gleichzeitig**: vor dem Start prueft HUMig auf eine laufende Sicherung/Wiederherstellung am Host - manuell mit Rueckfrage, im Zeitplan automatisch warten (hoechstens 8 h); meldet wbadmin trotzdem einen weiteren Vorgang, bis zu zwei neue Versuche
+- **Verlauf pflegen**: Rechtsklick im Verlauf entfernt markierte oder alle fehlgeschlagenen Laeufe (Sicherung und Bericht auf der Platte bleiben); abgebrochene Laeufe stehen mit Status *Fehler* und Bericht im Verlauf; Dauer lesbar (z.B. *6 h 12 min*)
+- **HUMig schliessen waehrend einer Sicherung**: Rueckfrage - Sicherung stoppen, im Hintergrund weiterlaufen lassen (ohne Verlauf/Bericht) oder offen lassen
 - **Auswerfen** (Schreibcache leeren), **Versionen**, **Wiederherstellen** ueber die Windows Server-Sicherung
 
 Voraussetzung: Feature *Windows Server-Sicherung* (installierbar aus dem Reiter).
@@ -260,6 +267,7 @@ Alles ueber **Einstellungen** (Fenster). Die Werte landen in:
 | `Config\apps.json` | eigene Eintraege fuer den Programm-Katalog (Aufbau wie `apps.default.json`) |
 | `Config\exceptions.json` | Ausnahmen Ordner/Dateitypen fuer Profil und C:\ |
 | `Config\modules.json` | eigene Module und Vorlagen |
+| `Config\serverbackup.json` | Server-Backup-Profile (VMs, Platten, Optionen), Suchwoerter der Zeitplan-Pruefung (`ConflictWords`) |
 | `Config\update.json` | andere Update-Quelle `{ "Owner": "...", "Repo": "...", "Branch": "main" }` |
 
 Die `*.default.json` kommen mit dem Update, eigene Dateien bleiben erhalten.

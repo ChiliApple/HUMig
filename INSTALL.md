@@ -25,6 +25,12 @@ der eigene PC wird direkt installiert.
 ## Treiberverteilung
 Entpackte Treiber (Ordner mit INF-Dateien) oder Hersteller-Setups in `Treiberverteilung\` legen (oder im Fenster *Ordner/Datei hinzufuegen*,
 ZIP/CAB werden entpackt). Remote wie die Softwareverteilung ueber PowerShell-Remoting (WinRM), Administratorrechte noetig.
+Kopiert wird bevorzugt ueber die Admin-Freigabe `C$` (Robocopy, deutlich schneller), sonst ueber PowerShell-Remoting.
+*Vor Treiber-Updates schuetzen* wirkt nur auf Windows Pro, Education und Enterprise.
+
+## Server-Backup
+Am Hyper-V-Host bzw. Server als Administrator starten; Feature *Windows Server-Sicherung* noetig (installierbar aus dem Reiter).
+Geplante Sicherungen laufen als Aufgabe unter `\HUMig` in der Aufgabenplanung (SYSTEM) - der Tool-Ordner muss dafuer lokal am Host liegen oder fuer SYSTEM lesbar sein.
 
 ## Update
 Button **Update** laedt die aktuelle Version (Pull.ps1). Lokale Daten (BACKUPS, Config, Softwareverteilung, Treiberverteilung, HUMig.exe) bleiben erhalten.

@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.46 - 2026-09-30
+### Dokumentation
+- README, Anleitung und INSTALL ergaenzt: Server-Backup (Vorab-Pruefung auf laufende Sicherung, Zeitplan-Pruefung mit `ConflictWords`, Verlauf pflegen, abgebrochene Laeufe, Rueckfrage beim Schliessen), Treiberverteilung (Pruefung vor der Kopie, Kopie ueber `C$`, Erweiterungs-INFs), pulsierender Punkt, lesbare Dauer, automatische Spaltenbreite
+
 ## v2.0.45 - 2026-09-30
 ### Verbessert
 - **Pulsierender gruener Punkt**, solange im Hintergrund gelesen/gearbeitet wird: im Reiter Server-Backup neben dem Ladehinweis (VMs/Laufwerke, Platten, USB-Datentraeger, Versionen, Host-Konfiguration, Platte einrichten) und in der Statusleiste fuer alle Hintergrund-Aufgaben - HUMig wirkt beim Laden nicht mehr eingefroren
