@@ -228,6 +228,7 @@ Reiter **Server-Backup** (als Administrator auf Windows Server - Hyper-V-Host: V
 - Die Sicherungen sind normale Windows-Server-Sicherungen (`WindowsImageBackup`) - wiederherstellbar auch ohne HUMig mit `wbadmin.msc`, `wbadmin` oder dem Windows-Server-Installationsmedium (Systemimage-Wiederherstellung)
 - **Host-Konfiguration**: virtuelle Switches, SET-Teams, Host-vNICs mit VLAN, IP, Netzwerkkarten, VM-Einstellungen als HTML/JSON + `Restore-VMSwitches.ps1`
 - **Verlauf/Statistik** (mit Hinweis je Lauf, Doppelklick = Bericht) auf der Platte und im Tool-Ordner: letzte Sicherung je Platte, Rotationsempfehlung, Warnung nach 14 Tagen
+- **Archiv-Platten** (`<Bezeichnung>-A1`, `-A2` ... - Profil *Bearbeiten*): von der Rotation ausgenommen, faellig nach einstellbarem Abstand (Standard 30 Tage), Erinnerung zum Abziehen und getrennten Lagern - damit die Sicherung weit genug zurueckreicht, wenn Schadsoftware laenger unbemerkt war
 - **Status je Lauf**: *OK* (alles gesichert und geprueft), *OK (Hinweis)* (vollstaendig, aber etwas zu wissen - z.B. VM offline gesichert), *Warnung* (nicht alles einwandfrei, z.B. Pruefung oder Host-System), *Fehler*
 - **Bericht je Lauf** (`Bericht.html`, Doppelklick im Verlauf): Status mit Erklaerung, Hinweise mit "Was tun", alle Dateien als Links mit Erklaerung, komplettes Protokoll. *wbadmin* = Befehlszeile der Windows Server-Sicherung, die HUMig aufruft
 - **Offline-Hinweis**: VMs, die Hyper-V nur offline sichern kann (z.B. dynamische Datentraeger im Gast), werden markiert, vor dem Start gemeldet und der Grund steht im Bericht
