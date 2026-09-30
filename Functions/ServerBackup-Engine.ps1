@@ -815,144 +815,153 @@ function Start-HMServerBackup {
         catch { Write-HMSbLog "Profil nicht auf der Platte gespeichert: $($_.Exception.Message)" 'Warning' }
     }
 
-    # --- Host-Konfiguration
-    $hostCfgOk = $false
-    if ($Ctx.HostConfig) {
-        $Job.Status = 'Host-Konfiguration'
-        try {
-            $hc = Export-HMSbHostConfig -Dest (Join-Path $rep 'Host-Konfiguration')
-            $hostCfgOk = $true
-            Write-HMSbLog "Host-Konfiguration gesichert: $($hc.Switches) Switch(es), $($hc.ManagementAdapters) Host-vNIC(s), $($hc.VMs) VM(s) -> Host-Konfiguration\ (HTML, JSON, Restore-VMSwitches.ps1)" 'Success'
-            foreach ($w in @($hc.Warnings)) { Write-HMSbLog "  Host-Konfiguration: $w" 'Warning' }
-        } catch {
-            Write-HMSbLog "Host-Konfiguration nicht gesichert: $($_.Exception.Message)" 'Warning'; $notes += 'Host-Konfiguration fehlgeschlagen'; $status = 'Warning'
-            $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Host-Konfiguration konnte nicht gesichert werden: $($_.Exception.Message)"; Fix = 'Die VM-Sicherung ist davon nicht betroffen. Mit "Nur Host-Konfiguration" erneut versuchen.' }
+    # Ab hier existiert der Berichtsordner: Abbruch/Fehler wird trotzdem in Verlauf und Bericht festgehalten
+    $hostCfgOk = $false; $verId = ''; $volOk = $false; $hostSysOk = $false
+    try {
+        # --- Host-Konfiguration
+        $hostCfgOk = $false
+        if ($Ctx.HostConfig) {
+            $Job.Status = 'Host-Konfiguration'
+            try {
+                $hc = Export-HMSbHostConfig -Dest (Join-Path $rep 'Host-Konfiguration')
+                $hostCfgOk = $true
+                Write-HMSbLog "Host-Konfiguration gesichert: $($hc.Switches) Switch(es), $($hc.ManagementAdapters) Host-vNIC(s), $($hc.VMs) VM(s) -> Host-Konfiguration\ (HTML, JSON, Restore-VMSwitches.ps1)" 'Success'
+                foreach ($w in @($hc.Warnings)) { Write-HMSbLog "  Host-Konfiguration: $w" 'Warning' }
+            } catch {
+                Write-HMSbLog "Host-Konfiguration nicht gesichert: $($_.Exception.Message)" 'Warning'; $notes += 'Host-Konfiguration fehlgeschlagen'; $status = 'Warning'
+                $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Host-Konfiguration konnte nicht gesichert werden: $($_.Exception.Message)"; Fix = 'Die VM-Sicherung ist davon nicht betroffen. Mit "Nur Host-Konfiguration" erneut versuchen.' }
+            }
         }
-    }
-    if ($Job.Cancel) { throw 'Abgebrochen' }
+        if ($Job.Cancel) { throw 'Abgebrochen' }
 
-    $nPh = [Math]::Max(1, [int][bool]$vms.Count + [int][bool]$vols.Count + [int][bool]$Ctx.HostSystem)
-    $span = [int](95 / $nPh)
-    $pb = 2
-    # --- VMs sichern
-    $verId = ''
-    if ($vms.Count) {
-        $Job.Status = 'VMs: Schattenkopie wird erstellt ...'
-        Write-HMSbLog "wbadmin: VMs sichern -> $target (Online-Sicherung ueber VSS, VMs laufen weiter)" 'Header'
-        $argList = "start backup -backupTarget:$target -hyperv:""$($vms -join ',')"" -quiet"
-        $r = Invoke-HMSbStart -Arguments $argList -Phase 'VMs' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-VMs.log') -Job $Job
-        if ($Job.Cancel) {
-            Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
-            [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
-            throw 'Abgebrochen'
-        }
-        foreach ($lf in @($r.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
-        if ($r.ExitCode -ne 0 -and $r.Busy) { $status = 'Error'; $notes += 'VM-Sicherung: anderer Sicherungsvorgang lief'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die VM-Sicherung wurde nicht ausgefuehrt: am Host lief bereits eine andere Sicherung/Wiederherstellung.'; Fix = $script:HMSbBusyFix }; Write-HMSbLog 'VM-Sicherung NICHT ausgefuehrt - am Host lief bereits eine andere Sicherung/Wiederherstellung (spaeter erneut starten)' 'Error' }
-        elseif ($r.ExitCode -ne 0) { $status = 'Error'; $notes += "VM-Sicherung Exitcode $($r.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die VM-Sicherung ist fehlgeschlagen (wbadmin Exitcode $($r.ExitCode))."; Fix = 'Ursache steht in wbadmin-VMs.log und im Backup-/Fehlerprotokoll der Windows Server-Sicherung (Links unten). Haeufig: Platte voll, VM gesperrt, VSS-Fehler im Gast.' }; Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - Details: wbadmin-VMs.log im Berichtsordner" 'Error' }
-        else {
-            $offVms = @($r.Lines | Where-Object { $_ -match '"(.+?) \(Offline\)"' } | ForEach-Object { if ($_ -match '"(.+?) \(Offline\)"') { $Matches[1] } } | Select-Object -Unique)
-            if ($offVms.Count) {
-                # vollstaendig gesichert -> kein Warnstatus, nur Hinweis
-                $why = Get-HMSbOfflineReasons -Since $t0.AddMinutes(-1)
-                foreach ($ov in $offVms) {
-                    $h = Get-HMSbOfflineHintText $why[$ov]
-                    if ($h) {
-                        Write-HMSbLog "VM '$ov' wurde OFFLINE gesichert (kurz angehalten) - Grund laut Hyper-V: $h$(if ($why[$ov].Dynamic) { '. Abhilfe: Laufwerke im Gast auf Basisdatentraeger umstellen (neue Basis-VHDX, Daten kopieren) - siehe Anleitung.' })" 'Warning'
-                        $notes += "Hinweis: $ov offline gesichert ($h)"
-                        $hints += [pscustomobject]@{ Lvl = 'Info'; Text = "VM $ov wurde vollstaendig gesichert, aber OFFLINE: Hyper-V hat sie zu Beginn kurz angehalten (gespeicherter Zustand, meist 1-2 Minuten), danach lief sie weiter. Grund laut Hyper-V: $h."; Fix = $(if ($why[$ov].Dynamic) { 'Im Gast sind dynamische Datentraeger eingerichtet (diskpart > list disk, Spalte Dyn). Abhilfe: auf Basisdatentraeger umstellen (neue Basis-VHDX anhaengen, Daten kopieren). Bis dahin ausserhalb der Unterrichtszeit sichern (Zeitplan).' } else { 'Integrationsdienst Sicherung (VSS) der VM und den Dienst vmicvss im Gast pruefen.' }) }
-                    } else {
-                        Write-HMSbLog "VM '$ov' wurde OFFLINE gesichert (kurz angehalten) - Grund nicht im Hyper-V-Protokoll gefunden: Integrationsdienst Sicherung (VSS), Dienst vmicvss im Gast und Volumes (NTFS/ReFS, Basisdatentraeger) pruefen." 'Warning'
-                        $notes += "Hinweis: $ov offline gesichert"
-                        $hints += [pscustomobject]@{ Lvl = 'Info'; Text = "VM $ov wurde vollstaendig gesichert, aber OFFLINE (zu Beginn kurz angehalten). Ein Grund stand nicht im Hyper-V-Protokoll."; Fix = 'Integrationsdienst Sicherung (VSS) der VM, Dienst vmicvss im Gast und Volumes im Gast (NTFS/ReFS, Basisdatentraeger) pruefen.' }
+        $nPh = [Math]::Max(1, [int][bool]$vms.Count + [int][bool]$vols.Count + [int][bool]$Ctx.HostSystem)
+        $span = [int](95 / $nPh)
+        $pb = 2
+        # --- VMs sichern
+        $verId = ''
+        if ($vms.Count) {
+            $Job.Status = 'VMs: Schattenkopie wird erstellt ...'
+            Write-HMSbLog "wbadmin: VMs sichern -> $target (Online-Sicherung ueber VSS, VMs laufen weiter)" 'Header'
+            $argList = "start backup -backupTarget:$target -hyperv:""$($vms -join ',')"" -quiet"
+            $r = Invoke-HMSbStart -Arguments $argList -Phase 'VMs' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-VMs.log') -Job $Job
+            if ($Job.Cancel) {
+                Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
+                [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+                throw 'Abgebrochen'
+            }
+            foreach ($lf in @($r.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
+            if ($r.ExitCode -ne 0 -and $r.Busy) { $status = 'Error'; $notes += 'VM-Sicherung: anderer Sicherungsvorgang lief'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die VM-Sicherung wurde nicht ausgefuehrt: am Host lief bereits eine andere Sicherung/Wiederherstellung.'; Fix = $script:HMSbBusyFix }; Write-HMSbLog 'VM-Sicherung NICHT ausgefuehrt - am Host lief bereits eine andere Sicherung/Wiederherstellung (spaeter erneut starten)' 'Error' }
+            elseif ($r.ExitCode -ne 0) { $status = 'Error'; $notes += "VM-Sicherung Exitcode $($r.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die VM-Sicherung ist fehlgeschlagen (wbadmin Exitcode $($r.ExitCode))."; Fix = 'Ursache steht in wbadmin-VMs.log und im Backup-/Fehlerprotokoll der Windows Server-Sicherung (Links unten). Haeufig: Platte voll, VM gesperrt, VSS-Fehler im Gast.' }; Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - Details: wbadmin-VMs.log im Berichtsordner" 'Error' }
+            else {
+                $offVms = @($r.Lines | Where-Object { $_ -match '"(.+?) \(Offline\)"' } | ForEach-Object { if ($_ -match '"(.+?) \(Offline\)"') { $Matches[1] } } | Select-Object -Unique)
+                if ($offVms.Count) {
+                    # vollstaendig gesichert -> kein Warnstatus, nur Hinweis
+                    $why = Get-HMSbOfflineReasons -Since $t0.AddMinutes(-1)
+                    foreach ($ov in $offVms) {
+                        $h = Get-HMSbOfflineHintText $why[$ov]
+                        if ($h) {
+                            Write-HMSbLog "VM '$ov' wurde OFFLINE gesichert (kurz angehalten) - Grund laut Hyper-V: $h$(if ($why[$ov].Dynamic) { '. Abhilfe: Laufwerke im Gast auf Basisdatentraeger umstellen (neue Basis-VHDX, Daten kopieren) - siehe Anleitung.' })" 'Warning'
+                            $notes += "Hinweis: $ov offline gesichert ($h)"
+                            $hints += [pscustomobject]@{ Lvl = 'Info'; Text = "VM $ov wurde vollstaendig gesichert, aber OFFLINE: Hyper-V hat sie zu Beginn kurz angehalten (gespeicherter Zustand, meist 1-2 Minuten), danach lief sie weiter. Grund laut Hyper-V: $h."; Fix = $(if ($why[$ov].Dynamic) { 'Im Gast sind dynamische Datentraeger eingerichtet (diskpart > list disk, Spalte Dyn). Abhilfe: auf Basisdatentraeger umstellen (neue Basis-VHDX anhaengen, Daten kopieren). Bis dahin ausserhalb der Unterrichtszeit sichern (Zeitplan).' } else { 'Integrationsdienst Sicherung (VSS) der VM und den Dienst vmicvss im Gast pruefen.' }) }
+                        } else {
+                            Write-HMSbLog "VM '$ov' wurde OFFLINE gesichert (kurz angehalten) - Grund nicht im Hyper-V-Protokoll gefunden: Integrationsdienst Sicherung (VSS), Dienst vmicvss im Gast und Volumes (NTFS/ReFS, Basisdatentraeger) pruefen." 'Warning'
+                            $notes += "Hinweis: $ov offline gesichert"
+                            $hints += [pscustomobject]@{ Lvl = 'Info'; Text = "VM $ov wurde vollstaendig gesichert, aber OFFLINE (zu Beginn kurz angehalten). Ein Grund stand nicht im Hyper-V-Protokoll."; Fix = 'Integrationsdienst Sicherung (VSS) der VM, Dienst vmicvss im Gast und Volumes im Gast (NTFS/ReFS, Basisdatentraeger) pruefen.' }
+                        }
                     }
                 }
+                Write-HMSbLog 'VM-Sicherung erfolgreich' 'Success'
             }
-            Write-HMSbLog 'VM-Sicherung erfolgreich' 'Success'
-        }
-        # Version ermitteln + pruefen
-        $Job.Status = 'Pruefen'
-        try {
-            $vv = Get-HMSbVersions $target
-            $last = @($vv.Versions) | Select-Object -Last 1
-            if ($last) {
-                $verId = "$($last.Id)"; $res.VersionId = $verId
-                Write-HMSbLog "Versionen auf der Platte: $(@($vv.Versions).Count) - neueste: $($last.Time) (ID $verId)" 'Info'
-                Set-Content -LiteralPath (Join-Path $rep 'Versionen.txt') -Value $vv.Text -Encoding UTF8
-            }
-            if ($Ctx.Verify -and $verId -and $r.ExitCode -eq 0) {
-                $gi = Invoke-HMSbWbadmin -Arguments "get items -version:$verId -backupTarget:$target" -Quiet
-                Set-Content -LiteralPath (Join-Path $rep 'Inhalt.txt') -Value $gi.Text -Encoding UTF8
-                $miss = @($vms | Where-Object { $gi.Text -notmatch [regex]::Escape($_) })
-                if ($gi.ExitCode -ne 0) { Write-HMSbLog "Pruefung: wbadmin get items Exitcode $($gi.ExitCode) - siehe Inhalt.txt" 'Warning'; if ($status -eq 'OK') { $status = 'Warning' }; $notes += 'Pruefung nicht moeglich'
-                    $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Pruefung konnte den Inhalt der Sicherung nicht lesen (Exitcode $($gi.ExitCode))."; Fix = 'Inhalt.txt ansehen; "Versionen auf der Platte" zeigt, ob die Version vorhanden ist.' } }
-                elseif ($miss.Count) { Write-HMSbLog "Pruefung: in Version $verId NICHT gefunden: $($miss -join ', ') - siehe Inhalt.txt" 'Warning'; $notes += "Pruefung: fehlt $($miss -join ', ')"; if ($status -eq 'OK') { $status = 'Warning' }
-                    $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Pruefung hat folgende VMs in der neuen Version nicht gefunden: $($miss -join ', ')."; Fix = 'Inhalt.txt ansehen. Fehlen die VMs wirklich, Sicherung wiederholen.' } }
-                else { Write-HMSbLog "Pruefung OK: alle $($vms.Count) VM(s) in Version $verId enthalten" 'Success' }
-            }
-        } catch { Write-HMSbLog "Versionen/Pruefung nicht moeglich: $($_.Exception.Message)" 'Warning' }
-    }
-    if ($vms.Count) { $pb += $span }
-    if ($Job.Cancel) { throw 'Abgebrochen' }
-
-    # --- Laufwerke dieses Servers (Volume-Sicherung, blockbasiert)
-    $volOk = $false
-    if ($vols.Count) {
-        $Job.Status = 'Laufwerke: Schattenkopie wird erstellt ...'
-        Write-HMSbLog "wbadmin: Laufwerke sichern ($($vols -join ', ')) -> $target" 'Header'
-        $r3 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -include:$($vols -join ',') -quiet" -Phase 'Laufwerke' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-Laufwerke.log') -Job $Job
-        $pb += $span
-        if ($Job.Cancel) {
-            Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
-            [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
-            throw 'Abgebrochen'
-        }
-        foreach ($lf in @($r3.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
-        if ($r3.ExitCode -ne 0) {
-            $status = 'Error'; $notes += $(if ($r3.Busy) { 'Laufwerke: anderer Sicherungsvorgang lief' } else { "Laufwerke Exitcode $($r3.ExitCode)" })
-            if ($r3.Busy) { $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die Sicherung der Laufwerke wurde nicht ausgefuehrt: am Host lief bereits eine andere Sicherung/Wiederherstellung.'; Fix = $script:HMSbBusyFix } }
-            else { $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die Sicherung der Laufwerke $($vols -join ', ') ist fehlgeschlagen (wbadmin Exitcode $($r3.ExitCode))."; Fix = 'Ursache in wbadmin-Laufwerke.log und im Protokoll der Windows Server-Sicherung. Haeufig: Platte voll, VSS-Fehler (vssadmin list writers).' } }
-            Write-HMSbLog "Laufwerks-Sicherung FEHLGESCHLAGEN (Exitcode $($r3.ExitCode)) - wbadmin-Laufwerke.log" 'Error'
-        } else {
-            $volOk = $true
-            Write-HMSbLog 'Laufwerks-Sicherung erfolgreich' 'Success'
+            # Version ermitteln + pruefen
+            $Job.Status = 'Pruefen'
             try {
-                $vv3 = Get-HMSbVersions $target
-                $l3 = @($vv3.Versions) | Select-Object -Last 1
-                if ($l3) { $res.VolVersionId = "$($l3.Id)"; Set-Content -LiteralPath (Join-Path $rep 'Versionen.txt') -Value $vv3.Text -Encoding UTF8 }
-                if ($Ctx.Verify -and $res.VolVersionId) {
-                    $gi3 = Invoke-HMSbWbadmin -Arguments "get items -version:$($res.VolVersionId) -backupTarget:$target" -Quiet
-                    Set-Content -LiteralPath (Join-Path $rep 'Inhalt-Laufwerke.txt') -Value $gi3.Text -Encoding UTF8
-                    $missV = @($vols | Where-Object { $gi3.Text -notmatch [regex]::Escape($_) })
-                    if ($gi3.ExitCode -ne 0 -or $missV.Count) {
-                        if ($status -eq 'OK') { $status = 'Warning' }
-                        $notes += "Pruefung Laufwerke: $(if ($missV.Count) { 'fehlt ' + ($missV -join ', ') } else { 'nicht moeglich' })"
-                        $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Pruefung der Laufwerks-Sicherung war nicht erfolgreich$(if ($missV.Count) { " (nicht gefunden: $($missV -join ', '))" })."; Fix = 'Inhalt-Laufwerke.txt ansehen, ggf. Sicherung wiederholen.' }
-                        Write-HMSbLog 'Pruefung Laufwerke: nicht alle Laufwerke in der Version gefunden - siehe Inhalt-Laufwerke.txt' 'Warning'
-                    } else { Write-HMSbLog "Pruefung OK: alle $($vols.Count) Laufwerk(e) in Version $($res.VolVersionId) enthalten" 'Success' }
+                $vv = Get-HMSbVersions $target
+                $last = @($vv.Versions) | Select-Object -Last 1
+                if ($last) {
+                    $verId = "$($last.Id)"; $res.VersionId = $verId
+                    Write-HMSbLog "Versionen auf der Platte: $(@($vv.Versions).Count) - neueste: $($last.Time) (ID $verId)" 'Info'
+                    Set-Content -LiteralPath (Join-Path $rep 'Versionen.txt') -Value $vv.Text -Encoding UTF8
                 }
-            } catch { Write-HMSbLog "Versionen/Pruefung Laufwerke nicht moeglich: $($_.Exception.Message)" 'Warning' }
+                if ($Ctx.Verify -and $verId -and $r.ExitCode -eq 0) {
+                    $gi = Invoke-HMSbWbadmin -Arguments "get items -version:$verId -backupTarget:$target" -Quiet
+                    Set-Content -LiteralPath (Join-Path $rep 'Inhalt.txt') -Value $gi.Text -Encoding UTF8
+                    $miss = @($vms | Where-Object { $gi.Text -notmatch [regex]::Escape($_) })
+                    if ($gi.ExitCode -ne 0) { Write-HMSbLog "Pruefung: wbadmin get items Exitcode $($gi.ExitCode) - siehe Inhalt.txt" 'Warning'; if ($status -eq 'OK') { $status = 'Warning' }; $notes += 'Pruefung nicht moeglich'
+                        $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Pruefung konnte den Inhalt der Sicherung nicht lesen (Exitcode $($gi.ExitCode))."; Fix = 'Inhalt.txt ansehen; "Versionen auf der Platte" zeigt, ob die Version vorhanden ist.' } }
+                    elseif ($miss.Count) { Write-HMSbLog "Pruefung: in Version $verId NICHT gefunden: $($miss -join ', ') - siehe Inhalt.txt" 'Warning'; $notes += "Pruefung: fehlt $($miss -join ', ')"; if ($status -eq 'OK') { $status = 'Warning' }
+                        $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Pruefung hat folgende VMs in der neuen Version nicht gefunden: $($miss -join ', ')."; Fix = 'Inhalt.txt ansehen. Fehlen die VMs wirklich, Sicherung wiederholen.' } }
+                    else { Write-HMSbLog "Pruefung OK: alle $($vms.Count) VM(s) in Version $verId enthalten" 'Success' }
+                }
+            } catch { Write-HMSbLog "Versionen/Pruefung nicht moeglich: $($_.Exception.Message)" 'Warning' }
         }
-    }
-    if ($Job.Cancel) { throw 'Abgebrochen' }
+        if ($vms.Count) { $pb += $span }
+        if ($Job.Cancel) { throw 'Abgebrochen' }
 
-    # --- Host-System (Bare-Metal)
-    $hostSysOk = $false
-    if ($Ctx.HostSystem) {
-        $Job.Status = 'Host-System: wird vorbereitet ...'
-        Write-HMSbLog "wbadmin: Host-System (alle kritischen Volumes, Bare-Metal) -> $target" 'Header'
-        $r2 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -allCritical -quiet" -Phase 'Host-System' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-HostSystem.log') -Job $Job
-        if ($Job.Cancel) {
-            Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
-            [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
-            throw 'Abgebrochen'
+        # --- Laufwerke dieses Servers (Volume-Sicherung, blockbasiert)
+        $volOk = $false
+        if ($vols.Count) {
+            $Job.Status = 'Laufwerke: Schattenkopie wird erstellt ...'
+            Write-HMSbLog "wbadmin: Laufwerke sichern ($($vols -join ', ')) -> $target" 'Header'
+            $r3 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -include:$($vols -join ',') -quiet" -Phase 'Laufwerke' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-Laufwerke.log') -Job $Job
+            $pb += $span
+            if ($Job.Cancel) {
+                Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
+                [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+                throw 'Abgebrochen'
+            }
+            foreach ($lf in @($r3.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
+            if ($r3.ExitCode -ne 0) {
+                $status = 'Error'; $notes += $(if ($r3.Busy) { 'Laufwerke: anderer Sicherungsvorgang lief' } else { "Laufwerke Exitcode $($r3.ExitCode)" })
+                if ($r3.Busy) { $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die Sicherung der Laufwerke wurde nicht ausgefuehrt: am Host lief bereits eine andere Sicherung/Wiederherstellung.'; Fix = $script:HMSbBusyFix } }
+                else { $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die Sicherung der Laufwerke $($vols -join ', ') ist fehlgeschlagen (wbadmin Exitcode $($r3.ExitCode))."; Fix = 'Ursache in wbadmin-Laufwerke.log und im Protokoll der Windows Server-Sicherung. Haeufig: Platte voll, VSS-Fehler (vssadmin list writers).' } }
+                Write-HMSbLog "Laufwerks-Sicherung FEHLGESCHLAGEN (Exitcode $($r3.ExitCode)) - wbadmin-Laufwerke.log" 'Error'
+            } else {
+                $volOk = $true
+                Write-HMSbLog 'Laufwerks-Sicherung erfolgreich' 'Success'
+                try {
+                    $vv3 = Get-HMSbVersions $target
+                    $l3 = @($vv3.Versions) | Select-Object -Last 1
+                    if ($l3) { $res.VolVersionId = "$($l3.Id)"; Set-Content -LiteralPath (Join-Path $rep 'Versionen.txt') -Value $vv3.Text -Encoding UTF8 }
+                    if ($Ctx.Verify -and $res.VolVersionId) {
+                        $gi3 = Invoke-HMSbWbadmin -Arguments "get items -version:$($res.VolVersionId) -backupTarget:$target" -Quiet
+                        Set-Content -LiteralPath (Join-Path $rep 'Inhalt-Laufwerke.txt') -Value $gi3.Text -Encoding UTF8
+                        $missV = @($vols | Where-Object { $gi3.Text -notmatch [regex]::Escape($_) })
+                        if ($gi3.ExitCode -ne 0 -or $missV.Count) {
+                            if ($status -eq 'OK') { $status = 'Warning' }
+                            $notes += "Pruefung Laufwerke: $(if ($missV.Count) { 'fehlt ' + ($missV -join ', ') } else { 'nicht moeglich' })"
+                            $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Pruefung der Laufwerks-Sicherung war nicht erfolgreich$(if ($missV.Count) { " (nicht gefunden: $($missV -join ', '))" })."; Fix = 'Inhalt-Laufwerke.txt ansehen, ggf. Sicherung wiederholen.' }
+                            Write-HMSbLog 'Pruefung Laufwerke: nicht alle Laufwerke in der Version gefunden - siehe Inhalt-Laufwerke.txt' 'Warning'
+                        } else { Write-HMSbLog "Pruefung OK: alle $($vols.Count) Laufwerk(e) in Version $($res.VolVersionId) enthalten" 'Success' }
+                    }
+                } catch { Write-HMSbLog "Versionen/Pruefung Laufwerke nicht moeglich: $($_.Exception.Message)" 'Warning' }
+            }
         }
-        foreach ($lf in @($r2.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
-        if ($r2.ExitCode -ne 0) { if ($status -eq 'OK') { $status = 'Warning' }; $notes += "Host-System Exitcode $($r2.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Host-System-Sicherung ist fehlgeschlagen (Exitcode $($r2.ExitCode)). Die VM-Sicherung ist davon nicht betroffen."; Fix = $(if ($r2.Busy) { $script:HMSbBusyFix } else { 'Ursache in wbadmin-HostSystem.log.' }) }; Write-HMSbLog "Host-System-Sicherung FEHLGESCHLAGEN (Exitcode $($r2.ExitCode)) - wbadmin-HostSystem.log" 'Error' }
-        else {
-            $hostSysOk = $true
-            Write-HMSbLog 'Host-System-Sicherung erfolgreich' 'Success'
-            try { $vv2 = Get-HMSbVersions $target; $l2 = @($vv2.Versions) | Select-Object -Last 1; if ($l2) { $res.HostVersionId = "$($l2.Id)"; Set-Content -LiteralPath (Join-Path $rep 'Versionen.txt') -Value $vv2.Text -Encoding UTF8 } } catch { }
+        if ($Job.Cancel) { throw 'Abgebrochen' }
+
+        # --- Host-System (Bare-Metal)
+        $hostSysOk = $false
+        if ($Ctx.HostSystem) {
+            $Job.Status = 'Host-System: wird vorbereitet ...'
+            Write-HMSbLog "wbadmin: Host-System (alle kritischen Volumes, Bare-Metal) -> $target" 'Header'
+            $r2 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -allCritical -quiet" -Phase 'Host-System' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-HostSystem.log') -Job $Job
+            if ($Job.Cancel) {
+                Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
+                [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+                throw 'Abgebrochen'
+            }
+            foreach ($lf in @($r2.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
+            if ($r2.ExitCode -ne 0) { if ($status -eq 'OK') { $status = 'Warning' }; $notes += "Host-System Exitcode $($r2.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Host-System-Sicherung ist fehlgeschlagen (Exitcode $($r2.ExitCode)). Die VM-Sicherung ist davon nicht betroffen."; Fix = $(if ($r2.Busy) { $script:HMSbBusyFix } else { 'Ursache in wbadmin-HostSystem.log.' }) }; Write-HMSbLog "Host-System-Sicherung FEHLGESCHLAGEN (Exitcode $($r2.ExitCode)) - wbadmin-HostSystem.log" 'Error' }
+            else {
+                $hostSysOk = $true
+                Write-HMSbLog 'Host-System-Sicherung erfolgreich' 'Success'
+                try { $vv2 = Get-HMSbVersions $target; $l2 = @($vv2.Versions) | Select-Object -Last 1; if ($l2) { $res.HostVersionId = "$($l2.Id)"; Set-Content -LiteralPath (Join-Path $rep 'Versionen.txt') -Value $vv2.Text -Encoding UTF8 } } catch { }
+            }
         }
+    } catch {
+        $msg = "$($_.Exception.Message)"
+        $status = 'Error'
+        if ($msg -eq 'Abgebrochen' -or $Job.Cancel) { $notes += 'abgebrochen'; Write-HMSbLog 'Server-Backup ABGEBROCHEN - Lauf wird im Verlauf festgehalten' 'Error'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die Sicherung wurde abgebrochen.'; Fix = 'Sicherung erneut starten. Was bis zum Abbruch gesichert war, zeigt der Button Versionen auf der Platte.' } }
+        else { $notes += "Fehler: $msg"; Write-HMSbLog "Server-Backup FEHLER: $msg" 'Error'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die Sicherung ist mit einem Fehler abgebrochen: $msg"; Fix = 'Protokoll im Berichtsordner pruefen und erneut starten.' } }
     }
 
     # --- Verlauf, Bericht
