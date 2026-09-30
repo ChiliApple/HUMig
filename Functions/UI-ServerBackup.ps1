@@ -231,7 +231,7 @@ function Add-HMSbHeader([string]$Text) {
 function Update-HMSbVms {
     $ui.pnlSbVms.Children.Clear()
     Add-HMSbInfoText 'VMs und Laufwerke werden gelesen ...'
-    Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Get-HMSbSources } -ArgumentList @($script:SbEngine) -TimeoutSec 120 -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Get-HMSbSources } -ArgumentList @($script:SbEngine) -TimeoutSec 120 -BusyTag 'Sb' -BusyText 'VMs und Laufwerke werden gelesen ...' -OnComplete {
         param($r)
         $ui.pnlSbVms.Children.Clear()
         if ($r -is [string] -or $null -eq $r) { $script:SbVms = @(); $script:SbVols = @(); Add-HMSbInfoText "Nicht lesbar: $r" '#FFF38BA8'; return }
@@ -289,7 +289,7 @@ function Update-HMSbDrives {
     $ui.cmbSbDrive.SelectedIndex = 0
     $script:SbDrives = @()
     $script:SbSuppressDrive = $false
-    Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Get-HMSbDriveList } -ArgumentList @($script:SbEngine) -TimeoutSec 60 -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Get-HMSbDriveList } -ArgumentList @($script:SbEngine) -TimeoutSec 60 -BusyTag 'Sb' -BusyText 'Platten werden gelesen ...' -OnComplete {
         param($r)
         $script:SbSuppressDrive = $true
         $ui.cmbSbDrive.Items.Clear()
@@ -557,7 +557,7 @@ function Start-HMSbBackup {
 function Show-HMSbDiskSetup {
     if ($script:JobRunning) { Out-Console 'Waehrend eines Vorgangs nicht moeglich.' 'Warning'; return }
     Out-Console 'Server-Backup: USB-Datentraeger werden gelesen ...' 'Info'
-    Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Get-HMSbDiskList } -ArgumentList @($script:SbEngine) -TimeoutSec 90 -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Get-HMSbDiskList } -ArgumentList @($script:SbEngine) -TimeoutSec 90 -BusyTag 'Sb' -BusyText 'USB-Datentraeger werden gelesen ...' -OnComplete {
         param($r)
         if ($r -is [string]) { Out-Console "Datentraeger nicht lesbar: $r" 'Error'; return }
         $disks = @($r | Where-Object { $_ })
@@ -593,7 +593,7 @@ function Invoke-HMSbDiskSetup($Sel, $Win) {
     try { $Win.Close() } catch { }
     Out-Console "Datentraeger $num wird eingerichtet ($label) ..." 'Warning'
     Set-Status "Platte $label wird eingerichtet ..." '#FFF9E2AF'
-    Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $l, $pn) . $eng; Initialize-HMSbDisk -Number $n -Label $l -Profile $pn } -ArgumentList @($script:SbEngine, $num, $label, $(if ($p) { $p.Name } else { '' })) -TimeoutSec 900 -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $l, $pn) . $eng; Initialize-HMSbDisk -Number $n -Label $l -Profile $pn } -ArgumentList @($script:SbEngine, $num, $label, $(if ($p) { $p.Name } else { '' })) -TimeoutSec 900 -BusyTag 'Sb' -BusyText 'Platte wird eingerichtet ...' -OnComplete {
         param($r)
         if ($r -is [string]) { Out-Console "Platte einrichten FEHLGESCHLAGEN: $r" 'Error'; Set-Status 'Platte einrichten fehlgeschlagen' '#FFF38BA8' }
         else { Out-Console "Platte eingerichtet: $($r.Letter): $($r.Label) ($(Format-HMSize $r.SizeBytes), NTFS 64K)" 'Success'; Set-Status 'Platte eingerichtet' '#FFA6E3A1' }
@@ -635,7 +635,7 @@ function Show-HMSbVersions {
     $d = Get-HMSbDrive
     if (-not $d) { Out-Console 'Keine Ziel-Platte gewaehlt.' 'Warning'; return }
     Out-Console "Versionen auf $($d.Letter): werden gelesen ..." 'Info'
-    Invoke-AsyncCommand -ScriptBlock { param($eng, $t) . $eng; Get-HMSbVersions $t } -ArgumentList @($script:SbEngine, "$($d.Letter):") -TimeoutSec 120 -State $d -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $t) . $eng; Get-HMSbVersions $t } -ArgumentList @($script:SbEngine, "$($d.Letter):") -TimeoutSec 120 -State $d -BusyTag 'Sb' -BusyText 'Versionen werden gelesen ...' -OnComplete {
         param($r, $d)
         if ($r -is [string]) { Out-Console "Versionen: $r" 'Error'; return }
         $v = @($r.Versions)
@@ -651,7 +651,7 @@ function Start-HMSbHostOnly {
     $base = if ($d) { "$($d.Letter):\$($script:SbDirName)" } else { $script:SbReportDir }
     $dest = Join-Path $base ('Host-Konfiguration_{0}_{1}' -f $env:COMPUTERNAME, (Get-Date -Format 'yyyy-MM-dd_HHmm'))
     Out-Console "Host-Konfiguration wird exportiert -> $dest" 'Info'
-    Invoke-AsyncCommand -ScriptBlock { param($eng, $dst) . $eng; Export-HMSbHostConfig -Dest $dst } -ArgumentList @($script:SbEngine, $dest) -TimeoutSec 300 -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $dst) . $eng; Export-HMSbHostConfig -Dest $dst } -ArgumentList @($script:SbEngine, $dest) -TimeoutSec 300 -BusyTag 'Sb' -BusyText 'Host-Konfiguration wird exportiert ...' -OnComplete {
         param($r)
         if ($r -is [string]) { Out-Console "Host-Konfiguration: $r" 'Error'; return }
         Out-Console "Host-Konfiguration: $($r.Switches) Switch(es), $($r.ManagementAdapters) Host-vNIC(s), $($r.VMs) VM(s) -> $($r.Folder)" 'Success'
@@ -682,7 +682,7 @@ function Install-HMSbFeature {
     Set-Status 'Windows Server-Sicherung wird installiert ...' '#FFF9E2AF'
     Invoke-AsyncCommand -ScriptBlock {
         try { $r = Install-WindowsFeature -Name Windows-Server-Backup -IncludeManagementTools -ErrorAction Stop; return "OK:$($r.Success):$($r.RestartNeeded)" } catch { return "FEHLER: $($_.Exception.Message)" }
-    } -TimeoutSec 1800 -OnComplete {
+    } -TimeoutSec 1800 -BusyTag 'Sb' -BusyText 'Windows Server-Sicherung wird installiert ...' -OnComplete {
         param($r)
         if ("$r" -like 'OK:True*') { Out-Console "Windows Server-Sicherung installiert$(if ("$r" -match ':Yes$') { ' - Neustart erforderlich' })" 'Success'; Set-Status 'Windows Server-Sicherung installiert' '#FFA6E3A1' }
         else { Out-Console "Installation: $r" 'Error'; Set-Status 'Installation fehlgeschlagen' '#FFF38BA8' }
@@ -691,7 +691,7 @@ function Install-HMSbFeature {
 }
 
 function Update-HMSbPrereq {
-    Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Test-HMSbPrereq } -ArgumentList @($script:SbEngine) -TimeoutSec 60 -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Test-HMSbPrereq } -ArgumentList @($script:SbEngine) -TimeoutSec 60 -BusyTag 'Sb' -BusyText 'Windows Server-Sicherung wird geprueft ...' -OnComplete {
         param($r)
         if ($r -is [string]) { Out-Console "Server-Backup Pruefung: $r" 'Warning'; return }
         $script:SbPrereq = $r
@@ -914,7 +914,8 @@ function Edit-HMSbConflictWords($Owner = $null) {
     return $true
 }
 function Show-HMSbConflicts($Plan = $null, [string]$OwnPrefix = '', [double]$OwnMinutes = 360) {
-    $rows = Get-HMSbConflicts $Plan $OwnPrefix $OwnMinutes
+    [System.Windows.Input.Mouse]::OverrideCursor = [System.Windows.Input.Cursors]::Wait
+    try { $rows = Get-HMSbConflicts $Plan $OwnPrefix $OwnMinutes } finally { [System.Windows.Input.Mouse]::OverrideCursor = $null }
     $rows = @($rows)
     $list = New-Object System.Collections.Generic.List[object]
     foreach ($r in $rows) { $list.Add(@($r.Ueberschneidung, $r.Aufgabe, $r.Zustand, $r.Ausloeser, $r.Naechster_Lauf, $r.Letzter_Lauf, $r.Suchwort, $r.Aktion)) }

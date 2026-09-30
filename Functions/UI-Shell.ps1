@@ -87,6 +87,37 @@ function New-HMDesktopShortcut {
 # ----------------------------------------------------------------------------
 # Fenstergroesse / -position (Config\WindowState.json, lokal)
 # ----------------------------------------------------------------------------
+# Pulsierender Punkt: Hintergrund-Aufgaben laufen (Statusleiste = alle, Server-Backup-Reiter = Kennung 'Sb')
+$script:HMPulse = $null
+function Set-HMBusyDot($Dot, [bool]$On) {
+    if (-not $Dot) { return }
+    if ($On) {
+        if ("$($Dot.Visibility)" -ne 'Visible') {
+            $Dot.Visibility = 'Visible'
+            if (-not $script:HMPulse) {
+                $a = New-Object System.Windows.Media.Animation.DoubleAnimation
+                $a.From = 1.0; $a.To = 0.15; $a.Duration = [System.Windows.Duration]::new([TimeSpan]::FromMilliseconds(650))
+                $a.AutoReverse = $true; $a.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
+                $script:HMPulse = $a
+            }
+            $Dot.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $script:HMPulse)
+        }
+    } elseif ("$($Dot.Visibility)" -eq 'Visible') {
+        $Dot.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $null)
+        $Dot.Visibility = 'Collapsed'
+    }
+}
+function Update-HMBusyUi {
+    if (-not $ui) { return }
+    $all = [int]$script:AsyncBusy['*']; $sb = [int]$script:AsyncBusy['Sb']
+    if ($ui.dotBusy) { Set-HMBusyDot $ui.dotBusy ($all -gt 0); $ui.dotBusy.ToolTip = "Im Hintergrund laufen $all Aufgabe(n)" }
+    if ($ui.dotSbBusy) { Set-HMBusyDot $ui.dotSbBusy ($sb -gt 0) }
+    if ($ui.lblSbBusy) {
+        $ui.lblSbBusy.Text = $(if ($sb -gt 0) { $t = "$($script:AsyncBusyText['Sb'])"; if ($t) { $t } else { 'wird geladen ...' } } else { '' })
+        $ui.lblSbBusy.Visibility = $(if ($sb -gt 0) { 'Visible' } else { 'Collapsed' })
+    }
+}
+
 function Save-HMWindowState {
     try {
         $w = $script:Window

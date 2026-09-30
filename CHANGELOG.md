@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.45 - 2026-09-30
+### Verbessert
+- **Pulsierender gruener Punkt**, solange im Hintergrund gelesen/gearbeitet wird: im Reiter Server-Backup neben dem Ladehinweis (VMs/Laufwerke, Platten, USB-Datentraeger, Versionen, Host-Konfiguration, Platte einrichten) und in der Statusleiste fuer alle Hintergrund-Aufgaben - HUMig wirkt beim Laden nicht mehr eingefroren
+- *Zeitplan-Pruefung*: Sanduhr, waehrend die Aufgabenplanung gelesen wird
+
 ## v2.0.44 - 2026-09-30
 ### Verbessert
 - Server-Backup: Knopf **Zeitplan-Pruefung** neben *Zeitplan ...* - zeigt alle geplanten Sicherungsaufgaben am Host (fremde Programme, alte Aufgaben, HUMig-Zeitplaene aller Profile) mit Ausloeser, naechstem/letztem Lauf und *Suchwoerter aendern ...*
