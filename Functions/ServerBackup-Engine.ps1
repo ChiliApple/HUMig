@@ -480,6 +480,34 @@ public static class HMSbEject {
     if (-not $dd) { throw "Datentraeger $Number nicht gefunden" }
     return [HMSbEject]::Eject("$($dd.PNPDeviceID)")
 }
+# Veto-Grund von CM_Request_Device_Eject lesbar machen (PNP_VETO_TYPE)
+function Format-HMSbVeto([string]$Result) {
+    if ($Result -notmatch 'Veto (\d+)') { return $Result }
+    $t = switch ([int]$Matches[1]) {
+        1 { 'Legacy-Geraet' } 2 { 'wird gerade geschlossen' } 3 { 'ein Programm verwendet die Platte' } 4 { 'ein Dienst verwendet die Platte' }
+        5 { 'Dateien/Volume auf der Platte sind noch geoeffnet' } 6 { 'ein anderes Geraet verhindert es' } 7 { 'Treiber verhindert es' }
+        9 { 'zu wenig Strom' } 10 { 'Geraet nicht abschaltbar' } 12 { 'fehlende Rechte' } 13 { 'bereits entfernt' } default { 'Grund unbekannt' }
+    }
+    return "$t - $Result"
+}
+# Platte offline schalten + als "von HUMig offline" merken
+function Set-HMSbDiskOffline([int]$Number, [string]$Label) {
+    $disk = Get-Disk -Number $Number -ErrorAction Stop
+    if ($disk.IsBoot -or $disk.IsSystem) { throw "Datentraeger $Number ist System-/Startplatte" }
+    Set-Disk -Number $Number -IsOffline $true -ErrorAction Stop
+    $k = Get-HMSbDiskKey $disk
+    if ($k) { Set-HMSbOfflineMarks (@(Get-HMSbOfflineMarks | Where-Object { "$_".Split('|')[0] -ne $k }) + @("$k|$Label|$((Get-Date).ToString('yyyy-MM-dd HH:mm'))")) }
+}
+# Auswerfen mit Wiederholung (die Windows Server-Sicherung gibt die Platte nach dem Lauf teils erst nach einigen Sekunden frei)
+function Invoke-HMSbDiskEjectRetry([int]$Number, [int]$Tries = 3, [int]$WaitSec = 10) {
+    $r = ''
+    for ($i = 1; $i -le $Tries; $i++) {
+        $r = Invoke-HMSbDiskEject -Number $Number
+        if (-not $r) { return '' }
+        if ($i -lt $Tries) { Start-Sleep -Seconds $WaitSec }
+    }
+    return (Format-HMSbVeto $r)
+}
 function Invoke-HMSbAfterBackup([string]$Letter, [string]$Mode, [string]$Label) {
     if ($Mode -notmatch '^(Eject|Offline)$') { return }
     $L = "$Letter".TrimEnd(':')
@@ -489,15 +517,17 @@ function Invoke-HMSbAfterBackup([string]$Letter, [string]$Mode, [string]$Label) 
     try { Write-VolumeCache -DriveLetter $L -ErrorAction Stop } catch { }
     if ($Mode -eq 'Offline') {
         try {
-            Set-Disk -Number $disk.Number -IsOffline $true -ErrorAction Stop
-            $k = Get-HMSbDiskKey $disk
-            if ($k) { Set-HMSbOfflineMarks (@(Get-HMSbOfflineMarks | Where-Object { "$_".Split('|')[0] -ne $k }) + @("$k|$Label|$((Get-Date).ToString('yyyy-MM-dd HH:mm'))")) }
+            Set-HMSbDiskOffline -Number $disk.Number -Label $Label
             Write-HMSbLog "Platte $Label offline geschaltet (Datentraeger $($disk.Number), kein Laufwerksbuchstabe mehr). Wieder online: HUMig ""Aktualisieren"", naechster geplanter Lauf oder Datentraegerverwaltung." 'Success'
         } catch { Write-HMSbLog "Platte $Label konnte nicht offline geschaltet werden: $($_.Exception.Message)" 'Warning' }
     } else {
         try {
-            $r = Invoke-HMSbDiskEject -Number $disk.Number
-            if ($r) { Write-HMSbLog "Platte $Label wurde NICHT ausgeworfen ($r) - wird sie noch verwendet? Explorer: Rechtsklick > Auswerfen" 'Warning' }
+            $r = Invoke-HMSbDiskEjectRetry -Number $disk.Number
+            if ($r) {
+                Write-HMSbLog "Platte $Label liess sich nicht auswerfen ($r) - wird stattdessen offline geschaltet." 'Warning'
+                try { Set-HMSbDiskOffline -Number $disk.Number -Label $Label; Write-HMSbLog "Platte $Label offline geschaltet (kein Laufwerksbuchstabe mehr) - kann abgezogen werden." 'Success' }
+                catch { Write-HMSbLog "Platte $Label konnte auch nicht offline geschaltet werden: $($_.Exception.Message)" 'Warning' }
+            }
             else { Write-HMSbLog "Platte $Label ausgeworfen - kann abgezogen werden (bis zum erneuten Anstecken nicht mehr verfuegbar)." 'Success' }
         } catch { Write-HMSbLog "Platte $Label auswerfen: $($_.Exception.Message)" 'Warning' }
     }
