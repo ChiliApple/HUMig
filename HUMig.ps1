@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.42'
+$script:Version   = '2.0.43'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -1592,7 +1592,17 @@ function Set-HMUserModeUi {
 # ============================================================================
 $script:Window.Add_Closing({
     param($s, $e)
-    if ($script:JobRunning) {
+    if ($script:JobRunning -and "$($script:JobTitle)" -like 'Server-Backup*') {
+        # wbadmin laeuft als Windows-Dienst weiter, auch wenn HUMig beendet wird
+        $m = "Eine Server-Sicherung laeuft noch (Windows Server-Sicherung).`n`nJa = Sicherung STOPPEN (wbadmin stop job) und HUMig beenden`nNein = Sicherung im Hintergrund weiterlaufen lassen und HUMig beenden - HUMig traegt den Lauf dann nicht in Verlauf/Bericht ein; Ergebnis: Versionen auf der Platte bzw. wbadmin.msc`nAbbrechen = HUMig offen lassen"
+        $a = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'HUMig beenden', 'YesNoCancel', 'Warning'))"
+        if ($a -eq 'Cancel') { $e.Cancel = $true; return }
+        if ($a -eq 'Yes') {
+            if ($script:CurrentJob) { $script:CurrentJob.Cancel = $true }
+            try { $sp = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\wbadmin.exe') -ArgumentList 'stop job -quiet' -WindowStyle Hidden -PassThru -ErrorAction Stop; [void]$sp.WaitForExit(60000) } catch { }
+            if ($script:CurrentJob) { Stop-HMJobProcess $script:CurrentJob }
+        }
+    } elseif ($script:JobRunning) {
         if (-not (Confirm-Action 'Ein Backup/Restore laeuft noch. Wirklich beenden (Vorgang wird abgebrochen)?')) { $e.Cancel = $true; return }
         if ($script:CurrentJob) { $script:CurrentJob.Cancel = $true; Stop-HMJobProcess $script:CurrentJob }
     }

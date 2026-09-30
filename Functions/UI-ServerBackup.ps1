@@ -45,10 +45,13 @@ function Get-HMSbConfig {
     if ($c -and $c.Profiles) { foreach ($p in @($c.Profiles)) { if ($p -and "$($p.Name)".Trim()) { $list += (ConvertTo-HMSbProfile $p) } } }
     $ren = @()
     if ($c -and $c.Renames) { foreach ($r in @($c.Renames)) { if ($r -and "$($r.Old)" -and "$($r.New)") { $ren += [pscustomobject]@{ Old = "$($r.Old)"; New = "$($r.New)" } } } }
-    return [pscustomobject]@{ LastProfile = "$($c.LastProfile)"; Profiles = $list; Renames = $ren }
+    $cw = if ($c -and $c.PSObject.Properties['ConflictWords'] -and $null -ne $c.ConflictWords) { @($c.ConflictWords | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() }) } else { $null }
+    return [pscustomobject]@{ LastProfile = "$($c.LastProfile)"; Profiles = $list; Renames = $ren; ConflictWords = $cw }
 }
 function Save-HMSbConfig($Cfg) {
-    Write-JsonFile $script:SbCfgFile ([pscustomobject]@{ LastProfile = "$($Cfg.LastProfile)"; Profiles = @($Cfg.Profiles); Renames = @($Cfg.Renames) }) -Depth 6
+    $o = [ordered]@{ LastProfile = "$($Cfg.LastProfile)"; Profiles = @($Cfg.Profiles); Renames = @($Cfg.Renames) }
+    if ($Cfg.PSObject.Properties['ConflictWords'] -and $null -ne $Cfg.ConflictWords) { $o.ConflictWords = @($Cfg.ConflictWords) }
+    Write-JsonFile $script:SbCfgFile ([pscustomobject]$o) -Depth 6
 }
 # Umbenennungen (alter -> neuer Profilname) auf Verlaufseintraege nicht angesteckter Platten anwenden
 function Get-HMSbCurrentName([string]$Name, $Renames) {
@@ -801,6 +804,127 @@ function Show-HMSbScheduleDialog([string]$Info) {
     if ($w.ShowDialog() -eq $true) { return $res.V }
     return $null
 }
+# ----------------------------------------------------------------------------
+# Andere Sicherungsaufgaben in der Aufgabenplanung, die sich mit HUMig ueberschneiden koennen
+#   Suchwoerter frei (serverbackup.json ConflictWords), "-Wort" = ausschliessen
+# ----------------------------------------------------------------------------
+$script:SbConflictDefault = @('backup', 'sicherung', 'wbadmin', 'veeam', 'acronis', '-RegIdleBackup')
+function Get-HMSbConflictWords {
+    $w = (Get-HMSbConfig).ConflictWords
+    if ($null -eq $w -or -not @($w).Count) { return $script:SbConflictDefault }
+    return @($w)
+}
+# Startzeiten eines Plans (Daily/Weekly/Once bzw. Aufgaben-Trigger) im Zeitraum
+function Get-HMSbPlanStarts($Plan, [datetime]$From, [datetime]$To) {
+    $out = @()
+    switch ($Plan.Mode) {
+        'Once'  { if ($Plan.At -ge $From -and $Plan.At -le $To) { $out += $Plan.At } }
+        'Daily' { for ($d = $From.Date; $d -le $To; $d = $d.AddDays(1)) { $x = $d.Add($Plan.At.TimeOfDay); if ($x -ge $From -and $x -le $To) { $out += $x } } }
+        default { for ($d = $From.Date; $d -le $To; $d = $d.AddDays(1)) { if (@($Plan.Days) -contains "$($d.DayOfWeek)") { $x = $d.Add($Plan.At.TimeOfDay); if ($x -ge $From -and $x -le $To) { $out += $x } } } }
+    }
+    return $out
+}
+function Get-HMSbTaskStarts($Task, [datetime]$From, [datetime]$To) {
+    $out = @()
+    foreach ($t in @($Task.Triggers)) {
+        if (-not $t) { continue }
+        if ($t.PSObject.Properties['Enabled'] -and $t.Enabled -eq $false) { continue }
+        $sb = $null; try { if ("$($t.StartBoundary)") { $sb = [datetime]"$($t.StartBoundary)" } } catch { }
+        if (-not $sb) { continue }
+        $cls = "$($t.CimClass.CimClassName)"
+        if ($cls -like '*DailyTrigger') {
+            $iv = 1; try { $iv = [Math]::Max(1, [int]$t.DaysInterval) } catch { }
+            $d = $sb; $n = 0
+            while ($d -lt $From -and $n -lt 100000) { $d = $d.AddDays($iv); $n++ }
+            while ($d -le $To) { $out += $d; $d = $d.AddDays($iv) }
+        } elseif ($cls -like '*WeeklyTrigger') {
+            $mask = 0; try { $mask = [int]$t.DaysOfWeek } catch { }
+            for ($d = $From.Date; $d -le $To; $d = $d.AddDays(1)) {
+                if ($mask -band (1 -shl [int]$d.DayOfWeek)) { $x = $d.Add($sb.TimeOfDay); if ($x -ge $From -and $x -le $To -and $x -ge $sb) { $out += $x } }
+            }
+        } elseif ($cls -like '*TimeTrigger') { if ($sb -ge $From -and $sb -le $To) { $out += $sb } }
+    }
+    return $out
+}
+function Get-HMSbTriggerText($Task) {
+    $days = @('So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa')
+    $parts = foreach ($t in @($Task.Triggers)) {
+        if (-not $t) { continue }
+        $cls = "$($t.CimClass.CimClassName)"
+        $tm = ''; try { $tm = ([datetime]"$($t.StartBoundary)").ToString('HH:mm') } catch { }
+        if ($cls -like '*DailyTrigger') { "taeglich $tm" }
+        elseif ($cls -like '*WeeklyTrigger') { $m = 0; try { $m = [int]$t.DaysOfWeek } catch { }; "$((@(0..6 | Where-Object { $m -band (1 -shl $_) } | ForEach-Object { $days[$_] })) -join ',') $tm" }
+        elseif ($cls -like '*TimeTrigger') { "einmalig $(try { ([datetime]"$($t.StartBoundary)").ToString('dd.MM.yyyy HH:mm') } catch { '' })" }
+        elseif ($cls -like '*LogonTrigger') { 'bei Anmeldung' }
+        elseif ($cls -like '*BootTrigger') { 'beim Start' }
+        elseif ($cls -like '*IdleTrigger') { 'im Leerlauf' }
+        else { ($cls -replace '^MSFT_Task', '' -replace 'Trigger$', '') }
+    }
+    return (@($parts) -join ' | ')
+}
+# Passende Aufgaben (ohne die Zeitplaene des eigenen Profils). $Plan (optional): geplanter Lauf -> Ueberschneidung pruefen
+function Get-HMSbConflicts($Plan = $null, [string]$OwnPrefix = '', [double]$OwnMinutes = 360) {
+    $words = @(Get-HMSbConflictWords)
+    $inc = @($words | Where-Object { $_ -notlike '-*' })
+    $exc = @($words | Where-Object { $_ -like '-*' } | ForEach-Object { $_.Substring(1) } | Where-Object { $_ })
+    $from = Get-Date; $to = $from.AddDays(14)
+    $mine = @(); if ($Plan) { $mine = @(Get-HMSbPlanStarts $Plan $from $to) }
+    $rows = @()
+    foreach ($t in @(Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+        $full = "$($t.TaskPath)$($t.TaskName)"
+        if ($OwnPrefix -and "$($t.TaskPath)" -eq $script:SbTaskPath -and $t.TaskName -like "$OwnPrefix*") { continue }
+        $acts = (@($t.Actions) | ForEach-Object { "$($_.Execute) $($_.Arguments)".Trim() }) -join ' ; '
+        $txt = "$full $($t.Description) $acts"
+        $hit = @($inc | Where-Object { $txt -like "*$_*" })
+        $isHumig = ("$($t.TaskPath)" -eq $script:SbTaskPath -and $t.TaskName -like 'Server-Backup*')
+        if (-not $hit.Count -and -not $isHumig) { continue }
+        if (@($exc | Where-Object { $txt -like "*$_*" }).Count) { continue }
+        $info = $null; try { $info = Get-ScheduledTaskInfo -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction Stop } catch { }
+        $enabled = ("$($t.State)" -ne 'Disabled')
+        $over = ''
+        if ($Plan -and $enabled) {
+            $dur = 180
+            if ($isHumig) { $dur = 360 }
+            foreach ($a in @(Get-HMSbTaskStarts $t $from $to)) {
+                foreach ($m in $mine) { if ($m -lt $a.AddMinutes($dur) -and $a -lt $m.AddMinutes($OwnMinutes)) { $over = $a.ToString('ddd dd.MM. HH:mm'); break } }
+                if ($over) { break }
+            }
+        }
+        $rows += [pscustomobject]@{
+            Ueberschneidung = $(if ($over) { "JA ($over)" } elseif (-not $enabled) { 'nein (deaktiviert)' } elseif ($Plan) { 'nein' } else { '' })
+            Aufgabe = $full; Zustand = $(switch ("$($t.State)") { 'Ready' { 'Bereit' } 'Disabled' { 'Deaktiviert' } 'Running' { 'Laeuft' } default { "$($t.State)" } })
+            Ausloeser = (Get-HMSbTriggerText $t)
+            Naechster_Lauf = $(if ($info -and $info.NextRunTime) { $info.NextRunTime.ToString('dd.MM.yyyy HH:mm') } else { '' })
+            Letzter_Lauf = $(if ($info -and $info.LastRunTime -and $info.LastRunTime.Year -gt 2000) { $info.LastRunTime.ToString('dd.MM.yyyy HH:mm') } else { '' })
+            Suchwort = $(if ($hit.Count) { $hit -join ', ' } elseif ($isHumig) { 'HUMig' } else { '' })
+            Aktion = $acts
+        }
+    }
+    return ,@($rows | Sort-Object @{ E = { if ("$($_.Ueberschneidung)" -like 'JA*') { 0 } elseif ($_.Zustand -eq 'Deaktiviert') { 2 } else { 1 } } }, Aufgabe)
+}
+function Edit-HMSbConflictWords($Owner = $null) {
+    $cur = @(Get-HMSbConflictWords) -join "`r`n"
+    $t = Show-TextInputDialog -Title 'Suchwoerter fuer andere Sicherungsaufgaben' -Label "Ein Suchwort je Zeile - gesucht wird in Pfad, Name, Beschreibung und Aufruf aller geplanten Aufgaben (Gross/Klein egal).`nMit - davor = Aufgaben mit diesem Wort ausschliessen (z.B. -RegIdleBackup).`nLeer lassen = Standard: $($script:SbConflictDefault -join ', ')" -Text $cur -Owner $Owner -MultiLine
+    if ($null -eq $t) { return $false }
+    $list = @("$t" -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $cfg = Get-HMSbConfig
+    $cfg.ConflictWords = $(if ($list.Count) { $list } else { $null })
+    Save-HMSbConfig $cfg
+    Out-Console "Server-Backup: Suchwoerter fuer andere Sicherungsaufgaben gespeichert ($(if ($list.Count) { $list -join ', ' } else { 'Standard' }))" 'Success'
+    return $true
+}
+function Show-HMSbConflicts($Plan = $null, [string]$OwnPrefix = '', [double]$OwnMinutes = 360) {
+    $rows = Get-HMSbConflicts $Plan $OwnPrefix $OwnMinutes
+    $rows = @($rows)
+    $list = New-Object System.Collections.Generic.List[object]
+    foreach ($r in $rows) { $list.Add(@($r.Ueberschneidung, $r.Aufgabe, $r.Zustand, $r.Ausloeser, $r.Naechster_Lauf, $r.Letzter_Lauf, $r.Suchwort, $r.Aktion)) }
+    $n = @($rows | Where-Object { "$($_.Ueberschneidung)" -like 'JA*' }).Count
+    Show-DataGridWindow -Title 'Server-Backup - andere Sicherungsaufgaben (Aufgabenplanung)' -Width 1300 -Height 480 `
+        -Columns @('Ueberschneidung', 'Aufgabe', 'Zustand', 'Ausloeser', 'Naechster_Lauf', 'Letzter_Lauf', 'Suchwort', 'Aktion') -Rows $list.ToArray() `
+        -CountText "$($rows.Count) Aufgabe(n) gefunden$(if ($Plan) { ", $n ueberschneiden sich (naechste 14 Tage)" }) - Suchwoerter: $((Get-HMSbConflictWords) -join ', ')" `
+        -Actions @(@{ Text = 'Suchwoerter aendern ...'; Color = '#FFCBA6F7'; NoSelection = $true; Handler = { param($sel, $w, $c) if (Edit-HMSbConflictWords $w) { $w.Close(); Show-HMSbConflicts } } })
+}
+
 function New-HMSbSchedule {
     $p = Get-HMSbProfile
     if (-not $p) { Out-Console 'Zeitplan: zuerst ein Profil waehlen/anlegen.' 'Warning'; return }
@@ -812,6 +936,20 @@ function New-HMSbSchedule {
     $info = "Profil: $($p.Name)   (Platten $($p.DiskPrefix)-...)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })   Pruefen: $(if ($vf) { 'ja' } else { 'nein' })   Host-System: $(if ($hs) { 'ja' } else { 'nein' })`n`nEs gelten die aktuell angehakten VMs und Optionen."
     $r = Show-HMSbScheduleDialog $info
     if (-not $r) { return }
+    # andere Sicherungsaufgaben, die sich ueberschneiden (naechste 14 Tage)
+    try {
+        $own = 'Server-Backup - {0} - ' -f ($p.Name -replace '[\\/:*?"<>|]', '_')
+        $avg = 360.0
+        try { $okr = @(Get-HMSbAllHistory | Where-Object { "$($_.Profile)" -eq $p.Name -and "$($_.Status)" -ne 'Error' -and [double]$_.Minutes -gt 0 }); if ($okr.Count) { $avg = [double](@($okr | ForEach-Object { [double]$_.Minutes }) | Measure-Object -Maximum).Maximum } } catch { }
+        $cf = Get-HMSbConflicts $r $own $avg
+        $hit = @(@($cf) | Where-Object { "$($_.Ueberschneidung)" -like 'JA*' })
+        if ($hit.Count) {
+            $m = "Diese Aufgaben laufen zur selben Zeit wie der geplante Lauf (angenommene Dauer $(Format-HMDuration $avg)) - die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig:`n`n" + (@($hit | Select-Object -First 10 | ForEach-Object { "  $($_.Aufgabe)  [$($_.Ausloeser)]  -> $($_.Ueberschneidung)" }) -join "`n") + $(if ($hit.Count -gt 10) { "`n  ..." }) + "`n`nHUMig wartet zwar, bis der andere Vorgang fertig ist (hoechstens 8 h), besser ist aber eine andere Uhrzeit.`n`nJa = trotzdem planen`nNein = nicht planen (Uhrzeit aendern)`nAbbrechen = Liste aller gefundenen Aufgaben anzeigen"
+            $ans = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'Server-Backup planen', 'YesNoCancel', 'Warning'))"
+            if ($ans -eq 'Cancel') { Show-HMSbConflicts $r $own $avg; return }
+            if ($ans -ne 'Yes') { return }
+        }
+    } catch { Out-Console "Pruefung auf andere Sicherungsaufgaben nicht moeglich: $($_.Exception.Message)" 'Warning' }
     $task = Join-Path $script:AppRoot 'Functions\ServerBackup-Task.ps1'
     $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$task`" -ProfileName `"$($p.Name)`""
     if ($vms.Count) { $arg += " -VMs `"$($vms -join '|')`"" }
@@ -870,13 +1008,14 @@ function Update-HMSbSchedules {
 function Show-HMSbSchedules {
     $rows = Get-HMSbScheduleRows
     $rows = @($rows)
-    if (-not $rows.Count) { Out-Console 'Keine geplanten Server-Backups (Aufgabenplanung \HUMig).' 'Info'; return }
+    if (-not $rows.Count) { Out-Console 'Keine geplanten Server-Backups (Aufgabenplanung \HUMig) - angezeigt werden andere Sicherungsaufgaben am Host.' 'Info'; Show-HMSbConflicts; return }
     $list = New-Object System.Collections.Generic.List[object]
     foreach ($r in $rows) { $list.Add(@($r.Name, $r.State, $r.Next, $r.Last, $r.Result, $r.Args)) }
     Show-DataGridWindow -Title 'Geplante Server-Backups (Aufgabenplanung \HUMig)' -Width 1200 -Height 420 `
         -Columns @('Name', 'Zustand', 'Naechster_Lauf', 'Letzter_Lauf', 'Ergebnis', 'Aufruf') -Rows $list.ToArray() `
         -CountText 'Ergebnis: OK / Warnung / Fehler - Details im Verlauf und in Logs\ServerBackup\Aufgabe_*.log' `
         -Actions @(
+            @{ Text = 'Andere Sicherungsaufgaben ...'; Color = '#FFCBA6F7'; NoSelection = $true; Handler = { param($sel, $w, $c) Show-HMSbConflicts } },
             @{ Text = 'Jetzt starten'; Color = '#FFA6E3A1'; Handler = { param($sel, $w, $c) foreach ($r in $sel) { try { Start-ScheduledTask -TaskPath $script:SbTaskPath -TaskName "$($r.Name)" -ErrorAction Stop; Out-Console "Gestartet: $($r.Name) (laeuft im Hintergrund als SYSTEM)" 'Success' } catch { Out-Console "$($r.Name): $($_.Exception.Message)" 'Error' } }; $w.Close(); Update-HMSbSchedules } },
             @{ Text = 'Loeschen'; Color = '#FFF38BA8'; Handler = { param($sel, $w, $c)
                     if (-not (Confirm-Action "$(@($sel).Count) geplante(s) Server-Backup(s) loeschen?")) { return }

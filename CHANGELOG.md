@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.43 - 2026-09-30
+### Neu
+- Server-Backup-Zeitplan: **Pruefung auf andere Sicherungsaufgaben** in der ganzen Aufgabenplanung - frei definierbare Suchwoerter (Standard backup, sicherung, wbadmin, veeam, acronis; `-Wort` schliesst aus, Standard -RegIdleBackup) plus Zeitplaene anderer Profile; Ueberschneidung mit dem geplanten Lauf in den naechsten 14 Tagen wird gemeldet (trotzdem planen / nicht planen / Liste); Liste und *Suchwoerter aendern ...* auch ueber Rechtsklick auf *Zeitplan ...*
+- **HUMig beenden waehrend einer Server-Sicherung:** Rueckfrage - Sicherung stoppen (wbadmin stop job), im Hintergrund weiterlaufen lassen oder HUMig offen lassen (bisher lief wbadmin nach dem Schliessen unbemerkt weiter)
+
 ## v2.0.42 - 2026-09-30
 ### Behoben
 - Server-Backup: ein abgebrochener oder mit Fehler beendeter Lauf (nach Anlegen des Berichtsordners) landet jetzt im Verlauf (Status FEHLER, Hinweis *abgebrochen* bzw. Fehlertext) und bekommt einen Bericht - bisher blieb nur ein Berichtsordner auf der Platte ohne Eintrag
