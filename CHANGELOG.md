@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.47 - 2026-09-30
+### Neu
+- Server-Backup: **Archiv-Platten** gegen Verschluesselungstrojaner - je Profil Anzahl und Abstand (Profil *Bearbeiten ...*, Standard 30 Tage); Bezeichnung `<Prefix>-A1`, `-A2` ... (Vorschlag in *Platte einrichten*); von der Rotation ausgenommen; rechts im Reiter letzte Archiv-Sicherung und *faellig*-Hinweis; nach einer Archiv-Sicherung Erinnerung zum Auswerfen, Abziehen und getrennten Lagern; Zeitplan nimmt bevorzugt Rotations-Platten; Statistik mit Spalte *Art*
+- Anleitung: Abschnitt *Archiv-Platten* mit Faustregel 3-2-1-1-0
+
 ## v2.0.46 - 2026-09-30
 ### Dokumentation
 - README, Anleitung und INSTALL ergaenzt: Server-Backup (Vorab-Pruefung auf laufende Sicherung, Zeitplan-Pruefung mit `ConflictWords`, Verlauf pflegen, abgebrochene Laeufe, Rueckfrage beim Schliessen), Treiberverteilung (Pruefung vor der Kopie, Kopie ueber `C$`, Erweiterungs-INFs), pulsierender Punkt, lesbare Dauer, automatische Spaltenbreite

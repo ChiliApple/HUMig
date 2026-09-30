@@ -389,6 +389,12 @@ function Test-HMSbLabelMatch([string]$Label, [string]$Prefix) {
     if (-not $Label -or -not $Prefix) { return $false }
     return ($Label -ieq $Prefix -or $Label.StartsWith("$Prefix-", [System.StringComparison]::OrdinalIgnoreCase))
 }
+# Archiv-Platte: Bezeichnung <Prefix>-A<n> (ohne Prefix: jede Bezeichnung, die auf -A<n> endet)
+function Test-HMSbArchiveLabel([string]$Label, [string]$Prefix) {
+    if (-not $Label) { return $false }
+    if ($Prefix) { return ($Label -imatch ('^' + [regex]::Escape($Prefix) + '-A\d+$')) }
+    return ($Label -imatch '-A\d+$')
+}
 
 # Bezeichnung einer Platte wurde geaendert: Verlauf auf der Platte (alle Eintraege gehoeren zu ihr) und
 # die passenden Eintraege im Tool-Ordner (gleicher Lauf = Datum/Host/Profil auch auf der Platte) nachziehen

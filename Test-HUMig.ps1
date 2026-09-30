@@ -252,6 +252,11 @@ T 'Treiberverteilung: INF lesen (v2.0.30)' {
     $d = @(Get-HUDrvState $m | Where-Object { $_.Match })
     "$($inf.Name): $($i.Class) $($i.Version), $(@($i.HwIds).Count) IDs, $($d.Count) passende Geraete"
 }
+T 'Server-Backup: Archiv-Platten erkennen (v2.0.47)' {
+    . (Join-Path $root 'Functions\ServerBackup-Engine.ps1')
+    $ok = (Test-HMSbArchiveLabel 'HUMIG-GYM-A1' 'HUMIG-GYM') -and (Test-HMSbArchiveLabel 'humig-gym-a12' 'HUMIG-GYM') -and -not (Test-HMSbArchiveLabel 'HUMIG-GYM-1' 'HUMIG-GYM') -and -not (Test-HMSbArchiveLabel 'HUMIG-GYMA-1' 'HUMIG-GYM') -and (Test-HMSbArchiveLabel 'X-A2' '')
+    if (-not $ok) { throw 'Archiv-Bezeichnung falsch erkannt' }; '<Prefix>-A<n> = Archiv'
+}
 T 'Installer-Erkennung (EXE)' { $i = Get-SwInstallerInfo (Join-Path $env:windir 'System32\robocopy.exe'); if (-not $i -or $i.Type -ne 'EXE') { throw 'keine Info' }; "$($i.Framework)" }
 T 'Starter HUMig.exe erzeugen (TEMP)' {
     . (Join-Path $root 'Functions\UI-Shell.ps1')

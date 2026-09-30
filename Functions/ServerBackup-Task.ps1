@@ -73,8 +73,11 @@ $dl = Get-HMSbDriveList
 foreach ($m in @($dl.Messages)) { if ($m) { Write-HMSbLog $m 'Warning' } }
 $drives = @(@($dl.Drives) | Where-Object { $_ -and (Test-HMSbLabelMatch "$($_.Label)" $prefix) })
 if (-not $drives.Count) { Add-HMSbTaskError "Keine Platte des Profils angesteckt ($prefix-...)"; exit 2 }
+# Rotations-Platten vor Archiv-Platten (<Prefix>-A<n>)
+$drives = @(@($drives | Where-Object { -not (Test-HMSbArchiveLabel "$($_.Label)" $prefix) }) + @($drives | Where-Object { Test-HMSbArchiveLabel "$($_.Label)" $prefix }))
 if ($drives.Count -gt 1) { Write-HMSbLog "Mehrere Platten des Profils angesteckt - verwendet wird $($drives[0].Letter): $($drives[0].Label)" 'Warning' }
 $d = $drives[0]
+if (Test-HMSbArchiveLabel "$($d.Label)" $prefix) { Write-HMSbLog "Archiv-Platte $($d.Label) wird verwendet - Archiv-Platten nach der Sicherung abziehen und getrennt lagern." 'Warning' }
 
 $list = @(if ($VMs) { $VMs -split '\|' } else { @($prof.VMs) }) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() }
 $volList = @(if ($Volumes) { $Volumes -split '\|' } else { @($prof.Volumes) }) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() }

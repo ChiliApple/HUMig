@@ -31,12 +31,16 @@ function ConvertTo-HMSbProfile($p) {
     if (-not $pre) { $pre = 'HUMIG-' + (ConvertTo-HMSbSafeName $name).ToUpper() }
     $n = 0; try { $n = [int]$p.Disks } catch { }
     $w = 0; try { $w = [int]$p.WarnDays } catch { }
+    $ad = 0; try { $ad = [int]$p.ArchiveDisks } catch { }
+    $ai = 0; try { $ai = [int]$p.ArchiveDays } catch { }
     return [pscustomobject][ordered]@{
         Name = $name; DiskPrefix = $pre; Disks = $(if ($n -gt 0) { $n } else { 2 })
         VMs = @($p.VMs | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
         Volumes = @($p.Volumes | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim().ToUpper() })
         HostConfig = ($p.HostConfig -ne $false); Verify = ($p.Verify -ne $false); HostSystem = ($p.HostSystem -eq $true)
         WarnDays = $(if ($w -gt 0) { $w } else { 14 })
+        ArchiveDisks = $(if ($ad -gt 0 -and $ad -le 9) { $ad } else { 0 })
+        ArchiveDays = $(if ($ai -gt 0) { $ai } else { 30 })
     }
 }
 function Get-HMSbConfig {
@@ -187,7 +191,17 @@ function Edit-HMSbProfile {
     if ($null -eq $w) { return }
     $wd = 0
     if (-not [int]::TryParse("$w".Trim(), [ref]$wd) -or $wd -lt 1 -or $wd -gt 365) { Out-Console "Ungueltige Tage '$w' (1-365)" 'Error'; return }
-    foreach ($x in $cfg.Profiles) { if ($x.Name -eq $p.Name) { $x.Name = $n; $x.DiskPrefix = $pre; $x.Disks = $cnt; $x.WarnDays = $wd } }
+    $a = Show-TextInputDialog -Title 'Archiv-Platten' -Label "Wie viele ARCHIV-Platten (0 = keine)?`nArchiv-Platten heissen $pre-A1, -A2 ..., sind von der Rotation ausgenommen und werden nur in groesseren Abstaenden`n(z. B. monatlich) beschrieben, dann abgezogen und getrennt gelagert - so reicht die Sicherung weit genug zurueck,`nfalls Schadsoftware laenger unbemerkt war." -Text "$($p.ArchiveDisks)"
+    if ($null -eq $a) { return }
+    $ad = 0
+    if (-not [int]::TryParse("$a".Trim(), [ref]$ad) -or $ad -lt 0 -or $ad -gt 9) { Out-Console "Ungueltige Anzahl '$a' (0-9)" 'Error'; return }
+    $ai = $p.ArchiveDays
+    if ($ad -gt 0) {
+        $i = Show-TextInputDialog -Title 'Archiv-Platten' -Label 'Archiv-Sicherung faellig nach (Tagen, z. B. 30 = monatlich):' -Text "$($p.ArchiveDays)"
+        if ($null -eq $i) { return }
+        if (-not [int]::TryParse("$i".Trim(), [ref]$ai) -or $ai -lt 1 -or $ai -gt 365) { Out-Console "Ungueltige Tage '$i' (1-365)" 'Error'; return }
+    }
+    foreach ($x in $cfg.Profiles) { if ($x.Name -eq $p.Name) { $x.Name = $n; $x.DiskPrefix = $pre; $x.Disks = $cnt; $x.WarnDays = $wd; $x.ArchiveDisks = $ad; $x.ArchiveDays = $ai } }
     if ($n -ne $p.Name) { $cfg.Renames = @(@($cfg.Renames) | Where-Object { $_.Old -ne $n }) + @([pscustomobject]@{ Old = $p.Name; New = $n }) }
     if ($cfg.LastProfile -eq $p.Name) { $cfg.LastProfile = $n }
     Save-HMSbConfig $cfg
@@ -199,7 +213,7 @@ function Edit-HMSbProfile {
         foreach ($f in $files) { try { $cnt2 += (Rename-HMSbProfileInFile $f $p.Name $n) } catch { Out-Console "Umbenennen in $f`: $($_.Exception.Message)" 'Warning' } }
         Out-Console "Profil '$($p.Name)' umbenannt in '$n' - $cnt2 Verlaufseintrag/-eintraege angepasst (Tool-Ordner und angesteckte Platten; nicht angesteckte Platten beim naechsten Backup)" 'Success'
     }
-    Out-Console "Profil '$n': Platten $pre-1 bis $pre-$cnt, Warnung nach $wd Tagen" 'Success'
+    Out-Console "Profil '$n': Platten $pre-1 bis $pre-$cnt$(if ($ad) { ", Archiv $pre-A1 bis $pre-A$ad (faellig nach $ai Tagen)" }), Warnung nach $wd Tagen" 'Success'
     Update-HMSbProfileList $n
 }
 function Remove-HMSbProfile {
@@ -327,7 +341,7 @@ function Import-HMSbDiskProfiles {
             $script:SbImportAsked[$key] = $true
             $pr = ConvertTo-HMSbProfile $x
             $pr.Name = $n
-            if (Confirm-Action "Auf der Platte $($d.Letter): $($d.Label) ist das Server-Backup-Profil '$n' gespeichert, das es auf diesem Host nicht gibt.`n`nPlatten: $($pr.DiskPrefix)-1 bis -$($pr.Disks)`nVMs: $(@($pr.VMs) -join ', ')`n`nProfil uebernehmen?" 'Server-Backup') {
+            if (Confirm-Action "Auf der Platte $($d.Letter): $($d.Label) ist das Server-Backup-Profil '$n' gespeichert, das es auf diesem Host nicht gibt.`n`nPlatten: $($pr.DiskPrefix)-1 bis -$($pr.Disks)$(if ($pr.ArchiveDisks) { ", Archiv $($pr.DiskPrefix)-A1 bis -A$($pr.ArchiveDisks)" })`nVMs: $(@($pr.VMs) -join ', ')`n`nProfil uebernehmen?" 'Server-Backup') {
                 $cfg.Profiles = @($cfg.Profiles) + @($pr)
                 $added += $n
             }
@@ -357,8 +371,10 @@ function Update-HMSbDiskInfo {
     $t = ''; $col = '#FFA6ADC8'
     if (-not $p) { $t = "Platte $($d.Label) - kein Profil gewaehlt (mit ""Neu ..."" anlegen)"; $col = '#FFF9E2AF' }
     elseif (Test-HMSbLabelMatch $d.Label $p.DiskPrefix) {
-        $t = "Platte des Profils erkannt: $($d.Label)"
+        $arc = Test-HMSbArchiveLabel $d.Label $p.DiskPrefix
+        $t = "$(if ($arc) { 'ARCHIV-Platte' } else { 'Platte' }) des Profils erkannt: $($d.Label)"
         if ($d.Model -or $d.Serial) { $t += "  ($($d.Model)$(if ($d.Serial) { ", SN $($d.Serial)" }))" }
+        if ($arc) { $t += "  -  nach der Sicherung auswerfen, abziehen und getrennt lagern" }
         $col = '#FFA6E3A1'
     } else {
         $t = "ACHTUNG: '$($d.Label)' ist keine Platte des Profils '$($p.Name)' ($($p.DiskPrefix)-1 bis -$($p.Disks)). Neue Platte? -> ""Platte einrichten ..."""
@@ -434,7 +450,11 @@ function Update-HMSbHistory {
     $ui.dgSbHistory.ItemsSource = $rows
     # Plattenstatus + Rotationsempfehlung
     $labels = @(1..$p.Disks | ForEach-Object { "$($p.DiskPrefix)-$_" })
-    foreach ($x in @($mine | ForEach-Object { "$($_.Disk)" } | Where-Object { $_ } | Select-Object -Unique)) { if ($labels -notcontains $x) { $labels += $x } }
+    $arcLabels = @(); if ($p.ArchiveDisks -gt 0) { $arcLabels = @(1..$p.ArchiveDisks | ForEach-Object { "$($p.DiskPrefix)-A$_" }) }
+    foreach ($x in @($mine | ForEach-Object { "$($_.Disk)" } | Where-Object { $_ } | Select-Object -Unique)) {
+        if (Test-HMSbArchiveLabel $x $p.DiskPrefix) { if ($arcLabels -notcontains $x) { $arcLabels += $x } }
+        elseif ($labels -notcontains $x) { $labels += $x }
+    }
     $parts = @(); $oldest = $null; $oldestDate = [datetime]::MaxValue
     foreach ($lb in $labels) {
         $last = @($mine | Where-Object { "$($_.Disk)" -eq $lb -and "$($_.Status)" -ne 'Error' })[0]
@@ -460,6 +480,30 @@ function Update-HMSbHistory {
         }
     }
     if ($oldest -and $labels.Count -gt 1) { $t += "`nNaechste Platte laut Rotation: $oldest (am laengsten nicht verwendet)" }
+    if ($arcLabels.Count) {
+        # Archiv: von der Rotation ausgenommen, faellig nach ArchiveDays
+        $ap = @(); $aLast = $null; $aOld = $null; $aOldDate = [datetime]::MaxValue
+        foreach ($lb in $arcLabels) {
+            $last = @($mine | Where-Object { "$($_.Disk)" -eq $lb -and "$($_.Status)" -ne 'Error' })[0]
+            $dt = if ($last) { Get-HMSbDate "$($last.Date)" } else { $null }
+            if ($dt) {
+                $age = [int][Math]::Floor(((Get-Date) - $dt).TotalDays)
+                $ap += "$lb`: $($dt.ToString('dd.MM.yyyy')) (vor $age Tag$(if ($age -ne 1) { 'en' }))"
+                if (-not $aLast -or $dt -gt $aLast) { $aLast = $dt }
+                if ($dt -lt $aOldDate) { $aOldDate = $dt; $aOld = $lb }
+            } else {
+                $ap += "$lb`: noch keine Sicherung"
+                if ($aOldDate -ne [datetime]::MinValue) { $aOldDate = [datetime]::MinValue; $aOld = $lb }
+            }
+        }
+        $t += "`nArchiv (getrennt lagern): " + ($ap -join '   |   ')
+        if (-not $aLast) { $t += "`nArchiv-Sicherung faellig: noch keine - $aOld anstecken und sichern"; if ($col -eq '#FFCDD6F4') { $col = '#FFF9E2AF' } }
+        else {
+            $aAge = [int][Math]::Floor(((Get-Date) - $aLast).TotalDays)
+            if ($aAge -ge $p.ArchiveDays) { $t += "`nArchiv-Sicherung faellig (letzte vor $aAge Tagen, Abstand $($p.ArchiveDays) Tage): $aOld anstecken und sichern"; if ($col -eq '#FFCDD6F4') { $col = '#FFF9E2AF' } }
+            else { $t += "`nNaechste Archiv-Sicherung in $($p.ArchiveDays - $aAge) Tag$(if (($p.ArchiveDays - $aAge) -ne 1) { 'en' }) auf $aOld" }
+        }
+    }
     $ui.lblSbDisks.Text = $t
     $ui.lblSbDisks.Foreground = New-Brush $col
     $hs = @($mine | Where-Object { $_.HostSystem -eq $true })[0]
@@ -480,10 +524,10 @@ function Show-HMSbOverview {
         $avg = 0.0
         if ($ok.Count) { try { $avg = [math]::Round([double](@($ok | ForEach-Object { [double]$_.Minutes }) | Measure-Object -Average).Average, 1) } catch { } }
         $hs = @($items | Where-Object { $_.HostSystem -eq $true })[0]
-        $rows.Add(@("$($last.Profile)", "$($last.Disk)", "$($last.Host)", $(if ($lastOk) { "$($lastOk.Date)" } else { '-' }), $age, (Format-HMSbStatus "$($last.Status)" "$($last.Note)"), $items.Count, $(if ($avg) { Format-HMDuration $avg } else { '' }), "$($last.SizeGB)", $(if ($hs) { "$($hs.Date)" } else { '' })))
+        $rows.Add(@("$($last.Profile)", "$($last.Disk)", $(if (Test-HMSbArchiveLabel "$($last.Disk)" '') { 'Archiv' } else { 'Rotation' }), "$($last.Host)", $(if ($lastOk) { "$($lastOk.Date)" } else { '-' }), $age, (Format-HMSbStatus "$($last.Status)" "$($last.Note)"), $items.Count, $(if ($avg) { Format-HMDuration $avg } else { '' }), "$($last.SizeGB)", $(if ($hs) { "$($hs.Date)" } else { '' })))
     }
     Show-DataGridWindow -Title 'Server-Backup - Statistik je Profil und Platte' -Width 1100 -Height 520 `
-        -Columns @('Profil', 'Platte', 'Host', 'Letzte_Sicherung', 'Tage', 'Letzter_Status', 'Laeufe', 'Mittlere_Dauer', 'GB', 'Host_System') `
+        -Columns @('Profil', 'Platte', 'Art', 'Host', 'Letzte_Sicherung', 'Tage', 'Letzter_Status', 'Laeufe', 'Mittlere_Dauer', 'GB', 'Host_System') `
         -Rows $rows.ToArray() -Sort 'Profil ASC, Platte ASC' -ColumnTypes @{ Tage = [int]; Laeufe = [int] } `
         -CountText "$($rows.Count) Platte(n), $($all.Count) Laeufe (Tool-Ordner + angesteckte Platten)" `
         -Actions @(@{ Text = 'Alle Laeufe anzeigen'; Color = '#FFCBA6F7'; NoSelection = $true; Handler = { param($r, $w, $c) Show-HMSbAllRuns } })
@@ -541,6 +585,7 @@ function Start-HMSbBackup {
         if ("$([System.Windows.MessageBox]::Show($script:Window, $bm, 'Server-Backup', 'YesNo', 'Warning'))" -ne 'Yes') { Out-Console 'Server-Backup nicht gestartet - am Host laeuft bereits eine Sicherung/Wiederherstellung.' 'Warning'; return }
     }
     if ($p) { Save-HMSbLastProfile $p.Name }
+    $script:SbArchiveRun = $(if ($p -and (Test-HMSbArchiveLabel $d.Label $p.DiskPrefix)) { "$($d.Label)" } else { '' })
     $ctx = @{
         Profile = $pName; DiskPrefix = $(if ($p) { $p.DiskPrefix } else { '' }); Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
         VMs = $vms; Volumes = $vols; HostConfig = $hc; HostSystem = $hs; Verify = [bool]$ui.chkSbVerify.IsChecked
@@ -551,6 +596,7 @@ function Start-HMSbBackup {
         param($j)
         Update-HMSbHistory
         if ($j.Result -and $j.Result.Report) { Out-Console "Berichtsordner: $($j.Result.Report)" 'Info' }
+        if ($script:SbArchiveRun) { Out-Console "Archiv-Platte $($script:SbArchiveRun): jetzt ""Auswerfen"", abziehen und getrennt vom Server lagern (nicht angesteckt lassen)." 'Warning' }
     }
 }
 
@@ -576,7 +622,10 @@ function Get-HMSbNextLabel($p) {
     $all = Get-HMSbAllHistory
     $used += @(@($all) | Where-Object { "$($_.Profile)" -eq $p.Name } | ForEach-Object { "$($_.Disk)" })
     $used += @($script:SbDrives | ForEach-Object { "$($_.Label)" })
-    for ($i = 1; $i -le 30; $i++) { $l = "$($p.DiskPrefix)-$i"; if (-not (@($used) -contains $l)) { return $l } }
+    $cand = @(1..$p.Disks | ForEach-Object { "$($p.DiskPrefix)-$_" })
+    if ($p.ArchiveDisks -gt 0) { $cand += @(1..$p.ArchiveDisks | ForEach-Object { "$($p.DiskPrefix)-A$_" }) }
+    $cand += @(($p.Disks + 1)..30 | ForEach-Object { "$($p.DiskPrefix)-$_" })
+    foreach ($l in $cand) { if (-not (@($used) -contains $l)) { return $l } }
     return "$($p.DiskPrefix)-1"
 }
 function Invoke-HMSbDiskSetup($Sel, $Win) {
