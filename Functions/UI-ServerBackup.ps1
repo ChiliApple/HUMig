@@ -1073,6 +1073,7 @@ function Initialize-HMServerBackupTab {
     $ui.btnSbHostOnly.Add_Click({ Start-HMSbHostOnly })
     $ui.btnSbSchedule.Add_Click({ New-HMSbSchedule })
     $ui.btnSbSchedule.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMSbSchedules })
+    if ($ui.btnSbConflicts) { $ui.btnSbConflicts.Add_Click({ Show-HMSbConflicts }) }
     $ui.btnSbRestore.Add_Click({ Show-HMSbRestoreHelp })
     $ui.btnSbFeature.Add_Click({ Install-HMSbFeature })
     $ui.chkSbHostSystem.Add_Click({ if ($ui.chkSbHostSystem.IsChecked) { Out-Console 'Host-System: sichert nur den Host (C:, Boot/EFI) fuer eine Bare-Metal-Wiederherstellung - Datenlaufwerke mit VMs (z.B. D:) sind nicht dabei, dafuer die VM-Sicherung. Liegen VMs auf C:, werden sie zusaetzlich gesichert (Platz!).' 'Info' } })
