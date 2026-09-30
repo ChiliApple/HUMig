@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.44 - 2026-09-30
+### Verbessert
+- Server-Backup: Knopf **Zeitplan-Pruefung** neben *Zeitplan ...* - zeigt alle geplanten Sicherungsaufgaben am Host (fremde Programme, alte Aufgaben, HUMig-Zeitplaene aller Profile) mit Ausloeser, naechstem/letztem Lauf und *Suchwoerter aendern ...*
+
 ## v2.0.43 - 2026-09-30
 ### Neu
 - Server-Backup-Zeitplan: **Pruefung auf andere Sicherungsaufgaben** in der ganzen Aufgabenplanung - frei definierbare Suchwoerter (Standard backup, sicherung, wbadmin, veeam, acronis; `-Wort` schliesst aus, Standard -RegIdleBackup) plus Zeitplaene anderer Profile; Ueberschneidung mit dem geplanten Lauf in den naechsten 14 Tagen wird gemeldet (trotzdem planen / nicht planen / Liste); Liste und *Suchwoerter aendern ...* auch ueber Rechtsklick auf *Zeitplan ...*
