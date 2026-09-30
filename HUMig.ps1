@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.49'
+$script:Version   = '2.0.50'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -245,7 +245,7 @@ foreach ($n in @('imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings
     'pnlLinks', 'rtbConsole', 'pbMain', 'lblStatus', 'lblElapsed', 'rowConsole', 'btnToolSoftDeploy', 'btnToolDrvDeploy', 'btnToolSoftList', 'lblSizeTotal', 'lstExclude',
     'btnExclAdd', 'btnExclDel', 'btnBigFiles', 'chkIncremental', 'lblIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport',
     'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag',
-    'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnReinstall', 'btnADDevices',
+    'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnBackupSearch', 'btnFileSearch', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnReinstall', 'btnADDevices',
     'tabServerBackup', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
     'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'cmbSbAfter', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
     'pnlSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'btnSbConflicts', 'dotSbBusy', 'lblSbBusy', 'dotBusy', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule')) { $ui[$n] = Get-UI $n }
@@ -1154,6 +1154,8 @@ $ui.btnChecklist.Add_Click({ Show-HMChecklist })
 $ui.btnVerifyBackup.Add_Click({ if (-not $script:JobRunning) { Start-HMVerifyBackup $false } })
 $ui.btnVerifyBackup.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; if (-not $script:JobRunning) { Start-HMVerifyBackup $true } })
 $ui.btnCompare.Add_Click({ if (-not $script:JobRunning) { Start-HMCompareBackups } })
+$ui.btnBackupSearch.Add_Click({ if (-not $script:JobRunning) { Start-HMBackupSearch } })
+$ui.btnFileSearch.Add_Click({ if (-not $script:JobRunning) { Start-HMFileSearch } })
 $ui.btnOverview.Add_Click({ Update-HMBackupOverview -Open })
 $ui.btnApps.Add_Click({ Start-HMAppDetect -Show })
 $ui.btnBackupSchedule.Add_Click({ New-HMBackupSchedule })
