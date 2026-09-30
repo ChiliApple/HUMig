@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.44'
+$script:Version   = '2.0.45'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -248,7 +248,7 @@ foreach ($n in @('imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings
     'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnReinstall', 'btnADDevices',
     'tabServerBackup', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
     'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
-    'lblSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'btnSbConflicts', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule')) { $ui[$n] = Get-UI $n }
+    'lblSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'btnSbConflicts', 'dotSbBusy', 'lblSbBusy', 'dotBusy', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule')) { $ui[$n] = Get-UI $n }
 Initialize-HMTaskbar
 $script:RowConsole = $ui.rowConsole
 if ($script:LogoImage) { $ui.imgLogo.Source = $script:LogoImage }

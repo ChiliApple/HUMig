@@ -7,6 +7,19 @@
 #>
 
 $script:RunspacePool = $null
+# laufende Hintergrund-Aufgaben je Kennung ('*' = alle) - fuer die pulsierenden Anzeige-Punkte
+$script:AsyncBusy = @{}
+$script:AsyncBusyText = @{}
+function Set-HMAsyncBusy([string]$Tag, [int]$Delta, [string]$Text = '') {
+    foreach ($k in @('*', $Tag)) {
+        if (-not $k) { continue }
+        $n = [int]$script:AsyncBusy[$k] + $Delta; if ($n -lt 0) { $n = 0 }
+        $script:AsyncBusy[$k] = $n
+        if ($Delta -gt 0 -and $Text) { $script:AsyncBusyText[$k] = $Text }
+        if ($n -eq 0) { $script:AsyncBusyText[$k] = '' }
+    }
+    if (Get-Command Update-HMBusyUi -ErrorAction SilentlyContinue) { try { Update-HMBusyUi } catch { } }
+}
 
 function Initialize-AsyncPool {
     param([int]$PoolSize = 6)
@@ -23,7 +36,9 @@ function Invoke-AsyncCommand {
         [object[]]$ArgumentList,
         [scriptblock]$OnComplete,
         [object]$State = $null,
-        [int]$TimeoutSec = 120
+        [int]$TimeoutSec = 120,
+        [string]$BusyTag = '',
+        [string]$BusyText = ''
     )
     if (-not $script:RunspacePool) { Write-Host '[ASYNC] RunspacePool nicht initialisiert' -ForegroundColor Red; return }
 
@@ -34,6 +49,10 @@ function Invoke-AsyncCommand {
 
     $handle    = $ps.BeginInvoke()
     $startTime = Get-Date
+    # Anzeige "laeuft": die Timer-Closure sieht keine Skript-Funktionen -> Funktion als Scriptblock mitgeben
+    $busyFn  = ${function:Set-HMAsyncBusy}
+    $busyTag = $BusyTag
+    try { & $busyFn $busyTag 1 $BusyText } catch { }
     $completed = [ref]$false
     $timeout   = $TimeoutSec
     $stateObj  = $State
@@ -54,6 +73,7 @@ function Invoke-AsyncCommand {
         if ($handle.IsCompleted) {
             $timer.Stop()
             $completed.Value = $true
+            try { & $busyFn $busyTag -1 } catch { }
             $result = $null
             try {
                 $raw = $ps.EndInvoke($handle)
@@ -74,6 +94,7 @@ function Invoke-AsyncCommand {
             }
         } elseif (((Get-Date) - $startTime).TotalSeconds -gt $timeout) {
             $completed.Value = $true
+            try { & $busyFn $busyTag -1 } catch { }
             try { $stopState.Handle = $ps.BeginStop($null, $null) } catch { $stopState.Handle = $null }
             if ($OnComplete) {
                 try { & $OnComplete "FEHLER: Timeout - keine Antwort nach $timeout Sekunden (abgebrochen)" $stateObj }

@@ -206,6 +206,7 @@
             <DockPanel>
                 <TextBlock x:Name="lblElapsed" DockPanel.Dock="Right" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" Margin="10,0,0,0"/>
                 <ProgressBar x:Name="pbMain" DockPanel.Dock="Right" Width="260" Height="12" Minimum="0" Maximum="100" Value="0" Background="{StaticResource CatSurface0}" Foreground="{StaticResource CatGreen}" BorderThickness="0"/>
+                <Ellipse x:Name="dotBusy" DockPanel.Dock="Left" Width="9" Height="9" Fill="{StaticResource CatGreen}" Margin="0,0,6,0" VerticalAlignment="Center" Visibility="Collapsed"/>
                 <TextBlock x:Name="lblStatus" Text="Bereit" Foreground="{StaticResource CatGreen}" FontSize="11" VerticalAlignment="Center"/>
             </DockPanel>
         </Border>
@@ -476,6 +477,8 @@
                                     <Button x:Name="btnSbProfileSave" Content="Profil speichern" Style="{StaticResource BtnGreen}" ToolTip="Angehakte VMs und Optionen im gewaehlten Profil speichern"/>
                                     <Button x:Name="btnSbProfileEdit" Content="Bearbeiten ..." Style="{StaticResource BtnDefault}" ToolTip="Profil umbenennen (Verlauf wird uebernommen), Platten-Bezeichnung, Anzahl Platten, Warnung nach Tagen"/>
                                     <Button x:Name="btnSbProfileDel" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Profil loeschen (Sicherungen auf den Platten bleiben erhalten)"/>
+                                    <Ellipse x:Name="dotSbBusy" Width="11" Height="11" Fill="{StaticResource CatGreen}" Margin="10,0,6,4" VerticalAlignment="Center" Visibility="Collapsed"/>
+                                    <TextBlock x:Name="lblSbBusy" Text="" Foreground="{StaticResource CatGreen}" FontSize="11" VerticalAlignment="Center" Margin="0,0,0,4" Visibility="Collapsed"/>
                                     <TextBlock x:Name="lblSbHost" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,4"/>
                                 </WrapPanel>
                                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Ziel-Platte:" Style="{StaticResource Lbl}"/>
