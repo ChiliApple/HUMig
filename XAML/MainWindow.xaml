@@ -488,6 +488,12 @@
                                     <Button x:Name="btnSbDiskSetup" Content="Platte einrichten ..." Style="{StaticResource BtnPeach}" ToolTip="Neue USB-Platte vorbereiten: ALLE Daten loeschen, GPT, NTFS (64K), Bezeichnung nach Profil (z.B. HUMIG-SCHULE1-2)"/>
                                     <Button x:Name="btnSbOpenDrive" Content="Oeffnen" Style="{StaticResource BtnDefault}" ToolTip="Berichtsordner HUMig-ServerBackup auf der Platte oeffnen"/>
                                     <Button x:Name="btnSbEject" Content="Auswerfen" Style="{StaticResource BtnTeal}" ToolTip="Schreibcache leeren und Platte sicher entfernen"/>
+                                    <TextBlock Text="Nach Sicherung:" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="8,0,4,4"/>
+                                    <ComboBox x:Name="cmbSbAfter" Width="130" Margin="0,0,0,4" VerticalAlignment="Center" ToolTip="Gilt fuer die gewaehlte Platte des Profils (auch im Zeitplan). Auswerfen: bis zum Ab- und Anstecken weg. Offline schalten: kein Laufwerksbuchstabe mehr, der naechste geplante Lauf oder 'Aktualisieren' schaltet sie wieder online.">
+                                        <ComboBoxItem Content="nichts tun"/>
+                                        <ComboBoxItem Content="auswerfen"/>
+                                        <ComboBoxItem Content="offline schalten"/>
+                                    </ComboBox>
                                 </WrapPanel>
                                 <TextBlock x:Name="lblSbDiskInfo" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Text="" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatSubtext}" Margin="0,0,0,2"/>
                             </Grid>

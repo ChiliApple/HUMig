@@ -144,12 +144,24 @@ function Get-HMSbVmList {
 }
 
 # Moegliche Ziel-Laufwerke (nicht System/Start), offline geschaltete USB-Platten werden online geschaltet
-function Get-HMSbDriveList {
+# -KeepHumigOffline: von HUMig nach der Sicherung offline geschaltete Platten bleiben offline (automatisches Einlesen)
+function Get-HMSbDriveList([switch]$KeepHumigOffline) {
     $msgs = @()
-    foreach ($d in @(Get-Disk -ErrorAction SilentlyContinue | Where-Object { "$($_.BusType)" -match '^(USB|7)$' -and $_.IsOffline })) {
-        try { Set-Disk -Number $d.Number -IsOffline $false -ErrorAction Stop; $msgs += "USB-Platte $($d.Number) ($($d.FriendlyName)) war offline - online geschaltet" }
-        catch { $msgs += "USB-Platte $($d.Number) ist offline und konnte nicht online geschaltet werden: $($_.Exception.Message)" }
+    $marks = @(Get-HMSbOfflineMarks)
+    $marksNew = @($marks)
+    foreach ($d in @(Get-Disk -ErrorAction SilentlyContinue | Where-Object { "$($_.BusType)" -match '^(USB|7)$' })) {
+        $k = Get-HMSbDiskKey $d
+        $m = $null
+        if ($k) { $m = @($marks | Where-Object { "$_".Split('|')[0] -eq $k })[0] }
+        if (-not $d.IsOffline) { if ($m) { $marksNew = @($marksNew | Where-Object { $_ -ne $m }) }; continue }
+        if ($KeepHumigOffline -and $m) { $msgs += "USB-Platte $("$m".Split('|')[1]) (Datentraeger $($d.Number)) wurde nach der Sicherung von HUMig offline geschaltet und bleibt offline - ""Aktualisieren"" schaltet sie wieder online."; continue }
+        try {
+            Set-Disk -Number $d.Number -IsOffline $false -ErrorAction Stop
+            $msgs += "USB-Platte $($d.Number) ($($d.FriendlyName)) war offline - online geschaltet"
+            if ($m) { $marksNew = @($marksNew | Where-Object { $_ -ne $m }) }
+        } catch { $msgs += "USB-Platte $($d.Number) ist offline und konnte nicht online geschaltet werden: $($_.Exception.Message)" }
     }
+    if ($marksNew.Count -ne $marks.Count) { Set-HMSbOfflineMarks $marksNew }
     $sysLetter = "$env:SystemDrive".TrimEnd(':').ToUpper()
     $out = @()
     foreach ($v in @(Get-Volume -ErrorAction Stop | Where-Object { $_.DriveLetter -and "$($_.DriveType)" -match '^(Fixed|Removable|2|3)$' } | Sort-Object DriveLetter)) {
@@ -394,6 +406,101 @@ function Test-HMSbArchiveLabel([string]$Label, [string]$Prefix) {
     if (-not $Label) { return $false }
     if ($Prefix) { return ($Label -imatch ('^' + [regex]::Escape($Prefix) + '-A\d+$')) }
     return ($Label -imatch '-A\d+$')
+}
+
+# ----------------------------------------------------------------------------
+# Nach der Sicherung: Platte auswerfen oder offline schalten
+# Je Platte im Profil: DiskAfter = { "<Bezeichnung>": "Eject" | "Offline" }
+# Von HUMig offline geschaltete Platten: HKLM\SOFTWARE\HUMig\ServerBackup OfflineDisks ("<UniqueId>|<Bezeichnung>|<Datum>")
+# ----------------------------------------------------------------------------
+$script:SbRegKey = 'HKLM:\SOFTWARE\HUMig\ServerBackup'
+function Get-HMSbAfterMode($Profile, [string]$Label) {
+    if (-not $Profile -or -not $Label) { return '' }
+    $m = $null
+    try { $m = $Profile.DiskAfter } catch { }
+    if ($null -eq $m) { return '' }
+    $v = ''
+    if ($m -is [System.Collections.IDictionary]) { foreach ($k in @($m.Keys)) { if ("$k" -ieq $Label) { $v = "$($m[$k])" } } }
+    else { foreach ($pp in @($m.PSObject.Properties)) { if ($pp.Name -ieq $Label) { $v = "$($pp.Value)" } } }
+    if ($v -match '^(Eject|Offline)$') { return $v }
+    return ''
+}
+function Format-HMSbAfterMode([string]$Mode) {
+    switch ($Mode) { 'Eject' { return 'auswerfen' } 'Offline' { return 'offline schalten' } default { return 'nichts tun' } }
+}
+function Get-HMSbDiskKey($Disk) {
+    $k = "$($Disk.UniqueId)".Trim()
+    if (-not $k) { $k = "$($Disk.SerialNumber)".Trim() }
+    return $k
+}
+function Get-HMSbOfflineMarks {
+    try { return @(@((Get-ItemProperty -LiteralPath $script:SbRegKey -Name OfflineDisks -ErrorAction Stop).OfflineDisks) | Where-Object { "$_" }) } catch { return @() }
+}
+function Set-HMSbOfflineMarks([string[]]$List) {
+    try {
+        $l = @($List | Where-Object { "$_" })
+        if (-not (Test-Path -LiteralPath $script:SbRegKey)) { New-Item -Path $script:SbRegKey -Force | Out-Null }
+        if ($l.Count) { New-ItemProperty -LiteralPath $script:SbRegKey -Name OfflineDisks -PropertyType MultiString -Value ([string[]]$l) -Force | Out-Null }
+        else { Remove-ItemProperty -LiteralPath $script:SbRegKey -Name OfflineDisks -ErrorAction SilentlyContinue }
+    } catch { }
+}
+# USB-Platte sicher entfernen (wie "Auswerfen" im Explorer) ueber CM_Request_Device_Eject - auch ohne Desktop (SYSTEM)
+function Invoke-HMSbDiskEject([int]$Number) {
+    if (-not ('HMSbEject' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class HMSbEject {
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)] static extern int CM_Locate_DevNodeW(out uint pdnDevInst, string pDeviceID, int ulFlags);
+    [DllImport("cfgmgr32.dll")] static extern int CM_Get_Parent(out uint pdnDevInst, uint dnDevInst, int ulFlags);
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)] static extern int CM_Request_Device_EjectW(uint dnDevInst, out int pVetoType, StringBuilder pszVetoName, int ulNameLength, int ulFlags);
+    static string Request(uint inst) {
+        StringBuilder sb = new StringBuilder(260);
+        int veto;
+        int cr = CM_Request_Device_EjectW(inst, out veto, sb, sb.Capacity, 0);
+        if (cr == 0 && veto == 0) return "";
+        return "CR " + cr + ", Veto " + veto + (sb.Length > 0 ? " " + sb.ToString() : "");
+    }
+    public static string Eject(string deviceId) {
+        uint inst;
+        int cr = CM_Locate_DevNodeW(out inst, deviceId, 0);
+        if (cr != 0) return "Geraet nicht gefunden (CR " + cr + ")";
+        string r1 = "kein uebergeordnetes Geraet";
+        uint parent;
+        if (CM_Get_Parent(out parent, inst, 0) == 0) { r1 = Request(parent); if (r1 == "") return ""; }
+        string r2 = Request(inst);
+        if (r2 == "") return "";
+        return r1 + " / " + r2;
+    }
+}
+'@
+    }
+    $dd = @(Get-CimInstance -ClassName Win32_DiskDrive -Filter "Index=$Number" -ErrorAction Stop)[0]
+    if (-not $dd) { throw "Datentraeger $Number nicht gefunden" }
+    return [HMSbEject]::Eject("$($dd.PNPDeviceID)")
+}
+function Invoke-HMSbAfterBackup([string]$Letter, [string]$Mode, [string]$Label) {
+    if ($Mode -notmatch '^(Eject|Offline)$') { return }
+    $L = "$Letter".TrimEnd(':')
+    $disk = $null
+    try { $disk = Get-Partition -DriveLetter $L -ErrorAction Stop | Get-Disk -ErrorAction Stop } catch { Write-HMSbLog "Nach der Sicherung: Datentraeger von ${L}: nicht ermittelt - $($_.Exception.Message)" 'Warning'; return }
+    if ($disk.IsBoot -or $disk.IsSystem -or "$($disk.BusType)" -notmatch '^(USB|7)$') { Write-HMSbLog "Nach der Sicherung: ${L}: ist keine USB-Platte - wird nicht $(if ($Mode -eq 'Eject') { 'ausgeworfen' } else { 'offline geschaltet' })" 'Warning'; return }
+    try { Write-VolumeCache -DriveLetter $L -ErrorAction Stop } catch { }
+    if ($Mode -eq 'Offline') {
+        try {
+            Set-Disk -Number $disk.Number -IsOffline $true -ErrorAction Stop
+            $k = Get-HMSbDiskKey $disk
+            if ($k) { Set-HMSbOfflineMarks (@(Get-HMSbOfflineMarks | Where-Object { "$_".Split('|')[0] -ne $k }) + @("$k|$Label|$((Get-Date).ToString('yyyy-MM-dd HH:mm'))")) }
+            Write-HMSbLog "Platte $Label offline geschaltet (Datentraeger $($disk.Number), kein Laufwerksbuchstabe mehr). Wieder online: HUMig ""Aktualisieren"", naechster geplanter Lauf oder Datentraegerverwaltung." 'Success'
+        } catch { Write-HMSbLog "Platte $Label konnte nicht offline geschaltet werden: $($_.Exception.Message)" 'Warning' }
+    } else {
+        try {
+            $r = Invoke-HMSbDiskEject -Number $disk.Number
+            if ($r) { Write-HMSbLog "Platte $Label wurde NICHT ausgeworfen ($r) - wird sie noch verwendet? Explorer: Rechtsklick > Auswerfen" 'Warning' }
+            else { Write-HMSbLog "Platte $Label ausgeworfen - kann abgezogen werden (bis zum erneuten Anstecken nicht mehr verfuegbar)." 'Success' }
+        } catch { Write-HMSbLog "Platte $Label auswerfen: $($_.Exception.Message)" 'Warning' }
+    }
 }
 
 # Bezeichnung einer Platte wurde geaendert: Verlauf auf der Platte (alle Eintraege gehoeren zu ihr) und
@@ -998,6 +1105,8 @@ function Start-HMServerBackup {
     $Job.Progress = 100
     $lvl = switch ($status) { 'OK' { 'Success' } 'Warning' { 'Warning' } default { 'Error' } }
     Write-HMSbLog ("SERVER-BACKUP {0}: {1} in {2} - Bericht: {3}" -f $Ctx.Profile, $(switch ($status) { 'OK' { if ($notes.Count) { 'erfolgreich (mit Hinweis - siehe Bericht)' } else { 'erfolgreich' } } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }), (Format-HMDuration $dur), (Join-Path $rep 'Bericht.html')) $lvl
+    # Nach der Sicherung: Platte auswerfen / offline schalten (Einstellung je Platte)
+    if ("$($Ctx.After)") { $Job.Status = 'Platte'; Invoke-HMSbAfterBackup -Letter $L -Mode "$($Ctx.After)" -Label "$($Ctx.DiskLabel)" }
     $script:SbRunLog = $null
     if ($status -eq 'Error') { $Job.Error = ($notes -join '; ') }
 }

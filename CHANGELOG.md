@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.48 - 2026-09-30
+### Neu
+- Server-Backup: **Nach Sicherung** je Platte (Auswahl neben *Auswerfen*, gespeichert im Profil als `DiskAfter`, gilt auch fuer den Zeitplan): *nichts tun*, *auswerfen* (CM_Request_Device_Eject - funktioniert auch ohne Anmeldung als SYSTEM) oder *offline schalten* (Set-Disk -IsOffline); Anzeige in der Zeile unter der Ziel-Platte und in der Startabfrage
+- Von HUMig offline geschaltete Platten bleiben beim automatischen Einlesen offline; *Aktualisieren* und der naechste geplante Lauf schalten sie wieder online
+
 ## v2.0.47 - 2026-09-30
 ### Neu
 - Server-Backup: **Archiv-Platten** gegen Verschluesselungstrojaner - je Profil Anzahl und Abstand (Profil *Bearbeiten ...*, Standard 30 Tage); Bezeichnung `<Prefix>-A1`, `-A2` ... (Vorschlag in *Platte einrichten*); von der Rotation ausgenommen; rechts im Reiter letzte Archiv-Sicherung und *faellig*-Hinweis; nach einer Archiv-Sicherung Erinnerung zum Auswerfen, Abziehen und getrennten Lagern; Zeitplan nimmt bevorzugt Rotations-Platten; Statistik mit Spalte *Art*

@@ -20,6 +20,8 @@ $script:SbInit       = $false
 $script:SbPrereq     = $null
 $script:SbSuppress   = $false
 $script:SbSuppressDrive = $false
+$script:SbSuppressAfter = $false
+$script:SbAfterRun   = ''
 $script:SbButtons    = @()
 
 # ----------------------------------------------------------------------------
@@ -33,6 +35,11 @@ function ConvertTo-HMSbProfile($p) {
     $w = 0; try { $w = [int]$p.WarnDays } catch { }
     $ad = 0; try { $ad = [int]$p.ArchiveDisks } catch { }
     $ai = 0; try { $ai = [int]$p.ArchiveDays } catch { }
+    $da = [ordered]@{}
+    if ($null -ne $p.DiskAfter) {
+        if ($p.DiskAfter -is [System.Collections.IDictionary]) { foreach ($k in @($p.DiskAfter.Keys)) { if ("$($p.DiskAfter[$k])" -match '^(Eject|Offline)$') { $da["$k".ToUpper()] = "$($p.DiskAfter[$k])" } } }
+        else { foreach ($pp in @($p.DiskAfter.PSObject.Properties)) { if ("$($pp.Value)" -match '^(Eject|Offline)$') { $da[$pp.Name.ToUpper()] = "$($pp.Value)" } } }
+    }
     return [pscustomobject][ordered]@{
         Name = $name; DiskPrefix = $pre; Disks = $(if ($n -gt 0) { $n } else { 2 })
         VMs = @($p.VMs | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
@@ -41,6 +48,7 @@ function ConvertTo-HMSbProfile($p) {
         WarnDays = $(if ($w -gt 0) { $w } else { 14 })
         ArchiveDisks = $(if ($ad -gt 0 -and $ad -le 9) { $ad } else { 0 })
         ArchiveDays = $(if ($ai -gt 0) { $ai } else { 30 })
+        DiskAfter = [pscustomobject]$da
     }
 }
 function Get-HMSbConfig {
@@ -296,14 +304,14 @@ function Get-HMSbDrive {
     if ($i -ge 0 -and $i -lt $list.Count) { return $list[$i] }
     return $null
 }
-function Update-HMSbDrives {
+function Update-HMSbDrives([switch]$All) {
     $script:SbSuppressDrive = $true
     $ui.cmbSbDrive.Items.Clear()
     [void]$ui.cmbSbDrive.Items.Add('(Laufwerke werden gelesen ...)')
     $ui.cmbSbDrive.SelectedIndex = 0
     $script:SbDrives = @()
     $script:SbSuppressDrive = $false
-    Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Get-HMSbDriveList } -ArgumentList @($script:SbEngine) -TimeoutSec 60 -BusyTag 'Sb' -BusyText 'Platten werden gelesen ...' -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $all) . $eng; Get-HMSbDriveList -KeepHumigOffline:(-not $all) } -ArgumentList @($script:SbEngine, [bool]$All) -TimeoutSec 60 -BusyTag 'Sb' -BusyText 'Platten werden gelesen ...' -OnComplete {
         param($r)
         $script:SbSuppressDrive = $true
         $ui.cmbSbDrive.Items.Clear()
@@ -364,7 +372,37 @@ function Select-HMSbDriveForProfile {
     if ($list.Count -and $ui.cmbSbDrive.SelectedIndex -lt 0) { $ui.cmbSbDrive.SelectedIndex = 0 }
     Update-HMSbDiskInfo
 }
+function Update-HMSbAfterUi {
+    $d = Get-HMSbDrive
+    $p = Get-HMSbProfile
+    $ok = [bool]($d -and $p -and (Test-HMSbLabelMatch $d.Label $p.DiskPrefix))
+    $mode = if ($ok) { Get-HMSbAfterMode $p $d.Label } else { '' }
+    $script:SbSuppressAfter = $true
+    $ui.cmbSbAfter.SelectedIndex = $(switch ($mode) { 'Eject' { 1 } 'Offline' { 2 } default { 0 } })
+    $ui.cmbSbAfter.IsEnabled = $ok
+    $script:SbSuppressAfter = $false
+    return $mode
+}
+function Set-HMSbAfterMode {
+    if ($script:SbSuppressAfter) { return }
+    $d = Get-HMSbDrive
+    $p = Get-HMSbProfile
+    if (-not $d -or -not $p -or -not (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { return }
+    $mode = switch ($ui.cmbSbAfter.SelectedIndex) { 1 { 'Eject' } 2 { 'Offline' } default { '' } }
+    $cfg = Get-HMSbConfig
+    foreach ($x in $cfg.Profiles) {
+        if ($x.Name -ne $p.Name) { continue }
+        $m = [ordered]@{}
+        foreach ($pp in @($x.DiskAfter.PSObject.Properties)) { if ($pp.Name -ine $d.Label) { $m[$pp.Name] = "$($pp.Value)" } }
+        if ($mode) { $m["$($d.Label)".ToUpper()] = $mode }
+        $x.DiskAfter = [pscustomobject]$m
+    }
+    Save-HMSbConfig $cfg
+    Out-Console "Platte $($d.Label): nach der Sicherung $(Format-HMSbAfterMode $mode)" 'Info'
+    Update-HMSbDiskInfo
+}
 function Update-HMSbDiskInfo {
+    $after = Update-HMSbAfterUi
     $d = Get-HMSbDrive
     $p = Get-HMSbProfile
     if (-not $d) { $ui.lblSbDiskInfo.Text = 'Keine Ziel-Platte - USB-Platte anstecken und "Aktualisieren" druecken.'; $ui.lblSbDiskInfo.Foreground = New-Brush '#FFF9E2AF'; return }
@@ -382,6 +420,7 @@ function Update-HMSbDiskInfo {
     }
     if ($d.FileSystem -and $d.FileSystem -notmatch '^(NTFS|ReFS)$') { $t += "  |  Dateisystem $($d.FileSystem) wird nicht unterstuetzt (NTFS noetig)"; $col = '#FFF38BA8' }
     if ($d.Bus -and $d.Bus -notmatch '^(USB|7)$') { $t += "  |  kein USB-Datentraeger ($($d.Bus))" }
+    if ($after) { $t += "  |  nach der Sicherung automatisch: $(if ($after -eq 'Eject') { 'AUSWERFEN' } else { 'OFFLINE SCHALTEN' })" }
     $ui.lblSbDiskInfo.Text = $t
     $ui.lblSbDiskInfo.Foreground = New-Brush $col
 }
@@ -569,6 +608,9 @@ function Start-HMSbBackup {
     if ($script:SbPrereq -and ($script:SbPrereq.Feature -eq $false -or -not $script:SbPrereq.Wbadmin)) { Out-Console 'Windows Server-Sicherung fehlt - Button "Windows Server-Sicherung installieren".' 'Error'; return }
     $pName = if ($p) { $p.Name } else { '(ohne Profil)' }
     $msg = "Server-Backup starten?`n`nProfil: $pName`nZiel: $($d.Letter): $($d.Label)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })`nSystem (Bare-Metal): $(if ($hs) { 'ja' } else { 'nein' })`n`nVMs und Server laufen weiter (Online-Sicherung ueber VSS)."
+    $after = if ($p -and (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { Get-HMSbAfterMode $p $d.Label } else { '' }
+    if ($after -eq 'Eject') { $msg += "`n`nNach der Sicherung wird die Platte automatisch ausgeworfen." }
+    elseif ($after -eq 'Offline') { $msg += "`n`nNach der Sicherung wird die Platte automatisch offline geschaltet." }
     if (-not $p) { $msg += "`n`nHinweis: kein Profil gewaehlt - Verlauf unter '(ohne Profil)'." }
     elseif (-not (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { $msg += "`n`nACHTUNG: Die Platte '$($d.Label)' gehoert laut Bezeichnung NICHT zum Profil ($($p.DiskPrefix)-...)." }
     if ($p) {
@@ -590,13 +632,15 @@ function Start-HMSbBackup {
         Profile = $pName; DiskPrefix = $(if ($p) { $p.DiskPrefix } else { '' }); Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
         VMs = $vms; Volumes = $vols; HostConfig = $hc; HostSystem = $hs; Verify = [bool]$ui.chkSbVerify.IsChecked
         LocalHistory = $script:SbHistFile; LocalReportDir = $script:SbReportDir; Version = $script:Version
-        ProfileData = $(if ($p) { $p } else { $null })
+        ProfileData = $(if ($p) { $p } else { $null }); After = $after
     }
+    $script:SbAfterRun = $after
     Start-EngineJob -Command 'Start-HMServerBackup -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'Server-Backup' -ScriptFiles @($script:SbEngine) -OnFinished {
         param($j)
         Update-HMSbHistory
         if ($j.Result -and $j.Result.Report) { Out-Console "Berichtsordner: $($j.Result.Report)" 'Info' }
-        if ($script:SbArchiveRun) { Out-Console "Archiv-Platte $($script:SbArchiveRun): jetzt ""Auswerfen"", abziehen und getrennt vom Server lagern (nicht angesteckt lassen)." 'Warning' }
+        if ($script:SbAfterRun) { Update-HMSbDrives }
+        if ($script:SbArchiveRun) { Out-Console "Archiv-Platte $($script:SbArchiveRun): $(if ($script:SbAfterRun -eq 'Eject') { 'abziehen' } else { 'jetzt ""Auswerfen"", abziehen' }) und getrennt vom Server lagern (nicht angesteckt lassen)." 'Warning' }
     }
 }
 
@@ -1092,7 +1136,7 @@ function Initialize-HMServerBackupTab {
     $ui.btnSbProfileSave.Add_Click({ Save-HMSbProfile })
     $ui.btnSbProfileEdit.Add_Click({ Edit-HMSbProfile })
     $ui.btnSbProfileDel.Add_Click({ Remove-HMSbProfile })
-    $ui.btnSbDrives.Add_Click({ Update-HMSbVms; Update-HMSbDrives })
+    $ui.btnSbDrives.Add_Click({ Update-HMSbVms; Update-HMSbDrives -All })
     $ui.btnSbDiskSetup.Add_Click({ Show-HMSbDiskSetup })
     $ui.btnSbEject.Add_Click({ Invoke-HMSbEject })
     $ui.btnSbOpenDrive.Add_Click({
@@ -1132,6 +1176,7 @@ function Initialize-HMServerBackupTab {
         Save-HMSbLastProfile "$($ui.cmbSbProfile.SelectedItem)"
         Set-HMSbFromProfile
     })
+    $ui.cmbSbAfter.Add_SelectionChanged({ Set-HMSbAfterMode })
     $ui.cmbSbDrive.Add_SelectionChanged({
         if ($script:SbSuppressDrive) { return }
         Update-HMSbDiskInfo

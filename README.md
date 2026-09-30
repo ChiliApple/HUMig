@@ -238,6 +238,7 @@ Reiter **Server-Backup** (als Administrator auf Windows Server - Hyper-V-Host: V
 - **Verlauf pflegen**: Rechtsklick im Verlauf entfernt markierte oder alle fehlgeschlagenen Laeufe (Sicherung und Bericht auf der Platte bleiben); abgebrochene Laeufe stehen mit Status *Fehler* und Bericht im Verlauf; Dauer lesbar (z.B. *6 h 12 min*)
 - **HUMig schliessen waehrend einer Sicherung**: Rueckfrage - Sicherung stoppen, im Hintergrund weiterlaufen lassen (ohne Verlauf/Bericht) oder offen lassen
 - **Auswerfen** (Schreibcache leeren), **Versionen**, **Wiederherstellen** ueber die Windows Server-Sicherung
+- **Nach Sicherung** je Platte (auch im Zeitplan): nichts tun, **auswerfen** oder **offline schalten** (kein Laufwerksbuchstabe; naechster geplanter Lauf bzw. *Aktualisieren* schaltet wieder online) - Anzeige unter der Ziel-Platte
 
 Voraussetzung: Feature *Windows Server-Sicherung* (installierbar aus dem Reiter).
 
