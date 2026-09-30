@@ -177,7 +177,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 
   <h3>Zusätzliche Ordner und Ausnahmen</h3>
   <ul>
-    <li><b>Zusätzliche Ordner</b> (<span class="ui">+ Ordner</span>): werden im Modul <i>Zusätzliche Ordner</i> mit vollem Pfad gesichert. Sind Ordner eingetragen, bleibt das Modul angehakt (auch nach <span class="ui">Keine</span> oder einem Vorlagenwechsel) – so lassen sich auch <b>nur</b> diese Ordner sichern und messen. Nicht mehr sichern: Ordner aus der Liste entfernen.</li>
+    <li><b>Zusätzliche Ordner</b> (<span class="ui">+ Ordner</span>): werden im Modul <i>Zusätzliche Ordner</i> mit vollem Pfad gesichert. Sind Ordner eingetragen, bleibt das Modul angehakt (auch nach <span class="ui">Keine</span> oder einem Vorlagenwechsel) – so lassen sich auch <b>nur</b> diese Ordner sichern und messen. Nicht mehr sichern: Ordner aus der Liste entfernen. <span class="ui p">Wichtige Dateien suchen …</span> findet PST, KeePass, Access, OneNote, CAD … außerhalb der gesicherten Bereiche am gewählten Computer – Treffer als Zusätzliche Ordner übernehmen (wie unter Werkzeuge).</li>
     <li><b>Ausschließen</b>: einzelne Ordner/Dateien weglassen (Rechtsklick auf <span class="ui">+ Ordner</span> = Pfad eintippen). <span class="ui">Grosse Dateien …</span> zeigt die größten Ordner/Dateien der letzten Messung – markierte direkt ausschließen.</li>
     <li>Schalter: <i>Profil: nur AppData ausnehmen</i> · <i>Profil: keine Datei-Ausnahmen</i> · <i>C:\ nur Systemordner ausnehmen</i> · <i>C:\ keine Datei-Ausnahmen</i> · <span class="ui">Ausnahmelisten bearbeiten</span>.</li>
   </ul>
@@ -307,6 +307,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><span class="ui">Protokoll</span></td><td>Backup- bzw. Restore-Bericht (HTML, druckbar, als PDF speicherbar)</td></tr>
     <tr><td><span class="ui">Backup pruefen</span></td><td>Alle Dateien gegen den Prüfsummen-Katalog (beschädigt? fehlt etwas?). Ohne Katalog: Rechtsklick = Katalog jetzt erstellen. Ergebnis <code>Pruefung_*.txt</code>.</td></tr>
     <tr><td><span class="ui">Vergleichen …</span></td><td>Zwei Backups vergleichen: geändert, nur in A, nur in B</td></tr>
+    <tr><td><span class="ui t">Im Backup suchen …</span></td><td>Dateien im markierten Backup suchen (<code>*</code> und <code>?</code> erlaubt) und einzeln herauskopieren – z. B. eine versehentlich gelöschte Datei nach dem Restore</td></tr>
     <tr><td><span class="ui">Uebersicht (HTML)</span></td><td><code>Backups.html</code>: alle Backups mit Status, Größe, Prüfung, Links (Filter, Sortierung)</td></tr>
     <tr><td><span class="ui r">Loeschen</span> / <span class="ui">Alte loeschen</span></td><td>Einzeln löschen bzw. nach Aufbewahrungsregel: je PC + Benutzer die neuesten N behalten, ältere nach X Tagen vorschlagen – immer mit Rückfrage. <b>Ganz oder gar nicht:</b> vorher wird jede Datei geprüft (Rechte, geöffnet, auch sehr lange Pfade); fehlt etwas, wird nichts gelöscht und die Meldung nennt den Grund.</td></tr>
   </table>

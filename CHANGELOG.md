@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.50 - 2026-09-30
+### Verbessert
+- Reiter Restore: Knopf **Im Backup suchen ...** neben *Vergleichen ...* (sucht im markierten Backup)
+- Reiter Backup: Knopf **Wichtige Dateien suchen ...** unter *Zusaetzliche Ordner* (Treffer als Zusaetzliche Ordner uebernehmen)
+- beide weiterhin auch unter Werkzeuge
+
 ## v2.0.49 - 2026-09-30
 ### Verbessert
 - Server-Backup, Bereich *Platten / Verlauf des Profils* uebersichtlicher: je Platte eine Zeile (farbiger Punkt, Bezeichnung, Datum, Alter) getrennt nach *Rotation* und *Archiv*, Markierungen *naechste laut Rotation*, *faellig* / *naechste in ... Tagen*, *letzter Lauf fehlgeschlagen*; Warnungen als farbige Hinweiszeilen; groessere Schrift

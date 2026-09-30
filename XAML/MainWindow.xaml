@@ -296,6 +296,7 @@
                                 <WrapPanel Margin="0,4,0,6">
                                     <Button x:Name="btnExtraAdd" Content="+ Ordner" Style="{StaticResource BtnDefault}"/>
                                     <Button x:Name="btnExtraDel" Content="- Entfernen" Style="{StaticResource BtnDefault}"/>
+                                    <Button x:Name="btnFileSearch" Content="Wichtige Dateien suchen ..." Style="{StaticResource BtnPeach}" ToolTip="PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche am gewaehlten Computer finden und als Zusaetzliche Ordner aufnehmen (auch unter Werkzeuge)"/>
                                 </WrapPanel>
                                 <TextBlock Text="PFADE AUSSCHLIESSEN" Style="{StaticResource SectionLabel}"/>
                                 <ListBox x:Name="lstExclude" Height="60" ToolTip="Diese Ordner/Dateien werden nicht gesichert (Pfad am Quell-PC). Gilt fuer diese Sitzung."/>
@@ -349,6 +350,7 @@
                                 <Button x:Name="btnReport" Content="Protokoll" Style="{StaticResource BtnTeal}" ToolTip="Backup-/Restore-Protokoll (HTML) des markierten Backups oeffnen - druckbar, auch als PDF"/>
                                 <Button x:Name="btnVerifyBackup" Content="Backup pruefen" Style="{StaticResource BtnBlue}" ToolTip="Alle Dateien des markierten Backups gegen den Pruefsummen-Katalog pruefen (beschaedigt? fehlt etwas?). Ohne Katalog: Rechtsklick = Katalog jetzt erstellen"/>
                                 <Button x:Name="btnCompare" Content="Vergleichen ..." Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup mit einem anderen vergleichen: was ist neu, was fehlt, was hat sich geaendert"/>
+                                <Button x:Name="btnBackupSearch" Content="Im Backup suchen ..." Style="{StaticResource BtnTeal}" ToolTip="Dateien im markierten Backup suchen und einzeln herauskopieren (auch unter Werkzeuge)"/>
                                 <Button x:Name="btnOverview" Content="Uebersicht (HTML)" Style="{StaticResource BtnDefault}" ToolTip="HTML-Uebersicht aller Backups im Backup-Ordner erstellen und oeffnen (Backups.html)"/>
                                 <Button x:Name="btnDeleteBackup" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Markiertes Backup loeschen (mit Bestaetigung)"/>
                                 <Button x:Name="btnCleanupBackups" Content="Alte loeschen" Style="{StaticResource BtnPeach}" ToolTip="Backups aelter als die Aufbewahrungsdauer (Einstellungen) anzeigen und loeschen"/>
