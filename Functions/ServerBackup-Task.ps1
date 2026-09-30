@@ -89,7 +89,9 @@ $ctx = @{
     Profile = $ProfileName; DiskPrefix = $prefix; Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
     VMs = @($list); Volumes = @($volList); HostConfig = [bool]$HostConfig; HostSystem = [bool]$HostSystem; Verify = -not $NoVerify
     LocalHistory = $localHist; LocalReportDir = $repDir; Version = $version; ProfileData = $prof
+    After = (Get-HMSbAfterMode $prof "$($d.Label)")
 }
+if ($ctx.After) { Write-HMSbLog "Nach der Sicherung: Platte $($d.Label) $(Format-HMSbAfterMode $ctx.After)" 'Info' }
 $q = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
 $Job = [hashtable]::Synchronized(@{ Log = $q; Progress = 0; Status = ''; Cancel = $false; Done = $false; Result = $null; Process = $null; Error = $null; Started = (Get-Date) })
 try {
