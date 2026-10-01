@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.54'
+$script:Version   = '2.0.55'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -1448,7 +1448,7 @@ function Show-About {
     if ($script:AppIcon) { $w.Icon = $script:AppIcon }
     $inst = Get-HMInstalledInfo
     $uc = Get-HMUpdateConfig $script:ConfigDir
-    $w.FindName('ver').Text = "Version $($script:Version)  |  Kanal $(if ($uc.UseBranch) { "Branch $($uc.Branch)" } else { Format-HMChannel $uc.Channel })  |  PowerShell $($PSVersionTable.PSVersion)" + $(if ($inst -and "$($inst.Check)") { "`ninstalliert $($inst.Date), geprueft: $($inst.Check)" } else { '' })
+    $w.FindName('ver').Text = "Version $($script:Version)  |  Kanal $(if ($uc.UseBranch) { "Branch $($uc.Branch)" } else { Format-HMChannel $uc.Channel })$(if ($uc.RequireSignature) { ', nur signierte Updates' })  |  PowerShell $($PSVersionTable.PSVersion)" + $(if ($inst -and "$($inst.Check)") { "`ninstalliert $($inst.Date), geprueft: $($inst.Check)" } else { '' })
     $w.FindName('src').Text = "github.com/$($script:UpdateOwner)/$($script:UpdateRepo)"
     # ueber den Explorer oeffnen -> Browser laeuft als angemeldeter Benutzer, nicht erhoeht
     $w.FindName('src').Add_MouseLeftButtonUp({ try { Start-Process -FilePath explorer.exe -ArgumentList "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)" } catch { } })
@@ -1540,7 +1540,7 @@ function Invoke-UpdateCheck {
                 if ($text -match "\`$script:Version\s*=\s*'([0-9\.]+)'") { return [pscustomobject]@{ Version = $Matches[1]; Tag = "Branch $($cfg.Branch)"; Prerelease = $false; Branch = $true } }
                 return 'ERR:Version im Branch nicht gefunden'
             }
-            $rel = Select-HMRelease @(Get-HMReleases $cfg.Owner $cfg.Repo $token) $cfg.Channel
+            $rel = Select-HMRelease @(Get-HMReleases $cfg.Owner $cfg.Repo $token) $cfg.Channel -SignedOnly:$cfg.RequireSignature
             if (-not $rel) { return 'NONE' }
             return [pscustomobject]@{ Version = "$($rel.Version)"; Tag = $rel.Tag; Prerelease = $rel.Prerelease; Branch = $false; Manifest = [bool]$rel.ManifestUrl }
         } catch {
@@ -1565,7 +1565,7 @@ function Invoke-UpdateCheck {
                 $ui.btnUpdate.ClearValue([System.Windows.Controls.Control]::BackgroundProperty)
                 $ui.btnUpdate.ClearValue([System.Windows.Controls.Control]::ForegroundProperty)
             }
-        } elseif ("$r" -eq 'NONE') { Out-Console "Update-Check: kein Release im $chan" 'Debug' }
+        } elseif ("$r" -eq 'NONE') { Out-Console "Update-Check: kein $(if ($cfg.RequireSignature) { 'signiertes ' })Release im $chan" 'Debug' }
         elseif ("$r" -match '^AUTH:') { Out-Console "Update-Check: Repo $($cfg.Owner)/$($cfg.Repo) nicht erreichbar (privat? Rechtsklick auf 'Update' > GitHub-Token)" 'Debug' }
         else { Out-Console "Update-Check nicht moeglich: $("$r" -replace '^ERR:', '')" 'Debug' }
     }
@@ -1599,18 +1599,78 @@ function Show-HMVersionPicker {
         foreach ($x in $list) {
             $cmp = 0; try { $cmp = ([Version]"$($x.Version)").CompareTo([Version]$script:Version) } catch { }
             $first = @("$($x.Notes)" -split "`r?`n" | Where-Object { "$_".Trim() -and "$_" -notmatch '^\s*#' } | ForEach-Object { "$_".Trim().TrimStart('-', ' ', '*') })[0]
-            $rows.Add(@("$($x.Version)", $(if ($x.Prerelease) { 'Test' } else { 'Stabil' }), $(if ($cmp -eq 0) { 'installiert' } elseif ($cmp -lt 0) { 'aelter' } else { 'neuer' }), "$($x.Date)", $(if ($x.ManifestUrl) { 'ja' } else { 'nein' }), $(if ($x.SignatureUrl) { 'ja' } else { '' }), "$first"))
+            $rows.Add(@("$($x.Version)", $(if ($x.Prerelease) { 'Test' } else { 'Stabil' }), $(if ($cmp -eq 0) { 'installiert' } elseif ($cmp -lt 0) { 'aelter' } else { 'neuer' }), "$($x.Date)", $(if ($x.ManifestUrl) { 'ja' } else { 'nein' }), $(if ($x.SignatureUrl) { 'ja' } else { 'nein' }), "$first"))
         }
         Show-DataGridWindow -Title 'HUMig - Version waehlen (Vorversion / Test-Version)' -Width 1100 -Height 520 `
             -Columns @('Version', 'Kanal', 'Stand', 'Datum', 'Pruefsumme', 'Signatur', 'Aenderungen') -Rows $rows.ToArray() `
-            -CountText "Installiert: v$($script:Version) - Version markieren, dann 'Diese Version installieren'. Eigene Daten und Einstellungen bleiben erhalten. Versionen bis 2.0.52 haben keine Pruefsumme." `
+            -CountText "Installiert: v$($script:Version) - Version markieren, dann 'Diese Version installieren'. Eigene Daten und Einstellungen bleiben erhalten.$(if ($script:UpdateCfg.RequireSignature) { ' Nur signierte Versionen sind installierbar.' } else { ' Versionen bis 2.0.52 haben keine Pruefsumme.' })" `
             -Actions @(@{ Text = 'Diese Version installieren'; Color = '#FFA6E3A1'; Handler = {
                 param($sel, $win, $ctx)
                 $v = "$(@($sel)[0].Version)"
                 if (-not $v) { return }
+                if ((Get-HMUpdateConfig $script:ConfigDir).RequireSignature -and "$(@($sel)[0].Signatur)" -ne 'ja') {
+                    [void][System.Windows.MessageBox]::Show($win, "Version $v ist nicht signiert und kann nicht installiert werden (nur signierte Updates - Einstellungen > Update).", 'HUMig', 'OK', 'Warning'); return
+                }
                 try { $win.Close() } catch { }
                 Start-HMPull -Version $v
             } })
+    }
+}
+# Release signieren - nur auf dem PC des Herausgebers (privater Schluessel des Signatur-Zertifikats vorhanden)
+function Get-HMSignTokenFile { return (Join-Path $env:APPDATA 'HUMig\GitHubSignToken.xml') }
+function Read-HMSignToken {
+    $f = Get-HMSignTokenFile
+    if (Test-Path -LiteralPath $f) { try { $c = Import-Clixml -Path $f; if ($c -is [System.Management.Automation.PSCredential]) { return $c.GetNetworkCredential().Password.Trim() } } catch { } }
+    return ''
+}
+function Test-HMCanSign { return [bool](Get-HMSigningCert (Get-HMUpdateConfig $script:ConfigDir).SignerThumbprint) }
+function Start-HMReleaseSigning {
+    if ($script:JobRunning) { Out-Console 'Waehrend eines Backups/Restores nicht moeglich.' 'Warning'; return }
+    $cfg = Get-HMUpdateConfig $script:ConfigDir
+    if (-not (Get-HMSigningCert $cfg.SignerThumbprint)) { Out-Console "Signatur-Zertifikat $($cfg.SignerThumbprint) mit privatem Schluessel ist auf diesem PC nicht vorhanden." 'Error'; return }
+    $tok = Read-HMSignToken
+    if (-not $tok) {
+        $c = Get-Credential -UserName 'github' -Message "GitHub-Token mit Schreibrecht fuer $($cfg.Owner)/$($cfg.Repo) als Kennwort eingeben (Fine-grained PAT, 'Contents: Read and write'). Wird verschluesselt nur fuer deinen Windows-Benutzer gespeichert."
+        if (-not $c) { return }
+        $tok = $c.GetNetworkCredential().Password.Trim()
+        if (-not $tok) { return }
+        $f = Get-HMSignTokenFile
+        try { New-Item -ItemType Directory -Path (Split-Path $f -Parent) -Force | Out-Null; $c | Export-Clixml -Path $f -Force } catch { Out-Console "Token nicht gespeichert: $($_.Exception.Message)" 'Warning' }
+    }
+    $script:SignCtx = [pscustomobject]@{ Owner = $cfg.Owner; Repo = $cfg.Repo; Thumb = $cfg.SignerThumbprint; Token = $tok }
+    Out-Console 'Releases ohne Signatur werden gesucht ...' 'Info'
+    Invoke-AsyncCommand -ScriptBlock {
+        param($lib, $tok, $owner, $repo)
+        try {
+            . $lib
+            try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+            $l = @(Get-HMReleases $owner $repo $tok | Where-Object { $_.ManifestUrl -and -not $_.SignatureUrl })
+            return [pscustomobject]@{ Tags = @($l | ForEach-Object { "$($_.Tag)" }); Err = '' }
+        } catch { return [pscustomobject]@{ Tags = @(); Err = "$($_.Exception.Message)" } }
+    } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $tok, $cfg.Owner, $cfg.Repo) -TimeoutSec 40 -OnComplete {
+        param($r)
+        if (-not $r -or $r -is [string] -or $r.Err) { Out-Console "Releases nicht lesbar: $(if ($r -is [string]) { $r } else { $r.Err })" 'Error'; return }
+        $tags = @($r.Tags | Where-Object { $_ })
+        if (-not $tags.Count) { Out-Console 'Alle Releases mit Pruefsumme sind bereits signiert.' 'Success'; return }
+        if (-not (Confirm-Action "Diese Releases jetzt mit deinem Zertifikat signieren?`n`n$($tags -join ', ')`n`nDanach werden sie allen HUMig-Installationen als Update angeboten (je nach Kanal Stabil/Test)." 'Release signieren')) { return }
+        Out-Console "Signiere $($tags -join ', ') ..." 'Info'
+        $sc = $script:SignCtx
+        Invoke-AsyncCommand -ScriptBlock {
+            param($lib, $owner, $repo, $tp, $tok, $tags)
+            try { . $lib; return [pscustomobject]@{ Items = @(Invoke-HMReleaseSigning $owner $repo $tp $tok $tags); Err = '' } }
+            catch { return [pscustomobject]@{ Items = @(); Err = "$($_.Exception.Message)" } }
+        } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $sc.Owner, $sc.Repo, $sc.Thumb, $sc.Token, [string[]]$tags) -TimeoutSec 180 -OnComplete {
+            param($res)
+            $script:SignCtx = $null
+            if (-not $res -or $res -is [string] -or $res.Err) { Out-Console "Signieren fehlgeschlagen: $(if ($res -is [string]) { $res } else { $res.Err })" 'Error'; return }
+            $items = @($res.Items | Where-Object { $_ })
+            foreach ($x in $items) { Out-Console "$($x.Tag): $($x.Text)" $(if ($x.Ok) { 'Success' } else { 'Error' }) }
+            if (@($items | Where-Object { -not $_.Ok -and "$($_.Text)" -match 'Schreibrecht' }).Count) {
+                Remove-Item -LiteralPath (Get-HMSignTokenFile) -Force -ErrorAction SilentlyContinue
+                Out-Console 'Gespeicherter Schreib-Token geloescht - beim naechsten Signieren neu eingeben.' 'Warning'
+            }
+            Invoke-UpdateCheck
+        }
     }
 }
 $ui.btnUpdate.Add_Click({ Start-HMPull })
@@ -1627,7 +1687,11 @@ $miT.Add_Click({
         if ($c) { $c | Export-Clixml -Path $f -Force; Out-Console 'GitHub-Token gespeichert (DPAPI)' 'Success'; Invoke-UpdateCheck }
     } elseif ($a -eq 'No') { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue; Out-Console 'GitHub-Token geloescht' 'Info' }
 })
-foreach ($m in @($miV, $miS, (New-Object System.Windows.Controls.Separator), $miT)) { [void]$cmUpd.Items.Add($m) }
+$miSep2 = New-Object System.Windows.Controls.Separator
+$miSign = New-Object System.Windows.Controls.MenuItem; $miSign.Header = 'Release signieren (Herausgeber) ...'; $miSign.Add_Click({ Start-HMReleaseSigning })
+foreach ($m in @($miV, $miS, (New-Object System.Windows.Controls.Separator), $miT, $miSep2, $miSign)) { [void]$cmUpd.Items.Add($m) }
+# "Release signieren" nur zeigen, wenn auf diesem PC der private Schluessel des Signatur-Zertifikats liegt
+$cmUpd.Add_Opened({ $v = $(if (Test-HMCanSign) { 'Visible' } else { 'Collapsed' }); $miSign.Visibility = $v; $miSep2.Visibility = $v })
 $ui.btnUpdate.ContextMenu = $cmUpd
 
 # ============================================================================

@@ -1,5 +1,6 @@
 # Automatische Tests fuer HUMig (Windows PowerShell 5.1) und Pruefsummen-Datei fuer Releases.
 # - bei jedem Push/Pull-Request: Pruefungen (Syntax, XAML, Steuerelemente, PSScriptAnalyzer, Pester) + Selbsttest
+# - Signatur: haengt der Herausgeber danach an (HUMig: Rechtsklick auf Update > Release signieren), erst dann wird das Release angeboten
 # - bei einem neuen Release: zusaetzlich HUMig-files.sha256 erstellen und an das Release haengen (nur wenn die Pruefungen bestanden sind)
 #   und den Update-Weg testen (Pull.ps1 laedt genau dieses Release und prueft alle Pruefsummen)
 name: CI
@@ -26,9 +27,8 @@ jobs:
       - name: Pruefungen
         shell: powershell
         run: .\.github\tests\Invoke-CITests.ps1
-      - name: Selbsttest (Test-HUMig.ps1, umgebungsabhaengig - blockiert nicht)
+      - name: Selbsttest (Test-HUMig.ps1)
         shell: powershell
-        continue-on-error: true
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File .\Test-HUMig.ps1
           $c = $LASTEXITCODE
@@ -69,6 +69,9 @@ jobs:
         run: |
           $t = Join-Path $env:RUNNER_TEMP 'HUMig'
           $v = $env:TAG -replace '^v', ''
+          # Die Signatur haengt der Herausgeber erst nach diesem Test an - hier wird der Weg mit Pruefsumme getestet
+          New-Item -ItemType Directory -Path (Join-Path $t 'Config') -Force | Out-Null
+          '{ "AllowUnsigned": true }' | Set-Content -LiteralPath (Join-Path $t 'Config\update.json') -Encoding UTF8
           powershell -NoProfile -ExecutionPolicy Bypass -File .\Pull.ps1 -Target $t -Version $v -NoStart -NonInteractive -Owner $env:GITHUB_REPOSITORY_OWNER -Repo ($env:GITHUB_REPOSITORY -split '/')[1]
           if ($LASTEXITCODE -ne 0) { throw "Pull.ps1 Exitcode $LASTEXITCODE" }
           $i = Get-Content (Join-Path $t 'Config\installed.json') -Raw | ConvertFrom-Json

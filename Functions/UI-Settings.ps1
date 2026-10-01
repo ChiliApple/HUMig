@@ -220,6 +220,7 @@ function Show-SettingsDialog {
     $f.chkUseBranch.IsChecked = [bool]$uc.UseBranch
     $f.chkRequireSig.IsChecked = [bool]$uc.RequireSignature
     $f.txtSignerThumb.Text = "$($uc.SignerThumbprint)"
+    $st.ReqWas = [bool]$uc.RequireSignature
     $inst = Get-HMInstalledInfo
     $f.lblInstalled.Text = "installiert: v$($script:Version)$(if ($inst -and "$($inst.Check)") { "  ($($inst.Date), $($inst.Check))" })"
     $f.btnVersions.Add_Click({ $script:SetDlg.Win.Close(); Show-HMVersionPicker })
@@ -240,6 +241,11 @@ function Show-SettingsDialog {
         $F = $script:SetDlg.F; $W = $script:SetDlg.Win
         $tp0 = ("$($F.txtSignerThumb.Text)" -replace '[^0-9A-Fa-f]', '')
         if ([bool]$F.chkRequireSig.IsChecked -and $tp0.Length -ne 40) { [void][System.Windows.MessageBox]::Show($W, 'Nur signierte Updates: bitte den Fingerabdruck (Thumbprint, 40 Zeichen) des Signatur-Zertifikats eintragen - sonst wird kein Update mehr angenommen.', 'Einstellungen', 'OK', 'Warning'); $F.tabs.SelectedItem = $F.tabUpdate; return }
+        if ([bool]$F.chkRequireSig.IsChecked -and [bool]$F.chkUseBranch.IsChecked) { [void][System.Windows.MessageBox]::Show($W, "Ein Branch-Stand ist nicht signiert. 'Branch statt Releases laden' geht nur, wenn 'Nur signierte Updates annehmen' ausgeschaltet ist.", 'Einstellungen', 'OK', 'Warning'); $F.tabs.SelectedItem = $F.tabUpdate; return }
+        if ($script:SetDlg.ReqWas -and -not [bool]$F.chkRequireSig.IsChecked) {
+            $F.tabs.SelectedItem = $F.tabUpdate
+            if ([System.Windows.MessageBox]::Show($W, "Signaturpruefung wirklich ausschalten?`n`nDann werden auch Versionen installiert, die nicht vom Herausgeber signiert sind (z.B. wenn das GitHub-Konto missbraucht wird). Empfohlen: eingeschaltet lassen.", 'Einstellungen', 'YesNo', 'Warning') -ne 'Yes') { return }
+        }
         $ret = 0
         if (-not [int]::TryParse("$($F.txtRetention.Text)".Trim(), [ref]$ret) -or $ret -lt 0 -or $ret -gt 3650) { [void][System.Windows.MessageBox]::Show($W, 'Aufbewahrung: Zahl 0 bis 3650', 'Einstellungen', 'OK', 'Warning'); return }
         $keep = 0
@@ -307,10 +313,11 @@ function Show-SettingsDialog {
         # Update-Quelle
         $o = "$($F.txtOwner.Text)".Trim(); $rp = "$($F.txtRepo.Text)".Trim(); $b = "$($F.txtBranch.Text)".Trim()
         $tp = ("$($F.txtSignerThumb.Text)" -replace '[^0-9A-Fa-f]', '').ToUpper()
+        if ($tp -and $tp -eq (Get-HMDefaultSigner $o $rp)) { $tp = '' }   # eingebauter Fingerabdruck der offiziellen Quelle: nicht festschreiben
         if ($o -and $rp) {
             Write-JsonFile (Join-Path $script:ConfigDir 'update.json') ([pscustomobject][ordered]@{
                 Owner = $o; Repo = $rp; Branch = $(if ($b) { $b } else { 'main' }); UseBranch = [bool]$F.chkUseBranch.IsChecked
-                Channel = $(if ($F.cmbChannel.SelectedIndex -eq 1) { 'Test' } else { 'Stable' }); RequireSignature = [bool]$F.chkRequireSig.IsChecked; SignerThumbprint = $tp
+                Channel = $(if ($F.cmbChannel.SelectedIndex -eq 1) { 'Test' } else { 'Stable' }); AllowUnsigned = (-not [bool]$F.chkRequireSig.IsChecked); SignerThumbprint = $tp
             })
         }
         $script:SetDlg.Saved = $true

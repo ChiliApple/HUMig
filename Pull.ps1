@@ -11,13 +11,14 @@
     Welche Version:
       -Version 2.0.53     -> genau diese Version (auch aelter = "Vorversion")
       sonst Kanal         -> -Channel oder Config\update.json "Channel": Stable (freigegebene Releases, Standard) / Test (auch Vorab-Releases)
-      -Branch / UseBranch -> Entwicklungsstand eines Branches statt Release (ohne Pruefsumme)
+      -Branch / UseBranch -> Entwicklungsstand eines Branches statt Release (ohne Pruefsumme, nur ohne Signaturpflicht)
 
     Sicherheit:
       - jedes Release enthaelt HUMig-files.sha256 (SHA256 aller Dateien, erstellt von den automatischen Tests auf GitHub)
       - zuerst werden ALLE Dateien geladen und geprueft, erst dann ersetzt - bei einer Abweichung bleibt alles unveraendert
-      - optional (Config\update.json "RequireSignature": true + "SignerThumbprint"): nur Releases mit gueltiger Signatur
-        HUMig-files.sha256.p7s dieses Zertifikats werden angenommen
+      - Signatur: nur Releases mit gueltiger Signatur HUMig-files.sha256.p7s des Herausgeber-Zertifikats werden angenommen
+        (offizielle Quelle: Fingerabdruck eingebaut; eigene Quelle: Config\update.json "SignerThumbprint").
+        Abschalten nur bewusst mit Config\update.json "AllowUnsigned": true (Einstellungen > Update).
 
     Lokale Daten bleiben unangetastet: BACKUPS\, Logs\, BIN\USMT\, Softwareverteilung\, Treiberverteilung\, HUMig.exe, Config\settings.json, exceptions.json, modules.json, update.json.
     Token nur fuer private Repos: Umgebungsvariable HUMIG_GITHUB_TOKEN oder Config\GitHubToken_<DOMAIN>_<USER>.xml (DPAPI).
@@ -43,10 +44,20 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::S
 # Gemeinsame Update-Funktionen - identisch in Pull.ps1 und Functions\Core-Update.ps1 (die automatischen Tests pruefen das)
 $script:HMManifestName  = 'HUMig-files.sha256'
 $script:HMSignatureName = 'HUMig-files.sha256.p7s'
+# Offizielle Update-Quelle und Fingerabdruck des Zertifikats, mit dem ihre Releases signiert werden (oeffentlich, kein Geheimnis)
+$script:HMDefaultOwner  = 'ChiliApple'
+$script:HMDefaultRepo   = 'HUMig'
+$script:HMDefaultSigner = '1B669AE240DA1A91043C4576763D9F8E0BF762FA'
 
-# Update-Einstellungen aus Config\update.json (fehlt die Datei: Standard-Repo, Kanal Stabil)
+function Get-HMDefaultSigner([string]$Owner, [string]$Repo) {
+    if ($Owner -eq $script:HMDefaultOwner -and $Repo -eq $script:HMDefaultRepo) { return $script:HMDefaultSigner }
+    return ''
+}
+# Update-Einstellungen aus Config\update.json (fehlt die Datei: offizielle Quelle, Kanal Stabil, nur signierte Releases)
+#   Signaturpflicht gilt, sobald ein Fingerabdruck bekannt ist (offizielle Quelle: eingebaut) - ausser "AllowUnsigned": true.
+#   Mit Signaturpflicht gibt es keinen Branch-Modus (ein Branch-Stand ist nicht signiert).
 function Get-HMUpdateConfig([string]$ConfigDir) {
-    $c = [ordered]@{ Owner = 'ChiliApple'; Repo = 'HUMig'; Branch = 'main'; UseBranch = $false; Channel = 'Stable'; RequireSignature = $false; SignerThumbprint = '' }
+    $c = [ordered]@{ Owner = $script:HMDefaultOwner; Repo = $script:HMDefaultRepo; Branch = 'main'; UseBranch = $false; Channel = 'Stable'; AllowUnsigned = $false; SignerThumbprint = ''; DefaultSigner = $false; RequireSignature = $false }
     $f = Join-Path $ConfigDir 'update.json'
     if (Test-Path -LiteralPath $f) {
         try {
@@ -54,10 +65,16 @@ function Get-HMUpdateConfig([string]$ConfigDir) {
             foreach ($k in @('Owner', 'Repo', 'Branch', 'SignerThumbprint')) { if ($u.PSObject.Properties[$k] -and "$($u.$k)".Trim()) { $c[$k] = "$($u.$k)".Trim() } }
             if ($u.PSObject.Properties['Channel'] -and "$($u.Channel)" -match '^(Stable|Test)$') { $c.Channel = "$($u.Channel)" }
             if ($u.PSObject.Properties['UseBranch']) { $c.UseBranch = ($u.UseBranch -eq $true) }
-            if ($u.PSObject.Properties['RequireSignature']) { $c.RequireSignature = ($u.RequireSignature -eq $true) }
+            if ($u.PSObject.Properties['AllowUnsigned']) { $c.AllowUnsigned = ($u.AllowUnsigned -eq $true) }
         } catch { }
     }
     $c.SignerThumbprint = ("$($c.SignerThumbprint)" -replace '[^0-9A-Fa-f]', '').ToUpper()
+    if (-not $c.SignerThumbprint) {
+        $d = Get-HMDefaultSigner $c.Owner $c.Repo
+        if ($d) { $c.SignerThumbprint = $d; $c.DefaultSigner = $true }
+    }
+    $c.RequireSignature = ([bool]$c.SignerThumbprint -and -not $c.AllowUnsigned)
+    if ($c.RequireSignature) { $c.UseBranch = $false }
     return [pscustomobject]$c
 }
 function ConvertTo-HMVersion([string]$Tag) {
@@ -94,9 +111,11 @@ function Get-HMReleases([string]$Owner, [string]$Repo, [string]$Token) {
     return @(ConvertTo-HMReleaseList $raw)
 }
 # Kanal Stabil = nur freigegebene Releases, Test = auch Vorab-Releases; jeweils die hoechste Version
-function Select-HMRelease($Releases, [string]$Channel) {
+# -SignedOnly: nur Releases mit Pruefsummen- UND Signatur-Datei (bei Signaturpflicht)
+function Select-HMRelease($Releases, [string]$Channel, [switch]$SignedOnly) {
     $l = @($Releases | Where-Object { $_ -and $_.Version })
     if ($Channel -ne 'Test') { $l = @($l | Where-Object { -not $_.Prerelease }) }
+    if ($SignedOnly) { $l = @($l | Where-Object { $_.ManifestUrl -and $_.SignatureUrl }) }
     return (@($l | Sort-Object Version -Descending) | Select-Object -First 1)
 }
 # Release-Datei (Pruefsummen/Signatur) als Bytes laden - mit Token ueber die API (private Repos)
@@ -158,6 +177,12 @@ $cfgDir = Join-Path $Target 'Config'
 $cfg = Get-HMUpdateConfig $cfgDir
 if (-not $Owner) { $Owner = $cfg.Owner }
 if (-not $Repo)  { $Repo = $cfg.Repo }
+# andere Quelle per Parameter: eingebauter Fingerabdruck gilt nur fuer die offizielle Quelle
+if ($cfg.DefaultSigner -and ($Owner -ne $cfg.Owner -or $Repo -ne $cfg.Repo)) {
+    $cfg.SignerThumbprint = Get-HMDefaultSigner $Owner $Repo
+    $cfg.RequireSignature = ([bool]$cfg.SignerThumbprint -and -not $cfg.AllowUnsigned)
+}
+if ($Branch -and $cfg.RequireSignature) { Stop-HMPull "Branch-Stand ist nicht signiert - nur moeglich, wenn 'Nur signierte Updates' ausgeschaltet ist (Einstellungen > Update)." }
 if (-not $Channel) { $Channel = $cfg.Channel }
 $useBranch = [bool]$Branch -or ($cfg.UseBranch -and -not $Version)
 if (-not $Branch) { $Branch = $cfg.Branch }
@@ -212,8 +237,8 @@ for ($attempt = 1; $attempt -le 2 -and -not $ref; $attempt++) {
                 $rel = @($list | Where-Object { $want -and $_.Version -eq $want })[0]
                 if (-not $rel) { Stop-HMPull "Version $Version gibt es nicht als Release ($Owner/$Repo)." }
             } else {
-                $rel = Select-HMRelease $list $Channel
-                if (-not $rel) { Stop-HMPull "Kein Release im Kanal $(if ($Channel -eq 'Test') { 'Test' } else { 'Stabil' }) gefunden ($Owner/$Repo)." }
+                $rel = Select-HMRelease $list $Channel -SignedOnly:$cfg.RequireSignature
+                if (-not $rel) { Stop-HMPull "Kein $(if ($cfg.RequireSignature) { 'signiertes ' })Release im Kanal $(if ($Channel -eq 'Test') { 'Test' } else { 'Stabil' }) gefunden ($Owner/$Repo)." }
             }
             # Tag -> Commit (funktioniert auch bei annotierten Tags)
             $cm = Invoke-RestMethod "https://api.github.com/repos/$Owner/$Repo/commits/$($rel.Tag)" -Headers (New-GHHeaders 'application/vnd.github.v3+json') -UseBasicParsing

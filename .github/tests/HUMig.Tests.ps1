@@ -31,19 +31,37 @@ Describe 'Update: Versionen und Kanal' {
         (Select-HMRelease $l 'Test').Tag | Should -Be 'v2.0.54'
         Select-HMRelease @() 'Stable' | Should -BeNullOrEmpty
     }
+    It 'Signaturpflicht: nur Releases mit Pruefsumme und Signatur' {
+        $m = [pscustomobject]@{ name = 'HUMig-files.sha256'; browser_download_url = 'https://x/m'; url = 'https://api/m' }
+        $s = [pscustomobject]@{ name = 'HUMig-files.sha256.p7s'; browser_download_url = 'https://x/s'; url = 'https://api/s' }
+        $l = ConvertTo-HMReleaseList @((New-HMRel 'v2.0.56' $false @($m)), (New-HMRel 'v2.0.55' $false @($m, $s)), (New-HMRel 'v2.0.54' $false @($s)))
+        (Select-HMRelease $l 'Stable' -SignedOnly).Tag | Should -Be 'v2.0.55'
+        (Select-HMRelease $l 'Stable').Tag | Should -Be 'v2.0.56'
+        Select-HMRelease @(ConvertTo-HMReleaseList @(New-HMRel 'v2.0.56' $false @($m))) 'Test' -SignedOnly | Should -BeNullOrEmpty
+    }
     It 'findet Pruefsummen- und Signatur-Datei im Release' {
         $a = @([pscustomobject]@{ name = 'HUMig-files.sha256'; browser_download_url = 'https://x/m'; url = 'https://api/m' }, [pscustomobject]@{ name = 'HUMig-files.sha256.p7s'; browser_download_url = 'https://x/s'; url = 'https://api/s' })
         $r = @(ConvertTo-HMReleaseList @(New-HMRel 'v2.0.53' $false $a))[0]
         $r.ManifestUrl | Should -Be 'https://x/m'
         $r.SignatureApi | Should -Be 'https://api/s'
     }
-    It 'liest update.json (Standard: Kanal Stabil, ohne Signatur)' {
+    It 'liest update.json (Standard: offizielle Quelle, Kanal Stabil, nur signiert)' {
         $d = Join-Path $TestDrive 'cfg1'; New-Item -ItemType Directory -Path $d -Force | Out-Null
         $c = Get-HMUpdateConfig $d
-        $c.Channel | Should -Be 'Stable'; $c.RequireSignature | Should -BeFalse; $c.Owner | Should -Be 'ChiliApple'
-        Set-Content (Join-Path $d 'update.json') '{"Channel":"Test","RequireSignature":true,"SignerThumbprint":"ab:cd ef"}' -Encoding UTF8
+        $c.Channel | Should -Be 'Stable'; $c.Owner | Should -Be 'ChiliApple'
+        $c.RequireSignature | Should -BeTrue; $c.DefaultSigner | Should -BeTrue; $c.SignerThumbprint | Should -Match '^[0-9A-F]{40}$'
+        Set-Content (Join-Path $d 'update.json') '{"Channel":"Test","UseBranch":true}' -Encoding UTF8
         $c = Get-HMUpdateConfig $d
-        $c.Channel | Should -Be 'Test'; $c.RequireSignature | Should -BeTrue; $c.SignerThumbprint | Should -Be 'ABCDEF'
+        $c.Channel | Should -Be 'Test'; $c.RequireSignature | Should -BeTrue; $c.UseBranch | Should -BeFalse
+        Set-Content (Join-Path $d 'update.json') '{"AllowUnsigned":true,"UseBranch":true}' -Encoding UTF8
+        $c = Get-HMUpdateConfig $d
+        $c.RequireSignature | Should -BeFalse; $c.UseBranch | Should -BeTrue
+        Set-Content (Join-Path $d 'update.json') '{"Owner":"Schule","Repo":"Eigen"}' -Encoding UTF8
+        $c = Get-HMUpdateConfig $d
+        $c.RequireSignature | Should -BeFalse; $c.SignerThumbprint | Should -Be ''
+        Set-Content (Join-Path $d 'update.json') '{"Owner":"Schule","Repo":"Eigen","SignerThumbprint":"ab:cd ef"}' -Encoding UTF8
+        $c = Get-HMUpdateConfig $d
+        $c.RequireSignature | Should -BeTrue; $c.SignerThumbprint | Should -Be 'ABCDEF'; $c.DefaultSigner | Should -BeFalse
     }
 }
 
@@ -80,6 +98,11 @@ Describe 'Update: Pruefsumme und Signatur' {
             Test-HMManifestSignature $man2 $sig $cert.Thumbprint | Should -Match 'ungueltig'
             Test-HMManifestSignature $man $null $cert.Thumbprint | Should -Match 'keine Signatur'
             Test-HMManifestSignature $man $sig '' | Should -Match 'Fingerabdruck'
+            # Signieren wie in HUMig (Release signieren)
+            $sig2 = New-HMManifestSignature $man $cert
+            Test-HMManifestSignature $man $sig2 $cert.Thumbprint | Should -BeNullOrEmpty
+            if ($fromStore) { (Get-HMSigningCert $cert.Thumbprint).Thumbprint | Should -Be $cert.Thumbprint }
+            Get-HMSigningCert ('0' * 40) | Should -BeNullOrEmpty
         } finally { if ($fromStore -and $cert) { Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force -ErrorAction SilentlyContinue } }
     }
 }
