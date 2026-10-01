@@ -1102,16 +1102,18 @@ function Get-HMCloudFolderContent {
         $files = New-Object System.Collections.Generic.List[string]
         $cloudN = 0; $cloudB = [long]0; $failDirs = 0
         $stack = New-Object System.Collections.Generic.Stack[object]
-        $stack.Push(@($root, 0))
+        # relativer Pfad wird beim Durchlaufen mitgefuehrt (robust auch bei 8.3-Kurznamen im Stammpfad)
+        $stack.Push(@($root, 0, ''))
         while ($stack.Count -gt 0) {
-            $e = $stack.Pop(); $d = [string]$e[0]; $lvl = [int]$e[1]
+            $e = $stack.Pop(); $d = [string]$e[0]; $lvl = [int]$e[1]; $pre = [string]$e[2]
             if ($lvl -gt 60 -or $d.Length -gt 1000) { continue }
             try {
                 foreach ($i in (New-Object System.IO.DirectoryInfo $d).EnumerateFileSystemInfos()) {
                     $a = [int]$i.Attributes
-                    if ($a -band 0x10) { $stack.Push(@($i.FullName, ($lvl + 1))); continue }
+                    $rel = if ($pre) { "$pre\$($i.Name)" } else { $i.Name }
+                    if ($a -band 0x10) { $stack.Push(@($i.FullName, ($lvl + 1), $rel)); continue }
                     if (($a -band 0x400000) -or ($a -band 0x40000) -or ($a -band 0x1000)) { $cloudN++; $cloudB += $i.Length; continue }
-                    $files.Add(('{0}|{1}|{2}' -f $i.Length, $i.LastWriteTimeUtc.Ticks, $i.FullName.Substring($root.TrimEnd('\').Length).TrimStart('\')))
+                    $files.Add(('{0}|{1}|{2}' -f $i.Length, $i.LastWriteTimeUtc.Ticks, $rel))
                 }
             } catch { $failDirs++ }
         }

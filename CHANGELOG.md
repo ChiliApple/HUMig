@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.54 - 2026-10-01
+### Behoben
+- Cloud-Ordner sichern (nur lokale Dateien): relative Pfade werden beim Durchlaufen gebildet - funktionierte nicht, wenn der Ordnerpfad in Kurzform (8.3, z.B. `C:\Users\LANGER~1\...`) angegeben war (gefunden durch die automatischen Tests)
+- Selbsttest: Modul-Handler *DesktopIconPositions* war in der Pruefliste nicht eingetragen
+
 ## v2.0.53 - 2026-10-01
 ### Neu
 - **Update ueber Releases mit Kanal**: *Stabil* (Standard, nur freigegebene Versionen - fuer Server und Schul-PCs) oder *Test* (neue Versionen vor der Freigabe) - Einstellungen > Update bzw. Rechtsklick auf *Update*
