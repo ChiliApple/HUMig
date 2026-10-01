@@ -282,7 +282,7 @@ if (-not $useBranch) {
         if ($rel.SignatureUrl) { try { $sigBytes = Get-HMReleaseAsset $rel.SignatureUrl $rel.SignatureApi $Token } catch { Stop-HMPull "Signatur nicht ladbar: $($_.Exception.Message)" } }
         $why = Test-HMManifestSignature $manBytes $sigBytes $cfg.SignerThumbprint
         if ($why) { Stop-HMPull "Nur signierte Updates erlaubt - $($rel.Tag): $why" }
-        $verified = "Pruefsumme + Signatur ($($cfg.SignerThumbprint))"
+        $verified = "Pruefsumme + Signatur ($($cfg.SignerThumbprint.Substring(0, [Math]::Min(8, $cfg.SignerThumbprint.Length)))...)"
         Write-Host 'Signatur:   gueltig' -ForegroundColor Green
     }
     if (-not $manifest) {

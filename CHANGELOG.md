@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.56 - 2026-10-01
+### Behoben
+- *Release signieren*: Konsole zeigt je Release eine eigene Zeile (statt einer Sammelzeile)
+- Info-Fenster: Zeilen werden umgebrochen statt abgeschnitten; Version, Kanal und Pruefung je in eigener Zeile; Fingerabdruck gekuerzt
+- Versionsliste: Spalte *Aenderungen* ohne Formatierungszeichen (`**`)
+
 ## v2.0.55 - 2026-10-01
 ### Neu
 - **Nur signierte Updates** (Standard): der Herausgeber signiert jedes Release; HUMig und `Pull.ps1` installieren nur Releases mit gueltiger Signatur des eingebauten Zertifikats - nichts einzustellen. Eine Version, die jemand anderer auf GitHub ablegt, wird abgelehnt

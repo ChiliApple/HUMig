@@ -187,5 +187,5 @@ function Invoke-HMReleaseSigning([string]$Owner, [string]$Repo, [string]$Thumbpr
             $out += [pscustomobject]@{ Tag = $r.Tag; Ok = $false; Text = $(if ($code -in 401, 403, 404) { "kein Schreibrecht (HTTP $code) - Token pruefen" } else { "$($_.Exception.Message)" }) }
         }
     }
-    return , $out
+    return $out
 }
