@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.52'
+$script:Version   = '2.0.53'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -41,10 +41,11 @@ $script:Profiles   = @()
 $script:BackupChecks  = @{}
 $script:RestoreChecks = @{}
 $script:SelectedBackup = $null
-# Update-Quelle (anpassbar ueber Config\update.json: { "Owner": "...", "Repo": "...", "Branch": "main" })
+# Update-Quelle und Kanal (Config\update.json, Einstellungen > Update): Releases Stabil/Test, Pruefsumme, optional Signatur
 $script:UpdateOwner  = 'ChiliApple'
 $script:UpdateRepo   = 'HUMig'
 $script:UpdateBranch = 'main'
+$script:UpdateCfg    = $null
 
 # ============================================================================
 # ADMIN-RECHTE
@@ -115,7 +116,7 @@ $script:SplashShown = Get-Date
 # ============================================================================
 # FUNKTIONEN LADEN
 # ============================================================================
-foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1')) {
+foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1')) {
     $mp = Join-Path $script:AppRoot "Functions\$mod"
     try { . $mp } catch { [System.Windows.MessageBox]::Show("$mod konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null; exit 1 }
 }
@@ -202,12 +203,8 @@ function Import-AppConfig {
     foreach ($m in $script:Modules) { if ($script:Groups -notcontains $m.Group) { $script:Groups += $m.Group } }
     $script:Presets = @($modDef.Presets)
     if ($modLoc -and $modLoc.Presets) { $script:Presets = @($modLoc.Presets) + $script:Presets }
-    $uc = Read-JsonFile (Join-Path $script:ConfigDir 'update.json')
-    if ($uc) {
-        if ("$($uc.Owner)".Trim())  { $script:UpdateOwner  = "$($uc.Owner)".Trim() }
-        if ("$($uc.Repo)".Trim())   { $script:UpdateRepo   = "$($uc.Repo)".Trim() }
-        if ("$($uc.Branch)".Trim()) { $script:UpdateBranch = "$($uc.Branch)".Trim() }
-    }
+    $script:UpdateCfg = Get-HMUpdateConfig $script:ConfigDir
+    $script:UpdateOwner = $script:UpdateCfg.Owner; $script:UpdateRepo = $script:UpdateCfg.Repo; $script:UpdateBranch = $script:UpdateCfg.Branch
 }
 function Save-LocalSetting([string]$Name, $Value) {
     $p = Join-Path $script:ConfigDir 'settings.json'
@@ -1409,6 +1406,7 @@ function Open-Settings([string]$Tab = '') {
         $script:UiScaleAuto = ($v -le 0); Set-HMUiScale $(if ($v -le 0) { Get-HMAutoScale } else { $v }) -Quiet
         foreach ($e in $script:ConfigErrors) { Out-Console "Konfigurationsfehler: $e" 'Error' }
         Update-UiFromConfig
+        if (-not $script:UserMode) { Invoke-UpdateCheck }
     }
 }
 $ui.btnEditExceptions.Add_Click({ Open-Settings 'Ausnahmen' })
@@ -1434,12 +1432,12 @@ $ui.btnSettings.Add_MouseRightButtonUp({
 function Show-About {
     $x = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Info" Width="420" Height="360" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" Background="#FF1E1E2E">
+        Title="Info" Width="460" Height="380" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" Background="#FF1E1E2E">
   <StackPanel Margin="20" HorizontalAlignment="Center">
     <Image x:Name="img" Width="110" Height="110" RenderOptions.BitmapScalingMode="HighQuality"/>
     <TextBlock Text="HUMig v2" FontSize="28" FontWeight="Bold" Foreground="#FFCDD6F4" HorizontalAlignment="Center" Margin="0,8,0,0"/>
     <TextBlock Text="Benutzerprofil-Migration" FontSize="14" Foreground="#FFA6ADC8" HorizontalAlignment="Center"/>
-    <TextBlock x:Name="ver" FontSize="12" Foreground="#FF89B4FA" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+    <TextBlock x:Name="ver" FontSize="12" Foreground="#FF89B4FA" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,8,0,0"/>
     <TextBlock x:Name="src" FontSize="11" Foreground="#FF89B4FA" HorizontalAlignment="Center" Margin="0,4,0,0" Cursor="Hand" TextDecorations="Underline" ToolTip="Projektseite im Browser oeffnen"/>
     <TextBlock x:Name="lic" Text="Nutzungslizenz - siehe LICENSE" FontSize="11" Foreground="#FF89B4FA" HorizontalAlignment="Center" Margin="0,2,0,0" Cursor="Hand" TextDecorations="Underline" ToolTip="Lizenz anzeigen"/>
   </StackPanel>
@@ -1448,7 +1446,9 @@ function Show-About {
     $w = [System.Windows.Markup.XamlReader]::Parse($x)
     if ($script:LogoImage) { $w.FindName('img').Source = $script:LogoImage }
     if ($script:AppIcon) { $w.Icon = $script:AppIcon }
-    $w.FindName('ver').Text = "Version $($script:Version)  |  PowerShell $($PSVersionTable.PSVersion)"
+    $inst = Get-HMInstalledInfo
+    $uc = Get-HMUpdateConfig $script:ConfigDir
+    $w.FindName('ver').Text = "Version $($script:Version)  |  Kanal $(if ($uc.UseBranch) { "Branch $($uc.Branch)" } else { Format-HMChannel $uc.Channel })  |  PowerShell $($PSVersionTable.PSVersion)" + $(if ($inst -and "$($inst.Check)") { "`ninstalliert $($inst.Date), geprueft: $($inst.Check)" } else { '' })
     $w.FindName('src').Text = "github.com/$($script:UpdateOwner)/$($script:UpdateRepo)"
     # ueber den Explorer oeffnen -> Browser laeuft als angemeldeter Benutzer, nicht erhoeht
     $w.FindName('src').Add_MouseLeftButtonUp({ try { Start-Process -FilePath explorer.exe -ArgumentList "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)" } catch { } })
@@ -1492,7 +1492,7 @@ function Show-HMManual {
             return "ERR:nicht speicherbar ($why)"
         } catch { return "ERR:$($_.Exception.Message)" }
         finally { Remove-Item -LiteralPath $dl -Force -ErrorAction SilentlyContinue }
-    } -ArgumentList @((Read-GitHubToken), $script:UpdateOwner, $script:UpdateRepo, $script:UpdateBranch, @($script:ManualLocal, $alt)) -TimeoutSec 30 -OnComplete {
+    } -ArgumentList @((Read-GitHubToken), $script:UpdateOwner, $script:UpdateRepo, $(if ($script:UpdateCfg -and $script:UpdateCfg.UseBranch) { $script:UpdateBranch } else { "v$($script:Version)" }), @($script:ManualLocal, $alt)) -TimeoutSec 30 -OnComplete {
         param($r)
         $f = $null
         if ("$r" -match '^OK:(.+)$') { $f = $Matches[1]; Out-Console 'Anleitung geoeffnet (aktuelle Fassung von GitHub)' 'Debug' }
@@ -1517,54 +1517,118 @@ function Read-GitHubToken {
     if (Test-Path -LiteralPath $f) { try { $c = Import-Clixml -Path $f; if ($c -is [System.Management.Automation.PSCredential]) { return $c.GetNetworkCredential().Password.Trim() } } catch { } }
     return ''
 }
+function Get-HMInstalledInfo {
+    $f = Join-Path $script:ConfigDir 'installed.json'
+    if (Test-Path -LiteralPath $f) { try { return (Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { } }
+    return $null
+}
+function Format-HMChannel([string]$Channel) { if ($Channel -eq 'Test') { return 'Test' } elseif ($Channel -eq 'Branch') { return 'Entwicklung (Branch)' } else { return 'Stabil' } }
+# Update-Pruefung: Kanal Stabil = neuestes freigegebenes Release, Test = neuestes Release inkl. Vorab-Releases
 function Invoke-UpdateCheck {
+    $cfg = Get-HMUpdateConfig $script:ConfigDir
+    $script:UpdateCfg = $cfg
     Invoke-AsyncCommand -ScriptBlock {
-        param($token, $owner, $repo, $branch)
+        param($lib, $token, $cfg)
         try {
+            . $lib
             try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
-            $h = @{ Accept = 'application/vnd.github.v3.raw'; 'User-Agent' = 'HUMig' }
-            if ($token) { $h.Authorization = "token $token" }
-            $r = Invoke-WebRequest "https://api.github.com/repos/$owner/$repo/contents/HUMig.ps1?ref=$branch" -Headers $h -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
-            $text = if ($r.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($r.Content) } else { [string]$r.Content }
-            if ($text -match "\`$script:Version\s*=\s*'([0-9\.]+)'") { return "REMOTE:$($Matches[1])" }
-            return 'NOMATCH'
+            if ($cfg.UseBranch) {
+                $h = @{ Accept = 'application/vnd.github.v3.raw'; 'User-Agent' = 'HUMig' }
+                if ($token) { $h.Authorization = "token $token" }
+                $r = Invoke-WebRequest "https://api.github.com/repos/$($cfg.Owner)/$($cfg.Repo)/contents/HUMig.ps1?ref=$($cfg.Branch)" -Headers $h -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+                $text = if ($r.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($r.Content) } else { [string]$r.Content }
+                if ($text -match "\`$script:Version\s*=\s*'([0-9\.]+)'") { return [pscustomobject]@{ Version = $Matches[1]; Tag = "Branch $($cfg.Branch)"; Prerelease = $false; Branch = $true } }
+                return 'ERR:Version im Branch nicht gefunden'
+            }
+            $rel = Select-HMRelease @(Get-HMReleases $cfg.Owner $cfg.Repo $token) $cfg.Channel
+            if (-not $rel) { return 'NONE' }
+            return [pscustomobject]@{ Version = "$($rel.Version)"; Tag = $rel.Tag; Prerelease = $rel.Prerelease; Branch = $false; Manifest = [bool]$rel.ManifestUrl }
         } catch {
             $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
             if ($code -in 401, 403, 404) { return "AUTH:$code" }
             return "ERR:$($_.Exception.Message)"
         }
-    } -ArgumentList @((Read-GitHubToken), $script:UpdateOwner, $script:UpdateRepo, $script:UpdateBranch) -TimeoutSec 40 -OnComplete {
+    } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), (Read-GitHubToken), $cfg) -TimeoutSec 40 -OnComplete {
         param($r)
-        $r = "$r"
-        if ($r -match '^REMOTE:(.+)$') {
-            $remote = $Matches[1]
-            $cmp = 0; try { $cmp = ([Version]$remote).CompareTo([Version]$script:Version) } catch { }
+        $cfg = $script:UpdateCfg
+        $chan = if ($cfg.UseBranch) { "Branch $($cfg.Branch)" } else { "Kanal $(Format-HMChannel $cfg.Channel)" }
+        if ($r -and $r -isnot [string] -and $r.Version) {
+            $cmp = 0; try { $cmp = ([Version]"$($r.Version)").CompareTo([Version]$script:Version) } catch { }
             if ($cmp -gt 0) {
-                Out-Console "UPDATE VERFUEGBAR: v$remote (aktuell v$($script:Version)) - Button 'Update' druecken" 'Warning'
-                $ui.btnUpdate.Content = "Update v$remote"
+                Out-Console "UPDATE VERFUEGBAR: v$($r.Version)$(if ($r.Prerelease) { ' (Test)' }) - aktuell v$($script:Version), $chan - Button 'Update' druecken" 'Warning'
+                $ui.btnUpdate.Content = "Update v$($r.Version)$(if ($r.Prerelease) { ' (Test)' })"
                 $ui.btnUpdate.Background = [System.Windows.Media.Brushes]::Gold
                 $ui.btnUpdate.Foreground = Get-ConsoleBrush '#FF1E1E2E'
-            } else { Out-Console "Version aktuell: v$($script:Version)" 'Debug' }
-        } elseif ($r -match '^AUTH:') { Out-Console "Update-Check: Repo $($script:UpdateOwner)/$($script:UpdateRepo) nicht erreichbar (privat? Rechtsklick auf 'Update' = Token eingeben)" 'Debug' }
-        else { Out-Console "Update-Check nicht moeglich: $($r -replace '^ERR:', '')" 'Debug' }
+            } else {
+                Out-Console "Version aktuell: v$($script:Version) ($chan)" 'Debug'
+                $ui.btnUpdate.Content = 'Update'
+                $ui.btnUpdate.ClearValue([System.Windows.Controls.Control]::BackgroundProperty)
+                $ui.btnUpdate.ClearValue([System.Windows.Controls.Control]::ForegroundProperty)
+            }
+        } elseif ("$r" -eq 'NONE') { Out-Console "Update-Check: kein Release im $chan" 'Debug' }
+        elseif ("$r" -match '^AUTH:') { Out-Console "Update-Check: Repo $($cfg.Owner)/$($cfg.Repo) nicht erreichbar (privat? Rechtsklick auf 'Update' > GitHub-Token)" 'Debug' }
+        else { Out-Console "Update-Check nicht moeglich: $("$r" -replace '^ERR:', '')" 'Debug' }
     }
 }
-$ui.btnUpdate.Add_Click({
+function Start-HMPull([string]$Version = '') {
     if ($script:JobRunning) { Out-Console 'Waehrend eines Backups/Restores kein Update.' 'Warning'; return }
     $pull = Join-Path $script:AppRoot 'Pull.ps1'
     if (-not (Test-Path -LiteralPath $pull)) { Out-Console 'Pull.ps1 fehlt im Tool-Ordner.' 'Error'; return }
-    if (-not (Confirm-Action 'HUMig schliessen, aktuelle Version von GitHub laden und neu starten?')) { return }
-    Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$pull`"", '-WaitPid', $PID) -WorkingDirectory $script:AppRoot
+    $cfg = Get-HMUpdateConfig $script:ConfigDir
+    $what = if ($Version) { "Version $Version" } elseif ($cfg.UseBranch) { "den Entwicklungsstand (Branch $($cfg.Branch), ohne Pruefsumme)" } else { "die neueste Version im Kanal $(Format-HMChannel $cfg.Channel)" }
+    if (-not (Confirm-Action "HUMig schliessen, $what von GitHub laden$(if ($Version -or -not $cfg.UseBranch) { ', pruefen' }) und neu starten?`n`nEigene Daten und Einstellungen bleiben erhalten.")) { return }
+    $pa = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$pull`"", '-WaitPid', $PID)
+    if ($Version) { $pa += @('-Version', $Version) }
+    Start-Process powershell.exe -ArgumentList $pa -WorkingDirectory $script:AppRoot
     $script:Window.Close()
-})
-$ui.btnUpdate.Add_MouseRightButtonUp({
+}
+# Andere Version / Vorversion waehlen
+function Show-HMVersionPicker {
+    if ($script:JobRunning) { Out-Console 'Waehrend eines Backups/Restores nicht moeglich.' 'Warning'; return }
+    Out-Console 'Versionen werden von GitHub gelesen ...' 'Info'
+    Invoke-AsyncCommand -ScriptBlock {
+        param($lib, $token, $owner, $repo)
+        . $lib
+        @(Get-HMReleases $owner $repo $token)
+    } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), (Read-GitHubToken), $script:UpdateOwner, $script:UpdateRepo) -TimeoutSec 40 -OnComplete {
+        param($r)
+        if ($r -is [string]) { Out-Console "Versionen nicht lesbar: $($r -replace '^FEHLER: ', '')" 'Error'; return }
+        $list = @($r | Where-Object { $_ -and $_.Version })
+        if (-not $list.Count) { Out-Console 'Keine Releases gefunden.' 'Warning'; return }
+        $rows = New-Object System.Collections.Generic.List[object]
+        foreach ($x in $list) {
+            $cmp = 0; try { $cmp = ([Version]"$($x.Version)").CompareTo([Version]$script:Version) } catch { }
+            $first = @("$($x.Notes)" -split "`r?`n" | Where-Object { "$_".Trim() -and "$_" -notmatch '^\s*#' } | ForEach-Object { "$_".Trim().TrimStart('-', ' ', '*') })[0]
+            $rows.Add(@("$($x.Version)", $(if ($x.Prerelease) { 'Test' } else { 'Stabil' }), $(if ($cmp -eq 0) { 'installiert' } elseif ($cmp -lt 0) { 'aelter' } else { 'neuer' }), "$($x.Date)", $(if ($x.ManifestUrl) { 'ja' } else { 'nein' }), $(if ($x.SignatureUrl) { 'ja' } else { '' }), "$first"))
+        }
+        Show-DataGridWindow -Title 'HUMig - Version waehlen (Vorversion / Test-Version)' -Width 1100 -Height 520 `
+            -Columns @('Version', 'Kanal', 'Stand', 'Datum', 'Pruefsumme', 'Signatur', 'Aenderungen') -Rows $rows.ToArray() `
+            -CountText "Installiert: v$($script:Version) - Version markieren, dann 'Diese Version installieren'. Eigene Daten und Einstellungen bleiben erhalten. Versionen bis 2.0.52 haben keine Pruefsumme." `
+            -Actions @(@{ Text = 'Diese Version installieren'; Color = '#FFA6E3A1'; Handler = {
+                param($sel, $win, $ctx)
+                $v = "$(@($sel)[0].Version)"
+                if (-not $v) { return }
+                try { $win.Close() } catch { }
+                Start-HMPull -Version $v
+            } })
+    }
+}
+$ui.btnUpdate.Add_Click({ Start-HMPull })
+# Rechtsklick auf Update: andere Version / Einstellungen / Token
+$cmUpd = New-Object System.Windows.Controls.ContextMenu
+$miV = New-Object System.Windows.Controls.MenuItem; $miV.Header = 'Andere Version / Vorversion installieren ...'; $miV.Add_Click({ Show-HMVersionPicker })
+$miS = New-Object System.Windows.Controls.MenuItem; $miS.Header = 'Update-Einstellungen (Kanal Stabil/Test, Signatur) ...'; $miS.Add_Click({ Open-Settings 'Update' })
+$miT = New-Object System.Windows.Controls.MenuItem; $miT.Header = 'GitHub-Token (nur privates Repo) ...'
+$miT.Add_Click({
     $f = Get-GitHubTokenFile
-    $a = [System.Windows.MessageBox]::Show($script:Window, "Update-Quelle: $($script:UpdateOwner)/$($script:UpdateRepo) ($($script:UpdateBranch))`nGespeicherter Token: $(if (Test-Path -LiteralPath $f) { 'vorhanden' } else { 'keiner' })`n`nNur fuer PRIVATE Repos noetig (Fine-grained PAT, nur 'Contents: Read').`n`nJa = Token eingeben`nNein = Token loeschen", 'GitHub-Token', 'YesNoCancel', 'Question')
+    $a = [System.Windows.MessageBox]::Show($script:Window, "Update-Quelle: $($script:UpdateOwner)/$($script:UpdateRepo)`nGespeicherter Token: $(if (Test-Path -LiteralPath $f) { 'vorhanden' } else { 'keiner' })`n`nNur fuer PRIVATE Repos noetig (Fine-grained PAT, nur 'Contents: Read').`n`nJa = Token eingeben`nNein = Token loeschen", 'GitHub-Token', 'YesNoCancel', 'Question')
     if ($a -eq 'Yes') {
         $c = Get-Credential -UserName 'github' -Message 'GitHub-Token als Kennwort eingeben (wird verschluesselt gespeichert)'
         if ($c) { $c | Export-Clixml -Path $f -Force; Out-Console 'GitHub-Token gespeichert (DPAPI)' 'Success'; Invoke-UpdateCheck }
     } elseif ($a -eq 'No') { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue; Out-Console 'GitHub-Token geloescht' 'Info' }
 })
+foreach ($m in @($miV, $miS, (New-Object System.Windows.Controls.Separator), $miT)) { [void]$cmUpd.Items.Add($m) }
+$ui.btnUpdate.ContextMenu = $cmUpd
 
 # ============================================================================
 # BENUTZER-MODUS (ohne Administratorrechte): nur eigenes Profil auf diesem PC

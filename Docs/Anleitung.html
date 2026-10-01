@@ -97,7 +97,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <div class="card m"><b>Softwareverteilung</b>MSI/EXE still installieren – auf einem oder vielen PCs</div>
     <div class="card t"><b>Treiberverteilung</b>eigene Treiber (INF oder Setup) mit Hardware-Prüfung ausrollen – auch erzwungen</div>
   </div>
-  <div class="note tip"><b class="h">Diese Anleitung ist immer aktuell</b>Der Knopf <span class="ui">Anleitung</span> (oder <kbd>F1</kbd>) lädt sie jedes Mal neu aus dem Repository. Ohne Internet öffnet sich die mitgelieferte Kopie <code>Docs\Anleitung.html</code>.</div>
+  <div class="note tip"><b class="h">Diese Anleitung passt zur installierten Version</b>Der Knopf <span class="ui">Anleitung</span> (oder <kbd>F1</kbd>) lädt sie jedes Mal neu aus dem Repository – in der Fassung der installierten Version. Ohne Internet öffnet sich die mitgelieferte Kopie <code>Docs\Anleitung.html</code>.</div>
 </section>
 
 <section id="schnellstart">
@@ -123,7 +123,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h2><span class="n">2</span>Die Oberfläche</h2>
   <table>
     <tr><th style="width:230px">Bereich</th><th>Bedeutung</th></tr>
-    <tr><td><span class="ui">Update</span></td><td>Links: neue Version laden (Tool startet neu, eigene Daten bleiben). Wird gelb, wenn ein Update verfügbar ist. Rechts: GitHub-Token (nur bei privatem Repo).</td></tr>
+    <tr><td><span class="ui">Update</span></td><td>Links: neue Version laden und prüfen (Tool startet neu, eigene Daten bleiben). Wird gelb, wenn im gewählten <a href="#update">Kanal</a> eine neuere Version da ist. Rechts: andere Version / Vorversion, Update-Einstellungen, GitHub-Token.</td></tr>
     <tr><td><span class="ui">Einstellungen</span></td><td>Links: Einstellungsfenster. Rechts: Konfigurationsdateien im Editor, Config-/Log-Ordner.</td></tr>
     <tr><td><span class="ui">Anleitung</span> / <span class="ui">Info</span></td><td>Diese Anleitung (<kbd>F1</kbd>) bzw. Version und Quelle.</td></tr>
     <tr><td><b>Standort</b></td><td>Auswahl des Standort-Profils (Backup-Ordner, Software-/Treiberverteilung, USMT, Domäne). Nur sichtbar, wenn Standorte angelegt sind.</td></tr>
@@ -580,7 +580,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>Ausnahmen</td><td>Ordner und Dateitypen, die im Profil und auf C:\ nicht gesichert werden · Standard wiederherstellen</td></tr>
     <tr><td>Module</td><td>Module ein-/ausblenden, eigene Module anlegen/löschen, <code>modules.json</code> für Experten</td></tr>
     <tr><td>Links</td><td>Eigene Links (Name + URL) für den Werkzeug-Reiter; Platzhalter <code>{SERIAL}</code> und <code>{COMPUTER}</code> des gewählten Computers, optional Seriennummer in die Zwischenablage</td></tr>
-    <tr><td>Update</td><td>GitHub-Token eingeben/löschen (nur bei privatem Repository nötig)</td></tr>
+    <tr><td>Update</td><td><a href="#update">Kanal Stabil/Test</a>, installierte Version, andere Version / Vorversion, Signatur (in Vorbereitung), Quelle, GitHub-Token (nur bei privatem Repository)</td></tr>
   </table>
   <h3>Konfigurationsdateien</h3>
   <table>
@@ -590,7 +590,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><code>Config\exceptions.json</code></td><td>Ausnahmen Ordner/Dateitypen</td></tr>
     <tr><td><code>Config\modules.json</code></td><td>eigene Module und Vorlagen</td></tr>
     <tr><td><code>Config\serverbackup.json</code></td><td>Server-Backup-Profile (VMs, Platten, Optionen), Suchwörter der Zeitplan-Prüfung (<code>ConflictWords</code>)</td></tr>
-    <tr><td><code>Config\update.json</code></td><td>andere Update-Quelle <code>{ "Owner": "…", "Repo": "…", "Branch": "main" }</code></td></tr>
+    <tr><td><code>Config\update.json</code></td><td>Update-Einstellungen: Quelle (<code>Owner</code>, <code>Repo</code>), <code>Channel</code> (<code>Stable</code>/<code>Test</code>), <code>RequireSignature</code>, <code>SignerThumbprint</code>, Entwicklung: <code>Branch</code>, <code>UseBranch</code>. Daneben <code>installed.json</code>: installierte Version, Kanal und Prüfung.</td></tr>
   </table>
   <p>Die <code>*.default.json</code> kommen mit jedem Update, eigene Dateien bleiben erhalten.</p>
 </section>
@@ -599,10 +599,21 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h2><span class="n">13</span>Installation und Update</h2>
   <ol class="steps">
     <li><b>Neu installieren:</b> <code>Pull.ps1</code> in den Zielordner legen und ausführen: <code>powershell -ExecutionPolicy Bypass -File Pull.ps1</code></li>
-    <li><b>Update:</b> Knopf <span class="ui">Update</span> – lädt die aktuelle Version und startet neu. BACKUPS, Config, Software-/Treiberverteilung und HUMig.exe bleiben erhalten.</li>
+    <li><b>Update:</b> Knopf <span class="ui">Update</span> – lädt die neueste Version im gewählten Kanal, prüft sie und startet neu. BACKUPS, Config, Software-/Treiberverteilung und HUMig.exe bleiben erhalten (Details unten).</li>
     <li><b>USMT</b> (für das Modul <i>Windows-Einstellungen</i> – und damit für den Restore auf einen <b>neuen PC ohne Profil</b>: LoadState legt das Profil an; ohne USMT muss sich der Benutzer vorher einmal anmelden): Werkzeug <span class="ui">USMT einrichten (ADK)</span> oder siehe <code>BIN\LIESMICH.txt</code>.</li>
     <li><b>Selbsttest:</b> <code>powershell -NoProfile -ExecutionPolicy Bypass -File .\Test-HUMig.ps1</code> – Ergebnis in <code>Test-HUMig.result.txt</code>.</li>
   </ol>
+  <h3 id="update">Update: Kanäle, Vorversion, Prüfung</h3>
+  <table>
+    <tr><th style="width:230px">Was</th><th>Wie</th></tr>
+    <tr><td><b>Kanal Stabil</b> (Standard)</td><td>Nur freigegebene Versionen – für Server und Schul-PCs. Eine neue Version wird erst freigegeben, wenn sie getestet ist.</td></tr>
+    <tr><td><b>Kanal Test</b></td><td>Neue Versionen sofort, noch vor der Freigabe – zum Ausprobieren auf dem eigenen PC. Einstellen: Einstellungen › Update › Kanal (oder Rechtsklick auf <span class="ui">Update</span>). Der Knopf zeigt z. B. <i>Update v2.0.54 (Test)</i>.</td></tr>
+    <tr><td><b>Vorversion</b></td><td>Rechtsklick auf <span class="ui">Update</span> › <i>Andere Version / Vorversion installieren …</i> (oder Einstellungen › Update): alle Versionen mit Kanal, Datum und Änderungen – markieren, <span class="ui g">Diese Version installieren</span>. Eigene Daten und Einstellungen bleiben.</td></tr>
+    <tr><td><b>Prüfsumme</b></td><td>Jede Version enthält <code>HUMig-files.sha256</code> (SHA256 aller Dateien, erstellt von den automatischen Tests auf GitHub – nur wenn diese bestanden sind). Das Update lädt zuerst <b>alle</b> Dateien, prüft sie und ersetzt erst dann – stimmt eine Prüfsumme nicht, bleibt alles unverändert. Versionen bis 2.0.52 haben keine Prüfsumme (Rückfrage).</td></tr>
+    <tr><td><b>Signatur</b> (in Vorbereitung)</td><td>Eine Schule kann die Prüfsummen-Datei zusätzlich mit dem eigenen Code-Signatur-Zertifikat signieren (<code>Tools\Sign-HUMigRelease.ps1</code>, Ergebnis <code>HUMig-files.sha256.p7s</code> am Release). Mit <i>Nur signierte Updates annehmen</i> und dem Fingerabdruck des Zertifikats installiert HUMig dann nur noch so signierte Versionen. Wer den Haken nicht setzt, bekommt Updates wie bisher.</td></tr>
+    <tr><td>Ergebnis</td><td>Info-Fenster (Logo / <span class="ui">Info</span>): installierte Version, Kanal und Prüfung. Protokoll im Update-Fenster.</td></tr>
+  </table>
+  <div class="note tip"><b class="h">Was schützt was?</b>Die Prüfsumme erkennt beschädigte oder unterwegs veränderte Downloads. Gegen ein manipuliertes Repository hilft nur die Signatur mit eurem eigenen Zertifikat – der private Schlüssel bleibt dabei bei euch, nie auf GitHub.</div>
 </section>
 
 <section id="faq">

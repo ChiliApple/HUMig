@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.0.53 - 2026-10-01
+### Neu
+- **Update ueber Releases mit Kanal**: *Stabil* (Standard, nur freigegebene Versionen - fuer Server und Schul-PCs) oder *Test* (neue Versionen vor der Freigabe) - Einstellungen > Update bzw. Rechtsklick auf *Update*
+- **Vorversion / bestimmte Version installieren**: Rechtsklick auf *Update* > *Andere Version / Vorversion installieren ...* (Liste mit Kanal, Datum, Pruefsumme, Aenderungen); `Pull.ps1 -Version x.y.z`
+- **Pruefsumme**: jedes Release bekommt `HUMig-files.sha256` (SHA256 aller Dateien); das Update laedt zuerst alle Dateien, prueft sie und ersetzt erst dann - bei einer Abweichung bleibt alles unveraendert
+- **Signatur (in Vorbereitung)**: *Nur signierte Updates annehmen* + Fingerabdruck des eigenen Code-Signatur-Zertifikats; `Tools\Sign-HUMigRelease.ps1` signiert die Pruefsummen-Datei (PKCS#7) - ohne Haken Updates wie bisher
+- **Automatische Tests auf GitHub** (Windows PowerShell 5.1) bei jedem Push: Syntax + BOM, XAML und alle verwendeten Steuerelemente, Update-Bibliothek, PSScriptAnalyzer, Pester-Tests, Selbsttest; beim Release zusaetzlich Pruefsummen-Datei und Test des kompletten Update-Wegs
+- Info-Fenster: Kanal und Pruefung der installierten Version (`Config\installed.json`); Anleitung (F1) passend zur installierten Version
+### Hinweis
+- Von v2.0.52 und aelter kommt dieses Update einmalig noch ueber den bisherigen Weg (ohne Pruefsumme); danach gilt der eingestellte Kanal
+
 ## v2.0.52 - 2026-09-30
 ### Neu
 - Server-Backup **Host-System**: Pruefung, ob VMs Dateien auf C: haben (virtuelle Festplatten = werden mitgesichert, Warnung; nur Konfiguration = Hinweis) - Zeile unter *Host-System mitsichern* (orange, Details im Tooltip), Konsole beim Anhaken, Startabfrage, Zeitplan-Dialog und Protokoll des Laufs

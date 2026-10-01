@@ -25,7 +25,7 @@ function Show-SettingsDialog {
         'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtDrvDir', 'btnDrvDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript',
         'tabExceptions', 'btnExcDefault', 'txtExPF', 'txtExPFi', 'txtExPMin', 'txtExSF', 'txtExSFi', 'txtExSMin', 'tabModules', 'txtNmName', 'cmbNmGroup',
         'cmbNmType', 'txtNmFilter', 'txtNmPath', 'btnNmAdd', 'btnModDel', 'btnModJson', 'btnAppEditor', 'dgModules', 'btnLinkAdd', 'btnLinkDel', 'dgLinks',
-        'txtOwner', 'txtRepo', 'txtBranch', 'lblToken', 'btnTokenSet', 'btnTokenDel')) { $f[$n] = $w.FindName($n) }
+        'txtOwner', 'txtRepo', 'txtBranch', 'lblToken', 'btnTokenSet', 'btnTokenDel', 'tabUpdate', 'cmbChannel', 'lblInstalled', 'btnVersions', 'chkRequireSig', 'txtSignerThumb', 'chkUseBranch')) { $f[$n] = $w.FindName($n) }
     $f.lblPath.Text = $script:ConfigDir
     $st = @{ Saved = $false; Win = $w; F = $f }
     $script:SetDlg = $st
@@ -213,7 +213,16 @@ function Show-SettingsDialog {
     $f.btnSchoolDel.Add_Click({ $rv = $script:SetDlg.F.dgSchools.SelectedItem; if ($rv) { $rv.Row.Delete() } })
 
     # --- Update ---
-    $f.txtOwner.Text = $script:UpdateOwner; $f.txtRepo.Text = $script:UpdateRepo; $f.txtBranch.Text = $script:UpdateBranch
+    $uc = Get-HMUpdateConfig $script:ConfigDir
+    $f.txtOwner.Text = $uc.Owner; $f.txtRepo.Text = $uc.Repo; $f.txtBranch.Text = $uc.Branch
+    foreach ($t in @('Stabil (empfohlen, freigegebene Versionen)', 'Test (neue Versionen vor der Freigabe)')) { [void]$f.cmbChannel.Items.Add($t) }
+    $f.cmbChannel.SelectedIndex = $(if ($uc.Channel -eq 'Test') { 1 } else { 0 })
+    $f.chkUseBranch.IsChecked = [bool]$uc.UseBranch
+    $f.chkRequireSig.IsChecked = [bool]$uc.RequireSignature
+    $f.txtSignerThumb.Text = "$($uc.SignerThumbprint)"
+    $inst = Get-HMInstalledInfo
+    $f.lblInstalled.Text = "installiert: v$($script:Version)$(if ($inst -and "$($inst.Check)") { "  ($($inst.Date), $($inst.Check))" })"
+    $f.btnVersions.Add_Click({ $script:SetDlg.Win.Close(); Show-HMVersionPicker })
     $updTok = { $script:SetDlg.F.lblToken.Text = if (Test-Path -LiteralPath (Get-GitHubTokenFile)) { 'gespeichert' } elseif ("$env:HUMIG_GITHUB_TOKEN".Trim()) { 'aus Umgebungsvariable' } else { 'keiner' } }
     $st.UpdTok = $updTok
     & $updTok
@@ -229,6 +238,8 @@ function Show-SettingsDialog {
     $f.btnCancel.Add_Click({ $script:SetDlg.Win.Close() })
     $f.btnSave.Add_Click({
         $F = $script:SetDlg.F; $W = $script:SetDlg.Win
+        $tp0 = ("$($F.txtSignerThumb.Text)" -replace '[^0-9A-Fa-f]', '')
+        if ([bool]$F.chkRequireSig.IsChecked -and $tp0.Length -ne 40) { [void][System.Windows.MessageBox]::Show($W, 'Nur signierte Updates: bitte den Fingerabdruck (Thumbprint, 40 Zeichen) des Signatur-Zertifikats eintragen - sonst wird kein Update mehr angenommen.', 'Einstellungen', 'OK', 'Warning'); $F.tabs.SelectedItem = $F.tabUpdate; return }
         $ret = 0
         if (-not [int]::TryParse("$($F.txtRetention.Text)".Trim(), [ref]$ret) -or $ret -lt 0 -or $ret -gt 3650) { [void][System.Windows.MessageBox]::Show($W, 'Aufbewahrung: Zahl 0 bis 3650', 'Einstellungen', 'OK', 'Warning'); return }
         $keep = 0
@@ -295,7 +306,13 @@ function Show-SettingsDialog {
         Write-JsonFile (Join-Path $script:ConfigDir 'exceptions.json') ([pscustomobject]$ex)
         # Update-Quelle
         $o = "$($F.txtOwner.Text)".Trim(); $rp = "$($F.txtRepo.Text)".Trim(); $b = "$($F.txtBranch.Text)".Trim()
-        if ($o -and $rp) { Write-JsonFile (Join-Path $script:ConfigDir 'update.json') ([pscustomobject][ordered]@{ Owner = $o; Repo = $rp; Branch = $(if ($b) { $b } else { 'main' }) }) }
+        $tp = ("$($F.txtSignerThumb.Text)" -replace '[^0-9A-Fa-f]', '').ToUpper()
+        if ($o -and $rp) {
+            Write-JsonFile (Join-Path $script:ConfigDir 'update.json') ([pscustomobject][ordered]@{
+                Owner = $o; Repo = $rp; Branch = $(if ($b) { $b } else { 'main' }); UseBranch = [bool]$F.chkUseBranch.IsChecked
+                Channel = $(if ($F.cmbChannel.SelectedIndex -eq 1) { 'Test' } else { 'Stable' }); RequireSignature = [bool]$F.chkRequireSig.IsChecked; SignerThumbprint = $tp
+            })
+        }
         $script:SetDlg.Saved = $true
         Out-Console 'Einstellungen gespeichert' 'Success'
         $W.Close()
@@ -305,6 +322,7 @@ function Show-SettingsDialog {
         'Ausnahmen' { $f.tabs.SelectedItem = $f.tabExceptions }
         'Module' { $f.tabs.SelectedItem = $f.tabModules }
         'Standorte' { $f.tabs.SelectedItem = $f.tabSchools }
+        'Update' { $f.tabs.SelectedItem = $f.tabUpdate }
     }
     [void]$w.ShowDialog()
     $saved = $st.Saved

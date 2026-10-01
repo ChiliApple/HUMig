@@ -7,6 +7,7 @@ Config/settings.json
 Config/exceptions.json
 Config/modules.json
 Config/update.json
+Config/installed.json
 Config/computer_history.json
 Config/GitHubToken_*.xml
 *.pulltmp

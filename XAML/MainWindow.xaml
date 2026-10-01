@@ -220,7 +220,7 @@
                         <TextBlock Text="Standort:" Foreground="{StaticResource CatSubtext}" VerticalAlignment="Center" Margin="0,0,6,0"/>
                         <ComboBox x:Name="cmbSchool" Width="190" FontWeight="SemiBold" ToolTip="Standort-Profil: Backup-Ordner, Softwareverteilung, Netzwerk-Standardwerte (Einstellungen > Standorte)"/>
                     </StackPanel>
-                    <Button x:Name="btnUpdate" Content="Update" Style="{StaticResource BtnDefault}" Margin="0,0,4,0" Width="110" ToolTip="Links: Update von GitHub laden (Tool wird neu gestartet) | Rechts: GitHub-Token fuer private Repos"/>
+                    <Button x:Name="btnUpdate" Content="Update" Style="{StaticResource BtnDefault}" Margin="0,0,4,0" MinWidth="110" ToolTip="Links: Update laden (Kanal Stabil/Test, wird vorher geprueft, Tool startet neu) | Rechts: andere Version / Vorversion, Update-Einstellungen, GitHub-Token"/>
                     <Button x:Name="btnSettings" Content="Einstellungen" Style="{StaticResource BtnDefault}" Margin="0,0,4,0" ToolTip="Links: Einstellungsfenster | Rechts: Konfigurationsdateien im Editor, Config-/Log-Ordner"/>
                     <Button x:Name="btnHelp" Content="Anleitung" Style="{StaticResource BtnDefault}" Margin="0,0,4,0" ToolTip="Anleitung (F1) - wird immer aktuell von GitHub geladen"/>
                     <Button x:Name="btnAbout" Content="Info" Style="{StaticResource BtnDefault}" Margin="0" Width="50"/>

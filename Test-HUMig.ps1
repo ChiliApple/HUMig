@@ -53,7 +53,7 @@ T 'XAML Einstellungsfenster laden' {
     [xml]$y = Get-Content (Join-Path $root 'XAML\SettingsWindow.xaml') -Raw -Encoding UTF8
     $w = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $y))
     $w.Resources.MergedDictionaries.Add($main.Resources)
-    $need = 'txtRoot', 'cmbThreads', 'dgModules', 'dgLinks', 'txtExPF', 'btnSave', 'btnNmAdd', 'btnLauncher', 'txtRetentionKeep', 'chkOverviewAuto', 'txtChecklist', 'chkChecklistAuto', 'dgSchools', 'btnSchoolAdd', 'btnUsmtAdk', 'cmbUiScale', 'btnAppEditor', 'txtDrvDir', 'btnDrvDir'
+    $need = 'txtRoot', 'cmbThreads', 'dgModules', 'dgLinks', 'txtExPF', 'btnSave', 'btnNmAdd', 'btnLauncher', 'txtRetentionKeep', 'chkOverviewAuto', 'txtChecklist', 'chkChecklistAuto', 'dgSchools', 'btnSchoolAdd', 'btnUsmtAdk', 'cmbUiScale', 'btnAppEditor', 'txtDrvDir', 'btnDrvDir', 'cmbChannel', 'btnVersions', 'chkRequireSig', 'txtSignerThumb', 'chkUseBranch'
     $miss = @($need | Where-Object { -not $w.FindName($_) })
     if ($miss.Count) { throw "fehlt: $($miss -join ', ')" }
     $true
@@ -256,6 +256,15 @@ T 'Server-Backup: Archiv-Platten erkennen (v2.0.47)' {
     . (Join-Path $root 'Functions\ServerBackup-Engine.ps1')
     $ok = (Test-HMSbArchiveLabel 'HUMIG-GYM-A1' 'HUMIG-GYM') -and (Test-HMSbArchiveLabel 'humig-gym-a12' 'HUMIG-GYM') -and -not (Test-HMSbArchiveLabel 'HUMIG-GYM-1' 'HUMIG-GYM') -and -not (Test-HMSbArchiveLabel 'HUMIG-GYMA-1' 'HUMIG-GYM') -and (Test-HMSbArchiveLabel 'X-A2' '')
     if (-not $ok) { throw 'Archiv-Bezeichnung falsch erkannt' }; '<Prefix>-A<n> = Archiv'
+}
+T 'Update: Kanal Stabil/Test und Pruefsumme (v2.0.53)' {
+    . (Join-Path $root 'Functions\Core-Update.ps1')
+    $l = ConvertTo-HMReleaseList @([pscustomobject]@{ tag_name = 'v9.0.2'; prerelease = $true; draft = $false; assets = @() }, [pscustomobject]@{ tag_name = 'v9.0.1'; prerelease = $false; draft = $false; assets = @() })
+    if ((Select-HMRelease $l 'Stable').Tag -ne 'v9.0.1' -or (Select-HMRelease $l 'Test').Tag -ne 'v9.0.2') { throw 'Kanal-Auswahl falsch' }
+    $f = Join-Path $env:TEMP "HUMigHash_$([guid]::NewGuid().ToString('N')).bin"
+    try { [System.IO.File]::WriteAllBytes($f, [byte[]](1..50)); if ((Get-HMFileSha256 $f) -ne (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLower()) { throw 'SHA256 falsch' } } finally { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+    $c = Get-HMUpdateConfig (Join-Path $root 'Config')
+    "Kanal $($c.Channel)$(if ($c.RequireSignature) { ', nur signiert' })"
 }
 T 'Installer-Erkennung (EXE)' { $i = Get-SwInstallerInfo (Join-Path $env:windir 'System32\robocopy.exe'); if (-not $i -or $i.Type -ne 'EXE') { throw 'keine Info' }; "$($i.Framework)" }
 T 'Starter HUMig.exe erzeugen (TEMP)' {
