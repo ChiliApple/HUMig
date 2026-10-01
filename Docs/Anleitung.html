@@ -580,7 +580,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>Ausnahmen</td><td>Ordner und Dateitypen, die im Profil und auf C:\ nicht gesichert werden · Standard wiederherstellen</td></tr>
     <tr><td>Module</td><td>Module ein-/ausblenden, eigene Module anlegen/löschen, <code>modules.json</code> für Experten</td></tr>
     <tr><td>Links</td><td>Eigene Links (Name + URL) für den Werkzeug-Reiter; Platzhalter <code>{SERIAL}</code> und <code>{COMPUTER}</code> des gewählten Computers, optional Seriennummer in die Zwischenablage</td></tr>
-    <tr><td>Update</td><td><a href="#update">Kanal Stabil/Test</a>, installierte Version, andere Version / Vorversion, Signatur (in Vorbereitung), Quelle, GitHub-Token (nur bei privatem Repository)</td></tr>
+    <tr><td>Update</td><td><a href="#update">Kanal Stabil/Test</a>, installierte Version, andere Version / Vorversion, Signatur, Quelle, GitHub-Token (nur bei privatem Repository)</td></tr>
   </table>
   <h3>Konfigurationsdateien</h3>
   <table>
@@ -590,7 +590,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><code>Config\exceptions.json</code></td><td>Ausnahmen Ordner/Dateitypen</td></tr>
     <tr><td><code>Config\modules.json</code></td><td>eigene Module und Vorlagen</td></tr>
     <tr><td><code>Config\serverbackup.json</code></td><td>Server-Backup-Profile (VMs, Platten, Optionen), Suchwörter der Zeitplan-Prüfung (<code>ConflictWords</code>)</td></tr>
-    <tr><td><code>Config\update.json</code></td><td>Update-Einstellungen: Quelle (<code>Owner</code>, <code>Repo</code>), <code>Channel</code> (<code>Stable</code>/<code>Test</code>), <code>RequireSignature</code>, <code>SignerThumbprint</code>, Entwicklung: <code>Branch</code>, <code>UseBranch</code>. Daneben <code>installed.json</code>: installierte Version, Kanal und Prüfung.</td></tr>
+    <tr><td><code>Config\update.json</code></td><td>Update-Einstellungen: Quelle (<code>Owner</code>, <code>Repo</code>), <code>Channel</code> (<code>Stable</code>/<code>Test</code>), <code>SignerThumbprint</code> (nur eigene Quelle), <code>AllowUnsigned</code> (Signaturprüfung aus – nicht empfohlen), Entwicklung: <code>Branch</code>, <code>UseBranch</code> (nur ohne Signaturpflicht). Daneben <code>installed.json</code>: installierte Version, Kanal und Prüfung.</td></tr>
   </table>
   <p>Die <code>*.default.json</code> kommen mit jedem Update, eigene Dateien bleiben erhalten.</p>
 </section>
@@ -610,10 +610,11 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><b>Kanal Test</b></td><td>Neue Versionen sofort, noch vor der Freigabe – zum Ausprobieren auf dem eigenen PC. Einstellen: Einstellungen › Update › Kanal (oder Rechtsklick auf <span class="ui">Update</span>). Der Knopf zeigt z. B. <i>Update v2.0.54 (Test)</i>.</td></tr>
     <tr><td><b>Vorversion</b></td><td>Rechtsklick auf <span class="ui">Update</span> › <i>Andere Version / Vorversion installieren …</i> (oder Einstellungen › Update): alle Versionen mit Kanal, Datum und Änderungen – markieren, <span class="ui g">Diese Version installieren</span>. Eigene Daten und Einstellungen bleiben.</td></tr>
     <tr><td><b>Prüfsumme</b></td><td>Jede Version enthält <code>HUMig-files.sha256</code> (SHA256 aller Dateien, erstellt von den automatischen Tests auf GitHub – nur wenn diese bestanden sind). Das Update lädt zuerst <b>alle</b> Dateien, prüft sie und ersetzt erst dann – stimmt eine Prüfsumme nicht, bleibt alles unverändert. Versionen bis 2.0.52 haben keine Prüfsumme (Rückfrage).</td></tr>
-    <tr><td><b>Signatur</b> (in Vorbereitung)</td><td>Eine Schule kann die Prüfsummen-Datei zusätzlich mit dem eigenen Code-Signatur-Zertifikat signieren (<code>Tools\Sign-HUMigRelease.ps1</code>, Ergebnis <code>HUMig-files.sha256.p7s</code> am Release). Mit <i>Nur signierte Updates annehmen</i> und dem Fingerabdruck des Zertifikats installiert HUMig dann nur noch so signierte Versionen. Wer den Haken nicht setzt, bekommt Updates wie bisher.</td></tr>
+    <tr><td><b>Signatur</b></td><td>Der Herausgeber signiert die Prüfsummen-Datei jedes Releases mit seinem Zertifikat (<code>HUMig-files.sha256.p7s</code>). HUMig installiert nur Releases mit gültiger Signatur – der Fingerabdruck des Zertifikats ist eingebaut, es ist <b>nichts einzustellen</b>. Neue Versionen werden erst nach der Signatur angeboten; in der Versionsliste zeigt die Spalte <i>Signatur</i>, welche Versionen installierbar sind. Ausschalten (Einstellungen › Update › <i>Nur signierte Updates annehmen</i>) ist möglich, aber nicht empfohlen.</td></tr>
+    <tr><td>Eigene Quelle</td><td>Wer HUMig aus einem eigenen Repository verteilt: Fingerabdruck des eigenen Zertifikats unter Einstellungen › Update eintragen. Signieren: Rechtsklick auf <span class="ui">Update</span> › <i>Release signieren (Herausgeber)</i> – erscheint nur auf dem PC, auf dem der private Schlüssel liegt; einmalig wird ein GitHub-Token mit Schreibrecht abgefragt. Alternativ <code>Tools\Sign-HUMigRelease.ps1</code>.</td></tr>
     <tr><td>Ergebnis</td><td>Info-Fenster (Logo / <span class="ui">Info</span>): installierte Version, Kanal und Prüfung. Protokoll im Update-Fenster.</td></tr>
   </table>
-  <div class="note tip"><b class="h">Was schützt was?</b>Die Prüfsumme erkennt beschädigte oder unterwegs veränderte Downloads. Gegen ein manipuliertes Repository hilft nur die Signatur mit eurem eigenen Zertifikat – der private Schlüssel bleibt dabei bei euch, nie auf GitHub.</div>
+  <div class="note tip"><b class="h">Was schützt was?</b>Die Prüfsumme erkennt beschädigte oder unterwegs veränderte Downloads. Gegen ein manipuliertes Repository (z. B. missbrauchtes GitHub-Konto) hilft die Signatur – der private Schlüssel liegt nur beim Herausgeber, nie auf GitHub. HUMig prüft offline, ohne Domäne oder Internet-Dienst: Signatur gültig und Zertifikat = eingebauter Fingerabdruck.</div>
 </section>
 
 <section id="faq">

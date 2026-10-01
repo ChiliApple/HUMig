@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.0.55 - 2026-10-01
+### Neu
+- **Nur signierte Updates** (Standard): der Herausgeber signiert jedes Release; HUMig und `Pull.ps1` installieren nur Releases mit gueltiger Signatur des eingebauten Zertifikats - nichts einzustellen. Eine Version, die jemand anderer auf GitHub ablegt, wird abgelehnt
+- Neue Versionen werden erst nach der Signatur angeboten (Update-Knopf, Kanal Stabil/Test); Versionsliste: Spalte *Signatur*, nicht signierte Versionen sind nicht installierbar
+- **Release signieren**: Rechtsklick auf *Update* > *Release signieren (Herausgeber)* - nur sichtbar auf dem PC mit dem privaten Schluessel; signiert alle Releases mit Pruefsumme ohne Signatur, prueft und laedt hoch (Token mit Schreibrecht wird einmalig abgefragt und verschluesselt gespeichert)
+- Eigene Quelle (eigenes Repo): eigener Fingerabdruck unter Einstellungen > Update
+### Geaendert
+- Einstellungen > Update: *Nur signierte Updates annehmen (empfohlen)* ist eingeschaltet; Ausschalten nur nach Rueckfrage; Branch-Modus nur ohne Signaturpflicht
+- `Config\update.json`: `AllowUnsigned` statt `RequireSignature`; der eingebaute Fingerabdruck wird nicht in die Datei geschrieben
+- Automatische Tests: Selbsttest blockiert jetzt (Fehler = Test fehlgeschlagen)
+### Hinweis
+- Von v2.0.52 und aelter: einmal auf *Update* klicken - danach gilt die Signaturpruefung automatisch
+
 ## v2.0.54 - 2026-10-01
 ### Behoben
 - Cloud-Ordner sichern (nur lokale Dateien): relative Pfade werden beim Durchlaufen gebildet - funktionierte nicht, wenn der Ordnerpfad in Kurzform (8.3, z.B. `C:\Users\LANGER~1\...`) angegeben war (gefunden durch die automatischen Tests)

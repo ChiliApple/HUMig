@@ -221,11 +221,11 @@
                         <TextBlock x:Name="lblInstalled" VerticalAlignment="Center" Margin="0,0,10,0"/>
                         <Button x:Name="btnVersions" Content="Andere Version / Vorversion ..." Style="{DynamicResource BtnMauve}" ToolTip="Alle Versionen anzeigen und eine bestimmte (auch aeltere) installieren"/>
                     </StackPanel>
-                    <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="SIGNATUR (IN VORBEREITUNG)" Style="{DynamicResource SectionLabel}" Margin="0,8,0,4"/>
-                    <CheckBox x:Name="chkRequireSig" Grid.Row="3" Grid.Column="1" Content="Nur signierte Updates annehmen (in Vorbereitung)" Margin="0,0,0,6"/>
+                    <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="SIGNATUR" Style="{DynamicResource SectionLabel}" Margin="0,8,0,4"/>
+                    <CheckBox x:Name="chkRequireSig" Grid.Row="3" Grid.Column="1" Content="Nur signierte Updates annehmen (empfohlen)" Margin="0,0,0,6"/>
                     <TextBlock Grid.Row="4" Text="Zertifikat (Fingerabdruck):" Style="{DynamicResource Lbl}"/>
-                    <TextBox x:Name="txtSignerThumb" Grid.Row="4" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Width="420" HorizontalAlignment="Left" Margin="0,0,0,6" ToolTip="Fingerabdruck (Thumbprint, 40 Zeichen) des Code-Signatur-Zertifikats, mit dem eure Releases signiert werden"/>
-                    <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Text="In Vorbereitung: Jedes Release wird mit einer Pruefsumme (SHA256) aller Dateien geprueft. Zusaetzlich kann eine Schule die Pruefsummen-Datei mit dem eigenen Code-Signatur-Zertifikat signieren (Tools\Sign-HUMigRelease.ps1). Ist der Haken gesetzt, werden nur Releases mit gueltiger Signatur dieses Zertifikats installiert - andere Nutzer ohne Haken bekommen Updates wie bisher." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <TextBox x:Name="txtSignerThumb" Grid.Row="4" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Width="420" HorizontalAlignment="Left" Margin="0,0,0,6" ToolTip="Fingerabdruck (Thumbprint, 40 Zeichen) des Zertifikats, mit dem die Releases signiert werden. Offizielle Quelle: ist eingebaut."/>
+                    <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Text="Jedes Release wird mit einer Pruefsumme (SHA256) aller Dateien geprueft und vom Herausgeber signiert. HUMig installiert nur Releases mit gueltiger Signatur dieses Zertifikats - eine Version, die jemand anderer auf GitHub ablegt, wird abgelehnt. Fuer die offizielle Quelle ist der Fingerabdruck eingebaut, hier ist nichts zu tun. Nur bei einer eigenen Quelle (eigenes Repo) den Fingerabdruck des eigenen Zertifikats eintragen." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,0,0,8"/>
                     <TextBlock Grid.Row="6" Grid.ColumnSpan="2" Text="QUELLE" Style="{DynamicResource SectionLabel}" Margin="0,4,0,4"/>
                     <TextBlock Grid.Row="7" Text="GitHub-Besitzer / Repo:" Style="{DynamicResource Lbl}"/>
                     <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
@@ -236,7 +236,7 @@
                     <TextBlock Grid.Row="8" Text="Branch (Entwicklung):" Style="{DynamicResource Lbl}"/>
                     <StackPanel Grid.Row="8" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
                         <TextBox x:Name="txtBranch" Style="{DynamicResource DarkTextBox}" Width="160"/>
-                        <CheckBox x:Name="chkUseBranch" Content="Branch statt Releases laden (nur Entwicklung, ohne Pruefsumme)" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                        <CheckBox x:Name="chkUseBranch" Content="Branch statt Releases laden (nur Entwicklung, ohne Pruefsumme und Signatur)" VerticalAlignment="Center" Margin="10,0,0,0"/>
                     </StackPanel>
                     <TextBlock Grid.Row="9" Text="Token (privates Repo):" Style="{DynamicResource Lbl}"/>
                     <StackPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
