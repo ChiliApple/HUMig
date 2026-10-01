@@ -30,7 +30,8 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 | **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung |
 | **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |
 | **Benutzer-Modus** | ohne Administratorrechte: eigenes Profil sichern/wiederherstellen, Dateien aus dem Backup holen |
-| **Anleitung** | im Tool mit **F1** – immer aktuell aus diesem Repository |
+| **Update** | Kanal **Stabil** (freigegebene Versionen) oder **Test**, Vorversion per Klick, jede Datei per **SHA256** geprüft, Signatur mit eigenem Zertifikat (in Vorbereitung) |
+| **Anleitung** | im Tool mit **F1** – aus diesem Repository, passend zur installierten Version |
 
 <table>
   <tr>
@@ -250,6 +251,14 @@ Voraussetzung: Feature *Windows Server-Sicherung* (installierbar aus dem Reiter)
 Erfahrungswerte: VMs laufen weiter (Online-Sicherung). Jede Sicherung liest die VMs komplett (USB 3 rund 2 GB/min, 34-GB-VM ca. 18 min);
 auf der Platte braucht jede weitere Version nur die Aenderungen (zweite Version einer 34-GB-VM unter 1 GB).
 
+## Update
+
+- **Kanal Stabil** (Standard): nur freigegebene Versionen - fuer Server und Schul-PCs. **Kanal Test**: neue Versionen vor der Freigabe (Einstellungen > Update)
+- **Vorversion**: Rechtsklick auf *Update* > *Andere Version / Vorversion installieren ...*
+- **Pruefung**: jede Version hat `HUMig-files.sha256` (von den automatischen Tests erstellt); das Update laedt alle Dateien, prueft sie und ersetzt erst dann - bei einer Abweichung bleibt alles unveraendert
+- **Signatur** (in Vorbereitung): Pruefsummen-Datei mit eigenem Code-Signatur-Zertifikat signieren (`Tools\Sign-HUMigRelease.ps1`), in HUMig *Nur signierte Updates annehmen* + Fingerabdruck - ohne Haken Updates wie bisher
+- **Automatische Tests** bei jedem Push (Windows PowerShell 5.1): Syntax, XAML und Steuerelemente, PSScriptAnalyzer, Pester-Tests, Selbsttest, beim Release zusaetzlich der komplette Update-Weg
+
 ## Grenzen
 
 - Gespeicherte Browser-Kennwoerter/Cookies: durch Windows-Verschluesselung meist nicht uebertragbar -> Browser-Sync verwenden
@@ -272,7 +281,8 @@ Alles ueber **Einstellungen** (Fenster). Die Werte landen in:
 | `Config\exceptions.json` | Ausnahmen Ordner/Dateitypen fuer Profil und C:\ |
 | `Config\modules.json` | eigene Module und Vorlagen |
 | `Config\serverbackup.json` | Server-Backup-Profile (VMs, Platten, Optionen), Suchwoerter der Zeitplan-Pruefung (`ConflictWords`) |
-| `Config\update.json` | andere Update-Quelle `{ "Owner": "...", "Repo": "...", "Branch": "main" }` |
+| `Config\update.json` | Update: Quelle (`Owner`, `Repo`), `Channel` (`Stable`/`Test`), `RequireSignature` + `SignerThumbprint` (in Vorbereitung), Entwicklung `Branch` + `UseBranch` |
+| `Config\installed.json` | installierte Version, Kanal und Pruefung (schreibt das Update) |
 
 Die `*.default.json` kommen mit dem Update, eigene Dateien bleiben erhalten.
 

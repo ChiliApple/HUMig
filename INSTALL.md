@@ -33,7 +33,10 @@ Am Hyper-V-Host bzw. Server als Administrator starten; Feature *Windows Server-S
 Geplante Sicherungen laufen als Aufgabe unter `\HUMig` in der Aufgabenplanung (SYSTEM) - der Tool-Ordner muss dafuer lokal am Host liegen oder fuer SYSTEM lesbar sein.
 
 ## Update
-Button **Update** laedt die aktuelle Version (Pull.ps1). Lokale Daten (BACKUPS, Config, Softwareverteilung, Treiberverteilung, HUMig.exe) bleiben erhalten.
+Button **Update** laedt die neueste Version im Kanal (Pull.ps1): **Stabil** (Standard, freigegebene Versionen) oder **Test** (Einstellungen > Update).
+Jede Datei wird per SHA256 gegen `HUMig-files.sha256` des Releases geprueft, ersetzt wird erst, wenn alles stimmt. Lokale Daten (BACKUPS, Config, Softwareverteilung, Treiberverteilung, HUMig.exe) bleiben erhalten.
+Bestimmte oder aeltere Version: Rechtsklick auf *Update* > *Andere Version / Vorversion installieren ...* bzw. `powershell -ExecutionPolicy Bypass -File Pull.ps1 -Version 2.0.53`.
+Signatur (in Vorbereitung): `Tools\Sign-HUMigRelease.ps1` signiert die Pruefsummen-Datei mit eurem Code-Signatur-Zertifikat; in HUMig *Nur signierte Updates annehmen* + Fingerabdruck.
 Nur bei einem privaten Repository: einmalig einen Nur-Lese-Token eingeben (Rechtsklick auf *Update* oder Einstellungen > Update).
 
 ## Anleitung

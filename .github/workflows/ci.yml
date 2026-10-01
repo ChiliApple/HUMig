@@ -1,0 +1,77 @@
+# Automatische Tests fuer HUMig (Windows PowerShell 5.1) und Pruefsummen-Datei fuer Releases.
+# - bei jedem Push/Pull-Request: Pruefungen (Syntax, XAML, Steuerelemente, PSScriptAnalyzer, Pester) + Selbsttest
+# - bei einem neuen Release: zusaetzlich HUMig-files.sha256 erstellen und an das Release haengen (nur wenn die Pruefungen bestanden sind)
+#   und den Update-Weg testen (Pull.ps1 laedt genau dieses Release und prueft alle Pruefsummen)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Pruefungen (Windows PowerShell 5.1)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+      - name: Pruefungen
+        shell: powershell
+        run: .\.github\tests\Invoke-CITests.ps1
+      - name: Selbsttest (Test-HUMig.ps1, umgebungsabhaengig - blockiert nicht)
+        shell: powershell
+        continue-on-error: true
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\Test-HUMig.ps1
+          $c = $LASTEXITCODE
+          if (Test-Path .\Test-HUMig.result.txt) { Get-Content .\Test-HUMig.result.txt | Add-Content $env:GITHUB_STEP_SUMMARY }
+          exit $c
+
+  manifest:
+    name: Pruefsummen-Datei zum Release
+    if: github.event_name == 'release'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: HUMig-files.sha256 erstellen
+        run: python3 .github/scripts/manifest.py HUMig-files.sha256
+      - name: An das Release haengen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" HUMig-files.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+
+  pull:
+    name: Update-Weg testen (Pull.ps1)
+    if: github.event_name == 'release'
+    needs: manifest
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Pull.ps1 laedt das Release und prueft alle Pruefsummen
+        shell: powershell
+        env:
+          HUMIG_GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP 'HUMig'
+          $v = $env:TAG -replace '^v', ''
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\Pull.ps1 -Target $t -Version $v -NoStart -NonInteractive -Owner $env:GITHUB_REPOSITORY_OWNER -Repo ($env:GITHUB_REPOSITORY -split '/')[1]
+          if ($LASTEXITCODE -ne 0) { throw "Pull.ps1 Exitcode $LASTEXITCODE" }
+          $i = Get-Content (Join-Path $t 'Config\installed.json') -Raw | ConvertFrom-Json
+          if ("$($i.Version)" -ne $v) { throw "installiert: $($i.Version), erwartet $v" }
+          if ("$($i.Check)" -notlike 'Pruefsumme*') { throw "nicht geprueft: $($i.Check)" }
+          "Pull OK: $($i.Version) - $($i.Check) - $($i.Files) Dateien"

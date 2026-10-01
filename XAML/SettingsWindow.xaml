@@ -207,23 +207,44 @@
                 </DockPanel>
             </TabItem>
 
-            <TabItem Header="Update">
+            <TabItem Header="Update" x:Name="tabUpdate">
                 <Grid Margin="4">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                    <TextBlock Text="GitHub-Besitzer:" Style="{DynamicResource Lbl}"/>
-                    <TextBox x:Name="txtOwner" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Width="260" HorizontalAlignment="Left" Margin="0,0,0,6"/>
-                    <TextBlock Grid.Row="1" Text="Repository:" Style="{DynamicResource Lbl}"/>
-                    <TextBox x:Name="txtRepo" Grid.Row="1" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Width="260" HorizontalAlignment="Left" Margin="0,0,0,6"/>
-                    <TextBlock Grid.Row="2" Text="Branch:" Style="{DynamicResource Lbl}"/>
-                    <TextBox x:Name="txtBranch" Grid.Row="2" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Width="160" HorizontalAlignment="Left" Margin="0,0,0,6"/>
-                    <TextBlock Grid.Row="3" Text="Token (privates Repo):" Style="{DynamicResource Lbl}"/>
-                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TextBlock Text="Kanal:" Style="{DynamicResource Lbl}"/>
+                    <StackPanel Grid.Column="1" Margin="0,0,0,4">
+                        <ComboBox x:Name="cmbChannel" Width="300" HorizontalAlignment="Left"/>
+                        <TextBlock Text="Stabil: nur freigegebene Versionen (fuer Server und Schul-PCs). Test: neue Versionen sofort, vor der Freigabe (zum Ausprobieren)." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                    </StackPanel>
+                    <TextBlock Grid.Row="1" Text="Version:" Style="{DynamicResource Lbl}"/>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,4,0,8">
+                        <TextBlock x:Name="lblInstalled" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <Button x:Name="btnVersions" Content="Andere Version / Vorversion ..." Style="{DynamicResource BtnMauve}" ToolTip="Alle Versionen anzeigen und eine bestimmte (auch aeltere) installieren"/>
+                    </StackPanel>
+                    <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="SIGNATUR (IN VORBEREITUNG)" Style="{DynamicResource SectionLabel}" Margin="0,8,0,4"/>
+                    <CheckBox x:Name="chkRequireSig" Grid.Row="3" Grid.Column="1" Content="Nur signierte Updates annehmen (in Vorbereitung)" Margin="0,0,0,6"/>
+                    <TextBlock Grid.Row="4" Text="Zertifikat (Fingerabdruck):" Style="{DynamicResource Lbl}"/>
+                    <TextBox x:Name="txtSignerThumb" Grid.Row="4" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Width="420" HorizontalAlignment="Left" Margin="0,0,0,6" ToolTip="Fingerabdruck (Thumbprint, 40 Zeichen) des Code-Signatur-Zertifikats, mit dem eure Releases signiert werden"/>
+                    <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Text="In Vorbereitung: Jedes Release wird mit einer Pruefsumme (SHA256) aller Dateien geprueft. Zusaetzlich kann eine Schule die Pruefsummen-Datei mit dem eigenen Code-Signatur-Zertifikat signieren (Tools\Sign-HUMigRelease.ps1). Ist der Haken gesetzt, werden nur Releases mit gueltiger Signatur dieses Zertifikats installiert - andere Nutzer ohne Haken bekommen Updates wie bisher." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <TextBlock Grid.Row="6" Grid.ColumnSpan="2" Text="QUELLE" Style="{DynamicResource SectionLabel}" Margin="0,4,0,4"/>
+                    <TextBlock Grid.Row="7" Text="GitHub-Besitzer / Repo:" Style="{DynamicResource Lbl}"/>
+                    <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBox x:Name="txtOwner" Style="{DynamicResource DarkTextBox}" Width="200"/>
+                        <TextBlock Text=" / " VerticalAlignment="Center"/>
+                        <TextBox x:Name="txtRepo" Style="{DynamicResource DarkTextBox}" Width="200"/>
+                    </StackPanel>
+                    <TextBlock Grid.Row="8" Text="Branch (Entwicklung):" Style="{DynamicResource Lbl}"/>
+                    <StackPanel Grid.Row="8" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBox x:Name="txtBranch" Style="{DynamicResource DarkTextBox}" Width="160"/>
+                        <CheckBox x:Name="chkUseBranch" Content="Branch statt Releases laden (nur Entwicklung, ohne Pruefsumme)" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                    </StackPanel>
+                    <TextBlock Grid.Row="9" Text="Token (privates Repo):" Style="{DynamicResource Lbl}"/>
+                    <StackPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
                         <TextBlock x:Name="lblToken" VerticalAlignment="Center" Margin="0,0,10,0"/>
                         <Button x:Name="btnTokenSet" Content="Token eingeben" Style="{DynamicResource BtnBlue}"/>
                         <Button x:Name="btnTokenDel" Content="Token loeschen" Style="{DynamicResource BtnDefault}"/>
                     </StackPanel>
-                    <TextBlock Grid.Row="4" Grid.ColumnSpan="2" Text="Nur-Lese-Token genuegt (Fine-grained PAT, Repository-Zugriff nur auf dieses Repo, 'Contents: Read'). Er wird verschluesselt (DPAPI) nur fuer deinen Windows-Benutzer gespeichert." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                    <TextBlock Grid.Row="10" Grid.ColumnSpan="2" Text="Nur-Lese-Token genuegt (Fine-grained PAT, Repository-Zugriff nur auf dieses Repo, 'Contents: Read'). Er wird verschluesselt (DPAPI) nur fuer deinen Windows-Benutzer gespeichert." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,8,0,0"/>
                 </Grid>
             </TabItem>
         </TabControl>
