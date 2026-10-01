@@ -69,7 +69,7 @@ T 'modules.default.json' {
     $ids = @($script:mods.Modules | ForEach-Object { $_.Id })
     $dup = @($ids | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
     if ($dup.Count) { throw "doppelte Id: $($dup -join ', ')" }
-    $handlers = 'ExtraFolders', 'Wlan', 'Shares', 'PrinterConnections', 'PrintersFull', 'Fonts', 'Tasks', 'Drivers', 'Info', 'Wallpaper', 'Usmt'
+    $handlers = 'ExtraFolders', 'Wlan', 'Shares', 'PrinterConnections', 'PrintersFull', 'Fonts', 'Tasks', 'Drivers', 'Info', 'Wallpaper', 'Usmt', 'DesktopIconPositions'
     foreach ($m in $script:mods.Modules) {
         if (-not $m.Name -or -not $m.Group) { throw "$($m.Id): Name/Gruppe fehlt" }
         foreach ($i in @($m.Items)) {
