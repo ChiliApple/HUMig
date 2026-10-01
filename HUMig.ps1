@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.55'
+$script:Version   = '2.0.56'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -1432,12 +1432,12 @@ $ui.btnSettings.Add_MouseRightButtonUp({
 function Show-About {
     $x = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Info" Width="460" Height="380" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" Background="#FF1E1E2E">
-  <StackPanel Margin="20" HorizontalAlignment="Center">
+        Title="Info" Width="480" Height="410" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" Background="#FF1E1E2E">
+  <StackPanel Margin="20">
     <Image x:Name="img" Width="110" Height="110" RenderOptions.BitmapScalingMode="HighQuality"/>
     <TextBlock Text="HUMig v2" FontSize="28" FontWeight="Bold" Foreground="#FFCDD6F4" HorizontalAlignment="Center" Margin="0,8,0,0"/>
     <TextBlock Text="Benutzerprofil-Migration" FontSize="14" Foreground="#FFA6ADC8" HorizontalAlignment="Center"/>
-    <TextBlock x:Name="ver" FontSize="12" Foreground="#FF89B4FA" HorizontalAlignment="Center" TextAlignment="Center" Margin="0,8,0,0"/>
+    <TextBlock x:Name="ver" FontSize="12" Foreground="#FF89B4FA" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0"/>
     <TextBlock x:Name="src" FontSize="11" Foreground="#FF89B4FA" HorizontalAlignment="Center" Margin="0,4,0,0" Cursor="Hand" TextDecorations="Underline" ToolTip="Projektseite im Browser oeffnen"/>
     <TextBlock x:Name="lic" Text="Nutzungslizenz - siehe LICENSE" FontSize="11" Foreground="#FF89B4FA" HorizontalAlignment="Center" Margin="0,2,0,0" Cursor="Hand" TextDecorations="Underline" ToolTip="Lizenz anzeigen"/>
   </StackPanel>
@@ -1448,7 +1448,8 @@ function Show-About {
     if ($script:AppIcon) { $w.Icon = $script:AppIcon }
     $inst = Get-HMInstalledInfo
     $uc = Get-HMUpdateConfig $script:ConfigDir
-    $w.FindName('ver').Text = "Version $($script:Version)  |  Kanal $(if ($uc.UseBranch) { "Branch $($uc.Branch)" } else { Format-HMChannel $uc.Channel })$(if ($uc.RequireSignature) { ', nur signierte Updates' })  |  PowerShell $($PSVersionTable.PSVersion)" + $(if ($inst -and "$($inst.Check)") { "`ninstalliert $($inst.Date), geprueft: $($inst.Check)" } else { '' })
+    $chk = if ($inst -and "$($inst.Check)") { "$($inst.Check)" -replace '\b([0-9A-Fa-f]{8})[0-9A-Fa-f]{32}\b', '$1...' } else { '' }
+    $w.FindName('ver').Text = "Version $($script:Version)  |  PowerShell $($PSVersionTable.PSVersion)`nKanal $(if ($uc.UseBranch) { "Branch $($uc.Branch)" } else { Format-HMChannel $uc.Channel })$(if ($uc.RequireSignature) { ', nur signierte Updates' })" + $(if ($chk) { "`ninstalliert $($inst.Date), geprueft: $chk" } else { '' })
     $w.FindName('src').Text = "github.com/$($script:UpdateOwner)/$($script:UpdateRepo)"
     # ueber den Explorer oeffnen -> Browser laeuft als angemeldeter Benutzer, nicht erhoeht
     $w.FindName('src').Add_MouseLeftButtonUp({ try { Start-Process -FilePath explorer.exe -ArgumentList "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)" } catch { } })
@@ -1598,7 +1599,7 @@ function Show-HMVersionPicker {
         $rows = New-Object System.Collections.Generic.List[object]
         foreach ($x in $list) {
             $cmp = 0; try { $cmp = ([Version]"$($x.Version)").CompareTo([Version]$script:Version) } catch { }
-            $first = @("$($x.Notes)" -split "`r?`n" | Where-Object { "$_".Trim() -and "$_" -notmatch '^\s*#' } | ForEach-Object { "$_".Trim().TrimStart('-', ' ', '*') })[0]
+            $first = @("$($x.Notes)" -split "`r?`n" | Where-Object { "$_".Trim() -and "$_" -notmatch '^\s*#' } | ForEach-Object { ("$_".Trim().TrimStart('-', ' ', '*') -replace '\*\*|`', '') })[0]
             $rows.Add(@("$($x.Version)", $(if ($x.Prerelease) { 'Test' } else { 'Stabil' }), $(if ($cmp -eq 0) { 'installiert' } elseif ($cmp -lt 0) { 'aelter' } else { 'neuer' }), "$($x.Date)", $(if ($x.ManifestUrl) { 'ja' } else { 'nein' }), $(if ($x.SignatureUrl) { 'ja' } else { 'nein' }), "$first"))
         }
         Show-DataGridWindow -Title 'HUMig - Version waehlen (Vorversion / Test-Version)' -Width 1100 -Height 520 `
