@@ -26,7 +26,7 @@ Write-Host "HUMig CI - PowerShell $($PSVersionTable.PSVersion) - $([Environment]
 # 1. Syntax + BOM
 Step 'Syntax und UTF-8-BOM aller .ps1' {
     $bad = @()
-    $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Include *.ps1 | Where-Object { $_.FullName -notmatch '\\(BACKUPS|BIN|\.git)\\' })
+    $files = @(Get-ChildItem -Path $root -Recurse -File -Filter *.ps1 | Where-Object { $_.FullName -notmatch '\\(BACKUPS|BIN|\.git)\\' })
     foreach ($f in $files) {
         $t = $null; $e = $null
         [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$t, [ref]$e)
