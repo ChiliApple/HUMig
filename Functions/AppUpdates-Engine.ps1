@@ -137,31 +137,109 @@ function Remove-HMAuSource([string]$Name) {
 }
 
 # ----------------------------------------------------------------------------
-# Verfuegbare Updates
+# WinGet als angemeldeter Benutzer / als SYSTEM (einmalige geplante Aufgabe, Austausch-Ordner in ProgramData)
 # ----------------------------------------------------------------------------
-function Get-HMAuUpdates([string[]]$Sources, [bool]$IncludeUnknown) {
-    Import-Module $script:HMAuModule -ErrorAction Stop
-    $items = @{}
-    $errors = @()
-    foreach ($src in @($Sources | Where-Object { $_ })) {
+$script:HMAuWorker = Join-Path $PSScriptRoot 'AppUpdates-Worker.ps1'
+
+# Ist der Benutzer (SID) gerade angemeldet? (Besitzer eines explorer.exe-Prozesses)
+function Test-HMAuUserLoggedOn([string]$Sid) {
+    if (-not $Sid) { return $false }
+    foreach ($p in @(Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue)) {
+        try { if ("$((Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid -ErrorAction Stop).Sid)" -eq $Sid) { return $true } } catch { }
+    }
+    return $false
+}
+# Aufgabe anlegen und starten. $Account = 'SYSTEM' oder Benutzer (DOMAENE\Name) mit $Sid
+function Start-HMAuTask([string]$Account, [string]$Sid, $Request) {
+    $id = [guid]::NewGuid().ToString('N')
+    $dir = Join-Path $env:ProgramData "HUMig\AppUpdates\run_$id"
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    Copy-Item -LiteralPath $script:HMAuWorker -Destination (Join-Path $dir 'worker.ps1') -Force
+    $Request | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $dir 'request.json') -Encoding UTF8
+    $sys = ($Account -eq 'SYSTEM')
+    if (-not $sys) {
+        if (-not $Sid) { $Sid = (New-Object System.Security.Principal.NTAccount($Account)).Translate([System.Security.Principal.SecurityIdentifier]).Value }
+        & icacls.exe "$dir" /grant "*${Sid}:(OI)(CI)M" | Out-Null
+    }
+    $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $a = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dir\worker.ps1`" -Dir `"$dir`""
+    $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 3) -MultipleInstances IgnoreNew
+    $name = "HUMig_AppUpdates_$id"
+    $ok = $false; $err = ''
+    $uids = if ($sys) { @('NT AUTHORITY\SYSTEM') } else { @($Account, $Sid) | Where-Object { $_ } }
+    foreach ($uid in $uids) {
         try {
-            foreach ($p in @(Get-WinGetPackage -Source $src -ErrorAction Stop)) {
-                if (-not $p -or -not "$($p.Id)") { continue }
-                $avail = @($p.AvailableVersions | Where-Object { $_ })
-                $inst = "$($p.InstalledVersion)"
-                $unknown = (-not $inst -or $inst -eq 'Unknown')
-                $upd = [bool]$p.IsUpdateAvailable
-                if (-not $upd -and -not ($IncludeUnknown -and $unknown -and $avail.Count)) { continue }
-                $k = "$($p.Id)"
-                if ($items.ContainsKey($k)) { continue }
-                $items[$k] = [pscustomobject]@{
-                    Id = $k; Name = "$($p.Name)"; Installed = $(if ($unknown) { 'unbekannt' } else { $inst })
-                    Available = $(if ($avail.Count) { "$($avail[0])" } else { '' }); Source = $src; Unknown = $unknown
+            $pr = if ($sys) { New-ScheduledTaskPrincipal -UserId $uid -LogonType ServiceAccount -RunLevel Highest } else { New-ScheduledTaskPrincipal -UserId $uid -LogonType Interactive -RunLevel Limited }
+            Register-ScheduledTask -TaskName $name -TaskPath '\' -Action $a -Principal $pr -Settings $s -Force -ErrorAction Stop | Out-Null
+            $ok = $true; break
+        } catch { $err = $_.Exception.Message }
+    }
+    if (-not $ok) { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue; throw "Aufgabe fuer $Account nicht anlegbar: $err" }
+    Start-ScheduledTask -TaskPath '\' -TaskName $name
+    return [pscustomobject]@{ Dir = $dir; TaskName = $name; Account = $Account }
+}
+# Auf das Ergebnis warten. $OnLine: param($line) fuer jede neue Zeile aus log.txt. Raeumt Aufgabe und Ordner immer auf.
+function Wait-HMAuTask($Handle, [int]$TimeoutSec, $Job = $null, [scriptblock]$OnLine = $null) {
+    $t0 = Get-Date; $seen = 0; $cancelSent = $false; $doneAt = $null
+    $rf = Join-Path $Handle.Dir 'result.json'; $lf = Join-Path $Handle.Dir 'log.txt'
+    try {
+        while ($true) {
+            if (Test-Path -LiteralPath $lf) {
+                $lines = @(Get-Content -LiteralPath $lf -Encoding UTF8 -ErrorAction SilentlyContinue)
+                for ($i = $seen; $i -lt $lines.Count; $i++) { if ($OnLine) { & $OnLine $lines[$i] } }
+                $seen = $lines.Count
+            }
+            if (Test-Path -LiteralPath $rf) { return (Get-Content -LiteralPath $rf -Raw -Encoding UTF8 | ConvertFrom-Json) }
+            if ($Job -and $Job.Cancel -and -not $cancelSent) { try { New-Item -ItemType File -Path (Join-Path $Handle.Dir 'cancel') -Force | Out-Null } catch { }; $cancelSent = $true }
+            $st = ''; try { $st = "$((Get-ScheduledTask -TaskPath '\' -TaskName $Handle.TaskName -ErrorAction Stop).State)" } catch { }
+            if ($st -and $st -ne 'Running' -and $st -ne 'Queued') {
+                if (-not $doneAt) { $doneAt = Get-Date } elseif (((Get-Date) - $doneAt).TotalSeconds -gt 10) {
+                    $lr = ''; try { $lr = "$((Get-ScheduledTaskInfo -TaskPath '\' -TaskName $Handle.TaskName).LastTaskResult)" } catch { }
+                    return [pscustomobject]@{ Account = $Handle.Account; Items = @(); Results = @(); Errors = @("Aufgabe als $($Handle.Account) ohne Ergebnis beendet (Rueckgabe $lr) - ist der Benutzer angemeldet?") }
                 }
             }
-        } catch { $errors += "Quelle ${src}: $($_.Exception.Message)" }
+            if (((Get-Date) - $t0).TotalSeconds -gt $TimeoutSec) {
+                try { Stop-ScheduledTask -TaskPath '\' -TaskName $Handle.TaskName -ErrorAction SilentlyContinue } catch { }
+                return [pscustomobject]@{ Account = $Handle.Account; Items = @(); Results = @(); Errors = @("Zeitueberschreitung nach $TimeoutSec s (als $($Handle.Account))") }
+            }
+            Start-Sleep -Milliseconds 1500
+        }
+    } finally {
+        try { Unregister-ScheduledTask -TaskPath '\' -TaskName $Handle.TaskName -Confirm:$false -ErrorAction SilentlyContinue } catch { }
+        Remove-Item -LiteralPath $Handle.Dir -Recurse -Force -ErrorAction SilentlyContinue
     }
-    return [pscustomobject]@{ Items = @($items.Values | Sort-Object Name); Errors = $errors }
+}
+function Invoke-HMAuTaskRun([string]$Account, [string]$Sid, $Request, [int]$TimeoutSec, $Job = $null, [scriptblock]$OnLine = $null) {
+    try { $h = Start-HMAuTask $Account $Sid $Request } catch { return [pscustomobject]@{ Account = $Account; Items = @(); Results = @(); Errors = @("$($_.Exception.Message)") } }
+    return (Wait-HMAuTask $h $TimeoutSec $Job $OnLine)
+}
+# Listen zusammenfuehren: was auch SYSTEM sieht = fuer alle Benutzer installiert (Machine), sonst nur fuer den Benutzer (User)
+function Merge-HMAuLists($UserItems, $SysItems, [bool]$SysOk = $true) {
+    $sys = @{}; foreach ($i in @($SysItems | Where-Object { $_ })) { $sys["$($i.Id)"] = $i }
+    $out = @(); $done = @{}
+    foreach ($i in @($UserItems | Where-Object { $_ })) {
+        $sc = if ($sys.ContainsKey("$($i.Id)") -or -not $SysOk) { if ($SysOk) { 'Machine' } else { 'User' } } else { 'User' }
+        $out += [pscustomobject]@{ Id = "$($i.Id)"; Name = "$($i.Name)"; Installed = "$($i.Installed)"; Available = "$($i.Available)"; Source = "$($i.Source)"; Unknown = [bool]$i.Unknown; Scope = $sc }
+        $done["$($i.Id)"] = $true
+    }
+    foreach ($i in @($SysItems | Where-Object { $_ -and -not $done.ContainsKey("$($_.Id)") })) {
+        $out += [pscustomobject]@{ Id = "$($i.Id)"; Name = "$($i.Name)"; Installed = "$($i.Installed)"; Available = "$($i.Available)"; Source = "$($i.Source)"; Unknown = [bool]$i.Unknown; Scope = 'Machine' }
+    }
+    return @($out | Sort-Object Name)
+}
+# Verfuegbare Updates: als SYSTEM (fuer alle Benutzer) und - wenn angemeldet - als Benutzer (auch nur fuer ihn installierte)
+function Get-HMAuUpdates([string[]]$Sources, [bool]$IncludeUnknown, [string]$UserAccount = '', [string]$UserSid = '') {
+    $req = @{ Mode = 'List'; Sources = @($Sources); IncludeUnknown = $IncludeUnknown }
+    $loggedOn = ($UserSid -and (Test-HMAuUserLoggedOn $UserSid))
+    $hs = $null; $hu = $null; $errors = @()
+    try { $hs = Start-HMAuTask 'SYSTEM' '' $req } catch { $errors += "SYSTEM: $($_.Exception.Message)" }
+    if ($loggedOn) { try { $hu = Start-HMAuTask $UserAccount $UserSid $req } catch { $errors += "${UserAccount}: $($_.Exception.Message)" } }
+    $rs = if ($hs) { Wait-HMAuTask $hs 600 } else { $null }
+    $ru = if ($hu) { Wait-HMAuTask $hu 600 } else { $null }
+    foreach ($r in @($rs, $ru)) { if ($r) { $errors += @($r.Errors | Where-Object { $_ }) } }
+    $sysOk = [bool]($rs -and -not @($rs.Errors | Where-Object { $_ -like 'WinGet*' }).Count)
+    $items = Merge-HMAuLists $(if ($ru) { @($ru.Items) } else { @() }) $(if ($rs) { @($rs.Items) } else { @() }) $sysOk
+    return [pscustomobject]@{ Items = @($items); Errors = @($errors); UserRead = [bool]$ru; LoggedOn = [bool]$loggedOn; SysOk = $sysOk }
 }
 
 # Laufende Programme zu Paketen finden: Installationsordner aus der Registry (Deinstallations-Eintraege), Prozesse darin.
@@ -192,51 +270,80 @@ function Get-HMAuRunning($Items) {
 }
 
 # ----------------------------------------------------------------------------
-# Aktualisieren (Start-LongJob): $Ctx.Items = Id, Name, Source, Installed, Available; $Ctx.ProcDecisions/Running
+# Aktualisieren (Start-LongJob): $Ctx.Items = Id, Name, Source, Installed, Available, Unknown, Scope (Machine/User)
+#   $Ctx.UserAccount/UserSid, $Ctx.Running (Get-HMAuRunning), $Ctx.ProcDecisions (Id -> Close/CloseForce/Skip/Run)
+#   Machine -> als SYSTEM, User -> als angemeldeter Benutzer
 # ----------------------------------------------------------------------------
 function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
     $items = @($Ctx.Items)
-    $Job.Status = 'WinGet laden'
-    Import-Module $script:HMAuModule -ErrorAction Stop
     Write-HMLog $Job "App-Updates: $($items.Count) Programm(e) an $env:COMPUTERNAME" 'Header'
     $res = @()
-    $i = 0
-    $pc = @{ Computer = $env:COMPUTERNAME; IsRemote = $false; Credential = $null; Account = "$($Ctx.Account)" }
+    $pc = @{ Computer = $env:COMPUTERNAME; IsRemote = $false; Credential = $null; Account = "$($Ctx.UserAccount)" }
+    $new = { param($it) [ordered]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Computer = $env:COMPUTERNAME; Id = "$($it.Id)"; Name = "$($it.Name)"; From = "$($it.Installed)"; To = "$($it.Available)"; Source = "$($it.Source)"; Scope = "$($it.Scope)"; Status = ''; Text = ''; Reboot = $false } }
+    # 1. laufende Programme
+    $todo = @()
     foreach ($it in $items) {
-        if (Test-HMCancel $Job) { break }
-        $i++
-        $Job.Status = "$i/$($items.Count): $($it.Name)"
-        $Job.Progress = [int](($i - 1) * 100 / [Math]::Max(1, $items.Count))
-        $entry = [ordered]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Computer = $env:COMPUTERNAME; Id = "$($it.Id)"; Name = "$($it.Name)"; From = "$($it.Installed)"; To = "$($it.Available)"; Source = "$($it.Source)"; Status = ''; Text = ''; Reboot = $false }
-        # laufende Programme
         $dec = if ($Ctx.ProcDecisions) { "$($Ctx.ProcDecisions["$($it.Id)"])" } else { '' }
         $run = @(@($Ctx.Running) | Where-Object { "$($_.Id)" -eq "$($it.Id)" })[0]
         if ($run -and $dec -eq 'Skip') {
-            $entry.Status = 'Skipped'; $entry.Text = "uebersprungen - laeuft ($($run.Running))"
-            Write-HMLog $Job "  $($it.Name): $($entry.Text)" 'Warning'; $res += [pscustomobject]$entry; continue
+            $e = & $new $it; $e.Status = 'Skipped'; $e.Text = "uebersprungen - laeuft ($($run.Running))"
+            Write-HMLog $Job "  $($it.Name): $($e.Text)" 'Warning'; $res += [pscustomobject]$e; continue
         }
         if ($run -and $dec -match '^Close') {
             Write-HMLog $Job "  $($it.Name): Programm schliessen ($($run.Running)) ..." 'Info'
             $left = @(Close-HMProcs $pc $Job @($run.Procs) ($dec -eq 'CloseForce') 20)
             if ($left.Count) {
-                $entry.Status = 'Skipped'; $entry.Text = 'uebersprungen - Programm liess sich nicht schliessen'
-                Write-HMLog $Job "  $($it.Name): $($entry.Text)" 'Warning'; $res += [pscustomobject]$entry; continue
+                $e = & $new $it; $e.Status = 'Skipped'; $e.Text = 'uebersprungen - Programm liess sich nicht schliessen'
+                Write-HMLog $Job "  $($it.Name): $($e.Text)" 'Warning'; $res += [pscustomobject]$e; continue
             }
         }
-        Write-HMLog $Job "  $($it.Name) ($($it.Id)): $($it.Installed) -> $($it.Available) ..." 'Info'
-        try {
-            $up = @{ Id = "$($it.Id)"; Source = "$($it.Source)"; MatchOption = 'Equals'; Mode = 'Silent'; ErrorAction = 'Stop' }
-            if ($it.Unknown) { $up.IncludeUnknown = $true }
-            $r = Update-WinGetPackage @up
-            $st = "$($r.Status)"
-            $entry.Reboot = [bool]$r.RebootRequired
-            $entry.Status = $(if ($st -eq 'Ok') { 'OK' } else { 'Error' })
-            $entry.Text = Format-HMAuResult $st $r.InstallerErrorCode $r.ExtendedErrorCode ([bool]$r.RebootRequired)
-        } catch {
-            $entry.Status = 'Error'; $entry.Text = "$($_.Exception.Message)"
+        $todo += $it
+    }
+    # 2. je Bereich eine Aufgabe (zuerst fuer alle Benutzer als SYSTEM, dann Benutzer) - nacheinander, Installer stoeren sich sonst
+    $groups = @(
+        @{ Scope = 'Machine'; Account = 'SYSTEM'; Sid = ''; Label = 'fuer alle Benutzer (als SYSTEM)' },
+        @{ Scope = 'User'; Account = "$($Ctx.UserAccount)"; Sid = "$($Ctx.UserSid)"; Label = "nur fuer $($Ctx.UserAccount) (als dieser Benutzer)" })
+    $done = 0; $total = [Math]::Max(1, $todo.Count)
+    foreach ($g in $groups) {
+        $list = @($todo | Where-Object { "$($_.Scope)" -eq $g.Scope })
+        if (-not $list.Count) { continue }
+        if (Test-HMCancel $Job) { break }
+        if ($g.Scope -eq 'User' -and -not $g.Account) {
+            foreach ($it in $list) { $e = & $new $it; $e.Status = 'Error'; $e.Text = 'kein angemeldeter Benutzer gewaehlt'; $res += [pscustomobject]$e }
+            continue
         }
-        Write-HMLog $Job "  $($it.Name): $($entry.Text)" $(if ($entry.Status -eq 'OK') { 'Success' } else { 'Error' })
-        $res += [pscustomobject]$entry
+        Write-HMLog $Job "$($list.Count) Programm(e) $($g.Label) ..." 'Info'
+        $names = @{}; foreach ($it in $list) { $names["$($it.Id)"] = $it }
+        $state = @{ Job = $Job; Names = $names; Done = $done; Total = $total }
+        $req = @{ Mode = 'Update'; Items = @($list | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) }
+        $onLine = {
+            param($ln)
+            $p = "$ln".Split('|')
+            if ($p[0] -eq 'START' -and $state.Names.ContainsKey($p[1])) {
+                $x = $state.Names[$p[1]]
+                $state.Job.Status = "$($state.Done + 1)/$($state.Total): $($x.Name)"
+                $state.Job.Progress = [int]($state.Done * 100 / $state.Total)
+                Write-HMLog $state.Job "  $($x.Name) ($($x.Id)): $($x.Installed) -> $($x.Available) ..." 'Info'
+            } elseif ($p[0] -eq 'DONE') { $state.Done++ }
+        }   # ohne GetNewClosure: $state wird ueber die Aufrufkette gefunden (Wait-HMAuTask ruft den Block auf)
+        $r = Invoke-HMAuTaskRun $g.Account $g.Sid $req 10800 $Job $onLine
+        $done = $state.Done
+        foreach ($er in @($r.Errors | Where-Object { $_ })) { Write-HMLog $Job "  $er" 'Error' }
+        foreach ($it in $list) {
+            $e = & $new $it
+            $x = @(@($r.Results) | Where-Object { "$($_.Id)" -eq "$($it.Id)" })[0]
+            if (-not $x) {
+                $e.Status = $(if (Test-HMCancel $Job) { 'Skipped' } else { 'Error' })
+                $e.Text = $(if (Test-HMCancel $Job) { 'abgebrochen' } elseif (@($r.Errors).Count) { "nicht ausgefuehrt: $(@($r.Errors)[0])" } else { 'kein Ergebnis' })
+            } elseif ("$($x.Status)" -eq 'Exception') { $e.Status = 'Error'; $e.Text = "$($x.Text)" }
+            else {
+                $e.Status = $(if ("$($x.Status)" -eq 'Ok') { 'OK' } else { 'Error' })
+                $e.Reboot = [bool]$x.Reboot
+                $e.Text = Format-HMAuResult "$($x.Status)" $x.InstallerErrorCode $x.ExtendedErrorCode ([bool]$x.Reboot)
+            }
+            Write-HMLog $Job "  $($it.Name): $($e.Text)" $(if ($e.Status -eq 'OK') { 'Success' } elseif ($e.Status -eq 'Skipped') { 'Warning' } else { 'Error' })
+            $res += [pscustomobject]$e
+        }
     }
     $Job.Progress = 100
     $ok = @($res | Where-Object { $_.Status -eq 'OK' }).Count

@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.59 - 2026-10-02
+### Behoben
+- App-Updates: Suche brach mit *Failed to create instance: -2147023174* ab, wenn HUMig unter einem anderen Administratorkonto lief als der angemeldete Benutzer (WinGet ist pro Benutzer registriert)
+### Geaendert
+- App-Updates lesen und aktualisieren jetzt ueber einmalige geplante Aufgaben: als **SYSTEM** (Programme fuer alle Benutzer, ohne UAC) und im Konto des **oben gewaehlten, angemeldeten Benutzers** (auch nur fuer ihn installierte Programme) - neue Spalte *Bereich*
+
 ## v2.0.58 - 2026-10-02
 ### Neu
 - **Reiter App-Updates (WinGet)**: installierte Programme dieses PCs aktualisieren - Liste mit Haken (installiert/neu/Quelle/Paket-ID), *Angehakte* bzw. *Alle aktualisieren* (still, nacheinander), laufende Programme werden vorher erkannt (schliessen / notfalls beenden / nicht aktualisieren), Ergebnis je Programm mit Fehlertext und Neustart-Hinweis, Verlauf
