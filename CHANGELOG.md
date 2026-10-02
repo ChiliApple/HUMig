@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.61 - 2026-10-02
+### Geaendert
+- App-Updates: das WinGet-Modul laeuft als SYSTEM nur unter PowerShell 7 (*This cmdlet is not supported in Windows PowerShell*) - die Liste wird deshalb nur noch im Konto des angemeldeten Benutzers gelesen (sieht alle Programme), der *Bereich* kommt aus dem Deinstallations-Eintrag (Computer/Benutzer); Programme fuer alle Benutzer werden als SYSTEM ueber winget.exe aktualisiert (Ergebnis-Codes im Klartext)
+
 ## v2.0.60 - 2026-10-02
 ### Behoben
 - App-Updates: Lesen als SYSTEM schlug fehl, wenn das Modul Microsoft.WinGet.Client nur fuer einzelne Benutzer installiert war - HUMig prueft das jetzt und bietet *WinGet einrichten* an (installiert es fuer alle Benutzer)

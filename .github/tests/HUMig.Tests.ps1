@@ -178,23 +178,21 @@ Describe 'App-Updates (WinGet)' {
         Format-HMAuResult 'Ok' 0 0 $true | Should -Match 'Neustart'
         Format-HMAuResult 'InstallError' 1603 0 $false | Should -Match '1603.*Programm laeuft'
     }
-    It 'Listen zusammenfuehren: SYSTEM = fuer alle Benutzer, sonst nur Benutzer' {
-        $u = @([pscustomobject]@{ Id = 'A.A'; Name = 'Alpha'; Installed = '1'; Available = '2'; Source = 'winget' }, [pscustomobject]@{ Id = 'Z.Z'; Name = 'Zoom'; Installed = '7'; Available = '8'; Source = 'winget' })
-        $s = @([pscustomobject]@{ Id = 'A.A'; Name = 'Alpha'; Installed = '1'; Available = '2'; Source = 'winget' }, [pscustomobject]@{ Id = 'S.S'; Name = 'Service'; Installed = '1'; Available = '3'; Source = 'winget' })
-        $m = @(Merge-HMAuLists $u $s $true)
-        $m.Count | Should -Be 3
-        ($m | Where-Object Id -eq 'A.A').Scope | Should -Be 'Machine'
-        ($m | Where-Object Id -eq 'Z.Z').Scope | Should -Be 'User'
-        ($m | Where-Object Id -eq 'S.S').Scope | Should -Be 'Machine'
-        @(Merge-HMAuLists $u @() $false | Where-Object Scope -eq 'User').Count | Should -Be 2
-        @(Merge-HMAuLists @() $s $true).Count | Should -Be 2
+    It 'winget.exe-Code (als SYSTEM) lesbar' {
+        (Format-HMAuCliResult 0 '').Ok | Should -BeTrue
+        $r = Format-HMAuCliResult -1978335189 ''
+        $r.Ok | Should -BeFalse; $r.Text | Should -Match '0x8A15002B'
+        $r = Format-HMAuCliResult -1978334967 ''
+        $r.Ok | Should -BeTrue; $r.Reboot | Should -BeTrue
+        (Format-HMAuCliResult 5 'Zugriff verweigert').Text | Should -Match 'Zugriff verweigert'
     }
     It 'Aktualisieren: SYSTEM fuer alle Benutzer, Benutzer-Aufgabe fuer eigene, Uebersprungen bei laufendem Programm' {
         $global:AuCalls = @()
         Mock Invoke-HMAuTaskRun {
             $global:AuCalls += $Account
+            if ($Account -eq 'SYSTEM') { $global:AuCli = [bool]$Request.Cli }
             $res = @(foreach ($i in @($Request.Items)) {
-                    if ($i.Id -eq 'A.A') { [pscustomobject]@{ Id = 'A.A'; Status = 'Ok'; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $true } }
+                    if ($i.Id -eq 'A.A') { [pscustomobject]@{ Id = 'A.A'; Status = 'Cli'; Code = -1978334967; Text = '' } }
                     elseif ($i.Id -eq 'B.B') { [pscustomobject]@{ Id = 'B.B'; Status = 'InstallError'; InstallerErrorCode = 1603; ExtendedErrorCode = 0; Reboot = $false } }
                 })
             [pscustomobject]@{ Account = $Account; Items = @(); Results = $res; Errors = @() }
@@ -208,6 +206,7 @@ Describe 'App-Updates (WinGet)' {
         }
         Start-HMAppUpdate -Ctx $ctx -Job $job
         $global:AuCalls -join ',' | Should -Be 'SYSTEM,PC\lehrer'
+        $global:AuCli | Should -BeTrue
         $it = @($job.Result.Items)
         $it.Count | Should -Be 3
         ($it | Where-Object Id -eq 'A.A').Status | Should -Be 'OK'

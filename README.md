@@ -257,7 +257,7 @@ auf der Platte braucht jede weitere Version nur die Aenderungen (zweite Version 
 
 Reiter **App-Updates** (HUMig als Administrator): installierte Programme dieses PCs ueber WinGet aktualisieren.
 - **WinGet einrichten**: offizielles Modul `Microsoft.WinGet.Client` aus der PowerShell Gallery (alle Benutzer) + WinGet fuer das Konto registrieren/reparieren
-- Gelesen wird als **SYSTEM** (Programme fuer alle Benutzer) und im Konto des **gewaehlten, angemeldeten Benutzers** (auch nur fuer ihn installierte) - jeweils ueber eine einmalige geplante Aufgabe; aktualisiert wird ebenso (alle Benutzer als SYSTEM ohne UAC, eigene Programme im Benutzerkonto)
+- Gelesen wird im Konto des **gewaehlten, angemeldeten Benutzers** (einmalige geplante Aufgabe - sieht Programme fuer alle Benutzer und nur fuer ihn installierte); Bereich aus dem Deinstallations-Eintrag; aktualisiert wird fuer alle Benutzer als **SYSTEM** (winget.exe, ohne UAC), eigene Programme im Benutzerkonto
 - **Updates suchen** -> Liste mit Haken (installiert, neu, Bereich, Quelle, Paket-ID) -> **Angehakte** bzw. **Alle aktualisieren** (still, nacheinander); laufende Programme werden vorher erkannt (schliessen / notfalls beenden / nicht aktualisieren)
 - **Ausnahmen** je Standort (Muster auf Paket-ID oder Name, mit Grund) - werden nie aktualisiert; vorbelegt: selbstaktualisierende Programme (Edge, Chrome, Teams, Office, OneDrive) und Pruefungssoftware (Next-Exam, Safe Exam Browser)
 - **Quellen** je Standort (Standard nur *winget*), eigene Quelle hinzufuegen/entfernen; **Verlauf** aller Updates
