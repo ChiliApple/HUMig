@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.57 - 2026-10-02
+### Neu
+- Zeitplan (normales Backup): **USB-Laufwerk nach der Sicherung auswerfen** - Schutz vor Verschluesselungstrojanern; auch ohne Administratorrechte, auch nach einem Fehler; nur bei USB-/Wechsellaufwerk als Ziel (nicht Systemplatte, nicht Netzwerkpfad). Klappt es nicht, endet der Lauf mit Warnung und Grund. Verwaltung: neue Spalte *Danach*
+
 ## v2.0.56 - 2026-10-01
 ### Behoben
 - *Release signieren*: Konsole zeigt je Release eine eigene Zeile (statt einer Sammelzeile)

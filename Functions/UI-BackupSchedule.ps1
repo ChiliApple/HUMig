@@ -68,7 +68,7 @@ function Format-HMBsWhen($d) {
 # ----------------------------------------------------------------------------
 # Dialog
 # ----------------------------------------------------------------------------
-function Show-HMBsDialog([string]$Info, [string]$DefaultName) {
+function Show-HMBsDialog([string]$Info, [string]$DefaultName, [string]$EjectInfo = '') {
     $x = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Backup planen" Width="600" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#FF1E1E2E">
@@ -102,6 +102,9 @@ function Show-HMBsDialog([string]$Info, [string]$DefaultName) {
     </StackPanel>
     <TextBlock Foreground="#FF6C7086" TextWrapping="Wrap" Margin="22,0,0,4" FontSize="11" Text="Gilt fuer alle Backups dieses Benutzers von diesem PC im Backup-Ordner (auch von Hand erstellte). Geloescht wird nur nach einem erfolgreichen Lauf und endgueltig."/>
     <CheckBox x:Name="chkNotify" IsChecked="True" Content="Nach jedem Lauf Meldung anzeigen (aus = nur bei Warnung/Fehler/uebersprungen)" Foreground="#FFCDD6F4" Margin="0,2,0,10"/>
+    <TextBlock Text="NACH DER SICHERUNG" Foreground="#FF89B4FA" FontWeight="SemiBold" Margin="0,0,0,2"/>
+    <CheckBox x:Name="chkEject" Content="USB-Laufwerk auswerfen (Schutz vor Verschluesselungstrojanern)" Foreground="#FFCDD6F4" Margin="0,2"/>
+    <TextBlock x:Name="ejectNote" Foreground="#FF6C7086" TextWrapping="Wrap" Margin="22,0,0,10" FontSize="11"/>
     <TextBlock x:Name="note" Foreground="#FF6C7086" TextWrapping="Wrap" Margin="0,0,0,12" FontSize="11"/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
       <Button x:Name="ok" Content="Planen" Width="110" Height="28" Background="#FFA6E3A1" Foreground="#FF1E1E2E" FontWeight="SemiBold" Margin="0,0,6,0" IsDefault="True"/>
@@ -117,7 +120,9 @@ function Show-HMBsDialog([string]$Info, [string]$DefaultName) {
     $txtName = $w.FindName('txtName'); $txtName.Text = $DefaultName
     $txtTime = $w.FindName('txtTime'); $txtDelay = $w.FindName('txtDelay'); $txtKeep = $w.FindName('txtKeep')
     $rbUpdate = $w.FindName('rbUpdate'); $rbDaily = $w.FindName('rbDaily'); $rbWeekly = $w.FindName('rbWeekly'); $rbLogon = $w.FindName('rbLogon')
-    $chkRet = $w.FindName('chkRet'); $chkNotify = $w.FindName('chkNotify')
+    $chkRet = $w.FindName('chkRet'); $chkNotify = $w.FindName('chkNotify'); $chkEject = $w.FindName('chkEject')
+    if ($EjectInfo) { $chkEject.IsEnabled = $false; $w.FindName('ejectNote').Text = $EjectInfo }
+    else { $w.FindName('ejectNote').Text = 'Nach jedem Lauf (auch nach Fehlern) wird das Laufwerk ausgeworfen - ein Schaedling auf dem PC kommt dann nicht mehr an die Backups. Vor dem naechsten Lauf das Laufwerk wieder anstecken (sonst wird der Lauf uebersprungen und gemeldet).' }
     $days = @(@('Monday', 'Mo'), @('Tuesday', 'Di'), @('Wednesday', 'Mi'), @('Thursday', 'Do'), @('Friday', 'Fr'), @('Saturday', 'Sa'), @('Sunday', 'So'))
     $pnl = $w.FindName('pnlDays')
     foreach ($d in $days) { $cb = New-Object System.Windows.Controls.CheckBox; $cb.Content = $d[1]; $cb.Tag = $d[0]; $cb.Foreground = New-Brush '#FFCDD6F4'; $cb.Margin = [System.Windows.Thickness]::new(0, 0, 10, 0); [void]$pnl.Children.Add($cb) }
@@ -143,7 +148,7 @@ function Show-HMBsDialog([string]$Info, [string]$DefaultName) {
             [void][System.Windows.MessageBox]::Show($w, 'Anzahl der Backups, die bleiben sollen: 1-999.', 'Zeitplan', 'OK', 'Warning'); return
         }
         $res.V = @{ Name = $name; Kind = $(if ($rbUpdate.IsChecked) { 'Update' } else { 'New' }); Mode = $mode; Time = $(if ($mode -ne 'Logon') { $t.ToString('HH:mm') } else { '' })
-            Days = $sel; Delay = $delay; RetEnabled = [bool]$chkRet.IsChecked; Keep = $(if ($chkRet.IsChecked) { $keep } else { 3 }); NotifyAlways = [bool]$chkNotify.IsChecked }
+            Days = $sel; Delay = $delay; RetEnabled = [bool]$chkRet.IsChecked; Keep = $(if ($chkRet.IsChecked) { $keep } else { 3 }); NotifyAlways = [bool]$chkNotify.IsChecked; EjectAfter = ([bool]$chkEject.IsChecked -and [bool]$chkEject.IsEnabled) }
         $w.DialogResult = $true
     }.GetNewClosure())
     $w.Owner = $script:Window; Set-HMWindowScale $w
@@ -189,7 +194,14 @@ function New-HMBackupSchedule {
     $info = "Benutzer: $($me.Name) an $env:COMPUTERNAME$(if (-not $elev) { '  (ohne Administratorrechte: nur eigenes Profil)' })`nModule ($($mods.Count)): $(@($mods | ForEach-Object { $_.Name }) -join ', ')$(if (@($opt.ExtraFolders).Count) { "`nZusaetzliche Ordner: $(@($opt.ExtraFolders) -join '; ')" })`nZiel: $($tg.Display)`n`nEs gelten die aktuelle Modulauswahl, Ausnahmen und Optionen (Pruefen, Katalog, OneDrive ...)."
     $n = 1; $defName = 'Backup'
     while (@($defs | Where-Object { "$($_.Name)" -eq $defName }).Count) { $n++; $defName = "Backup $n" }
-    $r = Show-HMBsDialog $info $defName
+    # Auswerfen nur bei USB-/Wechsellaufwerk (nicht Systemplatte, nicht Netzlaufwerk)
+    $ejInfo = ''
+    if ($tg.Type -ne 'Drive') { $ejInfo = 'Nur bei einem USB-Laufwerk als Ziel moeglich (Ziel ist ein Netzwerkpfad - dort schuetzen Schattenkopien/Rechte am Server).' }
+    else {
+        try { $dk = Get-HMDriveDisk $tg.Letter; if ($dk.System) { $ejInfo = 'Ziel liegt auf der Systemplatte - Auswerfen nicht moeglich.' } elseif (-not $dk.External) { $ejInfo = "Ziel ist keine USB-/Wechselplatte ($($dk.Interface), $($dk.MediaType)) - Auswerfen nicht moeglich." } }
+        catch { $ejInfo = "Datentraeger des Ziels nicht ermittelbar ($($_.Exception.Message)) - Auswerfen nicht moeglich." }
+    }
+    $r = Show-HMBsDialog $info $defName $ejInfo
     if (-not $r) { return }
     if (@($defs | Where-Object { "$($_.Name)" -eq $r.Name }).Count) { Out-Console "Zeitplan '$($r.Name)' gibt es schon - bitte anderen Namen waehlen oder den alten loeschen (Rechtsklick auf Zeitplan)." 'Warning'; return }
 
@@ -211,6 +223,7 @@ function New-HMBackupSchedule {
         Target = $tg
         Retention = [ordered]@{ Enabled = [bool]$r.RetEnabled; Keep = [int]$r.Keep }
         NotifyAlways = [bool]$r.NotifyAlways
+        EjectAfter = [bool]$r.EjectAfter
         TaskName = $taskName; TaskPath = ''
         LastRun = ''; LastStatus = ''; LastMessage = ''; LastBackup = ''; LastLog = ''
     }
@@ -253,7 +266,7 @@ function New-HMBackupSchedule {
     }
     $def.TaskPath = $used
     try { [pscustomobject]$def | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $defFile -Encoding UTF8 -Force } catch { }
-    Out-Console "Geplant: '$($r.Name)' - $(Format-HMBsWhen ([pscustomobject]@{ Trigger = [pscustomobject]$def.Trigger })), $(if ($r.Kind -eq 'Update') { 'fortlaufend' } else { 'neues Backup' }) -> $($tg.Display)$(if ($r.RetEnabled) { ", neueste $($r.Keep) bleiben" })" 'Success'
+    Out-Console "Geplant: '$($r.Name)' - $(Format-HMBsWhen ([pscustomobject]@{ Trigger = [pscustomobject]$def.Trigger })), $(if ($r.Kind -eq 'Update') { 'fortlaufend' } else { 'neues Backup' }) -> $($tg.Display)$(if ($r.RetEnabled) { ", neueste $($r.Keep) bleiben" })$(if ($r.EjectAfter) { ', danach auswerfen' })" 'Success'
     Out-Console "   Aufgabenplanung: $used$taskName   (Konto $($me.Name)$(if ($elev) { ', mit Administratorrechten' } else { ', Benutzer-Modus' }))   Verwalten: Rechtsklick auf 'Zeitplan ...'" 'Info'
     Update-HMBsLabel
 }
@@ -294,6 +307,7 @@ function Get-HMBsRows {
         $rows += [pscustomobject]@{
             Name = "$($d.Name)"; Art = $(if ($d.Kind -eq 'Update') { 'fortlaufend' } else { 'neu' }); Wann = (Format-HMBsWhen $d); Was = ($what -join ' | '); Ziel = $tgt
             Aufbewahrung = $(if ($d.Retention -and $d.Retention.Enabled) { "neueste $($d.Retention.Keep)" } else { 'aus' })
+            Danach = $(if ($d.EjectAfter) { 'auswerfen' } else { '' })
             Zustand = $state; Next = $next; Last = "$($d.LastRun)"; Result = $res; Msg = "$($d.LastMessage)"; Def = $d; Task = $t
         }
     }
@@ -313,9 +327,9 @@ function Show-HMBackupSchedules {
     $rows = @($rows)
     if (-not $rows.Count) { Out-Console "Keine geplanten Backups fuer $([Security.Principal.WindowsIdentity]::GetCurrent().Name). Anlegen: Links-Klick auf 'Zeitplan ...'." 'Info'; return }
     $list = New-Object System.Collections.Generic.List[object]
-    foreach ($r in $rows) { $list.Add(@($r.Name, $r.Art, $r.Wann, $r.Was, $r.Ziel, $r.Aufbewahrung, $r.Zustand, $r.Next, $r.Last, $r.Result, $r.Msg, "$($r.Def.Id)")) }
+    foreach ($r in $rows) { $list.Add(@($r.Name, $r.Art, $r.Wann, $r.Was, $r.Ziel, $r.Aufbewahrung, $r.Danach, $r.Zustand, $r.Next, $r.Last, $r.Result, $r.Msg, "$($r.Def.Id)")) }
     Show-DataGridWindow -Title "Geplante Backups - $([Security.Principal.WindowsIdentity]::GetCurrent().Name)" -Width 1500 -Height 420 `
-        -Columns @('Name', 'Art', 'Wann', 'Was', 'Ziel', 'Aufbewahrung', 'Zustand', 'Naechster_Lauf', 'Letzter_Lauf', 'Ergebnis', 'Meldung', 'Id') -Rows $list.ToArray() `
+        -Columns @('Name', 'Art', 'Wann', 'Was', 'Ziel', 'Aufbewahrung', 'Danach', 'Zustand', 'Naechster_Lauf', 'Letzter_Lauf', 'Ergebnis', 'Meldung', 'Id') -Rows $list.ToArray() `
         -CountText 'Protokolle: %LOCALAPPDATA%\HUMig\Zeitplaene\Logs - Bericht des Backups: Bericht_Backup.html im Backup-Ordner' `
         -Actions @(
             @{ Text = 'Jetzt starten'; Color = '#FFA6E3A1'; Handler = { param($sel, $w, $c)

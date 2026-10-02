@@ -252,6 +252,13 @@ T 'Treiberverteilung: INF lesen (v2.0.30)' {
     $d = @(Get-HUDrvState $m | Where-Object { $_.Match })
     "$($inf.Name): $($i.Class) $($i.Version), $(@($i.HwIds).Count) IDs, $($d.Count) passende Geraete"
 }
+T 'Zeitplan: Auswerfen lehnt Systemplatte ab (v2.0.57)' {
+    $d = Get-HMDriveDisk $env:SystemDrive
+    if (-not $d.System) { throw "Systemplatte nicht erkannt ($($d.Letters -join ', '))" }
+    $r = Invoke-HMDriveEject $env:SystemDrive
+    if ("$r" -notmatch 'Systemplatte') { throw "Systemplatte nicht abgelehnt: $r" }
+    "$($d.Model) ($($d.Interface)) - abgelehnt"
+}
 T 'Server-Backup: Archiv-Platten erkennen (v2.0.47)' {
     . (Join-Path $root 'Functions\ServerBackup-Engine.ps1')
     $ok = (Test-HMSbArchiveLabel 'HUMIG-GYM-A1' 'HUMIG-GYM') -and (Test-HMSbArchiveLabel 'humig-gym-a12' 'HUMIG-GYM') -and -not (Test-HMSbArchiveLabel 'HUMIG-GYM-1' 'HUMIG-GYM') -and -not (Test-HMSbArchiveLabel 'HUMIG-GYMA-1' 'HUMIG-GYM') -and (Test-HMSbArchiveLabel 'X-A2' '')

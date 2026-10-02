@@ -6,7 +6,7 @@
     Liest die Zeitplan-Definition %LOCALAPPDATA%\HUMig\Zeitplaene\<Id>.json (angelegt in HUMig > Backup > Zeitplan),
     sucht das Backup-Ziel (USB-Laufwerk ueber seine Bezeichnung, Netzwerkpfad als UNC), sichert das eigene Profil
     mit der Backup-Engine (fortlaufend = vorhandenes Backup aktualisieren, oder neues Backup), loescht auf Wunsch alte
-    Backups (neueste N je PC + Benutzer bleiben) und zeigt eine Windows-Meldung.
+    Backups (neueste N je PC + Benutzer bleiben), wirft auf Wunsch das USB-Laufwerk aus und zeigt eine Windows-Meldung.
     Protokoll: %LOCALAPPDATA%\HUMig\Zeitplaene\Logs\*.log, dazu HUMig.log + Bericht_Backup.html im Backup-Ordner.
 .NOTES
     Zielmaschine: der PC des Benutzers (Aufruf durch die Aufgabenplanung, im Konto des Benutzers, nur wenn angemeldet).
@@ -298,6 +298,23 @@ if ($ret -and [bool]$ret.Enabled -and $st -in @('OK', 'Warning')) {
         Write-TaskLog "Aufbewahrung: neueste $keep behalten, $del geloescht" 'Info'
         if ($del) { $msg += " - $del alte(s) Backup(s) geloescht" }
     } catch { Write-TaskLog "Aufbewahrung fehlgeschlagen: $($_.Exception.Message)" 'Warning' }
+}
+
+# ---- Auswerfen (USB-Laufwerk, Schutz vor Verschluesselungstrojanern) - auch nach einem Fehler ----
+if ([bool]$script:Def.EjectAfter -and "$($t.Type)" -eq 'Drive') {
+    $ejL = $targetRoot.Substring(0, 1).ToUpper()
+    try { Set-Location -LiteralPath $env:SystemRoot } catch { }
+    [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+    $ejR = ''
+    try { $ejR = Invoke-HMDriveEject $ejL } catch { $ejR = $_.Exception.Message }
+    if ($ejR) {
+        Write-TaskLog "Laufwerk ${ejL}: nicht ausgeworfen - $ejR" 'Warning'
+        $msg += " - Auswerfen nicht moeglich: $ejR"
+        if ($st -eq 'OK') { $st = 'Warning' }
+    } else {
+        Write-TaskLog "Laufwerk ${ejL}: ausgeworfen - kann abgezogen werden; vor dem naechsten Lauf wieder anstecken" 'Success'
+        $msg += ' - Laufwerk ausgeworfen'
+    }
 }
 
 switch ($st) {
