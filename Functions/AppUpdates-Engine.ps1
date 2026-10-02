@@ -49,6 +49,29 @@ function Format-HMAuResult([string]$Status, $InstallerCode, $ExtendedCode, [bool
     if ($Reboot) { $t += ' - Neustart noetig' }
     return $t
 }
+# Ausgabe-Code von winget.exe (als SYSTEM) -> Status/Text. Rueckgabe: @{ Ok; Reboot; Text }
+function Format-HMAuCliResult([int64]$Code, [string]$Out) {
+    if ($Code -eq 0) { return @{ Ok = $true; Reboot = $false; Text = 'aktualisiert' } }
+    $u = if ($Code -lt 0) { [uint32]($Code + 4294967296) } else { [uint32]$Code }   # negativer Exitcode = HRESULT
+    $hex = '0x{0:X8}' -f $u
+    $t = switch ($hex) {
+        '0x8A150109' { return @{ Ok = $true; Reboot = $true; Text = 'aktualisiert - Neustart noetig' } }
+        '0x8A15002B' { 'kein passendes Update (schon aktuell oder andere Variante installiert)' }
+        '0x8A15004F' { 'neue Version ist nicht neuer als die installierte' }
+        '0x8A150014' { 'kein installiertes Paket gefunden (nur fuer einen Benutzer installiert?)' }
+        '0x8A15010A' { 'Neustart noetig, dann erneut versuchen' }
+        '0x8A150101' { 'Programm laeuft noch - schliessen und erneut versuchen' }
+        '0x8A150102' { 'andere Installation laeuft gerade' }
+        '0x8A150104' { 'Abhaengigkeit fehlt' }
+        '0x8A150106' { 'zu wenig Speicher' }
+        '0x8A150008' { 'Download fehlgeschlagen (Netz/Proxy oder Hersteller blockiert WinGet)' }
+        '0x8A15003A' { 'durch Gruppenrichtlinie blockiert' }
+        '0x8A150019' { 'braucht Administratorrechte' }
+        '0x8A150115' { 'Installer meldet Fehler' }
+        default { 'Fehler' }
+    }
+    return @{ Ok = $false; Reboot = $false; Text = "$t ($hex)$(if ("$Out".Trim() -and $t -eq 'Fehler') { ": $Out" })" }
+}
 # Windows-Version fuer WinGet: Win10 1809+ / Win11 (Client), Windows Server 2025
 function Test-HMAuOsSupported {
     $b = [Environment]::OSVersion.Version.Build
@@ -211,34 +234,16 @@ function Invoke-HMAuTaskRun([string]$Account, [string]$Sid, $Request, [int]$Time
     try { $h = Start-HMAuTask $Account $Sid $Request } catch { return [pscustomobject]@{ Account = $Account; Items = @(); Results = @(); Errors = @("$($_.Exception.Message)") } }
     return (Wait-HMAuTask $h $TimeoutSec $Job $OnLine)
 }
-# Listen zusammenfuehren: was auch SYSTEM sieht = fuer alle Benutzer installiert (Machine), sonst nur fuer den Benutzer (User)
-function Merge-HMAuLists($UserItems, $SysItems, [bool]$SysOk = $true) {
-    $sys = @{}; foreach ($i in @($SysItems | Where-Object { $_ })) { $sys["$($i.Id)"] = $i }
-    $out = @(); $done = @{}
-    foreach ($i in @($UserItems | Where-Object { $_ })) {
-        $sc = if ($sys.ContainsKey("$($i.Id)") -or -not $SysOk) { if ($SysOk) { 'Machine' } else { 'User' } } else { 'User' }
-        $out += [pscustomobject]@{ Id = "$($i.Id)"; Name = "$($i.Name)"; Installed = "$($i.Installed)"; Available = "$($i.Available)"; Source = "$($i.Source)"; Unknown = [bool]$i.Unknown; Scope = $sc }
-        $done["$($i.Id)"] = $true
-    }
-    foreach ($i in @($SysItems | Where-Object { $_ -and -not $done.ContainsKey("$($_.Id)") })) {
-        $out += [pscustomobject]@{ Id = "$($i.Id)"; Name = "$($i.Name)"; Installed = "$($i.Installed)"; Available = "$($i.Available)"; Source = "$($i.Source)"; Unknown = [bool]$i.Unknown; Scope = 'Machine' }
-    }
-    return @($out | Sort-Object Name)
-}
-# Verfuegbare Updates: als SYSTEM (fuer alle Benutzer) und - wenn angemeldet - als Benutzer (auch nur fuer ihn installierte)
+# Verfuegbare Updates: im Konto des angemeldeten Benutzers (WinGet-Modul; sieht Programme fuer alle Benutzer UND nur fuer ihn installierte).
+# Bereich je Programm aus der Registry (HKLM = alle Benutzer, HKCU = nur er). Als SYSTEM laeuft das Modul unter Windows PowerShell nicht.
 function Get-HMAuUpdates([string[]]$Sources, [bool]$IncludeUnknown, [string]$UserAccount = '', [string]$UserSid = '') {
-    $req = @{ Mode = 'List'; Sources = @($Sources); IncludeUnknown = $IncludeUnknown }
-    $loggedOn = ($UserSid -and (Test-HMAuUserLoggedOn $UserSid))
-    $hs = $null; $hu = $null; $errors = @()
-    try { $hs = Start-HMAuTask 'SYSTEM' '' $req } catch { $errors += "SYSTEM: $($_.Exception.Message)" }
-    if ($loggedOn) { try { $hu = Start-HMAuTask $UserAccount $UserSid $req } catch { $errors += "${UserAccount}: $($_.Exception.Message)" } }
-    $rs = if ($hs) { Wait-HMAuTask $hs 600 } else { $null }
-    $ru = if ($hu) { Wait-HMAuTask $hu 600 } else { $null }
-    foreach ($r in @($rs, $ru)) { if ($r) { $errors += @($r.Errors | Where-Object { $_ }) } }
-    $sysOk = [bool]($rs -and -not @($rs.Errors | Where-Object { $_ -like 'WinGet*' }).Count)
-    $items = Merge-HMAuLists $(if ($ru) { @($ru.Items) } else { @() }) $(if ($rs) { @($rs.Items) } else { @() }) $sysOk
-    $src = if ($ru -and @($ru.Sources).Count) { @($ru.Sources) } elseif ($rs) { @($rs.Sources) } else { @() }
-    return [pscustomobject]@{ Items = @($items); Errors = @($errors); UserRead = [bool]$ru; LoggedOn = [bool]$loggedOn; SysOk = $sysOk; Sources = @($src | Where-Object { $_ }) }
+    $loggedOn = [bool]($UserSid -and (Test-HMAuUserLoggedOn $UserSid))
+    if (-not $loggedOn) { return [pscustomobject]@{ Items = @(); Errors = @(); UserRead = $false; LoggedOn = $false; Sources = @() } }
+    $r = Invoke-HMAuTaskRun $UserAccount $UserSid @{ Mode = 'List'; Sources = @($Sources); IncludeUnknown = $IncludeUnknown } 600
+    $items = @(@($r.Items) | Where-Object { $_ } | ForEach-Object {
+            [pscustomobject]@{ Id = "$($_.Id)"; Name = "$($_.Name)"; Installed = "$($_.Installed)"; Available = "$($_.Available)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown; Scope = $(if ("$($_.Scope)" -eq 'Machine') { 'Machine' } else { 'User' }) }
+        } | Sort-Object Name)
+    return [pscustomobject]@{ Items = $items; Errors = @($r.Errors | Where-Object { $_ }); UserRead = $true; LoggedOn = $true; Sources = @($r.Sources | Where-Object { $_ }) }
 }
 
 # Laufende Programme zu Paketen finden: Installationsordner aus der Registry (Deinstallations-Eintraege), Prozesse darin.
@@ -314,7 +319,7 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
         Write-HMLog $Job "$($list.Count) Programm(e) $($g.Label) ..." 'Info'
         $names = @{}; foreach ($it in $list) { $names["$($it.Id)"] = $it }
         $state = @{ Job = $Job; Names = $names; Done = $done; Total = $total }
-        $req = @{ Mode = 'Update'; Items = @($list | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) }
+        $req = @{ Mode = 'Update'; Cli = ($g.Scope -eq 'Machine'); Items = @($list | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) }
         $onLine = {
             param($ln)
             $p = "$ln".Split('|')
@@ -335,6 +340,10 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
                 $e.Status = $(if (Test-HMCancel $Job) { 'Skipped' } else { 'Error' })
                 $e.Text = $(if (Test-HMCancel $Job) { 'abgebrochen' } elseif (@($r.Errors).Count) { "nicht ausgefuehrt: $(@($r.Errors)[0])" } else { 'kein Ergebnis' })
             } elseif ("$($x.Status)" -eq 'Exception') { $e.Status = 'Error'; $e.Text = "$($x.Text)" }
+            elseif ("$($x.Status)" -eq 'Cli') {
+                $c = Format-HMAuCliResult ([int64]$x.Code) "$($x.Text)"
+                $e.Status = $(if ($c.Ok) { 'OK' } else { 'Error' }); $e.Reboot = [bool]$c.Reboot; $e.Text = $c.Text
+            }
             else {
                 $e.Status = $(if ("$($x.Status)" -eq 'Ok') { 'OK' } else { 'Error' })
                 $e.Reboot = [bool]$x.Reboot

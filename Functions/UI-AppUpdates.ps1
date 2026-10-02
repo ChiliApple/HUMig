@@ -130,7 +130,7 @@ function Update-HMAuState([switch]$Search) {
         $s = $r.State
         $script:AuReady = [bool]$s.Ready
         $ui.btnAuSetup.Visibility = $(if ($s.Ready -or -not $s.OsOk) { 'Collapsed' } else { 'Visible' })
-        $ui.lblAuInfo.Text = $(if ($s.Ready) { "WinGet $($s.WinGet)  |  Modul Microsoft.WinGet.Client $($s.Module)  |  App Installer $($s.AppInstaller)  |  Gelesen wird als SYSTEM (Programme fuer alle Benutzer) und im Konto des oben gewaehlten Benutzers (nur fuer ihn installierte - er muss angemeldet sein)." } else { "$($s.Problem)" })
+        $ui.lblAuInfo.Text = $(if ($s.Ready) { "WinGet $($s.WinGet)  |  Modul Microsoft.WinGet.Client $($s.Module)  |  App Installer $($s.AppInstaller)  |  Gelesen wird im Konto des oben gewaehlten, angemeldeten Benutzers. Aktualisiert: Programme fuer alle Benutzer als SYSTEM, nur fuer ihn installierte in seinem Konto." } else { "$($s.Problem)" })
         foreach ($b in @($ui.btnAuSearch, $ui.btnAuUpdateSel, $ui.btnAuUpdateAll, $ui.btnAuSourceAdd)) { $b.IsEnabled = [bool]$s.Ready -and -not $script:JobRunning }
         Update-HMAuSourceList
         if ($s.Ready -and $stt.Search) { Start-HMAuSearch }
@@ -155,7 +155,7 @@ function Start-HMAuSearch {
     $acct = ''; $sid = ''
     if ($p -and $p.SID -and -not $p.NoProfile) { $acct = "$($p.Account)"; $sid = "$($p.SID)" }
     $script:AuUser = [pscustomobject]@{ Account = $acct; Sid = $sid }
-    $ui.lblAuListTitle.Text = "VERFUEGBARE UPDATES - wird gesucht (SYSTEM$(if ($acct) { " + $acct" })) ..."
+    $ui.lblAuListTitle.Text = "VERFUEGBARE UPDATES - wird gesucht (als $(if ($acct) { $acct } else { '?' })) ..."
     Invoke-AsyncCommand -ScriptBlock {
         param($eng, $src, $unk, $acct, $sid)
         . $eng
@@ -166,9 +166,11 @@ function Start-HMAuSearch {
         foreach ($e in @($r.Errors)) { Out-Console "App-Updates: $e" 'Warning' }
         if (@($r.Sources).Count) { $script:AuSources = @($r.Sources); Update-HMAuSourceList }
         $u = $script:AuUser
-        if ($u -and $u.Account -and -not $r.LoggedOn) { Out-Console "App-Updates: $($u.Account) ist nicht angemeldet - nur Programme fuer alle Benutzer gelesen. Fuer seine eigenen Programme muss er angemeldet sein." 'Warning'; $script:AuUser = [pscustomobject]@{ Account = ''; Sid = '' } }
-        elseif (-not ($u -and $u.Account)) { Out-Console 'App-Updates: kein Benutzer gewaehlt - nur Programme fuer alle Benutzer gelesen.' 'Info' }
-        if (-not $r.SysOk) { Out-Console 'App-Updates: Lesen als SYSTEM fehlgeschlagen - Bereich unsicher, alle als Benutzer-Programme behandelt.' 'Warning' }
+        if (-not $r.LoggedOn) {
+            $ui.lblAuListTitle.Text = 'VERFUEGBARE UPDATES'
+            Out-Console "App-Updates: $(if ($u -and $u.Account) { "$($u.Account) ist nicht angemeldet" } else { 'kein Benutzer gewaehlt' }) - WinGet liest die Programme im Konto eines ANGEMELDETEN Benutzers (oben waehlen). Er sieht dabei auch alle Programme fuer alle Benutzer." 'Warning'
+            return
+        }
         $c = Get-HMAuConfig
         $dt = New-HMAuTable
         $n = 0; $x = 0
@@ -186,7 +188,7 @@ function Start-HMAuSearch {
         }
         $script:AuDt = $dt
         $ui.dgAu.ItemsSource = $dt.DefaultView
-        $ui.lblAuListTitle.Text = "VERFUEGBARE UPDATES - $n$(if ($x) { " (+ $x Ausnahme(n))" })  |  gelesen als SYSTEM$(if ($r.UserRead) { " + $($script:AuUser.Account)" })  |  Stand $((Get-Date).ToString('HH:mm'))"
+        $ui.lblAuListTitle.Text = "VERFUEGBARE UPDATES - $n$(if ($x) { " (+ $x Ausnahme(n))" })  |  gelesen als $($script:AuUser.Account)  |  Stand $((Get-Date).ToString('HH:mm'))"
         Out-Console "App-Updates: $n Update(s) verfuegbar$(if ($x) { ", $x als Ausnahme ausgelassen" })" $(if ($n) { 'Info' } else { 'Success' })
     }
 }
