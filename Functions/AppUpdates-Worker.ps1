@@ -36,8 +36,8 @@ function Get-WScope($Map, [string]$Name) {
     $mk = @($Map.Machine | ForEach-Object { ConvertTo-WKey $_ })
     if ($uk -contains $k) { return 'User' }
     if ($mk -contains $k) { return 'Machine' }
-    # Teilname (z.B. "Adobe Acrobat Reader" <-> "Adobe Acrobat"): mindestens 8 Zeichen gemeinsam am Anfang
-    $pre = { param($a, $b) $a.Length -ge 8 -and $b.Length -ge 8 -and ($a.StartsWith($b) -or $b.StartsWith($a)) }
+    # Teilname (z.B. "Adobe Acrobat Reader" <-> "Adobe Acrobat", "PuTTY" <-> "PuTTY release"): der kuerzere Name mind. 5 Zeichen
+    $pre = { param($a, $b) $a.Length -ge 5 -and $b.Length -ge 5 -and ($a.StartsWith($b) -or $b.StartsWith($a)) }
     if (@($uk | Where-Object { & $pre $_ $k }).Count) { return 'User' }
     if (@($mk | Where-Object { & $pre $_ $k }).Count) { return 'Machine' }
     return 'User'   # nicht gefunden (z.B. MSIX-Apps wie Outlook) = im Benutzerkonto aktualisieren
