@@ -158,3 +158,58 @@ Describe 'Server-Backup: Hilfsfunktionen' {
         @($m2.Archive[0].Tags | ForEach-Object { $_.Text }) | Should -Contain 'faellig'
     }
 }
+
+Describe 'App-Updates (WinGet)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1')
+        function global:Get-WinGetPackage { param($Source) }
+        function global:Update-WinGetPackage { param($Id, $Source, $MatchOption, $Mode, [switch]$IncludeUnknown) }
+        if (-not (Get-Command Write-HMLog -ErrorAction SilentlyContinue)) { function global:Write-HMLog($Job, $Msg, $Lvl) { } }
+        if (-not (Get-Command Test-HMCancel -ErrorAction SilentlyContinue)) { function global:Test-HMCancel($Job) { $false } }
+    }
+    It 'Ausnahmen: Muster auf Paket-ID oder Name' {
+        $ex = @([pscustomobject]@{ Pattern = 'Microsoft.Edge*'; Reason = 'selbst' }, [pscustomobject]@{ Pattern = '*Next-Exam*'; Reason = 'Pruefung' })
+        (Find-HMAuExclusion ([pscustomobject]@{ Id = 'Microsoft.EdgeWebView2Runtime'; Name = 'WebView2' }) $ex).Reason | Should -Be 'selbst'
+        (Find-HMAuExclusion ([pscustomobject]@{ Id = 'X.Y'; Name = 'Next-Exam 1.4' }) $ex).Reason | Should -Be 'Pruefung'
+        Find-HMAuExclusion ([pscustomobject]@{ Id = 'Mozilla.Firefox'; Name = 'Mozilla Firefox' }) $ex | Should -BeNullOrEmpty
+    }
+    It 'Ergebnis lesbar' {
+        Format-HMAuResult 'Ok' 0 0 $false | Should -Be 'aktualisiert'
+        Format-HMAuResult 'Ok' 0 0 $true | Should -Match 'Neustart'
+        Format-HMAuResult 'InstallError' 1603 0 $false | Should -Match '1603.*Programm laeuft'
+    }
+    It 'Updates lesen: nur verfuegbare, unbekannte nur auf Wunsch, doppelte einmal' {
+        Mock Import-Module { }
+        Mock Get-WinGetPackage {
+            @([pscustomobject]@{ Id = 'A.A'; Name = 'Alpha'; InstalledVersion = '1.0'; AvailableVersions = @('2.0', '1.5'); IsUpdateAvailable = $true },
+              [pscustomobject]@{ Id = 'B.B'; Name = 'Beta'; InstalledVersion = '3.0'; AvailableVersions = @('3.0'); IsUpdateAvailable = $false },
+              [pscustomobject]@{ Id = 'C.C'; Name = 'Gamma'; InstalledVersion = 'Unknown'; AvailableVersions = @('9'); IsUpdateAvailable = $false })
+        }
+        $r = Get-HMAuUpdates @('winget', 'eigene') $false
+        @($r.Items).Count | Should -Be 1
+        $r.Items[0].Available | Should -Be '2.0'
+        $r.Items[0].Source | Should -Be 'winget'
+        $r2 = Get-HMAuUpdates @('winget') $true
+        @($r2.Items).Count | Should -Be 2
+        (@($r2.Items) | Where-Object Id -eq 'C.C').Installed | Should -Be 'unbekannt'
+    }
+    It 'Aktualisieren: Ergebnis je Programm, Uebersprungen bei laufendem Programm' {
+        Mock Import-Module { }
+        Mock Update-WinGetPackage { if ($Id -eq 'A.A') { [pscustomobject]@{ Status = 'Ok'; RebootRequired = $true; InstallerErrorCode = 0; ExtendedErrorCode = 0 } } else { [pscustomobject]@{ Status = 'InstallError'; RebootRequired = $false; InstallerErrorCode = 1603; ExtendedErrorCode = 0 } } }
+        $job = @{ Log = $null; Progress = 0; Status = ''; Cancel = $false; Result = $null }
+        $ctx = @{ Account = 'x'; Items = @(
+                [pscustomobject]@{ Id = 'A.A'; Name = 'Alpha'; Source = 'winget'; Installed = '1'; Available = '2' },
+                [pscustomobject]@{ Id = 'B.B'; Name = 'Beta'; Source = 'winget'; Installed = '1'; Available = '2' },
+                [pscustomobject]@{ Id = 'C.C'; Name = 'Gamma'; Source = 'winget'; Installed = '1'; Available = '2' })
+            Running = @([pscustomobject]@{ Id = 'C.C'; Name = 'Gamma'; Running = 'gamma (1)'; Procs = @() }); ProcDecisions = @{ 'C.C' = 'Skip' }
+        }
+        Start-HMAppUpdate -Ctx $ctx -Job $job
+        $it = @($job.Result.Items)
+        $it.Count | Should -Be 3
+        ($it | Where-Object Id -eq 'A.A').Status | Should -Be 'OK'
+        ($it | Where-Object Id -eq 'B.B').Text | Should -Match '1603'
+        ($it | Where-Object Id -eq 'C.C').Status | Should -Be 'Skipped'
+        $job.Result.Status | Should -Be 'Warning'
+        $job.Result.Reboot | Should -BeTrue
+    }
+}

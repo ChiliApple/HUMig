@@ -112,6 +112,12 @@ function Update-HMBusyUi {
     $all = [int]$script:AsyncBusy['*']; $sb = [int]$script:AsyncBusy['Sb']
     if ($ui.dotBusy) { Set-HMBusyDot $ui.dotBusy ($all -gt 0); $ui.dotBusy.ToolTip = "Im Hintergrund laufen $all Aufgabe(n)" }
     if ($ui.dotSbBusy) { Set-HMBusyDot $ui.dotSbBusy ($sb -gt 0) }
+    $au = [int]$script:AsyncBusy['Au']
+    if ($ui.dotAuBusy) { Set-HMBusyDot $ui.dotAuBusy ($au -gt 0) }
+    if ($ui.lblAuBusy) {
+        $ui.lblAuBusy.Text = $(if ($au -gt 0) { $t = "$($script:AsyncBusyText['Au'])"; if ($t) { $t } else { 'laeuft ...' } } else { '' })
+        $ui.lblAuBusy.Visibility = $(if ($au -gt 0) { 'Visible' } else { 'Collapsed' })
+    }
     if ($ui.lblSbBusy) {
         $ui.lblSbBusy.Text = $(if ($sb -gt 0) { $t = "$($script:AsyncBusyText['Sb'])"; if ($t) { $t } else { 'wird geladen ...' } } else { '' })
         $ui.lblSbBusy.Visibility = $(if ($sb -gt 0) { 'Visible' } else { 'Collapsed' })

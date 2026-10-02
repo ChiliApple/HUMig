@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.57'
+$script:Version   = '2.0.58'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -116,7 +116,7 @@ $script:SplashShown = Get-Date
 # ============================================================================
 # FUNKTIONEN LADEN
 # ============================================================================
-foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1')) {
+foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1', 'AppUpdates-Engine.ps1', 'UI-AppUpdates.ps1')) {
     $mp = Join-Path $script:AppRoot "Functions\$mod"
     try { . $mp } catch { [System.Windows.MessageBox]::Show("$mod konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null; exit 1 }
 }
@@ -245,7 +245,9 @@ foreach ($n in @('imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings
     'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnBackupSearch', 'btnFileSearch', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnReinstall', 'btnADDevices',
     'tabServerBackup', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
     'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'cmbSbAfter', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
-    'pnlSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'btnSbConflicts', 'dotSbBusy', 'lblSbBusy', 'dotBusy', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule')) { $ui[$n] = Get-UI $n }
+    'pnlSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'btnSbConflicts', 'dotSbBusy', 'lblSbBusy', 'dotBusy', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule',
+    'tabAppUpdates', 'btnAuSearch', 'btnAuUpdateSel', 'btnAuUpdateAll', 'btnAuCancel', 'chkAuUnknown', 'btnAuSetup', 'dotAuBusy', 'lblAuBusy', 'lblAuInfo', 'lblAuListTitle', 'dgAu',
+    'lblAuLocation', 'pnlAuSources', 'btnAuSourceAdd', 'btnAuExclAdd', 'btnAuExclDel', 'lstAuExcl', 'dgAuHistory')) { $ui[$n] = Get-UI $n }
 Initialize-HMTaskbar
 $script:RowConsole = $ui.rowConsole
 if ($script:LogoImage) { $ui.imgLogo.Source = $script:LogoImage }
@@ -703,6 +705,8 @@ function Set-JobUi([bool]$Running) {
     if ($script:UserMode) { $ui.btnUpdate.IsEnabled = $false }
     foreach ($b in @($script:SbButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
     if ($ui.btnSbCancel) { $ui.btnSbCancel.IsEnabled = $Running }
+    foreach ($b in @($script:AuButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
+    if ($ui.btnAuCancel) { $ui.btnAuCancel.IsEnabled = $Running }
 }
 function Start-EngineJob {
     param([string]$Command, [hashtable]$Ctx, [string]$Title, [scriptblock]$OnFinished, [string[]]$ScriptFiles = @())
@@ -1762,6 +1766,7 @@ foreach ($e in $script:ConfigErrors) { Out-Console "Konfigurationsfehler: $e" 'E
 if ($script:ActiveSchool) { Out-Console "Standort: $($script:ActiveSchool.Name) - Backup-Ordner $(Get-BackupRoot)" 'Info' }
 if ($script:UserMode) { Set-HMUserModeUi }
 Initialize-HMServerBackupTab -IsAdmin $isAdmin
+Initialize-HMAppUpdatesTab -IsAdmin $isAdmin
 try { Update-HMBsLabel } catch { }
 Update-BackupList
 Connect-Target
