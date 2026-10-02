@@ -460,6 +460,94 @@
                     </ScrollViewer>
                 </TabItem>
 
+                <!-- APP-UPDATES (WinGet) -->
+                <TabItem x:Name="tabAppUpdates" Header="App-Updates">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="2*"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Border Grid.Row="0" Style="{StaticResource SectionBorder}">
+                            <StackPanel>
+                                <WrapPanel>
+                                    <Button x:Name="btnAuSearch" Content="Updates suchen" Style="{StaticResource BtnBlue}" Padding="12,6" ToolTip="Verfuegbare Updates der installierten Programme lesen (WinGet, angehakte Quellen)"/>
+                                    <Button x:Name="btnAuUpdateSel" Content="Angehakte aktualisieren" Style="{StaticResource BtnGreen}" FontWeight="SemiBold" Padding="14,6" ToolTip="Angehakte Programme still aktualisieren - Ausnahmen werden nie aktualisiert"/>
+                                    <Button x:Name="btnAuUpdateAll" Content="Alle aktualisieren" Style="{StaticResource BtnTeal}" Padding="12,6" ToolTip="Alle gefundenen Updates ausser den Ausnahmen"/>
+                                    <Button x:Name="btnAuCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False" Padding="12,6" ToolTip="Nach dem laufenden Programm abbrechen"/>
+                                    <CheckBox x:Name="chkAuUnknown" Content="Programme ohne bekannte Version zeigen" VerticalAlignment="Center" Margin="10,0,0,4" ToolTip="WinGet kennt die installierte Version nicht - die Zuordnung zum Paket ist dann unsicher (Variante, Sprache, x86/x64). Nur gezielt verwenden."/>
+                                    <Button x:Name="btnAuSetup" Content="WinGet einrichten" Style="{StaticResource BtnYellow}" Padding="12,6" Margin="10,0,4,4" Visibility="Collapsed" ToolTip="Modul Microsoft.WinGet.Client aus der PowerShell Gallery installieren (alle Benutzer) und WinGet fuer dieses Konto registrieren/reparieren - Internet noetig"/>
+                                    <Ellipse x:Name="dotAuBusy" Width="11" Height="11" Fill="{StaticResource CatGreen}" Margin="10,0,6,4" VerticalAlignment="Center" Visibility="Collapsed"/>
+                                    <TextBlock x:Name="lblAuBusy" Text="" Foreground="{StaticResource CatGreen}" FontSize="11" VerticalAlignment="Center" Margin="0,0,0,4" Visibility="Collapsed"/>
+                                </WrapPanel>
+                                <WrapPanel Margin="0,4,0,0">
+                                    <TextBlock Text="Ziel:" Foreground="{StaticResource CatSubtext}" VerticalAlignment="Center" Margin="2,0,6,4"/>
+                                    <TextBlock x:Name="lblAuTarget" Text="" Foreground="{StaticResource CatMauve}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,4" MaxWidth="520" TextTrimming="CharacterEllipsis"/>
+                                    <Button x:Name="btnAuPcs" Content="Mehrere PCs / EDV-Saal ..." Style="{StaticResource BtnDefault}" Padding="10,4" ToolTip="PCs aus dem AD waehlen (OU, Filter, eigene Namen) - Suche und Aktualisierung laufen parallel auf allen PCs (WinRM)"/>
+                                    <Button x:Name="btnAuPcTop" Content="Oben gewaehlter PC" Style="{StaticResource BtnDefault}" Padding="10,4" ToolTip="Zurueck zum Computer oben (Reiter Migration)"/>
+                                    <Button x:Name="btnAuSchedule" Content="Zeitplan ..." Style="{StaticResource BtnYellow}" Padding="10,4" Margin="14,0,4,4" ToolTip="Programme fuer alle Benutzer auf den Ziel-PCs automatisch aktualisieren (taeglich/woechentlich, als SYSTEM, Ausnahmen dieses Standorts gelten)"/>
+                                    <Button x:Name="btnAuScheduleView" Content="Zeitplaene ansehen ..." Style="{StaticResource BtnDefault}" Padding="10,4" ToolTip="Zeitplan, letzter Lauf und Verlauf je Ziel-PC - entfernen, Verlauf uebernehmen"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="lblAuInfo" Text="" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatSubtext}" Margin="2,2,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <Grid Grid.Row="1" Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="2.2*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
+                                <DockPanel>
+                                    <TextBlock x:Name="lblAuListTitle" DockPanel.Dock="Top" Text="VERFUEGBARE UPDATES" Style="{StaticResource SectionLabel}"/>
+                                    <DataGrid x:Name="dgAu" Style="{StaticResource DarkGrid}" IsReadOnly="False" SelectionMode="Extended" ToolTip="Haken = aktualisieren. Graue Zeilen sind Ausnahmen (werden nie aktualisiert). Rechtsklick = als Ausnahme eintragen">
+                                        <DataGrid.RowStyle>
+                                            <Style TargetType="DataGridRow">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Excl}" Value="True"><Setter Property="Foreground" Value="{StaticResource CatOverlay0}"/></DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </DataGrid.RowStyle>
+                                        <DataGrid.Columns>
+                                            <DataGridCheckBoxColumn Header="" Binding="{Binding Sel, UpdateSourceTrigger=PropertyChanged}" Width="34"/>
+                                            <DataGridTextColumn Header="PC" Binding="{Binding PC}" Width="Auto" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Programm" Binding="{Binding Programm}" Width="Auto" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Installiert" Binding="{Binding Installiert}" Width="Auto" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Neu" Binding="{Binding Verfuegbar}" Width="Auto" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Bereich" Binding="{Binding Bereich}" Width="Auto" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Quelle" Binding="{Binding Quelle}" Width="Auto" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Paket-ID" Binding="{Binding Paket}" Width="Auto" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Hinweis" Binding="{Binding Hinweis}" Width="Auto" IsReadOnly="True"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </Border>
+                            <Border Grid.Column="2" Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
+                                <DockPanel>
+                                    <TextBlock x:Name="lblAuLocation" DockPanel.Dock="Top" Text="" Foreground="{StaticResource CatMauve}" FontSize="11" TextWrapping="Wrap" Margin="2,0,0,6"/>
+                                    <TextBlock DockPanel.Dock="Top" Text="QUELLEN" Style="{StaticResource SectionLabel}"/>
+                                    <StackPanel x:Name="pnlAuSources" DockPanel.Dock="Top" Margin="2,0,0,4"/>
+                                    <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                                        <Button x:Name="btnAuSourceAdd" Content="Quelle hinzufuegen ..." Style="{StaticResource BtnDefault}" ToolTip="Eigene WinGet-Quelle (REST-Adresse oder Netzwerkpfad) fuer diesen PC hinzufuegen - Rechtsklick auf eine Quelle = entfernen"/>
+                                    </WrapPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="AUSNAHMEN (NIE AKTUALISIEREN)" Style="{StaticResource SectionLabel}"/>
+                                    <WrapPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+                                        <Button x:Name="btnAuExclAdd" Content="Hinzufuegen ..." Style="{StaticResource BtnBlue}" ToolTip="Muster (Platzhalter *) auf Paket-ID oder Programmname, mit Grund - z.B. Pruefungssoftware"/>
+                                        <Button x:Name="btnAuExclDel" Content="Entfernen" Style="{StaticResource BtnRed}"/>
+                                    </WrapPanel>
+                                    <ListBox x:Name="lstAuExcl" Background="{StaticResource CatSurface0}" Foreground="{StaticResource CatText}" BorderBrush="{StaticResource CatSurface2}" SelectionMode="Extended"/>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                        <TextBlock Grid.Row="2" Text="VERLAUF" Style="{StaticResource SectionLabel}" Margin="6,8,0,2"/>
+                        <DataGrid x:Name="dgAuHistory" Grid.Row="3" Style="{StaticResource DarkGrid}" Margin="0,0,0,2">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="Auto"/>
+                                <DataGridTextColumn Header="PC" Binding="{Binding PC}" Width="Auto"/>
+                                <DataGridTextColumn Header="Programm" Binding="{Binding Programm}" Width="Auto"/>
+                                <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="Auto"/>
+                                <DataGridTextColumn Header="Ergebnis" Binding="{Binding Ergebnis}" Width="Auto"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
                 <!-- SERVER-BACKUP (Hyper-V-Host) -->
                 <TabItem x:Name="tabServerBackup" Header="Server-Backup">
                     <Grid>
@@ -549,85 +637,6 @@
                                 <Button x:Name="btnSbFeature" Content="Windows Server-Sicherung installieren" Style="{StaticResource BtnYellow}" Padding="12,6" Visibility="Collapsed" ToolTip="Install-WindowsFeature Windows-Server-Backup (kein Neustart noetig)"/>
                             </WrapPanel>
                         </Border>
-                    </Grid>
-                </TabItem>
-                <!-- APP-UPDATES (WinGet) -->
-                <TabItem x:Name="tabAppUpdates" Header="App-Updates">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="2*"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                        </Grid.RowDefinitions>
-                        <Border Grid.Row="0" Style="{StaticResource SectionBorder}">
-                            <StackPanel>
-                                <WrapPanel>
-                                    <Button x:Name="btnAuSearch" Content="Updates suchen" Style="{StaticResource BtnBlue}" Padding="12,6" ToolTip="Verfuegbare Updates der installierten Programme lesen (WinGet, angehakte Quellen)"/>
-                                    <Button x:Name="btnAuUpdateSel" Content="Angehakte aktualisieren" Style="{StaticResource BtnGreen}" FontWeight="SemiBold" Padding="14,6" ToolTip="Angehakte Programme still aktualisieren - Ausnahmen werden nie aktualisiert"/>
-                                    <Button x:Name="btnAuUpdateAll" Content="Alle aktualisieren" Style="{StaticResource BtnTeal}" Padding="12,6" ToolTip="Alle gefundenen Updates ausser den Ausnahmen"/>
-                                    <Button x:Name="btnAuCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False" Padding="12,6" ToolTip="Nach dem laufenden Programm abbrechen"/>
-                                    <CheckBox x:Name="chkAuUnknown" Content="Programme ohne bekannte Version zeigen" VerticalAlignment="Center" Margin="10,0,0,4" ToolTip="WinGet kennt die installierte Version nicht - die Zuordnung zum Paket ist dann unsicher (Variante, Sprache, x86/x64). Nur gezielt verwenden."/>
-                                    <Button x:Name="btnAuSetup" Content="WinGet einrichten" Style="{StaticResource BtnYellow}" Padding="12,6" Margin="10,0,4,4" Visibility="Collapsed" ToolTip="Modul Microsoft.WinGet.Client aus der PowerShell Gallery installieren (alle Benutzer) und WinGet fuer dieses Konto registrieren/reparieren - Internet noetig"/>
-                                    <Ellipse x:Name="dotAuBusy" Width="11" Height="11" Fill="{StaticResource CatGreen}" Margin="10,0,6,4" VerticalAlignment="Center" Visibility="Collapsed"/>
-                                    <TextBlock x:Name="lblAuBusy" Text="" Foreground="{StaticResource CatGreen}" FontSize="11" VerticalAlignment="Center" Margin="0,0,0,4" Visibility="Collapsed"/>
-                                </WrapPanel>
-                                <TextBlock x:Name="lblAuInfo" Text="" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatSubtext}" Margin="2,2,0,0"/>
-                            </StackPanel>
-                        </Border>
-                        <Grid Grid.Row="1" Margin="0,4,0,0">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="2.2*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
-                                <DockPanel>
-                                    <TextBlock x:Name="lblAuListTitle" DockPanel.Dock="Top" Text="VERFUEGBARE UPDATES" Style="{StaticResource SectionLabel}"/>
-                                    <DataGrid x:Name="dgAu" Style="{StaticResource DarkGrid}" IsReadOnly="False" SelectionMode="Extended" ToolTip="Haken = aktualisieren. Graue Zeilen sind Ausnahmen (werden nie aktualisiert). Rechtsklick = als Ausnahme eintragen">
-                                        <DataGrid.RowStyle>
-                                            <Style TargetType="DataGridRow">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding Excl}" Value="True"><Setter Property="Foreground" Value="{StaticResource CatOverlay0}"/></DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </DataGrid.RowStyle>
-                                        <DataGrid.Columns>
-                                            <DataGridCheckBoxColumn Header="" Binding="{Binding Sel, UpdateSourceTrigger=PropertyChanged}" Width="34"/>
-                                            <DataGridTextColumn Header="Programm" Binding="{Binding Programm}" Width="Auto" IsReadOnly="True"/>
-                                            <DataGridTextColumn Header="Installiert" Binding="{Binding Installiert}" Width="Auto" IsReadOnly="True"/>
-                                            <DataGridTextColumn Header="Neu" Binding="{Binding Verfuegbar}" Width="Auto" IsReadOnly="True"/>
-                                            <DataGridTextColumn Header="Bereich" Binding="{Binding Bereich}" Width="Auto" IsReadOnly="True"/>
-                                            <DataGridTextColumn Header="Quelle" Binding="{Binding Quelle}" Width="Auto" IsReadOnly="True"/>
-                                            <DataGridTextColumn Header="Paket-ID" Binding="{Binding Paket}" Width="Auto" IsReadOnly="True"/>
-                                            <DataGridTextColumn Header="Hinweis" Binding="{Binding Hinweis}" Width="Auto" IsReadOnly="True"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </DockPanel>
-                            </Border>
-                            <Border Grid.Column="2" Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
-                                <DockPanel>
-                                    <TextBlock x:Name="lblAuLocation" DockPanel.Dock="Top" Text="" Foreground="{StaticResource CatMauve}" FontSize="11" TextWrapping="Wrap" Margin="2,0,0,6"/>
-                                    <TextBlock DockPanel.Dock="Top" Text="QUELLEN" Style="{StaticResource SectionLabel}"/>
-                                    <StackPanel x:Name="pnlAuSources" DockPanel.Dock="Top" Margin="2,0,0,4"/>
-                                    <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                                        <Button x:Name="btnAuSourceAdd" Content="Quelle hinzufuegen ..." Style="{StaticResource BtnDefault}" ToolTip="Eigene WinGet-Quelle (REST-Adresse oder Netzwerkpfad) fuer diesen PC hinzufuegen - Rechtsklick auf eine Quelle = entfernen"/>
-                                    </WrapPanel>
-                                    <TextBlock DockPanel.Dock="Top" Text="AUSNAHMEN (NIE AKTUALISIEREN)" Style="{StaticResource SectionLabel}"/>
-                                    <WrapPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
-                                        <Button x:Name="btnAuExclAdd" Content="Hinzufuegen ..." Style="{StaticResource BtnBlue}" ToolTip="Muster (Platzhalter *) auf Paket-ID oder Programmname, mit Grund - z.B. Pruefungssoftware"/>
-                                        <Button x:Name="btnAuExclDel" Content="Entfernen" Style="{StaticResource BtnRed}"/>
-                                    </WrapPanel>
-                                    <ListBox x:Name="lstAuExcl" Background="{StaticResource CatSurface0}" Foreground="{StaticResource CatText}" BorderBrush="{StaticResource CatSurface2}" SelectionMode="Extended"/>
-                                </DockPanel>
-                            </Border>
-                        </Grid>
-                        <TextBlock Grid.Row="2" Text="VERLAUF" Style="{StaticResource SectionLabel}" Margin="6,8,0,2"/>
-                        <DataGrid x:Name="dgAuHistory" Grid.Row="3" Style="{StaticResource DarkGrid}" Margin="0,0,0,2">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="Auto"/>
-                                <DataGridTextColumn Header="PC" Binding="{Binding PC}" Width="Auto"/>
-                                <DataGridTextColumn Header="Programm" Binding="{Binding Programm}" Width="Auto"/>
-                                <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="Auto"/>
-                                <DataGridTextColumn Header="Ergebnis" Binding="{Binding Ergebnis}" Width="Auto"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
                     </Grid>
                 </TabItem>
             </TabControl>

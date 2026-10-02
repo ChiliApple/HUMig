@@ -1,5 +1,5 @@
 {
-  "_Info": "Programm-Katalog: erkennt installierte Programme (Detect = Regex auf den Anzeigenamen) und schlaegt passende Module vor. Bearbeiten: HUMig > Programme > Katalog bearbeiten (speichert in Config\\apps.json, gleiche Id ueberschreibt; diese Datei bleibt unveraendert). Felder: Id (App_...), Name, Detect, Package (Regex auf Paketnamen in der Softwareverteilung), Modules (vorhandene Modul-Ids) oder Items, Transfer, NotTransfer (nicht uebertragbar), License (Hinweis), Version (Versionsverhalten), After (Checkliste), CloseProcess (Prozessnamen ohne .exe - Programm wird vor Backup/Restore geschlossen), StopService (Dienstnamen - werden gestoppt und danach wieder gestartet, nur als Administrator), Verified { Date, Sources, Note } (geprueft; fehlt = ungeprueft). Items: Type (Folder/Files/Reg), Name (Unterordner im Backup, eindeutig), Path mit {PROFILE} {APPDATA} {LOCALAPPDATA} {SYSTEMDRIVE} {WINDIR} {PROGRAMDATA} {PROGRAMFILES} {PROGRAMFILESX86} {PUBLIC} oder Key (HKCU = Benutzer, HKLM), Filter (bei Files), XD, XF, NoHidden, License (true = Lizenzdatei/-schluessel), Role (Settings/Plugins/Data/Database/License/Template), DbKind (File/Service, nur bei Database; SQLite-Begleitdateien -wal/-shm/-journal werden mitkopiert).",
+  "_Info": "Programm-Katalog: erkennt installierte Programme (Detect = Regex auf den Anzeigenamen) und schlaegt passende Module vor. Bearbeiten: HUMig > Programme > Katalog bearbeiten (speichert in Config\\apps.json, gleiche Id ueberschreibt; diese Datei bleibt unveraendert). Felder: Id (App_...), Name, Detect, Package (Regex auf Paketnamen in der Softwareverteilung), WingetId (WinGet-Paket-ID - fehlt ein Paket in der Softwareverteilung, installiert \"Programme neu installieren\" ueber WinGet), Modules (vorhandene Modul-Ids) oder Items, Transfer, NotTransfer (nicht uebertragbar), License (Hinweis), Version (Versionsverhalten), After (Checkliste), CloseProcess (Prozessnamen ohne .exe - Programm wird vor Backup/Restore geschlossen), StopService (Dienstnamen - werden gestoppt und danach wieder gestartet, nur als Administrator), Verified { Date, Sources, Note } (geprueft; fehlt = ungeprueft). Items: Type (Folder/Files/Reg), Name (Unterordner im Backup, eindeutig), Path mit {PROFILE} {APPDATA} {LOCALAPPDATA} {SYSTEMDRIVE} {WINDIR} {PROGRAMDATA} {PROGRAMFILES} {PROGRAMFILESX86} {PUBLIC} oder Key (HKCU = Benutzer, HKLM), Filter (bei Files), XD, XF, NoHidden, License (true = Lizenzdatei/-schluessel), Role (Settings/Plugins/Data/Database/License/Template), DbKind (File/Service, nur bei Database; SQLite-Begleitdateien -wal/-shm/-journal werden mitkopiert).",
   "Apps": [
     {
       "Id": "App_Firefox",
@@ -13,7 +13,8 @@
       "After": [
         "Firefox: Lesezeichen und Kennwoerter vorhanden, ggf. Firefox-Konto anmelden"
       ],
-      "Package": "firefox"
+      "Package": "firefox",
+      "WingetId": "Mozilla.Firefox"
     },
     {
       "Id": "App_Chrome",
@@ -27,7 +28,8 @@
       "After": [
         "Chrome: Profil pruefen, ggf. Google-Konto neu anmelden (Kennwoerter sind an Windows-Konto gebunden)"
       ],
-      "Package": "chrome"
+      "Package": "chrome",
+      "WingetId": "Google.Chrome"
     },
     {
       "Id": "App_Edge",
@@ -79,7 +81,8 @@
       "After": [
         "Thunderbird: Konten und Kennwoerter pruefen"
       ],
-      "Package": "thunderbird"
+      "Package": "thunderbird",
+      "WingetId": "Mozilla.Thunderbird"
     },
     {
       "Id": "App_NotepadPP",
@@ -94,7 +97,8 @@
       ],
       "Transfer": "Einstellungen, Sitzung, Makros, Plugin-Konfiguration",
       "License": "kostenlos",
-      "Package": "notepad"
+      "Package": "notepad",
+      "WingetId": "Notepad++.Notepad++"
     },
     {
       "Id": "App_7Zip",
@@ -109,7 +113,8 @@
       ],
       "Transfer": "Einstellungen",
       "License": "kostenlos",
-      "Package": "7-?zip|7z"
+      "Package": "7-?zip|7z",
+      "WingetId": "7zip.7zip"
     },
     {
       "Id": "App_VLC",
@@ -124,7 +129,8 @@
       ],
       "Transfer": "Einstellungen, Wiedergabelisten",
       "License": "kostenlos",
-      "Package": "vlc"
+      "Package": "vlc",
+      "WingetId": "VideoLAN.VLC"
     },
     {
       "Id": "App_LibreOffice",
@@ -139,7 +145,8 @@
       ],
       "Transfer": "Benutzerprofil (Einstellungen, Woerterbuch, Vorlagen, Makros)",
       "License": "kostenlos",
-      "Package": "libreoffice"
+      "Package": "libreoffice",
+      "WingetId": "TheDocumentFoundation.LibreOffice"
     },
     {
       "Id": "App_AcrobatReader",
@@ -162,7 +169,8 @@
       "After": [
         "Acrobat: bei Pro-Lizenz am Altgeraet abmelden, am neuen Geraet mit Adobe-ID anmelden"
       ],
-      "Package": "acrobat|adobe.?reader"
+      "Package": "acrobat|adobe.?reader",
+      "WingetId": "Adobe.Acrobat.Reader.64-bit"
     },
     {
       "Id": "App_Foxit",
@@ -182,7 +190,8 @@
       ],
       "Transfer": "Einstellungen, Stempel",
       "License": "Reader kostenlos | Editor: Lizenz deaktivieren/aktivieren",
-      "Package": "foxit"
+      "Package": "foxit",
+      "WingetId": "Foxit.FoxitReader"
     },
     {
       "Id": "App_GIMP",
@@ -197,7 +206,8 @@
       ],
       "Transfer": "Einstellungen, Pinsel, Plugins",
       "License": "kostenlos",
-      "Package": "gimp"
+      "Package": "gimp",
+      "WingetId": "GIMP.GIMP.3"
     },
     {
       "Id": "App_Inkscape",
@@ -212,7 +222,8 @@
       ],
       "Transfer": "Einstellungen, Erweiterungen, Vorlagen",
       "License": "kostenlos",
-      "Package": "inkscape"
+      "Package": "inkscape",
+      "WingetId": "Inkscape.Inkscape"
     },
     {
       "Id": "App_Audacity",
@@ -227,7 +238,8 @@
       ],
       "Transfer": "Einstellungen, Effekt-Voreinstellungen",
       "License": "kostenlos",
-      "Package": "audacity"
+      "Package": "audacity",
+      "WingetId": "Audacity.Audacity"
     },
     {
       "Id": "App_PaintNet",
@@ -247,7 +259,8 @@
       ],
       "Transfer": "Einstellungen, Paletten",
       "License": "kostenlos (Store-Version kostenpflichtig)",
-      "Package": "paint"
+      "Package": "paint",
+      "WingetId": "dotPDN.PaintDotNet"
     },
     {
       "Id": "App_IrfanView",
@@ -262,7 +275,8 @@
       ],
       "Transfer": "Einstellungen (i_view64.ini)",
       "License": "kostenlos (privat/Bildung)",
-      "Package": "irfan"
+      "Package": "irfan",
+      "WingetId": "IrfanSkiljan.IrfanView"
     },
     {
       "Id": "App_Greenshot",
@@ -277,7 +291,8 @@
       ],
       "Transfer": "Einstellungen, Ziele",
       "License": "kostenlos",
-      "Package": "greenshot"
+      "Package": "greenshot",
+      "WingetId": "Greenshot.Greenshot"
     },
     {
       "Id": "App_OBS",
@@ -292,7 +307,8 @@
       ],
       "Transfer": "Szenen, Profile, Einstellungen",
       "License": "kostenlos",
-      "Package": "obs"
+      "Package": "obs",
+      "WingetId": "OBSProject.OBSStudio"
     },
     {
       "Id": "App_VSCode",
@@ -315,7 +331,8 @@
       "After": [
         "VS Code: Einstellungs-Sync (Konto) pruefen"
       ],
-      "Package": "vscode|code"
+      "Package": "vscode|code",
+      "WingetId": "Microsoft.VisualStudioCode"
     },
     {
       "Id": "App_KeePass",
@@ -329,7 +346,8 @@
       "After": [
         "KeePass: Datenbank oeffnen, Pfad in der Konfiguration pruefen"
       ],
-      "Package": "keepass"
+      "Package": "keepass",
+      "WingetId": "DominikReichl.KeePass"
     },
     {
       "Id": "App_KeePassXC",
@@ -349,7 +367,8 @@
       ],
       "Transfer": "Konfiguration, zuletzt geoeffnete Datenbanken",
       "License": "kostenlos",
-      "Package": "keepassxc"
+      "Package": "keepassxc",
+      "WingetId": "KeePassXCTeam.KeePassXC"
     },
     {
       "Id": "App_FileZilla",
@@ -379,7 +398,8 @@
       ],
       "Transfer": "Gespeicherte Sitzungen, bekannte Host-Schluessel",
       "License": "kostenlos",
-      "Package": "putty"
+      "Package": "putty",
+      "WingetId": "PuTTY.PuTTY"
     },
     {
       "Id": "App_WinSCP",
@@ -399,7 +419,8 @@
       ],
       "Transfer": "Gespeicherte Verbindungen, Einstellungen",
       "License": "kostenlos",
-      "Package": "winscp"
+      "Package": "winscp",
+      "WingetId": "WinSCP.WinSCP"
     },
     {
       "Id": "App_mRemoteNG",
@@ -414,7 +435,8 @@
       ],
       "Transfer": "Verbindungsliste (confCons.xml), Einstellungen",
       "License": "kostenlos",
-      "Package": "mremote"
+      "Package": "mremote",
+      "WingetId": "mRemoteNG.mRemoteNG"
     },
     {
       "Id": "App_AnyDesk",
@@ -432,7 +454,8 @@
       "After": [
         "AnyDesk: neue ID weitergeben, ggf. Lizenz zuweisen"
       ],
-      "Package": "anydesk"
+      "Package": "anydesk",
+      "WingetId": "AnyDesk.AnyDesk"
     },
     {
       "Id": "App_TeamViewer",
@@ -443,7 +466,8 @@
       "After": [
         "TeamViewer: am Konto anmelden, altes Geraet im Konto entfernen"
       ],
-      "Package": "teamviewer"
+      "Package": "teamviewer",
+      "WingetId": "TeamViewer.TeamViewer"
     },
     {
       "Id": "App_FortiClient",
@@ -479,7 +503,8 @@
       "After": [
         "Zotero: Synchronisation / Word-Plugin pruefen"
       ],
-      "Package": "zotero"
+      "Package": "zotero",
+      "WingetId": "DigitalScholar.Zotero"
     },
     {
       "Id": "App_Citavi",
@@ -505,7 +530,8 @@
       ],
       "Transfer": "Tresor-Liste, Einstellungen (Tresore selbst in Dokumente/OneDrive)",
       "License": "kostenlos (privat/Bildung)",
-      "Package": "obsidian"
+      "Package": "obsidian",
+      "WingetId": "Obsidian.Obsidian"
     },
     {
       "Id": "App_Arduino",
@@ -525,7 +551,8 @@
       ],
       "Transfer": "Boards, Bibliotheken, Einstellungen (Sketche in Dokumente\\Arduino)",
       "License": "kostenlos",
-      "Package": "arduino"
+      "Package": "arduino",
+      "WingetId": "ArduinoSA.IDE.stable"
     },
     {
       "Id": "App_GeoGebra",
@@ -533,7 +560,8 @@
       "Detect": "^GeoGebra",
       "Transfer": "nichts (Materialien am GeoGebra-Konto)",
       "License": "kostenlos",
-      "Package": "geogebra"
+      "Package": "geogebra",
+      "WingetId": "GeoGebra.Classic"
     },
     {
       "Id": "App_SketchUp",
@@ -620,7 +648,8 @@
       "After": [
         "Zoom: anmelden"
       ],
-      "Package": "zoom"
+      "Package": "zoom",
+      "WingetId": "Zoom.Zoom"
     },
     {
       "Id": "App_Teams",
@@ -667,7 +696,8 @@
       "After": [
         "WinRAR: Hilfe > Info zeigt den Lizenznehmer"
       ],
-      "Package": "winrar"
+      "Package": "winrar",
+      "WingetId": "RARLab.WinRAR"
     },
     {
       "Id": "App_TotalCommander",
@@ -712,7 +742,8 @@
       "After": [
         "Total Commander: Titelleiste zeigt den Lizenznehmer (kein Hinweisfenster)"
       ],
-      "Package": "totalcmd|total.?commander"
+      "Package": "totalcmd|total.?commander",
+      "WingetId": "Ghisler.TotalCommander"
     },
     {
       "Id": "App_BeyondCompare",
@@ -731,7 +762,8 @@
       "After": [
         "Beyond Compare: Hilfe > Info zeigt die Lizenz"
       ],
-      "Package": "beyond|bcompare"
+      "Package": "beyond|bcompare",
+      "WingetId": "ScooterSoftware.BeyondCompare.5"
     },
     {
       "Id": "App_SublimeText",
@@ -747,7 +779,8 @@
       ],
       "Transfer": "Einstellungen, Pakete + Lizenzdatei (Local\\License.sublime_license)",
       "License": "Lizenzdatei wird uebertragen",
-      "Package": "sublime"
+      "Package": "sublime",
+      "WingetId": "SublimeHQ.SublimeText.4"
     }
   ]
 }

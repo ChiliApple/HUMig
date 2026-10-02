@@ -260,6 +260,14 @@ T 'App-Updates: Ausnahmen und WinGet-Status (v2.0.58)' {
     $s = Get-HMAuState
     if ($s.Ready) { "WinGet $($s.WinGet), Modul $($s.Module)" } else { "nicht eingerichtet: $($s.Problem)" }
 }
+T 'App-Updates: Ziel-PC-Skript lokal (Zeitplan lesen, v2.0.64)' {
+    . (Join-Path $root 'Functions\AppUpdates-Engine.ps1')
+    $lines = New-Object System.Collections.ArrayList
+    $r = Invoke-HMAuTarget @($env:COMPUTERNAME) 'ScheduleGet' @{} $null { param($pc, $l) [void]$lines.Add($l) }
+    $v = $r["$env:COMPUTERNAME".ToUpper()]
+    if (-not $v -or -not $v.PSObject.Properties['Exists']) { throw "kein Ergebnis: $(@($v.Errors) -join '; ')" }
+    if ($v.Exists) { "Zeitplan vorhanden: $($v.When), naechster Lauf $($v.Next)" } else { 'kein Zeitplan (Ziel-Skript laeuft)' }
+}
 T 'Zeitplan: Auswerfen lehnt Systemplatte ab (v2.0.57)' {
     $d = Get-HMDriveDisk $env:SystemDrive
     if (-not $d.System) { throw "Systemplatte nicht erkannt ($($d.Letters -join ', '))" }
