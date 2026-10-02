@@ -344,7 +344,8 @@ function Start-HMAuSearchJob([hashtable]$Ctx, $Job) {
         $st.Job.Progress = [int]($st.Done * 100 / $st.Total)
         $st.Job.Status = "$($st.Done)/$($st.Total) PCs"
         foreach ($e in @($v.Errors | Where-Object { $_ })) { Write-HMLog $st.Job "  [$pc] $e" 'Warning' }
-        if ($v.PSObject.Properties['Items']) { Write-HMLog $st.Job "  [$pc] $(@($v.Items | Where-Object { $_ }).Count) Update(s)$(if ($v.ReadAs) { " (gelesen als $($v.ReadAs))" })" 'Success' }
+        if ($v.PSObject.Properties['Items'] -and "$($v.ReadAs)") { Write-HMLog $st.Job "  [$pc] $(@($v.Items | Where-Object { $_ }).Count) Update(s) (gelesen als $($v.ReadAs))" 'Success' }
+        elseif ($v.PSObject.Properties['Items']) { Write-HMLog $st.Job "  [$pc] NICHT gelesen" 'Error' }
     }
     $r = Invoke-HMAuTarget $pcs 'Search' @{ ByPc = $byPc } $Ctx.Credential $on $Job $onR
     foreach ($k in @($r.Keys)) { if (-not $r[$k].PSObject.Properties['Items']) { foreach ($e in @($r[$k].Errors)) { Write-HMLog $Job "  [$k] $e" 'Error' } } }

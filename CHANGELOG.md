@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.65 - 2026-10-02
+### Behoben
+- App-Updates: PowerShell 7 liess sich an PCs ohne angemeldeten Benutzer nicht einrichten - WinGet installiert seit PowerShell 7.6 die Store-Variante (MSIX), die als SYSTEM nicht verlaesslich laeuft. HUMig nimmt jetzt ein vorhandenes MSI-PowerShell oder legt eine eigene Kopie aus dem offiziellen ZIP-Paket ab (`Programme\HUMig\PowerShell7`, SHA256 geprueft)
+- App-Updates: ein nicht gelesener PC wurde als *0 Update(s)* gemeldet - jetzt *NICHT gelesen* mit Grund
+
 ## v2.0.64 - 2026-10-02
 ### Neu
 - **App-Updates an mehreren PCs**: Ziel *Mehrere PCs / EDV-Saal* (AD-Auswahl) - Suchen und Aktualisieren laufen parallel auf allen PCs (WinRM), Liste mit Spalte *PC*, Ergebnis je PC; ist am Ziel-PC niemand angemeldet, wird als SYSTEM mit PowerShell 7 gelesen (PowerShell 7 und WinGet-Modul werden bei Bedarf installiert)

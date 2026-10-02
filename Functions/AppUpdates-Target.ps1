@@ -18,7 +18,11 @@ $ProgressPreference = 'SilentlyContinue'
 $PC = "$env:COMPUTERNAME".ToUpper()
 $Base = Join-Path $env:ProgramData 'HUMig\AppUpdates'
 $ModName = 'Microsoft.WinGet.Client'
-$Pwsh = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+# PowerShell 7: installiert (MSI) oder eigene Kopie von HUMig (ZIP von Microsoft, nur fuer HUMig) - die Store-/MSIX-Variante
+# (winget ab 7.6 Standard) laeuft als SYSTEM nicht verlaesslich und liegt nicht unter Programme\PowerShell\7
+$PwshMsi = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+$PwshDir = Join-Path $env:ProgramFiles 'HUMig\PowerShell7'
+function Get-TPwsh { foreach ($p in @($PwshMsi, (Join-Path $PwshDir 'pwsh.exe'))) { if (Test-Path -LiteralPath $p) { return $p } }; return '' }
 $WinPs = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $AutoTask = 'HUMig App-Updates'
 $script:TErr = @()
@@ -72,7 +76,7 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec) 
         [System.IO.File]::WriteAllText((Join-Path $dir 'worker.ps1'), $WorkerText, (New-Object System.Text.UTF8Encoding($true)))
         $Request | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $dir 'request.json') -Encoding UTF8
         if (-not $sys) { & icacls.exe "$dir" /grant "*${Who}:(OI)(CI)M" | Out-Null }
-        $exe = if ($UsePwsh) { $Pwsh } else { $WinPs }
+        $exe = if ($UsePwsh) { Get-TPwsh } else { $WinPs }
         $psArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dir\worker.ps1`" -Dir `"$dir`""
         if ($sys) { $a = New-ScheduledTaskAction -Execute $exe -Argument $psArgs }
         elseif ([Environment]::OSVersion.Version.Build -ge 19041) { $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\conhost.exe') -Argument "--headless `"$exe`" $psArgs" }
@@ -116,13 +120,42 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec) 
     if ($script:TRes) { $script:TErr += @($script:TRes.Errors | Where-Object { $_ }) }
 }
 
-# PowerShell 7 (fuer das Lesen als SYSTEM) - Installation als SYSTEM ueber winget.exe
+# PowerShell 7 (fuer das Lesen als SYSTEM und den Zeitplan): offizielles ZIP-Paket von GitHub (Microsoft),
+# SHA256 aus den Release-Angaben geprueft, entpackt nach Programme\HUMig\PowerShell7 (nur Administratoren duerfen schreiben)
 function Install-TPwsh {
-    if (Test-Path -LiteralPath $Pwsh) { return }
-    if (-not $My.InstallPwsh) { $script:TErr += 'PowerShell 7 fehlt (fuer das Lesen ohne angemeldeten Benutzer noetig)'; return }
-    Out-L 'PowerShell 7 installieren (fuer alle Benutzer, als SYSTEM) ...'
-    Invoke-TTask 'SYSTEM' @{ Mode = 'Install'; Cli = $true; Items = @(@{ Id = 'Microsoft.PowerShell'; Source = 'winget'; Unknown = $false }) } $false 1800
-    if (Test-Path -LiteralPath $Pwsh) { Out-L 'PowerShell 7 installiert' } else { $script:TErr += 'PowerShell 7 konnte nicht installiert werden' }
+    if (Get-TPwsh) { return }
+    if (-not $My.InstallPwsh) { $script:TErr += 'PowerShell 7 fehlt (fuer das Lesen ohne angemeldeten Benutzer und den Zeitplan noetig)'; return }
+    Out-L 'PowerShell 7 laden (ZIP von Microsoft/GitHub, nur fuer HUMig) ...'
+    $tmp = Join-Path $Base "pwsh_$([guid]::NewGuid().ToString('N')).zip"
+    try {
+        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+        New-Item -ItemType Directory -Path $Base -Force | Out-Null
+        $arch = if ("$env:PROCESSOR_ARCHITECTURE" -eq 'ARM64') { 'arm64' } else { 'x64' }
+        $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/PowerShell/PowerShell/releases/latest' -Headers @{ 'User-Agent' = 'HUMig' } -UseBasicParsing -ErrorAction Stop
+        $as = @($rel.assets | Where-Object { "$($_.name)" -match "^PowerShell-[\d\.]+-win-$arch\.zip$" })[0]
+        if (-not $as) { throw "kein ZIP-Paket fuer $arch in $($rel.tag_name)" }
+        $want = ''
+        if ("$($as.digest)" -match '^sha256:([0-9a-fA-F]{64})$') { $want = $Matches[1] }
+        if (-not $want) {
+            $ha = @($rel.assets | Where-Object { "$($_.name)" -eq 'hashes.sha256' })[0]
+            if ($ha) {
+                $b = (Invoke-WebRequest -Uri $ha.browser_download_url -UseBasicParsing -ErrorAction Stop).RawContentStream.ToArray()
+                $txt = if ($b.Length -ge 2 -and $b[0] -eq 0xFF -and $b[1] -eq 0xFE) { [Text.Encoding]::Unicode.GetString($b) } else { [Text.Encoding]::UTF8.GetString($b) }
+                $m = [regex]::Match($txt, '([0-9a-fA-F]{64})\s+\*?' + [regex]::Escape("$($as.name)"))
+                if ($m.Success) { $want = $m.Groups[1].Value }
+            }
+        }
+        if (-not $want) { throw 'keine Pruefsumme zum Paket gefunden - nicht installiert' }
+        Invoke-WebRequest -Uri $as.browser_download_url -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+        $got = (Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash
+        if ($got -ne $want.ToUpper()) { throw "Pruefsumme passt nicht ($($as.name)) - nicht installiert" }
+        if (Test-Path -LiteralPath $PwshDir) { Remove-Item -LiteralPath $PwshDir -Recurse -Force }
+        New-Item -ItemType Directory -Path $PwshDir -Force | Out-Null
+        Expand-Archive -LiteralPath $tmp -DestinationPath $PwshDir -Force
+        if (-not (Test-Path -LiteralPath (Join-Path $PwshDir 'pwsh.exe'))) { throw 'pwsh.exe nach dem Entpacken nicht gefunden' }
+        Out-L "PowerShell $("$($rel.tag_name)".TrimStart('v')) bereit ($PwshDir)"
+    } catch { $script:TErr += "PowerShell 7 nicht installierbar: $($_.Exception.Message)" }
+    finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
 }
 
 # Benutzer fuer das Lesen: gewuenschter (wenn angemeldet), sonst der erste angemeldete
@@ -148,7 +181,7 @@ try {
                 if ($script:TRes) { $items = @($script:TRes.Items) }
             } else {
                 Install-TPwsh
-                if (Test-Path -LiteralPath $Pwsh) {
+                if (Get-TPwsh) {
                     $readAs = 'SYSTEM (PowerShell 7)'
                     Out-L 'niemand angemeldet - lese als SYSTEM (PowerShell 7) ...'
                     Invoke-TTask 'SYSTEM' $req $true 900
@@ -183,7 +216,7 @@ try {
         'ScheduleSet' {
             Install-TModule
             Install-TPwsh
-            if (-not (Test-TModule) -or -not (Test-Path -LiteralPath $Pwsh)) { Out-R ([pscustomobject]@{ Ok = $false; Errors = $script:TErr }); break }
+            if (-not (Test-TModule) -or -not (Get-TPwsh)) { Out-R ([pscustomobject]@{ Ok = $false; Errors = $script:TErr }); break }
             $dir = Join-Path $Base 'auto'
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
             [System.IO.File]::WriteAllText((Join-Path $dir 'auto.ps1'), $AutoText, (New-Object System.Text.UTF8Encoding($true)))
@@ -191,7 +224,7 @@ try {
                 ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $dir 'config.json') -Encoding UTF8
             $at = [datetime]::ParseExact("$($My.Time)", 'HH:mm', [System.Globalization.CultureInfo]::InvariantCulture)
             $trg = if ("$($My.Mode)" -eq 'Weekly') { New-ScheduledTaskTrigger -Weekly -DaysOfWeek @($My.Days) -At $at } else { New-ScheduledTaskTrigger -Daily -At $at }
-            $a = New-ScheduledTaskAction -Execute $Pwsh -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$dir\auto.ps1`""
+            $a = New-ScheduledTaskAction -Execute (Get-TPwsh) -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$dir\auto.ps1`""
             $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 4) -MultipleInstances IgnoreNew -WakeToRun:([bool]$My.Wake)
             $pr = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
             $tp = '\HUMig\'

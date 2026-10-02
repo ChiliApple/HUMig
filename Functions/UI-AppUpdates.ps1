@@ -200,7 +200,7 @@ function Show-HMAuSearchResult($Res) {
     $keys = @($Res.ByPc.Keys | Sort-Object)
     foreach ($k in $keys) {
         $v = $Res.ByPc[$k]
-        if (-not $v -or -not $v.PSObject.Properties['Items']) { $bad += $k; continue }
+        if (-not $v -or -not $v.PSObject.Properties['Items'] -or -not "$($v.ReadAs)") { $bad += $k; continue }
         $okPc++
         $script:AuUsers[$k] = [pscustomobject]@{ Sid = "$($v.UserSid)"; Account = "$($v.UserAccount)" }
         if ("$($v.ReadAs)") { $readAs += "$($v.ReadAs)" }
@@ -228,8 +228,8 @@ function Show-HMAuSearchResult($Res) {
     $ra = @($readAs | Select-Object -Unique)
     $who = if ($keys.Count -eq 1 -and $ra.Count) { "  |  gelesen als $($ra[0])" } else { "  |  $okPc von $($keys.Count) PC(s) gelesen" }
     $ui.lblAuListTitle.Text = "VERFUEGBARE UPDATES - $n$(if ($x) { " (+ $x Ausnahme(n))" })$who  |  Stand $((Get-Date).ToString('HH:mm'))"
-    Out-Console "App-Updates: $n Update(s) verfuegbar$(if ($x) { ", $x als Ausnahme ausgelassen" })$(if ($keys.Count -gt 1) { " auf $okPc PC(s)" })" $(if ($n) { 'Info' } else { 'Success' })
-    if ($bad.Count) { Out-Console "App-Updates: nicht gelesen ($($bad.Count)): $($bad -join ', ') - erreichbar? WinRM aktiv? (Werkzeuge > Online-Check / Fernwartung aktivieren)" 'Warning' }
+    if ($okPc) { Out-Console "App-Updates: $n Update(s) verfuegbar$(if ($x) { ", $x als Ausnahme ausgelassen" })$(if ($keys.Count -gt 1) { " auf $okPc PC(s)" })" $(if ($n) { 'Info' } else { 'Success' }) }
+    if ($bad.Count) { Out-Console "App-Updates: nicht gelesen ($($bad.Count)): $($bad -join ', ') - Grund steht oben in der Konsole (nicht erreichbar / WinRM aus / PowerShell 7 oder WinGet-Modul fehlt)" $(if ($okPc) { 'Warning' } else { 'Error' }) }
 }
 
 # ----------------------------------------------------------------------------
