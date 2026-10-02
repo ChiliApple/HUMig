@@ -13,11 +13,18 @@ param([Parameter(Mandatory)][string]$Dir)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 function Write-WLog([string]$m) { try { Add-Content -LiteralPath (Join-Path $Dir 'log.txt') -Value $m -Encoding UTF8 } catch { } }
-$res = [ordered]@{ Account = [Security.Principal.WindowsIdentity]::GetCurrent().Name; Items = @(); Results = @(); Errors = @() }
+$res = [ordered]@{ Account = [Security.Principal.WindowsIdentity]::GetCurrent().Name; Items = @(); Results = @(); Errors = @(); Sources = @() }
 try {
     $req = Get-Content -LiteralPath (Join-Path $Dir 'request.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     Import-Module Microsoft.WinGet.Client -ErrorAction Stop
-    if ("$($req.Mode)" -eq 'List') {
+    if ("$($req.Mode)" -eq 'SourceAdd') {
+        $p = @{ Name = "$($req.Name)"; Argument = "$($req.Argument)"; ErrorAction = 'Stop' }
+        if ("$($req.Type)") { $p.Type = "$($req.Type)" }
+        try { Add-WinGetSource @p } catch { $res.Errors += "Quelle $($req.Name): $($_.Exception.Message)" }
+    } elseif ("$($req.Mode)" -eq 'SourceRemove') {
+        try { Remove-WinGetSource -Name "$($req.Name)" -ErrorAction Stop } catch { $res.Errors += "Quelle $($req.Name): $($_.Exception.Message)" }
+    } elseif ("$($req.Mode)" -eq 'List') {
+        try { $res.Sources = @(Get-WinGetSource -ErrorAction Stop | ForEach-Object { [pscustomobject]@{ Name = "$($_.Name)"; Argument = "$($_.Argument)"; Type = "$($_.Type)" } }) } catch { $res.Errors += "Quellen: $($_.Exception.Message)" }
         $seen = @{}
         foreach ($src in @($req.Sources | Where-Object { $_ })) {
             try {
