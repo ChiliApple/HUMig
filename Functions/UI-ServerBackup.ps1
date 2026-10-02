@@ -416,7 +416,7 @@ function Update-HMSbDiskInfo {
         if ($arc) { $t += "  -  nach der Sicherung auswerfen, abziehen und getrennt lagern" }
         $col = '#FFA6E3A1'
     } else {
-        $t = "ACHTUNG: '$($d.Label)' ist keine Platte des Profils '$($p.Name)' ($($p.DiskPrefix)-1 bis -$($p.Disks)). Neue Platte? -> ""Platte einrichten ..."""
+        $t = "ACHTUNG: '$($d.Label)' ist keine Platte des Profils '$($p.Name)' ($($p.DiskPrefix)-1 bis -$($p.Disks)). Neue Platte? -> ""Platte einrichten ..."" (loescht alles) - schon anders genutzte Platte: dort ""Uebernehmen"" (nur umbenennen)"
         $col = '#FFFAB387'
     }
     if ($d.FileSystem -and $d.FileSystem -notmatch '^(NTFS|ReFS)$') { $t += "  |  Dateisystem $($d.FileSystem) wird nicht unterstuetzt (NTFS noetig)"; $col = '#FFF38BA8' }
@@ -781,10 +781,13 @@ function Show-HMSbDiskSetup {
         if (-not $disks.Count) { Out-Console 'Kein USB-Datentraeger gefunden (System-/Startplatten und Platten mit VM-Dateien werden nie angezeigt).' 'Warning'; return }
         $rows = New-Object System.Collections.Generic.List[object]
         foreach ($d in $disks) { $rows.Add(@([int]$d.Number, $d.Model, $d.Serial, (Format-HMSize $d.SizeBytes), $d.Style, $d.Volumes, $(if ($d.Offline) { 'offline' } else { '' }))) }
-        Show-DataGridWindow -Title 'USB-Platte fuer Server-Backup einrichten (ALLE DATEN WERDEN GELOESCHT)' -Width 1000 -Height 380 `
+        Show-DataGridWindow -Title 'USB-Platte fuer Server-Backup: einrichten (loescht alles) oder uebernehmen (Daten bleiben)' -Width 1100 -Height 380 `
             -Columns @('Nr', 'Modell', 'Seriennummer', 'Groesse', 'Partitionsstil', 'Volumes', 'Status') -Rows $rows.ToArray() -ColumnTypes @{ Nr = [int] } `
-            -CountText 'Platte markieren, dann "Einrichten ..."' `
-            -Actions @(@{ Text = 'Einrichten ...'; Color = '#FFFAB387'; Handler = { param($sel, $w, $c) Invoke-HMSbDiskSetup $sel $w } })
+            -CountText 'Platte markieren - "Einrichten" LOESCHT ALLES, "Uebernehmen" aendert nur die Bezeichnung (fuer Platten, die schon anders genutzt werden)' `
+            -Actions @(
+                @{ Text = 'Einrichten (loescht alles) ...'; Color = '#FFFAB387'; Handler = { param($sel, $w, $c) Invoke-HMSbDiskSetup $sel $w } }
+                @{ Text = 'Uebernehmen (ohne Formatieren) ...'; Color = '#FFA6E3A1'; Handler = { param($sel, $w, $c) Invoke-HMSbDiskAdopt $sel $w } }
+            )
     }
 }
 function Get-HMSbNextLabel($p) {
@@ -818,6 +821,63 @@ function Invoke-HMSbDiskSetup($Sel, $Win) {
         if ($r -is [string]) { Out-Console "Platte einrichten FEHLGESCHLAGEN: $r" 'Error'; Set-Status 'Platte einrichten fehlgeschlagen' '#FFF38BA8' }
         else { Out-Console "Platte eingerichtet: $($r.Letter): $($r.Label) ($(Format-HMSize $r.SizeBytes), NTFS 64K)" 'Success'; Set-Status 'Platte eingerichtet' '#FFA6E3A1' }
         Update-HMSbDrives
+    }
+}
+
+# Vorhandene Platte uebernehmen: nur Bezeichnung aendern (z.B. 'My Book' -> HUMIG-BHAK-1), alle Daten bleiben
+function Invoke-HMSbDiskAdopt($Sel, $Win) {
+    $row = @($Sel)[0]
+    if (-not $row) { return }
+    if ($script:JobRunning) { Out-Console 'Waehrend eines Vorgangs nicht moeglich.' 'Warning'; return }
+    $num = [int]$row.Nr
+    $script:SbAdopt = @{ Win = $Win; Num = $num }
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $n) . $eng; Get-HMSbDiskVolumeInfo $n } -ArgumentList @($script:SbEngine, $num) -TimeoutSec 120 -BusyTag 'Sb' -BusyText 'Platte wird gelesen ...' -OnComplete {
+        param($r)
+        $a = $script:SbAdopt
+        if ($r -is [string]) { [void][System.Windows.MessageBox]::Show($a.Win, "Uebernehmen nicht moeglich:`n$r", 'Platte uebernehmen', 'OK', 'Warning'); return }
+        $p = Get-HMSbProfile
+        $label = Show-TextInputDialog -Title 'Platte uebernehmen' -Label "Neue Bezeichnung fuer $($r.Letter): '$($r.Label)' (Datentraeger $($a.Num), $($r.Model)):" -Text (Get-HMSbNextLabel $p) -Owner $a.Win
+        if ($null -eq $label) { return }
+        $label = "$label".Trim().ToUpper()
+        if ($label -notmatch '^[A-Z0-9_\-]{1,32}$') { [void][System.Windows.MessageBox]::Show($a.Win, "Ungueltige Bezeichnung '$label' (max. 32 Zeichen: A-Z, 0-9, - und _)", 'Platte uebernehmen', 'OK', 'Warning'); return }
+        $dup = @($script:SbDrives | Where-Object { "$($_.Label)" -ieq $label -and "$($_.Letter)" -ine "$($r.Letter)" } | ForEach-Object { "$($_.Letter):" })
+        if ($dup.Count) { [void][System.Windows.MessageBox]::Show($a.Win, "Die Bezeichnung '$label' hat schon $($dup -join ', ') - bitte eine andere waehlen.", 'Platte uebernehmen', 'OK', 'Warning'); return }
+        $fold = @($r.Folders)
+        $fl = if ($fold.Count) { (@($fold | Select-Object -First 15) -join ', ') + $(if ($fold.Count -gt 15) { " ... (+$($fold.Count - 15))" } else { '' }) } else { '(keine)' }
+        $used = [long]$r.SizeBytes - [long]$r.FreeBytes
+        $msg = "Platte uebernehmen OHNE Formatieren?`n`n" +
+            "Laufwerk $($r.Letter): '$($r.Label)'  ->  neue Bezeichnung '$label'`n" +
+            "$($r.Model)$(if ($r.Serial) { ", SN $($r.Serial)" }), $($r.FileSystem)`n" +
+            "Belegt $(Format-HMSize $used) von $(Format-HMSize $r.SizeBytes), frei $(Format-HMSize $r.FreeBytes)`n" +
+            "Vorhandene Ordner: $fl`n`n" +
+            "- Es wird NICHTS geloescht - nur die Bezeichnung des Laufwerks wird umbenannt.`n" +
+            "- Die Sicherung landet im Ordner $($r.Letter):\WindowsImageBackup\$($r.Host) (Name fest von Windows vorgegeben) - andere Ordner bleiben unberuehrt.`n" +
+            "- ACHTUNG Umbenennen: Programme, Aufgaben oder Personen, die die Platte am Namen '$($r.Label)' erkennen, finden sie danach nur noch als '$label'. Vorher mit dem Besitzer der Platte abstimmen.`n" +
+            "- Gemeinsam genutzte Platte: genug Platz frei lassen; aeltere Sicherungsversionen haelt Windows auf diesem Laufwerk (Schattenkopien) - wird es knapp, fallen alte Versionen frueher weg.`n" +
+            "- Eine andere Sicherung auf diese Platte darf nicht gleichzeitig laufen."
+        if ($r.PrevLabel -and $r.PrevLabel -ine $label) { $msg += "`n`nHINWEIS: Die Platte war schon von HUMig als '$($r.PrevLabel)' eingerichtet$(if ($r.PrevProfile) { " (Profil $($r.PrevProfile))" })$(if ($r.PrevHost) { " am Host $($r.PrevHost)" }) - der Verlauf dort laeuft unter dem alten Namen." }
+        if ([int]$r.OtherVolumes -gt 0) { $msg += "`n`nHinweis: die Platte hat $($r.OtherVolumes) weitere(s) Volume(s) - genutzt wird nur $($r.Letter):." }
+        if ("$([System.Windows.MessageBox]::Show($a.Win, $msg, 'Platte uebernehmen (umbenennen)', 'YesNo', 'Warning', 'No'))" -ne 'Yes') { Out-Console 'Platte uebernehmen abgebrochen.' 'Info'; return }
+        # gleicher Ordnername: Windows-Sicherung dieses Hosts liegt schon auf der Platte (z.B. von einer anderen Person/einem anderen Programm eingerichtet)
+        if ($r.WbThisHost) {
+            $w2 = "VORSICHT - auf $($r.Letter): gibt es schon eine Windows Server-Sicherung DIESES Hosts:`n$($r.Letter):\WindowsImageBackup\$($r.Host)`n`n" +
+                "Windows legt die Sicherung immer in genau diesen Ordner - HUMig kann keinen anderen Namen verwenden. Die Sicherungen von HUMig und die vorhandenen landen dann im SELBEN Ordner und Katalog:`n" +
+                "- vorhandene Versionen bleiben erhalten und erscheinen unter 'Versionen auf der Platte'`n" +
+                "- wird der Platz knapp, loescht Windows die AELTESTEN Versionen - auch die der anderen Sicherung`n" +
+                "- laeuft die andere Sicherung weiter, mischen sich beide Zeitplaene`n`n" +
+                "Nur fortfahren, wenn das mit dem Besitzer der vorhandenen Sicherung abgestimmt ist (oder sie nicht mehr gebraucht wird).`n`nTrotzdem uebernehmen?"
+            if ("$([System.Windows.MessageBox]::Show($a.Win, $w2, 'Platte uebernehmen - vorhandene Sicherung', 'YesNo', 'Warning', 'No'))" -ne 'Yes') { Out-Console "Platte uebernehmen abgebrochen (vorhandene Windows-Sicherung von $($r.Host) auf $($r.Letter):)." 'Warning'; return }
+        } elseif (@($r.WbHosts).Count) {
+            Out-Console "Hinweis: auf $($r.Letter): liegen Windows-Sicherungen anderer Rechner ($(@($r.WbHosts) -join ', ')) - getrennte Ordner, bleiben unberuehrt." 'Info'
+        }
+        try { $a.Win.Close() } catch { }
+        Out-Console "Platte $($r.Letter): '$($r.Label)' wird als '$label' uebernommen (ohne Formatieren) ..." 'Info'
+        Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $l, $lb, $pn) . $eng; Rename-HMSbDiskVolume -Number $n -Letter $l -Label $lb -Profile $pn } -ArgumentList @($script:SbEngine, $a.Num, $r.Letter, $label, $(if ($p) { $p.Name } else { '' })) -TimeoutSec 120 -BusyTag 'Sb' -BusyText 'Platte wird umbenannt ...' -OnComplete {
+            param($x)
+            if ($x -is [string]) { Out-Console "Platte uebernehmen FEHLGESCHLAGEN: $x" 'Error' }
+            else { Out-Console "Platte uebernommen: $($x.Letter): '$($x.OldLabel)' -> '$($x.Label)' (Daten unveraendert, frei $(Format-HMSize $x.FreeBytes))" 'Success' }
+            Update-HMSbDrives
+        }
     }
 }
 

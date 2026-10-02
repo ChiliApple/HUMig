@@ -236,6 +236,54 @@ function Initialize-HMSbDisk([int]$Number, [string]$Label, [string]$Profile = ''
     return [pscustomobject]@{ Letter = $L; Label = $Label; SizeBytes = [long]$v.Size }
 }
 
+# Vorhandene USB-Platte UEBERNEHMEN (nichts loeschen): groesstes NTFS/ReFS-Volume mit Laufwerksbuchstaben, Belegung, Ordner,
+# Konflikte: Windows-Sicherung dieses Hosts schon auf der Platte (gleicher Ordnername!), frueher von HUMig anders benannt
+function Get-HMSbDiskVolumeInfo([int]$Number) {
+    $d = Get-Disk -Number $Number -ErrorAction Stop
+    if ($d.IsBoot -or $d.IsSystem) { throw "Datentraeger $Number ist System-/Startdatentraeger" }
+    if ("$($d.BusType)" -notmatch '^(USB|7)$') { throw "Datentraeger $Number ist kein USB-Datentraeger ($($d.BusType))" }
+    if ($d.IsOffline) { throw "Datentraeger $Number ist offline - zuerst online schalten (Aktualisieren)" }
+    $vols = @(foreach ($p in @(Get-Partition -DiskNumber $Number -ErrorAction Stop)) {
+            if (-not $p.DriveLetter) { continue }
+            try { $v = $p | Get-Volume -ErrorAction Stop; if ($v) { $v } } catch { }
+        })
+    $ok = @($vols | Where-Object { "$($_.FileSystem)" -match '^(NTFS|ReFS)$' } | Sort-Object Size -Descending)
+    if (-not $ok.Count) { throw "Datentraeger $Number hat kein NTFS/ReFS-Volume mit Laufwerksbuchstaben ($(@($vols | ForEach-Object { "$($_.DriveLetter): $($_.FileSystem)" }) -join ', ')) - dann nur 'Einrichten' (loescht alles)" }
+    $v = $ok[0]
+    $L = "$($v.DriveLetter)".ToUpper()
+    $dirs = @(Get-ChildItem -LiteralPath "${L}:\" -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('System Volume Information', '$RECYCLE.BIN') } | Sort-Object Name | ForEach-Object { $_.Name })
+    $wb = @(Get-ChildItem -LiteralPath "${L}:\WindowsImageBackup" -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+    $prev = $null
+    try { $prev = Get-Content -LiteralPath "${L}:\$($script:SbDirName)\disk.json" -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json } catch { }
+    return [pscustomobject]@{
+        Number = $Number; Letter = $L; Label = "$($v.FileSystemLabel)"; FileSystem = "$($v.FileSystem)"; SizeBytes = [long]$v.Size; FreeBytes = [long]$v.SizeRemaining
+        Folders = $dirs; OtherVolumes = [math]::Max(0, $vols.Count - 1); Model = "$($d.FriendlyName)".Trim(); Serial = "$($d.SerialNumber)".Trim()
+        WbHosts = $wb; WbThisHost = ($wb -contains "$env:COMPUTERNAME"); Host = "$env:COMPUTERNAME"
+        PrevLabel = $(if ($prev) { "$($prev.Label)" } else { '' }); PrevProfile = $(if ($prev) { "$($prev.Profile)" } else { '' }); PrevHost = $(if ($prev) { "$($prev.Host)" } else { '' })
+    }
+}
+# Bezeichnung schon an einem anderen angeschlossenen Laufwerk vergeben?
+function Test-HMSbLabelInUse([string]$Label, [string]$ExceptLetter) {
+    return @(Get-Volume -ErrorAction SilentlyContinue | Where-Object { "$($_.FileSystemLabel)" -ieq $Label -and "$($_.DriveLetter)" -ine $ExceptLetter } | ForEach-Object { "$(if ($_.DriveLetter) { "$($_.DriveLetter):" } else { '(ohne Buchstabe)' })" })
+}
+# Nur die Bezeichnung des Volumes aendern + Kennzeichnung im Ordner HUMig-ServerBackup (Daten bleiben unveraendert)
+function Rename-HMSbDiskVolume([int]$Number, [string]$Letter, [string]$Label, [string]$Profile = '') {
+    if ($Label -notmatch '^[A-Za-z0-9_\-]{1,32}$') { throw "Ungueltige Bezeichnung '$Label' (max. 32 Zeichen: A-Z, 0-9, - und _)" }
+    $i = Get-HMSbDiskVolumeInfo $Number
+    if ($i.Letter -ne "$Letter".ToUpper()) { throw "Laufwerk ${Letter}: gehoert nicht (mehr) zu Datentraeger $Number - Liste neu oeffnen" }
+    $dup = @(Test-HMSbLabelInUse $Label $i.Letter)
+    if ($dup.Count) { throw "Bezeichnung '$Label' hat schon $($dup -join ', ') - andere Bezeichnung waehlen" }
+    $old = $i.Label
+    Set-Volume -DriveLetter $i.Letter -NewFileSystemLabel $Label -ErrorAction Stop
+    try {
+        $dir = "$($i.Letter):\$($script:SbDirName)"
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        [pscustomobject]@{ Label = $Label; Profile = $Profile; Created = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Host = $env:COMPUTERNAME; Model = $i.Model; Serial = $i.Serial; Shared = $true; OldLabel = $old; Note = 'uebernommen ohne Formatieren - andere Daten auf der Platte bleiben unveraendert' } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dir 'disk.json') -Encoding UTF8
+    } catch { }
+    return [pscustomobject]@{ Letter = $i.Letter; Label = $Label; OldLabel = $old; FreeBytes = $i.FreeBytes; SizeBytes = $i.SizeBytes }
+}
+
 # wbadmin ausfuehren (stdout+stderr), Fortschritt in $Job, Zeilen ins Log
 function Invoke-HMSbWbadmin {
     param([string]$Arguments, [string]$Phase = '', [double]$PBase = 0, [double]$PSpan = 100, [string]$LogFile = '', [switch]$Quiet)

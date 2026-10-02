@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.67 - 2026-10-02
+### Neu
+- Server-Backup, *Platte einrichten*: **Uebernehmen (ohne Formatieren)** fuer Platten, die schon anders genutzt werden - nur die Bezeichnung wird geaendert (z. B. *My Book* -> *HUMIG-BHAK-1*), nichts geloescht. Rueckfrage mit Belegung, freiem Platz und vorhandenen Ordnern; zweite Warnung, wenn auf der Platte schon eine Windows-Sicherung dieses Hosts liegt (gleicher Ordner *WindowsImageBackup\<Host>*); Hinweis, wenn die Platte frueher von HUMig anders benannt war; schon vergebene Bezeichnung wird abgelehnt
+
 ## v2.0.66 - 2026-10-02
 ### Neu
 - App-Updates, *Zeitplaene ansehen*: Spalte *Fortschritt* waehrend eines Laufs (z. B. *12/26: GIMP (11 ok, 1 Fehler)*), Knoepfe *Neu laden* und *Markierte: Protokoll* (Protokoll am Ziel-PC je Programm)
