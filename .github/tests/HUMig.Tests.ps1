@@ -178,32 +178,36 @@ Describe 'App-Updates (WinGet)' {
         Format-HMAuResult 'Ok' 0 0 $true | Should -Match 'Neustart'
         Format-HMAuResult 'InstallError' 1603 0 $false | Should -Match '1603.*Programm laeuft'
     }
-    It 'Updates lesen: nur verfuegbare, unbekannte nur auf Wunsch, doppelte einmal' {
-        Mock Import-Module { }
-        Mock Get-WinGetPackage {
-            @([pscustomobject]@{ Id = 'A.A'; Name = 'Alpha'; InstalledVersion = '1.0'; AvailableVersions = @('2.0', '1.5'); IsUpdateAvailable = $true },
-              [pscustomobject]@{ Id = 'B.B'; Name = 'Beta'; InstalledVersion = '3.0'; AvailableVersions = @('3.0'); IsUpdateAvailable = $false },
-              [pscustomobject]@{ Id = 'C.C'; Name = 'Gamma'; InstalledVersion = 'Unknown'; AvailableVersions = @('9'); IsUpdateAvailable = $false })
-        }
-        $r = Get-HMAuUpdates @('winget', 'eigene') $false
-        @($r.Items).Count | Should -Be 1
-        $r.Items[0].Available | Should -Be '2.0'
-        $r.Items[0].Source | Should -Be 'winget'
-        $r2 = Get-HMAuUpdates @('winget') $true
-        @($r2.Items).Count | Should -Be 2
-        (@($r2.Items) | Where-Object Id -eq 'C.C').Installed | Should -Be 'unbekannt'
+    It 'Listen zusammenfuehren: SYSTEM = fuer alle Benutzer, sonst nur Benutzer' {
+        $u = @([pscustomobject]@{ Id = 'A.A'; Name = 'Alpha'; Installed = '1'; Available = '2'; Source = 'winget' }, [pscustomobject]@{ Id = 'Z.Z'; Name = 'Zoom'; Installed = '7'; Available = '8'; Source = 'winget' })
+        $s = @([pscustomobject]@{ Id = 'A.A'; Name = 'Alpha'; Installed = '1'; Available = '2'; Source = 'winget' }, [pscustomobject]@{ Id = 'S.S'; Name = 'Service'; Installed = '1'; Available = '3'; Source = 'winget' })
+        $m = @(Merge-HMAuLists $u $s $true)
+        $m.Count | Should -Be 3
+        ($m | Where-Object Id -eq 'A.A').Scope | Should -Be 'Machine'
+        ($m | Where-Object Id -eq 'Z.Z').Scope | Should -Be 'User'
+        ($m | Where-Object Id -eq 'S.S').Scope | Should -Be 'Machine'
+        @(Merge-HMAuLists $u @() $false | Where-Object Scope -eq 'User').Count | Should -Be 2
+        @(Merge-HMAuLists @() $s $true).Count | Should -Be 2
     }
-    It 'Aktualisieren: Ergebnis je Programm, Uebersprungen bei laufendem Programm' {
-        Mock Import-Module { }
-        Mock Update-WinGetPackage { if ($Id -eq 'A.A') { [pscustomobject]@{ Status = 'Ok'; RebootRequired = $true; InstallerErrorCode = 0; ExtendedErrorCode = 0 } } else { [pscustomobject]@{ Status = 'InstallError'; RebootRequired = $false; InstallerErrorCode = 1603; ExtendedErrorCode = 0 } } }
+    It 'Aktualisieren: SYSTEM fuer alle Benutzer, Benutzer-Aufgabe fuer eigene, Uebersprungen bei laufendem Programm' {
+        $global:AuCalls = @()
+        Mock Invoke-HMAuTaskRun {
+            $global:AuCalls += $Account
+            $res = @(foreach ($i in @($Request.Items)) {
+                    if ($i.Id -eq 'A.A') { [pscustomobject]@{ Id = 'A.A'; Status = 'Ok'; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $true } }
+                    elseif ($i.Id -eq 'B.B') { [pscustomobject]@{ Id = 'B.B'; Status = 'InstallError'; InstallerErrorCode = 1603; ExtendedErrorCode = 0; Reboot = $false } }
+                })
+            [pscustomobject]@{ Account = $Account; Items = @(); Results = $res; Errors = @() }
+        }
         $job = @{ Log = $null; Progress = 0; Status = ''; Cancel = $false; Result = $null }
-        $ctx = @{ Account = 'x'; Items = @(
-                [pscustomobject]@{ Id = 'A.A'; Name = 'Alpha'; Source = 'winget'; Installed = '1'; Available = '2' },
-                [pscustomobject]@{ Id = 'B.B'; Name = 'Beta'; Source = 'winget'; Installed = '1'; Available = '2' },
-                [pscustomobject]@{ Id = 'C.C'; Name = 'Gamma'; Source = 'winget'; Installed = '1'; Available = '2' })
+        $ctx = @{ UserAccount = 'PC\lehrer'; UserSid = 'S-1-5-21-1'; Items = @(
+                [pscustomobject]@{ Id = 'A.A'; Name = 'Alpha'; Source = 'winget'; Installed = '1'; Available = '2'; Scope = 'Machine' },
+                [pscustomobject]@{ Id = 'B.B'; Name = 'Beta'; Source = 'winget'; Installed = '1'; Available = '2'; Scope = 'User' },
+                [pscustomobject]@{ Id = 'C.C'; Name = 'Gamma'; Source = 'winget'; Installed = '1'; Available = '2'; Scope = 'User' })
             Running = @([pscustomobject]@{ Id = 'C.C'; Name = 'Gamma'; Running = 'gamma (1)'; Procs = @() }); ProcDecisions = @{ 'C.C' = 'Skip' }
         }
         Start-HMAppUpdate -Ctx $ctx -Job $job
+        $global:AuCalls -join ',' | Should -Be 'SYSTEM,PC\lehrer'
         $it = @($job.Result.Items)
         $it.Count | Should -Be 3
         ($it | Where-Object Id -eq 'A.A').Status | Should -Be 'OK'

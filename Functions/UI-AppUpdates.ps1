@@ -16,6 +16,7 @@ $script:AuReady    = $false
 $script:AuSources  = @()
 $script:AuDt       = $null
 $script:AuButtons  = @()
+$script:AuUser     = $null   # Benutzer der letzten Suche (Account, Sid)
 
 # ----------------------------------------------------------------------------
 # Einstellungen je Standort
@@ -109,7 +110,7 @@ function Add-HMAuHistory($Entries) {
 }
 function New-HMAuTable {
     $dt = New-Object System.Data.DataTable
-    foreach ($c in @(@('Sel', [bool]), @('Programm', [string]), @('Installiert', [string]), @('Verfuegbar', [string]), @('Quelle', [string]), @('Paket', [string]), @('Hinweis', [string]), @('Excl', [bool]))) { [void]$dt.Columns.Add($c[0], $c[1]) }
+    foreach ($c in @(@('Sel', [bool]), @('Programm', [string]), @('Installiert', [string]), @('Verfuegbar', [string]), @('Quelle', [string]), @('Paket', [string]), @('Hinweis', [string]), @('Excl', [bool]), @('Bereich', [string]), @('Scope', [string]), @('Unknown', [bool]))) { [void]$dt.Columns.Add($c[0], $c[1]) }
     return , $dt
 }
 
@@ -132,7 +133,7 @@ function Update-HMAuState([switch]$Search) {
         $script:AuReady = [bool]$s.Ready
         $script:AuSources = @($r.Sources | Where-Object { $_ })
         $ui.btnAuSetup.Visibility = $(if ($s.Ready -or -not $s.OsOk) { 'Collapsed' } else { 'Visible' })
-        $ui.lblAuInfo.Text = $(if ($s.Ready) { "WinGet $($s.WinGet)  |  Modul Microsoft.WinGet.Client $($s.Module)  |  App Installer $($s.AppInstaller)  |  Konto $([Security.Principal.WindowsIdentity]::GetCurrent().Name) - Programme, die nur fuer andere Benutzer installiert sind, sieht WinGet hier nicht." } else { "$($s.Problem)" })
+        $ui.lblAuInfo.Text = $(if ($s.Ready) { "WinGet $($s.WinGet)  |  Modul Microsoft.WinGet.Client $($s.Module)  |  App Installer $($s.AppInstaller)  |  Gelesen wird als SYSTEM (Programme fuer alle Benutzer) und im Konto des oben gewaehlten Benutzers (nur fuer ihn installierte - er muss angemeldet sein)." } else { "$($s.Problem)" })
         foreach ($b in @($ui.btnAuSearch, $ui.btnAuUpdateSel, $ui.btnAuUpdateAll, $ui.btnAuSourceAdd)) { $b.IsEnabled = [bool]$s.Ready -and -not $script:JobRunning }
         Update-HMAuSourceList
         if ($s.Ready -and $stt.Search) { Start-HMAuSearch }
@@ -152,15 +153,24 @@ function Start-HMAuSearch {
     if (-not $script:AuReady) { Update-HMAuState -Search; return }
     $c = Get-HMAuConfig
     if (-not $c.Sources.Count) { Out-Console 'App-Updates: keine Quelle angehakt.' 'Warning'; return }
-    $ui.lblAuListTitle.Text = 'VERFUEGBARE UPDATES - wird gesucht ...'
+    if (-not (Test-HMIsLocal (Get-TargetComputer))) { Out-Console "App-Updates: derzeit nur fuer diesen PC ($env:COMPUTERNAME) - gewaehlt ist $(Get-TargetComputer)." 'Warning'; return }
+    $p = Get-SelectedProfile
+    $acct = ''; $sid = ''
+    if ($p -and $p.SID -and -not $p.NoProfile) { $acct = "$($p.Account)"; $sid = "$($p.SID)" }
+    $script:AuUser = [pscustomobject]@{ Account = $acct; Sid = $sid }
+    $ui.lblAuListTitle.Text = "VERFUEGBARE UPDATES - wird gesucht (SYSTEM$(if ($acct) { " + $acct" })) ..."
     Invoke-AsyncCommand -ScriptBlock {
-        param($eng, $src, $unk)
+        param($eng, $src, $unk, $acct, $sid)
         . $eng
-        Get-HMAuUpdates $src $unk
-    } -ArgumentList @($script:AuEngine, [string[]]$c.Sources, [bool]$ui.chkAuUnknown.IsChecked) -TimeoutSec 300 -BusyTag 'Au' -BusyText 'Updates werden gesucht ...' -OnComplete {
+        Get-HMAuUpdates $src $unk $acct $sid
+    } -ArgumentList @($script:AuEngine, [string[]]$c.Sources, [bool]$ui.chkAuUnknown.IsChecked, $acct, $sid) -TimeoutSec 1300 -BusyTag 'Au' -BusyText 'Updates werden gesucht ...' -OnComplete {
         param($r)
         if (-not $r -or $r -is [string]) { $ui.lblAuListTitle.Text = 'VERFUEGBARE UPDATES'; Out-Console "App-Updates: Suche fehlgeschlagen - $r" 'Error'; return }
         foreach ($e in @($r.Errors)) { Out-Console "App-Updates: $e" 'Warning' }
+        $u = $script:AuUser
+        if ($u -and $u.Account -and -not $r.LoggedOn) { Out-Console "App-Updates: $($u.Account) ist nicht angemeldet - nur Programme fuer alle Benutzer gelesen. Fuer seine eigenen Programme muss er angemeldet sein." 'Warning'; $script:AuUser = [pscustomobject]@{ Account = ''; Sid = '' } }
+        elseif (-not ($u -and $u.Account)) { Out-Console 'App-Updates: kein Benutzer gewaehlt - nur Programme fuer alle Benutzer gelesen.' 'Info' }
+        if (-not $r.SysOk) { Out-Console 'App-Updates: Lesen als SYSTEM fehlgeschlagen - Bereich unsicher, alle als Benutzer-Programme behandelt.' 'Warning' }
         $c = Get-HMAuConfig
         $dt = New-HMAuTable
         $n = 0; $x = 0
@@ -170,13 +180,15 @@ function Start-HMAuSearch {
             $row.Sel = (-not $ex -and -not $it.Unknown)
             $row.Programm = "$($it.Name)"; $row.Installiert = "$($it.Installed)"; $row.Verfuegbar = "$($it.Available)"; $row.Quelle = "$($it.Source)"; $row.Paket = "$($it.Id)"
             $row.Excl = [bool]$ex
+            $row.Scope = "$($it.Scope)"; $row.Unknown = [bool]$it.Unknown
+            $row.Bereich = $(if ("$($it.Scope)" -eq 'User') { "nur $(("$($script:AuUser.Account)" -split '\\')[-1])" } else { 'alle Benutzer' })
             $row.Hinweis = $(if ($ex) { "Ausnahme ($($ex.Pattern)): $($ex.Reason)" } elseif ($it.Unknown) { 'Version unbekannt - Zuordnung unsicher' } else { '' })
             $dt.Rows.Add($row)
             if ($ex) { $x++ } else { $n++ }
         }
         $script:AuDt = $dt
         $ui.dgAu.ItemsSource = $dt.DefaultView
-        $ui.lblAuListTitle.Text = "VERFUEGBARE UPDATES - $n$(if ($x) { " (+ $x Ausnahme(n))" })  |  Stand $((Get-Date).ToString('HH:mm'))"
+        $ui.lblAuListTitle.Text = "VERFUEGBARE UPDATES - $n$(if ($x) { " (+ $x Ausnahme(n))" })  |  gelesen als SYSTEM$(if ($r.UserRead) { " + $($script:AuUser.Account)" })  |  Stand $((Get-Date).ToString('HH:mm'))"
         Out-Console "App-Updates: $n Update(s) verfuegbar$(if ($x) { ", $x als Ausnahme ausgelassen" })" $(if ($n) { 'Info' } else { 'Success' })
     }
 }
@@ -193,7 +205,9 @@ function Start-HMAuUpdate([switch]$All) {
     $rows = @($rows | Where-Object { -not [bool]$_.Excl })
     if ($exRows.Count -and -not $All) { Out-Console "App-Updates: $(@($exRows | ForEach-Object { $_.Programm }) -join ', ') - Ausnahme, wird nicht aktualisiert (Ausnahme zuerst entfernen)." 'Warning' }
     if (-not $rows.Count) { Out-Console 'App-Updates: nichts zu aktualisieren.' 'Warning'; return }
-    $items = @($rows | ForEach-Object { [pscustomobject]@{ Id = "$($_.Paket)"; Name = "$($_.Programm)"; Source = "$($_.Quelle)"; Installed = "$($_.Installiert)"; Available = "$($_.Verfuegbar)"; Unknown = ("$($_.Installiert)" -eq 'unbekannt') } })
+    $items = @($rows | ForEach-Object { [pscustomobject]@{ Id = "$($_.Paket)"; Name = "$($_.Programm)"; Source = "$($_.Quelle)"; Installed = "$($_.Installiert)"; Available = "$($_.Verfuegbar)"; Unknown = [bool]$_.Unknown; Scope = "$($_.Scope)" } })
+    $uAcct = if ($script:AuUser) { "$($script:AuUser.Account)" } else { '' }
+    if (@($items | Where-Object { $_.Scope -eq 'User' }).Count -and -not $uAcct) { Out-Console 'App-Updates: Programme "nur Benutzer" brauchen einen angemeldeten Benutzer - neu suchen.' 'Warning'; return }
     $list = @($items | Select-Object -First 25 | ForEach-Object { "  $($_.Name): $($_.Installed) -> $($_.Available)" }) -join "`n"
     if ($items.Count -gt 25) { $list += "`n  ... und $($items.Count - 25) weitere" }
     if (-not (Confirm-Action "$($items.Count) Programm(e) an $env:COMPUTERNAME still aktualisieren?`n`n$list`n`nLaufende Programme werden vorher erkannt (Schliessen wird angeboten)." 'App-Updates')) { return }
@@ -214,7 +228,7 @@ function Start-HMAuUpdate([switch]$All) {
             if ($null -eq $dec) { Out-Console 'App-Updates abgebrochen (laufende Programme).' 'Warning'; return }
             foreach ($x in $running) { Out-Console ("   {0}: {1} -> {2}" -f $x.Name, $x.Running, $(switch ("$($dec[$x.Id])") { 'Close' { 'schliessen' } 'CloseForce' { 'schliessen, notfalls beenden' } 'Skip' { 'nicht aktualisieren' } default { 'trotzdem aktualisieren' } })) 'Info' }
         }
-        $ctx = @{ Items = @($st.Items); Running = $running; ProcDecisions = $dec; Account = [Security.Principal.WindowsIdentity]::GetCurrent().Name }
+        $ctx = @{ Items = @($st.Items); Running = $running; ProcDecisions = $dec; UserAccount = $(if ($script:AuUser) { "$($script:AuUser.Account)" } else { '' }); UserSid = $(if ($script:AuUser) { "$($script:AuUser.Sid)" } else { '' }) }
         Start-EngineJob -Command 'Start-HMAppUpdate -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'App-Updates' -ScriptFiles @($script:Engine, $script:AuEngine) -OnFinished {
             param($j)
             if ($j.Result -and $j.Result.Items) { Add-HMAuHistory @($j.Result.Items) }

@@ -593,6 +593,7 @@
                                             <DataGridTextColumn Header="Programm" Binding="{Binding Programm}" Width="Auto" IsReadOnly="True"/>
                                             <DataGridTextColumn Header="Installiert" Binding="{Binding Installiert}" Width="Auto" IsReadOnly="True"/>
                                             <DataGridTextColumn Header="Neu" Binding="{Binding Verfuegbar}" Width="Auto" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Bereich" Binding="{Binding Bereich}" Width="Auto" IsReadOnly="True"/>
                                             <DataGridTextColumn Header="Quelle" Binding="{Binding Quelle}" Width="Auto" IsReadOnly="True"/>
                                             <DataGridTextColumn Header="Paket-ID" Binding="{Binding Paket}" Width="Auto" IsReadOnly="True"/>
                                             <DataGridTextColumn Header="Hinweis" Binding="{Binding Hinweis}" Width="Auto" IsReadOnly="True"/>
