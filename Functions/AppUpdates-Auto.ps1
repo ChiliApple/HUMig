@@ -41,7 +41,7 @@ try {
     # Log kurz halten (letzte 2000 Zeilen)
     try { $lf = Join-Path $Dir 'log.txt'; if ((Get-Item -LiteralPath $lf -ErrorAction Stop).Length -gt 400KB) { Get-Content -LiteralPath $lf -Tail 2000 | Set-Content -LiteralPath $lf -Encoding UTF8 } } catch { }
     $cfg = Get-Content -LiteralPath (Join-Path $Dir 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-    Import-Module Microsoft.WinGet.Client -ErrorAction Stop
+    try { Import-Module Microsoft.WinGet.Client -ErrorAction Stop } catch { Import-Module (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\Microsoft.WinGet.Client') -ErrorAction Stop }
     $wg = Get-AWingetExe
     if (-not $wg) { throw 'winget.exe nicht gefunden' }
     $seen = @{}

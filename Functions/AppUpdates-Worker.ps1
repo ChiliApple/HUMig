@@ -55,7 +55,7 @@ function Get-WWingetExe {
 $res = [ordered]@{ Account = [Security.Principal.WindowsIdentity]::GetCurrent().Name; Items = @(); Results = @(); Errors = @(); Sources = @() }
 try {
     $req = Get-Content -LiteralPath (Join-Path $Dir 'request.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-    if (-not [bool]$req.Cli) { Import-Module Microsoft.WinGet.Client -ErrorAction Stop }
+    if (-not [bool]$req.Cli) { try { Import-Module Microsoft.WinGet.Client -ErrorAction Stop } catch { Import-Module (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\Microsoft.WinGet.Client') -ErrorAction Stop } }
     if ("$($req.Mode)" -eq 'SourceAdd') {
         $p = @{ Name = "$($req.Name)"; Argument = "$($req.Argument)"; ErrorAction = 'Stop' }
         if ("$($req.Type)") { $p.Type = "$($req.Type)" }
