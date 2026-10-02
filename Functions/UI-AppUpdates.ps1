@@ -90,7 +90,8 @@ function Update-HMAuSourceList {
 }
 function Update-HMAuHistory {
     $h = @()
-    try { if (Test-Path -LiteralPath $script:AuHistFile) { $h = @(Get-Content -LiteralPath $script:AuHistFile -Raw -Encoding UTF8 | ConvertFrom-Json) } } catch { }
+    # ConvertFrom-Json gibt ein JSON-Array in PS 5.1 als EIN Objekt weiter -> mit ForEach-Object aufloesen
+    try { if (Test-Path -LiteralPath $script:AuHistFile) { $h = @(Get-Content -LiteralPath $script:AuHistFile -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { $_ }) } } catch { }
     $rows = @(@($h) | Where-Object { $_ } | Sort-Object Date -Descending | Select-Object -First 500 | ForEach-Object {
             $st = switch ("$($_.Status)") { 'OK' { 'OK' } 'Skipped' { 'uebersprungen' } default { 'FEHLER' } }
             [pscustomobject]@{ Datum = "$($_.Date)"; PC = "$($_.Computer)"; Programm = "$($_.Name)"; Version = "$($_.From) -> $($_.To)"; Ergebnis = "$st - $($_.Text)" }
@@ -99,7 +100,7 @@ function Update-HMAuHistory {
 }
 function Add-HMAuHistory($Entries) {
     $h = @()
-    try { if (Test-Path -LiteralPath $script:AuHistFile) { $h = @(Get-Content -LiteralPath $script:AuHistFile -Raw -Encoding UTF8 | ConvertFrom-Json) } } catch { }
+    try { if (Test-Path -LiteralPath $script:AuHistFile) { $h = @(Get-Content -LiteralPath $script:AuHistFile -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { $_ }) } } catch { }
     $h = @(@($h) + @($Entries) | Where-Object { $_ } | Sort-Object Date -Descending | Select-Object -First 2000)
     try {
         $d = Split-Path $script:AuHistFile -Parent

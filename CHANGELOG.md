@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.63 - 2026-10-02
+### Behoben
+- App-Updates: beim Suchen/Aktualisieren im Benutzerkonto ging ein leeres Konsolenfenster auf (Windows 11 / Windows Terminal) - startet jetzt ohne Fenster
+- App-Updates: Verlauf zeigte mehrere Laeufe in einer Zeile (und faelschlich FEHLER)
+- App-Updates: Bereich bei kurzen Namen (z.B. PuTTY / *PuTTY release ...*) richtig erkannt
+
 ## v2.0.62 - 2026-10-02
 ### Behoben
 - App-Updates: Bereich falsch (*nur Benutzer*), wenn der WinGet-Name vom Deinstallations-Eintrag abweicht (z.B. *Adobe Acrobat Reader (64-bit)* / *Adobe Acrobat (64-bit)*, *Mozilla Thunderbird (de)* / *(x64 de)*) - Vergleich ohne Klammerzusaetze, Architektur und Versionsnummern, Teilnamen ab 8 Zeichen

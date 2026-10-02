@@ -183,7 +183,19 @@ function Start-HMAuTask([string]$Account, [string]$Sid, $Request) {
         & icacls.exe "$dir" /grant "*${Sid}:(OI)(CI)M" | Out-Null
     }
     $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $a = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dir\worker.ps1`" -Dir `"$dir`""
+    $psArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dir\worker.ps1`" -Dir `"$dir`""
+    if ($sys) { $a = New-ScheduledTaskAction -Execute $ps -Argument $psArgs }   # SYSTEM: Sitzung 0, kein Fenster
+    else {
+        # im Benutzerkonto ohne sichtbares Fenster (Windows 11 oeffnet sonst trotz -WindowStyle Hidden ein leeres Terminal):
+        # conhost --headless; aeltere Windows-Versionen ueber ein WSH-Startskript (Fenster 0 = versteckt)
+        if ([Environment]::OSVersion.Version.Build -ge 19041) {
+            $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\conhost.exe') -Argument "--headless `"$ps`" $psArgs"
+        } else {
+            $vbs = Join-Path $dir 'start.vbs'
+            ('CreateObject("WScript.Shell").Run """' + $ps + '"" ' + ($psArgs -replace '"', '""') + '", 0, True') | Set-Content -LiteralPath $vbs -Encoding ASCII
+            $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\wscript.exe') -Argument "//B //NoLogo `"$vbs`""
+        }
+    }
     $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 3) -MultipleInstances IgnoreNew
     $name = "HUMig_AppUpdates_$id"
     $ok = $false; $err = ''
