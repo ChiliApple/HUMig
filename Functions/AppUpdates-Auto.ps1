@@ -6,7 +6,7 @@
     Wird von HUMig nach %ProgramData%\HUMig\AppUpdates\auto\ kopiert und von der geplanten Aufgabe "HUMig App-Updates"
     als SYSTEM mit PowerShell 7 gestartet (das Modul Microsoft.WinGet.Client laeuft als SYSTEM nur dort).
     Lesen: Modul (nur Programme fuer alle Benutzer sichtbar). Aktualisieren: winget.exe.
-    Ergebnis: history.json (je Programm), last.json (Zusammenfassung), log.txt (letzte Laeufe).
+    Ergebnis: history.json (je Programm, sofort), progress.json (Fortschritt), last.json (Zusammenfassung), log.txt (letzte Laeufe).
 .NOTES
     Zielmaschine: der PC mit dem Zeitplan (SYSTEM, ohne Anmeldung).
 #>
@@ -26,17 +26,41 @@ function Format-ACode([int64]$Code) {
     if ($Code -eq 0) { return @{ Ok = $true; Reboot = $false; Text = 'aktualisiert' } }
     $u = if ($Code -lt 0) { [uint32]($Code + 4294967296) } else { [uint32]$Code }
     $hex = '0x{0:X8}' -f $u
-    switch ($hex) {
-        '0x8A150109' { return @{ Ok = $true; Reboot = $true; Text = 'aktualisiert - Neustart noetig' } }
-        '0x8A15002B' { return @{ Ok = $false; Reboot = $false; Text = "kein passendes Update ($hex)" } }
-        '0x8A150101' { return @{ Ok = $false; Reboot = $false; Text = "Programm laeuft noch ($hex)" } }
-        '0x8A150008' { return @{ Ok = $false; Reboot = $false; Text = "Download fehlgeschlagen ($hex)" } }
-        '0x8A150011' { return @{ Ok = $false; Reboot = $false; Text = "Pruefsumme passt nicht - nicht installiert ($hex)" } }
-        default { return @{ Ok = $false; Reboot = $false; Text = "Fehler ($hex)" } }
+    if ($hex -eq '0x8A150109') { return @{ Ok = $true; Reboot = $true; Text = 'aktualisiert - Neustart noetig' } }
+    $t = switch ($hex) {
+        '0x8A15002B' { 'kein passendes Update' }
+        '0x8A15004F' { 'neue Version nicht neuer als installierte' }
+        '0x8A150014' { 'kein installiertes Paket gefunden' }
+        '0x8A150010' { 'kein passender Installer' }
+        '0x8A15010A' { 'Neustart noetig, dann erneut' }
+        '0x8A150101' { 'Programm laeuft noch' }
+        '0x8A150102' { 'andere Installation laeuft gerade' }
+        '0x8A150104' { 'Abhaengigkeit fehlt' }
+        '0x8A150106' { 'zu wenig Speicher' }
+        '0x8A150008' { 'Download fehlgeschlagen' }
+        '0x8A15003A' { 'durch Gruppenrichtlinie blockiert' }
+        '0x8A150006' { 'Installer meldet Fehler' }
+        '0x8A150115' { 'Installer meldet Fehler' }
+        '0x8A150011' { 'Pruefsumme passt nicht - nicht installiert' }
+        default { 'Fehler' }
     }
+    return @{ Ok = $false; Reboot = $false; Text = "$t ($hex)" }
 }
+# Verlauf und Fortschritt nach jedem Programm speichern (HUMig > Zeitplaene ansehen liest beides auch waehrend des Laufs)
+$hf = Join-Path $Dir 'history.json'
+$pf = Join-Path $Dir 'progress.json'
+function Add-AHistory($Entry) {
+    try {
+        $old = @(); if (Test-Path -LiteralPath $hf) { $old = @(Get-Content -LiteralPath $hf -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { $_ }) }
+        ConvertTo-Json -InputObject @(@($old) + @($Entry) | Select-Object -Last 1000) -Depth 4 | Set-Content -LiteralPath $hf -Encoding UTF8
+    } catch { Write-ALog "Verlauf nicht speicherbar: $($_.Exception.Message)" }
+}
+function Set-AProgress([bool]$Running, [int]$Done, [int]$Total, [string]$Current, [int]$Ok, [int]$Err) {
+    try { [pscustomobject]@{ Running = $Running; Started = $script:Started; Done = $Done; Total = $Total; Current = $Current; Ok = $Ok; Err = $Err; Updated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } | ConvertTo-Json | Set-Content -LiteralPath $pf -Encoding UTF8 } catch { }
+}
+$script:Started = (Get-Date).ToString('yyyy-MM-dd HH:mm')
 Write-ALog '=== Start'
-$hist = @(); $ok = 0; $err = 0; $excl = 0; $found = 0
+$ok = 0; $err = 0; $excl = 0; $found = 0; $i = 0; $todo = @()
 try {
     # Log kurz halten (letzte 2000 Zeilen)
     try { $lf = Join-Path $Dir 'log.txt'; if ((Get-Item -LiteralPath $lf -ErrorAction Stop).Length -gt 400KB) { Get-Content -LiteralPath $lf -Tail 2000 | Set-Content -LiteralPath $lf -Encoding UTF8 } } catch { }
@@ -59,18 +83,21 @@ try {
         } catch { Write-ALog "Quelle ${src}: $($_.Exception.Message)" }
     }
     Write-ALog "$found Update(s), $excl Ausnahme(n), $($todo.Count) zu aktualisieren"
+    $i = 0
     foreach ($t in $todo) {
+        Set-AProgress $true $i $todo.Count "$($t.Name)" $ok $err
         $out = @(& $wg upgrade --id $t.Id --exact --source $t.Source --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | ForEach-Object { "$_" })
         $r = Format-ACode ([int64]$LASTEXITCODE)
+        $i++
         if ($r.Ok) { $ok++ } else { $err++ }
-        Write-ALog "$($t.Name) $($t.From) -> $($t.To): $($r.Text)"
-        $hist += [pscustomobject]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Computer = $PC; Id = $t.Id; Name = $t.Name; From = $t.From; To = $t.To; Source = $t.Source; Scope = 'Machine'; Status = $(if ($r.Ok) { 'OK' } else { 'Error' }); Text = "$($r.Text) (Zeitplan)"; Reboot = [bool]$r.Reboot }
+        $det = ''
+        if (-not $r.Ok) { $det = @($out | Where-Object { "$_".Trim() -and "$_" -notmatch '^[\s\-\\|/]+$' -and "$_" -notmatch '[\u2580-\u259F]' } | Select-Object -Last 2) -join ' / ' }
+        Write-ALog "$($t.Name) $($t.From) -> $($t.To): $($r.Text)$(if ($det) { " - $det" })"
+        Add-AHistory ([pscustomobject]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Computer = $PC; Id = $t.Id; Name = $t.Name; From = $t.From; To = $t.To; Source = $t.Source; Scope = 'Machine'; Status = $(if ($r.Ok) { 'OK' } else { 'Error' }); Text = "$($r.Text)$(if ($det) { ": $det" }) (Zeitplan)"; Reboot = [bool]$r.Reboot })
     }
 } catch { $err++; Write-ALog "FEHLER: $($_.Exception.Message)" }
+Set-AProgress $false $i $(if ($todo) { @($todo).Count } else { 0 }) '' $ok $err
 try {
-    $hf = Join-Path $Dir 'history.json'
-    $old = @(); if (Test-Path -LiteralPath $hf) { $old = @(Get-Content -LiteralPath $hf -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { $_ }) }
-    ConvertTo-Json -InputObject @(@($old) + @($hist) | Select-Object -Last 1000) -Depth 4 | Set-Content -LiteralPath $hf -Encoding UTF8
     [pscustomobject]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Found = $found; Ok = $ok; Err = $err; Excluded = $excl } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Dir 'last.json') -Encoding UTF8
-} catch { Write-ALog "Verlauf nicht speicherbar: $($_.Exception.Message)" }
+} catch { Write-ALog "Bericht nicht speicherbar: $($_.Exception.Message)" }
 Write-ALog "=== Ende: $ok aktualisiert, $err Fehler"

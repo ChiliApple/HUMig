@@ -68,6 +68,7 @@ function Format-HMAuCliResult([int64]$Code, [string]$Out) {
         '0x8A15003A' { 'durch Gruppenrichtlinie blockiert' }
         '0x8A150019' { 'braucht Administratorrechte' }
         '0x8A150115' { 'Installer meldet Fehler' }
+        '0x8A150006' { 'Installer meldet Fehler (Programm offen, Neustart ausstehend oder Installer defekt)' }
         '0x8A150010' { 'kein passender Installer fuer alle Benutzer bzw. diesen PC (nur pro Benutzer installierbar?)' }
         '0x8A150061' { 'schon installiert' }
         '0x8A15010D' { 'andere Version ist schon installiert' }
