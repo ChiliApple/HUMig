@@ -571,8 +571,27 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <div class="note tip"><b class="h">Dauer und Platz</b>Hyper-V-VMs werden bei jedem Lauf vollständig gelesen – die Dauer hängt von der Größe der VMs ab (über USB 3 grob 1–2 GB pro Minute). Auf der Platte speichert die Windows Server-Sicherung aber nur die geänderten Blöcke: jede weitere Version braucht meist nur wenig Platz. Bei Platzmangel werden die ältesten Versionen automatisch gelöscht.</div>
 </section>
 
+<section id="appupdates">
+  <h2><span class="n">12</span>App-Updates (WinGet)</h2>
+  <p>Der Reiter <span class="ui">App-Updates</span> aktualisiert die installierten Programme dieses PCs über <b>WinGet</b>, den Paketmanager von Windows – mit Haken je Programm, Ausnahmen und Quellen je Standort und einem Verlauf. Der Reiter erscheint, wenn HUMig als Administrator läuft (nicht im Benutzer-Modus).</p>
+  <ol class="steps">
+    <li><b>Beim ersten Öffnen</b> prüft HUMig WinGet. Fehlt etwas: <span class="ui p">WinGet einrichten</span> – installiert das offizielle PowerShell-Modul <code>Microsoft.WinGet.Client</code> aus der PowerShell Gallery (für alle Benutzer) und registriert bzw. repariert WinGet für dieses Konto. Dafür ist Internet nötig.</li>
+    <li><span class="ui b">Updates suchen</span> – Liste aller Programme mit neuerer Version: installierte und neue Version, Quelle, Paket-ID. Ausnahmen sind grau und ohne Haken.</li>
+    <li>Haken setzen bzw. entfernen, dann <span class="ui g">Angehakte aktualisieren</span> oder <span class="ui t">Alle aktualisieren</span>. Laufende Programme werden vorher erkannt: <i>Schließen</i>, <i>Schließen, notfalls beenden</i>, <i>Nicht aktualisieren</i> oder <i>Trotzdem aktualisieren</i>.</li>
+    <li>Die Updates laufen still nacheinander; die Konsole zeigt je Programm das Ergebnis, der <b>Verlauf</b> unten speichert es (Datum, PC, Version alt → neu, Ergebnis).</li>
+  </ol>
+  <table>
+    <tr><th style="width:230px">Bereich</th><th>Bedeutung</th></tr>
+    <tr><td>Ausnahmen</td><td>Programme, die über App-Updates <b>nie</b> aktualisiert werden – z. B. Prüfungssoftware oder gezielt verteilte Versionen. Muster mit <code>*</code> auf Paket-ID oder Programmname (z. B. <code>*Next-Exam*</code>), mit Grund. Rechtsklick in der Liste: <i>Markierte als Ausnahme eintragen</i>. Vorbelegt: Programme, die sich selbst aktualisieren (Edge, Chrome, Teams, Office, OneDrive) und Prüfungssoftware (Next-Exam, Safe Exam Browser).</td></tr>
+    <tr><td>Quellen</td><td>Angehakte WinGet-Quellen werden durchsucht – Standard nur <i>winget</i>. <i>msstore</i> (Microsoft Store) ist in Schulen oft gesperrt und braucht Zustimmungen. <span class="ui">Quelle hinzufügen …</span> für eine eigene Quelle (REST-Adresse oder Netzwerkpfad, Administratorrechte); Rechtsklick auf eine Quelle entfernt sie von diesem PC.</td></tr>
+    <tr><td>Je Standort</td><td>Ausnahmen und angehakte Quellen gelten für den gewählten Standort (z. B. jede Schule eigene Ausnahmen). Beim ersten Mal werden die Vorgaben übernommen.</td></tr>
+    <tr><td>Version unbekannt</td><td><i>Programme ohne bekannte Version zeigen</i> – WinGet kennt die installierte Version nicht; die Zuordnung zum Paket ist dann unsicher (Variante, Sprache, x86/x64). Standard aus.</td></tr>
+  </table>
+  <div class="note warn"><b class="h">Gut zu wissen</b>WinGet sieht im Konto, in dem HUMig läuft, nur Programme für alle Benutzer und die dieses Kontos – nur für einen anderen Benutzer installierte Programme (z. B. Zoom einer Lehrkraft) erscheinen nicht. Manche Hersteller blockieren den Download über WinGet; dann meldet HUMig einen Download-Fehler. Braucht ein Programm einen Neustart, steht das im Ergebnis. Windows Server 2019/2022 unterstützt WinGet nicht.</div>
+</section>
+
 <section id="einstellungen">
-  <h2><span class="n">12</span>Einstellungen</h2>
+  <h2><span class="n">13</span>Einstellungen</h2>
   <table>
     <tr><th style="width:170px">Reiter</th><th>Inhalt</th></tr>
     <tr><td>Allgemein</td><td>Backup-Ordner, Threads, Aufbewahrung (Tage + Anzahl je PC/Benutzer), USMT-Pfad (<span class="ui">Aus ADK einrichten</span>), Softwareverteilung, Treiberverteilung, WLAN-Schlüssel im Klartext, Übersicht automatisch aktualisieren, Skalierung, HUMig.exe neu erstellen, Desktop-Verknüpfung</td></tr>
@@ -590,6 +609,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><code>Config\apps.json</code></td><td>eigene Einträge für den Programm-Katalog</td></tr>
     <tr><td><code>Config\exceptions.json</code></td><td>Ausnahmen Ordner/Dateitypen</td></tr>
     <tr><td><code>Config\modules.json</code></td><td>eigene Module und Vorlagen</td></tr>
+    <tr><td><code>Config\appupdates.json</code></td><td>App-Updates: Ausnahmen und Quellen je Standort (Vorlage <code>appupdates.default.json</code>), Verlauf in <code>Config\AppUpdates\history.json</code></td></tr>
     <tr><td><code>Config\serverbackup.json</code></td><td>Server-Backup-Profile (VMs, Platten, Optionen), Suchwörter der Zeitplan-Prüfung (<code>ConflictWords</code>)</td></tr>
     <tr><td><code>Config\update.json</code></td><td>Update-Einstellungen: Quelle (<code>Owner</code>, <code>Repo</code>), <code>Channel</code> (<code>Stable</code>/<code>Test</code>), <code>SignerThumbprint</code> (nur eigene Quelle), <code>AllowUnsigned</code> (Signaturprüfung aus – nicht empfohlen), Entwicklung: <code>Branch</code>, <code>UseBranch</code> (nur ohne Signaturpflicht). Daneben <code>installed.json</code>: installierte Version, Kanal und Prüfung.</td></tr>
   </table>
@@ -597,7 +617,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 </section>
 
 <section id="update">
-  <h2><span class="n">13</span>Installation und Update</h2>
+  <h2><span class="n">14</span>Installation und Update</h2>
   <ol class="steps">
     <li><b>Neu installieren:</b> <code>Pull.ps1</code> in den Zielordner legen und ausführen: <code>powershell -ExecutionPolicy Bypass -File Pull.ps1</code></li>
     <li><b>Update:</b> Knopf <span class="ui">Update</span> – lädt die neueste Version im gewählten Kanal, prüft sie und startet neu. BACKUPS, Config, Software-/Treiberverteilung und HUMig.exe bleiben erhalten (Details unten).</li>
@@ -619,7 +639,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 </section>
 
 <section id="faq">
-  <h2><span class="n">14</span>Fragen und Probleme</h2>
+  <h2><span class="n">15</span>Fragen und Probleme</h2>
   <h3>„Übersprungen“ im Robocopy.log – fehlt etwas?</h3>
   <p>Nein. Versteckte/System-Dateien (z. B. <code>pagefile.sys</code>), Nur-Cloud-Platzhalter und Ausschlussmuster werden bewusst nicht kopiert. Das HUMig-Protokoll zeigt sie getrennt als <i>absichtlich ausgelassen</i>. Echte Fehler stehen unter <i>FAILED</i> und als Warnung im Protokoll.</p>
   <h3>Windows meldet „Robocopy lädt Dateien herunter“</h3>
@@ -641,7 +661,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 </section>
 
 <section id="tasten">
-  <h2><span class="n">15</span>Tastenkürzel</h2>
+  <h2><span class="n">16</span>Tastenkürzel</h2>
   <table>
     <tr><td style="width:230px"><kbd>F1</kbd></td><td>Anleitung</td></tr>
     <tr><td><kbd>Enter</kbd> im Feld Computer</td><td>Verbinden</td></tr>

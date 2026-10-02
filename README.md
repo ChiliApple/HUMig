@@ -29,6 +29,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 | **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
 | **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung |
 | **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |
+| **App-Updates** | installierte Programme ueber **WinGet** aktualisieren - Liste mit Haken, **Ausnahmen** (z.B. Pruefungssoftware) und Quellen je Standort, Verlauf |
 | **Benutzer-Modus** | ohne Administratorrechte: eigenes Profil sichern/wiederherstellen, Dateien aus dem Backup holen |
 | **Update** | Kanal **Stabil** (freigegebene Versionen) oder **Test**, Vorversion per Klick, jede Datei per **SHA256** geprüft, nur **signierte** Releases werden installiert |
 | **Anleitung** | im Tool mit **F1** – aus diesem Repository, passend zur installierten Version |
@@ -252,6 +253,15 @@ Voraussetzung: Feature *Windows Server-Sicherung* (installierbar aus dem Reiter)
 Erfahrungswerte: VMs laufen weiter (Online-Sicherung). Jede Sicherung liest die VMs komplett (USB 3 rund 2 GB/min, 34-GB-VM ca. 18 min);
 auf der Platte braucht jede weitere Version nur die Aenderungen (zweite Version einer 34-GB-VM unter 1 GB).
 
+## App-Updates (WinGet)
+
+Reiter **App-Updates** (HUMig als Administrator): installierte Programme dieses PCs ueber WinGet aktualisieren.
+- **WinGet einrichten**: offizielles Modul `Microsoft.WinGet.Client` aus der PowerShell Gallery (alle Benutzer) + WinGet fuer das Konto registrieren/reparieren
+- **Updates suchen** -> Liste mit Haken (installiert, neu, Quelle, Paket-ID) -> **Angehakte** bzw. **Alle aktualisieren** (still, nacheinander); laufende Programme werden vorher erkannt (schliessen / notfalls beenden / nicht aktualisieren)
+- **Ausnahmen** je Standort (Muster auf Paket-ID oder Name, mit Grund) - werden nie aktualisiert; vorbelegt: selbstaktualisierende Programme (Edge, Chrome, Teams, Office, OneDrive) und Pruefungssoftware (Next-Exam, Safe Exam Browser)
+- **Quellen** je Standort (Standard nur *winget*), eigene Quelle hinzufuegen/entfernen; **Verlauf** aller Updates
+- Grenzen: nur fuer einen anderen Benutzer installierte Programme sieht WinGet im Admin-Konto nicht; Windows Server 2019/2022 ohne WinGet
+
 ## Update
 
 - **Kanal Stabil** (Standard): nur freigegebene Versionen - fuer Server und Schul-PCs. **Kanal Test**: neue Versionen vor der Freigabe (Einstellungen > Update)
@@ -282,6 +292,7 @@ Alles ueber **Einstellungen** (Fenster). Die Werte landen in:
 | `Config\apps.json` | eigene Eintraege fuer den Programm-Katalog (Aufbau wie `apps.default.json`) |
 | `Config\exceptions.json` | Ausnahmen Ordner/Dateitypen fuer Profil und C:\ |
 | `Config\modules.json` | eigene Module und Vorlagen |
+| `Config\appupdates.json` | App-Updates: Ausnahmen und Quellen je Standort (Vorlage `appupdates.default.json`), Verlauf `Config\AppUpdates\history.json` |
 | `Config\serverbackup.json` | Server-Backup-Profile (VMs, Platten, Optionen), Suchwoerter der Zeitplan-Pruefung (`ConflictWords`) |
 | `Config\update.json` | Update: Quelle (`Owner`, `Repo`), `Channel` (`Stable`/`Test`), `SignerThumbprint` (nur eigene Quelle), `AllowUnsigned` (Signaturpruefung aus - nicht empfohlen), Entwicklung `Branch` + `UseBranch` (nur ohne Signaturpflicht) |
 | `Config\installed.json` | installierte Version, Kanal und Pruefung (schreibt das Update) |

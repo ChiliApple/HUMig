@@ -303,14 +303,14 @@ function Format-HMProcDecision([string]$D) {
     switch ($D) { 'Close' { 'schliessen' } 'CloseForce' { 'schliessen, notfalls beenden' } 'Copy' { 'trotzdem kopieren' } default { 'ueberspringen' } }
 }
 # Dialog: je Programm Schliessen / Schliessen, notfalls beenden / Ueberspringen / Trotzdem kopieren. Rueckgabe Hashtable Id -> Entscheidung, $null = Abbrechen
-function Show-HMProcDialog([object[]]$Rows, [string]$Kind, [string]$Computer) {
+function Show-HMProcDialog([object[]]$Rows, [string]$Kind, [string]$Computer, [object[]]$Options = @(), [string]$Note = '') {
     $x = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Programme geoeffnet" Width="760" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#FF1E1E2E">
   <StackPanel Margin="14">
     <TextBlock x:Name="info" Foreground="#FFCDD6F4" TextWrapping="Wrap" Margin="0,0,0,10"/>
     <StackPanel x:Name="rows" Margin="0,0,0,10"/>
-    <TextBlock Foreground="#FF6C7086" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,12" Text="Schliessen = wie der Benutzer das Fenster schliesst (ungespeicherte Arbeit fragt das Programm selbst nach). Laesst sich das Programm in 20 s nicht schliessen, wird das Modul uebersprungen - ausser 'notfalls beenden' ist gewaehlt (Programm wird dann hart beendet, ungespeicherte Daten gehen verloren). Trotzdem kopieren: geoeffnete Dateien/Datenbanken koennen fehlen oder inkonsistent sein."/>
+    <TextBlock x:Name="note" Foreground="#FF6C7086" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,12" Text="Schliessen = wie der Benutzer das Fenster schliesst (ungespeicherte Arbeit fragt das Programm selbst nach). Laesst sich das Programm in 20 s nicht schliessen, wird das Modul uebersprungen - ausser 'notfalls beenden' ist gewaehlt (Programm wird dann hart beendet, ungespeicherte Daten gehen verloren). Trotzdem kopieren: geoeffnete Dateien/Datenbanken koennen fehlen oder inkonsistent sein."/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
       <Button x:Name="ok" Content="Weiter" Width="110" Height="28" Background="#FFA6E3A1" Foreground="#FF1E1E2E" FontWeight="SemiBold" Margin="0,0,6,0" IsDefault="True"/>
       <Button x:Name="cancel" Content="Abbrechen" Width="100" Height="28" Background="#FF45475A" Foreground="#FFCDD6F4" IsCancel="True"/>
@@ -323,7 +323,8 @@ function Show-HMProcDialog([object[]]$Rows, [string]$Kind, [string]$Computer) {
     $w.FindName('info').Text = "An $Computer laufen Programme, deren Dateien beim $Kind gesperrt sein koennen. Was soll HUMig tun?"
     $pnl = $w.FindName('rows')
     $combos = @{}
-    $opts = @(@('Close', 'Schliessen'), @('CloseForce', 'Schliessen, notfalls beenden'), @('Skip', 'Modul ueberspringen'), @('Copy', 'Trotzdem kopieren'))
+    $opts = if (@($Options).Count) { @($Options) } else { @(@('Close', 'Schliessen'), @('CloseForce', 'Schliessen, notfalls beenden'), @('Skip', 'Modul ueberspringen'), @('Copy', 'Trotzdem kopieren')) }
+    if ($Note) { $w.FindName('note').Text = $Note }
     foreach ($r in $Rows) {
         $g = New-Object System.Windows.Controls.Grid
         $g.Margin = [System.Windows.Thickness]::new(0, 2, 0, 2)

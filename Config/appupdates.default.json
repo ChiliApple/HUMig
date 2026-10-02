@@ -1,0 +1,14 @@
+{
+  "_Info": "App-Updates (WinGet): Standard-Ausnahmen und -Quellen. Wird beim ersten Oeffnen je Standort in Config\\appupdates.json uebernommen und dort im Reiter App-Updates gepflegt (diese Datei bleibt unveraendert). Pattern: Platzhalter * ? auf Paket-ID oder Programmname.",
+  "Sources": [ "winget" ],
+  "Exclude": [
+    { "Pattern": "Microsoft.Edge*", "Reason": "aktualisiert sich selbst" },
+    { "Pattern": "Google.Chrome*", "Reason": "aktualisiert sich selbst" },
+    { "Pattern": "Microsoft.Teams*", "Reason": "aktualisiert sich selbst / Intune" },
+    { "Pattern": "Microsoft.Office*", "Reason": "Office aktualisiert sich selbst (Klick-und-Ausfuehren)" },
+    { "Pattern": "Microsoft.OneDrive*", "Reason": "aktualisiert sich selbst" },
+    { "Pattern": "*Next-Exam*", "Reason": "Pruefungssoftware - Version gezielt verteilen" },
+    { "Pattern": "*Safe Exam Browser*", "Reason": "Pruefungssoftware - Version gezielt verteilen" },
+    { "Pattern": "*SafeExamBrowser*", "Reason": "Pruefungssoftware - Version gezielt verteilen" }
+  ]
+}

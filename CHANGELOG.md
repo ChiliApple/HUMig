@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.0.58 - 2026-10-02
+### Neu
+- **Reiter App-Updates (WinGet)**: installierte Programme dieses PCs aktualisieren - Liste mit Haken (installiert/neu/Quelle/Paket-ID), *Angehakte* bzw. *Alle aktualisieren* (still, nacheinander), laufende Programme werden vorher erkannt (schliessen / notfalls beenden / nicht aktualisieren), Ergebnis je Programm mit Fehlertext und Neustart-Hinweis, Verlauf
+- **Ausnahmen je Standort** (Muster auf Paket-ID oder Name, mit Grund) - werden nie aktualisiert; vorbelegt: Edge, Chrome, Teams, Office, OneDrive (aktualisieren sich selbst) und Pruefungssoftware (Next-Exam, Safe Exam Browser)
+- **Quellen je Standort** (Standard nur *winget*), eigene Quelle hinzufuegen/entfernen
+- **WinGet einrichten**: Modul Microsoft.WinGet.Client (PowerShell Gallery, alle Benutzer) installieren und WinGet fuer das Konto registrieren/reparieren
+- Programme ohne bekannte Version nur auf Wunsch (Zuordnung unsicher)
+
 ## v2.0.57 - 2026-10-02
 ### Neu
 - Zeitplan (normales Backup): **USB-Laufwerk nach der Sicherung auswerfen** - Schutz vor Verschluesselungstrojanern; auch ohne Administratorrechte, auch nach einem Fehler; nur bei USB-/Wechsellaufwerk als Ziel (nicht Systemplatte, nicht Netzwerkpfad). Klappt es nicht, endet der Lauf mit Warnung und Grund. Verwaltung: neue Spalte *Danach*

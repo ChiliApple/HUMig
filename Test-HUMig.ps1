@@ -252,6 +252,14 @@ T 'Treiberverteilung: INF lesen (v2.0.30)' {
     $d = @(Get-HUDrvState $m | Where-Object { $_.Match })
     "$($inf.Name): $($i.Class) $($i.Version), $(@($i.HwIds).Count) IDs, $($d.Count) passende Geraete"
 }
+T 'App-Updates: Ausnahmen und WinGet-Status (v2.0.58)' {
+    . (Join-Path $root 'Functions\AppUpdates-Engine.ps1')
+    $def = Get-Content (Join-Path $root 'Config\appupdates.default.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not (Find-HMAuExclusion ([pscustomobject]@{ Id = 'Microsoft.Edge'; Name = 'Microsoft Edge' }) $def.Exclude)) { throw 'Edge nicht als Ausnahme erkannt' }
+    if (Find-HMAuExclusion ([pscustomobject]@{ Id = 'Mozilla.Firefox'; Name = 'Mozilla Firefox' }) $def.Exclude) { throw 'Firefox faelschlich Ausnahme' }
+    $s = Get-HMAuState
+    if ($s.Ready) { "WinGet $($s.WinGet), Modul $($s.Module)" } else { "nicht eingerichtet: $($s.Problem)" }
+}
 T 'Zeitplan: Auswerfen lehnt Systemplatte ab (v2.0.57)' {
     $d = Get-HMDriveDisk $env:SystemDrive
     if (-not $d.System) { throw "Systemplatte nicht erkannt ($($d.Letters -join ', '))" }

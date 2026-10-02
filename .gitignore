@@ -23,3 +23,5 @@ HUMig-Benutzer.exe
 Config/serverbackup.json
 Config/ServerBackup/
 Config/apps.json.bak
+Config/appupdates.json
+Config/AppUpdates/
