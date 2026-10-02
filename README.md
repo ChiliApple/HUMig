@@ -225,6 +225,7 @@ Reiter **Server-Backup** (als Administrator auf Windows Server - Hyper-V-Host: V
 
 - **Profile** je Schule/Standort (Name frei, umbenennbar mit Verlauf; Kopie auf jeder Platte): VMs, Platten-Bezeichnung (z.B. `HUMIG-SCHULE1-1`, `-2` ...), Anzahl Platten (Rotation + ausgelagert), Optionen
 - **Platte einrichten**: nur USB-Platten, loeschen + GPT + NTFS 64K + Bezeichnung; Platten werden beim Anstecken an der Bezeichnung erkannt
+- **Platte uebernehmen** (ohne Formatieren): schon anders genutzte Platte nur umbenennen, Daten bleiben; Rueckfrage mit Belegung/Ordnern, zweite Warnung wenn schon eine Windows-Sicherung dieses Hosts darauf liegt (gleicher Ordner `WindowsImageBackup\<Host>`), doppelte Bezeichnung wird abgelehnt
 - **Sichern** mit `wbadmin start backup -hyperv` (online ueber VSS), danach Pruefung (Version + enthaltene VMs), optional Host-System (`-allCritical`)
 - **Laufwerke dieses Servers**: Volume-Sicherung (blockbasiert, einzelne Dateien wiederherstellbar) - z.B. fuer physische Server ohne Hyper-V
 - **Host-System** (Option, `-allCritical`): nur der Host selbst - Systemlaufwerk C: mit Windows, Hyper-V-Rolle, Switches, Einstellungen sowie EFI-/Boot-/Wiederherstellungspartition. Datenlaufwerke mit den VMs (z.B. D:) sind **nicht** enthalten - dafuer die VM-Sicherung. Fuer eine komplette Wiederherstellung nach Totalausfall: Host-System **und** VMs sichern
