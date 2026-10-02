@@ -391,10 +391,13 @@ function Start-HMAuScheduleView {
             $v = $j.Result.ByPc[$k]
             if (-not $v.PSObject.Properties['Exists']) { [void]$rows.Add(@($k, '(nicht erreichbar)', '', '', '', '', (@($v.Errors) -join '; '))); continue }
             $lr = "$($v.LastResult)"
-            $lrT = if (-not $v.Last) { '' } elseif ($lr -eq '0') { 'OK' } elseif ($lr -eq '267009') { 'laeuft' } else { "Code $lr" }
-            [void]$rows.Add(@($k, $(if ($v.Exists) { "$($v.When)" } else { '(kein Zeitplan)' }), "$($v.Next)", "$($v.Last)", $lrT, "$($v.Summary)", "$(@($v.History).Count) Eintraege"))
+            $lrT = if ([bool]$v.Running -or $lr -eq '267009') { 'laeuft' } elseif (-not $v.Last) { '' } elseif ($lr -eq '0') { 'OK' } else { "Code $lr" }
+            [void]$rows.Add(@($k, $(if ($v.Exists) { "$($v.When)" } else { '(kein Zeitplan)' }), "$($v.Next)", "$($v.Last)", $lrT, "$($v.Progress)", "$($v.Summary)", "$(@($v.History).Count) Eintraege"))
         }
-        Show-DataGridWindow -Title 'App-Updates - Zeitplaene' -Columns @('PC', 'Zeitplan', 'Naechster Lauf', 'Letzter Lauf', 'Ergebnis', 'Letzter Bericht', 'Verlauf') -Rows $rows.ToArray() -Sort 'PC ASC' -CountText "$($rows.Count) PC(s)" -Width 1100 -Height 520 -Actions @(
+        $run = @($rows | Where-Object { $_[4] -eq 'laeuft' }).Count
+        Show-DataGridWindow -Title 'App-Updates - Zeitplaene' -Columns @('PC', 'Zeitplan', 'Naechster Lauf', 'Letzter Lauf', 'Ergebnis', 'Fortschritt', 'Letzter Bericht', 'Verlauf') -Rows $rows.ToArray() -Sort 'PC ASC' -CountText "$($rows.Count) PC(s)$(if ($run) { ", $run laufen gerade" })  |  Stand $((Get-Date).ToString('HH:mm:ss'))" -Width 1200 -Height 520 -Actions @(
+            @{ Text = 'Neu laden'; Color = '#FFA6E3A1'; NoSelection = $true; Handler = { param($rows, $win, $ctx) $win.Close(); Start-HMAuScheduleView } }
+            @{ Text = 'Markierte: Protokoll'; Color = '#FFF9E2AF'; Handler = { param($rows, $win, $ctx) Show-HMAuScheduleLog @($rows | ForEach-Object { "$($_.PC)" }) } }
             @{ Text = 'Verlauf aller PCs uebernehmen'; Color = '#FF89B4FA'; NoSelection = $true; Handler = { param($rows, $win, $ctx) Import-HMAuScheduleHistory } }
             @{ Text = 'Markierte: Zeitplan entfernen'; Color = '#FFF38BA8'; Handler = {
                     param($rows, $win, $ctx)
@@ -405,6 +408,19 @@ function Start-HMAuScheduleView {
                 } }
         )
     }
+}
+# Protokoll der Zeitplan-Laeufe (log.txt am Ziel-PC, letzte 80 Zeilen) - Stand beim Lesen
+function Show-HMAuScheduleLog([string[]]$Pcs) {
+    $rows = New-Object System.Collections.ArrayList
+    foreach ($k in @($Pcs)) {
+        $v = $script:AuSchedData[$k]
+        foreach ($l in @($v.Log | Where-Object { "$_".Trim() })) {
+            $m = [regex]::Match("$l", '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (.*)$')
+            if ($m.Success) { [void]$rows.Add(@($k, $m.Groups[1].Value, $m.Groups[2].Value)) } else { [void]$rows.Add(@($k, '', "$l")) }
+        }
+    }
+    if (-not $rows.Count) { Out-Console 'App-Updates: noch kein Protokoll (Zeitplan noch nicht gelaufen).' 'Info'; return }
+    Show-DataGridWindow -Title "App-Updates - Protokoll Zeitplan ($($Pcs -join ', '))" -Columns @('PC', 'Zeit', 'Meldung') -Rows $rows.ToArray() -Sort 'PC ASC, Zeit DESC' -CountText "$($rows.Count) Zeilen (neueste oben) - Stand beim Lesen, fuer neuen Stand im Zeitplan-Fenster 'Neu laden'" -Width 1100 -Height 560
 }
 # Verlauf der Zeitplan-Laeufe (am Ziel-PC) in den Verlauf hier uebernehmen - doppelte Eintraege werden ausgelassen
 function Import-HMAuScheduleHistory {

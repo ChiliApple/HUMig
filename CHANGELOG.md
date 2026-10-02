@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.66 - 2026-10-02
+### Neu
+- App-Updates, *Zeitplaene ansehen*: Spalte *Fortschritt* waehrend eines Laufs (z. B. *12/26: GIMP (11 ok, 1 Fehler)*), Knoepfe *Neu laden* und *Markierte: Protokoll* (Protokoll am Ziel-PC je Programm)
+### Geaendert
+- Zeitplan: Verlauf wird nach jedem Programm gespeichert (nicht erst am Ende); bei Fehlern steht die Meldung des Installers dabei
+- Fehler 0x8A150006 (Installer meldet Fehler) im Klartext
+
 ## v2.0.65 - 2026-10-02
 ### Behoben
 - App-Updates: PowerShell 7 liess sich an PCs ohne angemeldeten Benutzer nicht einrichten - WinGet installiert seit PowerShell 7.6 die Store-Variante (MSIX), die als SYSTEM nicht verlaesslich laeuft. HUMig nimmt jetzt ein vorhandenes MSI-PowerShell oder legt eine eigene Kopie aus dem offiziellen ZIP-Paket ab (`Programme\HUMig\PowerShell7`, SHA256 geprueft)

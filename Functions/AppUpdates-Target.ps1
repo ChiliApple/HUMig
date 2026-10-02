@@ -236,7 +236,8 @@ try {
         }
         'ScheduleGet' {
             $t = @(Get-ScheduledTask -TaskName $AutoTask -ErrorAction SilentlyContinue)[0]
-            $o = [ordered]@{ Exists = [bool]$t; When = ''; Next = ''; Last = ''; LastResult = ''; Summary = ''; History = @(); Errors = @() }
+            $o = [ordered]@{ Exists = [bool]$t; When = ''; Next = ''; Last = ''; LastResult = ''; Summary = ''; Running = $false; Progress = ''; Log = @(); History = @(); Errors = @() }
+            if ($t) { $o.Running = ("$($t.State)" -eq 'Running') }
             if ($t) {
                 $tr = @($t.Triggers)[0]
                 if ($tr) {
@@ -247,6 +248,10 @@ try {
             }
             $lf = Join-Path $Base 'auto\last.json'
             if (Test-Path -LiteralPath $lf) { try { $l = Get-Content -LiteralPath $lf -Raw -Encoding UTF8 | ConvertFrom-Json; $o.Summary = "$($l.Date): $($l.Ok) aktualisiert, $($l.Err) Fehler, $($l.Excluded) Ausnahme(n)" } catch { } }
+            $pf = Join-Path $Base 'auto\progress.json'
+            if ($o.Running -and (Test-Path -LiteralPath $pf)) { try { $g = Get-Content -LiteralPath $pf -Raw -Encoding UTF8 | ConvertFrom-Json; $o.Progress = "$($g.Done)/$($g.Total)$(if ($g.Current) { ": $($g.Current)" }) ($($g.Ok) ok, $($g.Err) Fehler)" } catch { } }
+            $lg = Join-Path $Base 'auto\log.txt'
+            if (Test-Path -LiteralPath $lg) { try { $o.Log = @(Get-Content -LiteralPath $lg -Tail 80 -Encoding UTF8) } catch { } }
             $hf = Join-Path $Base 'auto\history.json'
             if (Test-Path -LiteralPath $hf) { try { $o.History = @(Get-Content -LiteralPath $hf -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { $_ } | Select-Object -Last 200) } catch { } }
             Out-R ([pscustomobject]$o)
