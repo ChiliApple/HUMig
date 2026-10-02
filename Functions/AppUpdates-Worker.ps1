@@ -20,13 +20,27 @@ function Get-WScopeMap {
     $m.User += @(Get-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | ForEach-Object { "$($_.DisplayName)".Trim() } | Where-Object { $_ })
     return $m
 }
+function ConvertTo-WKey([string]$n) {
+    # Vergleichsschluessel: ohne Klammerzusaetze (Sprache, Architektur), Versionsnummern und Sonderzeichen
+    $k = ("$n" -replace '\([^)]*\)', ' ' -replace '\b(x64|x86|64-bit|32-bit|amd64|arm64)\b', ' ' -replace '\b\d+(\.\d+)+\b', ' ').ToLower()
+    return ($k -replace '[^a-z0-9]', '')
+}
 function Get-WScope($Map, [string]$Name) {
     $n = "$Name".Trim()
     if (-not $n) { return 'User' }
-    if ($Map.Machine -contains $n) { return 'Machine' }
     if ($Map.User -contains $n) { return 'User' }
-    if (@($Map.Machine | Where-Object { $_.StartsWith($n, [StringComparison]::OrdinalIgnoreCase) }).Count) { return 'Machine' }
-    return 'User'
+    if ($Map.Machine -contains $n) { return 'Machine' }
+    $k = ConvertTo-WKey $n
+    if ($k.Length -lt 4) { return 'User' }
+    $uk = @($Map.User | ForEach-Object { ConvertTo-WKey $_ })
+    $mk = @($Map.Machine | ForEach-Object { ConvertTo-WKey $_ })
+    if ($uk -contains $k) { return 'User' }
+    if ($mk -contains $k) { return 'Machine' }
+    # Teilname (z.B. "Adobe Acrobat Reader" <-> "Adobe Acrobat"): mindestens 8 Zeichen gemeinsam am Anfang
+    $pre = { param($a, $b) $a.Length -ge 8 -and $b.Length -ge 8 -and ($a.StartsWith($b) -or $b.StartsWith($a)) }
+    if (@($uk | Where-Object { & $pre $_ $k }).Count) { return 'User' }
+    if (@($mk | Where-Object { & $pre $_ $k }).Count) { return 'Machine' }
+    return 'User'   # nicht gefunden (z.B. MSIX-Apps wie Outlook) = im Benutzerkonto aktualisieren
 }
 # winget.exe fuer SYSTEM (dort nicht als Befehl registriert): aus dem App-Installer-Paketordner
 function Get-WWingetExe {
