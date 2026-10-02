@@ -143,6 +143,7 @@ Knopf **Zeitplan ...** im Reiter Backup: das **eigene Profil** an diesem PC auto
 - Geplante Aufgabe im Konto des Benutzers **ohne Kennwort** (laeuft, solange er angemeldet ist) - auch im Benutzer-Modus; ohne Adminrechte nur Module des eigenen Profils
 - Ziel: USB-Laufwerk wird an seiner **Bezeichnung** erkannt (Buchstabe darf wechseln), Netzlaufwerk als UNC-Pfad; fehlt das Ziel, wird der Lauf uebersprungen und gemeldet
 - Optional **alte Backups automatisch loeschen** (neueste N dieses Benutzers/PCs bleiben, Standard aus, nur nach erfolgreichem Lauf)
+- Optional **USB-Laufwerk danach auswerfen** (Schutz vor Verschluesselungstrojanern, auch ohne Adminrechte; vor dem naechsten Lauf wieder anstecken) - nur bei USB-/Wechsellaufwerk als Ziel
 - Windows-Meldung nach jedem Lauf oder nur bei Problemen; Rechtsklick auf *Zeitplan ...* = verwalten (jetzt starten, Protokoll, Bericht, loeschen)
 - Dateien: `%LOCALAPPDATA%\HUMig\Zeitplaene\` (Definition + `Logs\`), Aufgabe *HUMig Backup - Benutzer - Name* in der Aufgabenplanung
 

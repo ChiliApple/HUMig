@@ -2649,3 +2649,78 @@ function Start-HMRestore {
     $rep = New-HMReport -Ctx $Ctx -Kind Restore -OutFile (Join-Path $Ctx.Backup.Path ("Bericht_Restore_{0}_{1}.html" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))) -Modules $results -Facts $facts -Notes $notes -Status $st
     $Job.Result = [pscustomobject]@{ Status = $st; Duration = $dur; Modules = $results; Report = $rep }
 }
+
+# ============================================================================
+# USB-Laufwerk nach dem geplanten Backup auswerfen (Schutz vor Verschluesselungstrojanern)
+# Laeuft auch ohne Administratorrechte: Datentraeger ueber WMI, Auswerfen ueber CM_Request_Device_Eject
+# ============================================================================
+function Get-HMDriveDisk([string]$Letter) {
+    $L = ("$Letter".TrimEnd(':', '\') + ':').ToUpper()
+    $ld = @(Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$L'" -ErrorAction Stop)[0]
+    if (-not $ld) { throw "Laufwerk $L nicht gefunden" }
+    $part = @(Get-CimAssociatedInstance -InputObject $ld -ResultClassName Win32_DiskPartition -ErrorAction Stop)[0]
+    if (-not $part) { throw "Partition von $L nicht gefunden" }
+    $dd = @(Get-CimAssociatedInstance -InputObject $part -ResultClassName Win32_DiskDrive -ErrorAction Stop)[0]
+    if (-not $dd) { throw "Datentraeger von $L nicht gefunden" }
+    $letters = @(foreach ($p in @(Get-CimAssociatedInstance -InputObject $dd -ResultClassName Win32_DiskPartition -ErrorAction SilentlyContinue)) {
+            foreach ($l in @(Get-CimAssociatedInstance -InputObject $p -ResultClassName Win32_LogicalDisk -ErrorAction SilentlyContinue)) { "$($l.DeviceID)".ToUpper() } })
+    $ext = ("$($dd.InterfaceType)" -eq 'USB') -or ("$($dd.MediaType)" -match 'External|Removable|Extern|Wechsel') -or ("$($dd.PNPDeviceID)" -like 'USBSTOR\*') -or ([int]$ld.DriveType -eq 2)
+    return [pscustomobject]@{
+        Letter = $L; Index = $dd.Index; Model = "$($dd.Model)"; PnpId = "$($dd.PNPDeviceID)"; Interface = "$($dd.InterfaceType)"; MediaType = "$($dd.MediaType)"
+        External = [bool]$ext; System = ($letters -contains "$env:SystemDrive".ToUpper()); Letters = $letters
+    }
+}
+# Veto-Grund von CM_Request_Device_Eject lesbar machen (PNP_VETO_TYPE)
+function Format-HMEjectVeto([string]$Result) {
+    if ($Result -notmatch 'Veto (\d+)') { return $Result }
+    $t = switch ([int]$Matches[1]) {
+        1 { 'Legacy-Geraet' } 2 { 'wird gerade geschlossen' } 3 { 'ein Programm verwendet das Laufwerk' } 4 { 'ein Dienst verwendet das Laufwerk' }
+        5 { 'Dateien auf dem Laufwerk sind noch geoeffnet' } 6 { 'ein anderes Geraet verhindert es' } 7 { 'Treiber verhindert es' }
+        9 { 'zu wenig Strom' } 10 { 'Geraet nicht abschaltbar' } 12 { 'fehlende Rechte' } 13 { 'bereits entfernt' } default { 'Grund unbekannt' }
+    }
+    return "$t ($Result)"
+}
+# Rueckgabe: '' = ausgeworfen, sonst Grund
+function Invoke-HMDriveEject([string]$Letter, [int]$Tries = 3, [int]$WaitSec = 5) {
+    $d = Get-HMDriveDisk $Letter
+    if ($d.System) { return "$($d.Letter) liegt auf der Systemplatte - wird nicht ausgeworfen" }
+    if (-not $d.External) { return "$($d.Letter) ist kein USB-/Wechsellaufwerk ($($d.Interface), $($d.MediaType)) - wird nicht ausgeworfen" }
+    if (-not ('HMDriveEject' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class HMDriveEject {
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)] static extern int CM_Locate_DevNodeW(out uint pdnDevInst, string pDeviceID, int ulFlags);
+    [DllImport("cfgmgr32.dll")] static extern int CM_Get_Parent(out uint pdnDevInst, uint dnDevInst, int ulFlags);
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)] static extern int CM_Request_Device_EjectW(uint dnDevInst, out int pVetoType, StringBuilder pszVetoName, int ulNameLength, int ulFlags);
+    static string Request(uint inst) {
+        StringBuilder sb = new StringBuilder(260);
+        int veto;
+        int cr = CM_Request_Device_EjectW(inst, out veto, sb, sb.Capacity, 0);
+        if (cr == 0 && veto == 0) return "";
+        return "CR " + cr + ", Veto " + veto + (sb.Length > 0 ? " " + sb.ToString() : "");
+    }
+    public static string Eject(string deviceId) {
+        uint inst;
+        int cr = CM_Locate_DevNodeW(out inst, deviceId, 0);
+        if (cr != 0) return "Geraet nicht gefunden (CR " + cr + ")";
+        string r1 = "kein uebergeordnetes Geraet";
+        uint parent;
+        if (CM_Get_Parent(out parent, inst, 0) == 0) { r1 = Request(parent); if (r1 == "") return ""; }
+        string r2 = Request(inst);
+        if (r2 == "") return "";
+        return r1 + " / " + r2;
+    }
+}
+'@
+    }
+    $r = ''
+    for ($i = 1; $i -le $Tries; $i++) {
+        $r = [HMDriveEject]::Eject($d.PnpId)
+        if (-not $r) { return '' }
+        if ($i -lt $Tries) { Start-Sleep -Seconds $WaitSec }
+    }
+    return (Format-HMEjectVeto $r)
+}
+
