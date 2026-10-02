@@ -62,11 +62,14 @@ function Test-HMAuOsSupported {
 # Status / Einrichten
 # ----------------------------------------------------------------------------
 function Get-HMAuState {
-    $s = [ordered]@{ OsOk = (Test-HMAuOsSupported); Module = ''; AppInstaller = ''; WinGet = ''; Ready = $false; Problem = '' }
+    $s = [ordered]@{ OsOk = (Test-HMAuOsSupported); Module = ''; ModuleAllUsers = $false; AppInstaller = ''; WinGet = ''; Ready = $false; Problem = '' }
     try { $m = @(Get-Module -ListAvailable -Name $script:HMAuModule | Sort-Object Version -Descending)[0]; if ($m) { $s.Module = "$($m.Version)" } } catch { }
+    # SYSTEM und andere Benutzer finden das Modul nur, wenn es fuer alle Benutzer installiert ist (Programme\WindowsPowerShell\Modules)
+    $s.ModuleAllUsers = (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$($script:HMAuModule)"))
     try { $a = @(Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller' -ErrorAction Stop)[0]; if ($a) { $s.AppInstaller = "$($a.Version)" } } catch { }
     if (-not $s.OsOk) { $s.Problem = 'WinGet wird auf dieser Windows-Version nicht unterstuetzt (Windows 10 1809+/11, Windows Server 2025).' }
     elseif (-not $s.Module) { $s.Problem = "PowerShell-Modul $($script:HMAuModule) fehlt - 'WinGet einrichten'." }
+    elseif (-not $s.ModuleAllUsers) { $s.Problem = "PowerShell-Modul $($script:HMAuModule) ist nur fuer einzelne Benutzer installiert - SYSTEM und andere Benutzer finden es nicht. 'WinGet einrichten' installiert es fuer alle Benutzer." }
     else {
         try {
             Import-Module $script:HMAuModule -ErrorAction Stop
@@ -121,19 +124,14 @@ function Install-HMAuWinGet($Job) {
 # ----------------------------------------------------------------------------
 # Quellen
 # ----------------------------------------------------------------------------
-function Get-HMAuSources {
-    Import-Module $script:HMAuModule -ErrorAction Stop
-    return @(Get-WinGetSource -ErrorAction Stop | ForEach-Object { [pscustomobject]@{ Name = "$($_.Name)"; Argument = "$($_.Argument)"; Type = "$($_.Type)" } })
-}
+# Quellen aendern als SYSTEM (Administratorrechte) - die Liste der Quellen kommt mit der Suche (Benutzerkonto)
 function Add-HMAuSource([string]$Name, [string]$Argument, [string]$Type) {
-    Import-Module $script:HMAuModule -ErrorAction Stop
-    $p = @{ Name = $Name; Argument = $Argument; ErrorAction = 'Stop' }
-    if ($Type) { $p.Type = $Type }
-    Add-WinGetSource @p
+    $r = Invoke-HMAuTaskRun 'SYSTEM' '' @{ Mode = 'SourceAdd'; Name = $Name; Argument = $Argument; Type = $Type } 300
+    if (@($r.Errors | Where-Object { $_ }).Count) { throw (@($r.Errors) -join ' | ') }
 }
 function Remove-HMAuSource([string]$Name) {
-    Import-Module $script:HMAuModule -ErrorAction Stop
-    Remove-WinGetSource -Name $Name -ErrorAction Stop
+    $r = Invoke-HMAuTaskRun 'SYSTEM' '' @{ Mode = 'SourceRemove'; Name = $Name } 300
+    if (@($r.Errors | Where-Object { $_ }).Count) { throw (@($r.Errors) -join ' | ') }
 }
 
 # ----------------------------------------------------------------------------
@@ -239,7 +237,8 @@ function Get-HMAuUpdates([string[]]$Sources, [bool]$IncludeUnknown, [string]$Use
     foreach ($r in @($rs, $ru)) { if ($r) { $errors += @($r.Errors | Where-Object { $_ }) } }
     $sysOk = [bool]($rs -and -not @($rs.Errors | Where-Object { $_ -like 'WinGet*' }).Count)
     $items = Merge-HMAuLists $(if ($ru) { @($ru.Items) } else { @() }) $(if ($rs) { @($rs.Items) } else { @() }) $sysOk
-    return [pscustomobject]@{ Items = @($items); Errors = @($errors); UserRead = [bool]$ru; LoggedOn = [bool]$loggedOn; SysOk = $sysOk }
+    $src = if ($ru -and @($ru.Sources).Count) { @($ru.Sources) } elseif ($rs) { @($rs.Sources) } else { @() }
+    return [pscustomobject]@{ Items = @($items); Errors = @($errors); UserRead = [bool]$ru; LoggedOn = [bool]$loggedOn; SysOk = $sysOk; Sources = @($src | Where-Object { $_ }) }
 }
 
 # Laufende Programme zu Paketen finden: Installationsordner aus der Registry (Deinstallations-Eintraege), Prozesse darin.

@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.60 - 2026-10-02
+### Behoben
+- App-Updates: Lesen als SYSTEM schlug fehl, wenn das Modul Microsoft.WinGet.Client nur fuer einzelne Benutzer installiert war - HUMig prueft das jetzt und bietet *WinGet einrichten* an (installiert es fuer alle Benutzer)
+- App-Updates: Quellen werden mit der Suche im Benutzerkonto gelesen (vorher leer, wenn HUMig unter einem anderen Administratorkonto lief); hinzufuegen/entfernen als SYSTEM
+
 ## v2.0.59 - 2026-10-02
 ### Behoben
 - App-Updates: Suche brach mit *Failed to create instance: -2147023174* ab, wenn HUMig unter einem anderen Administratorkonto lief als der angemeldete Benutzer (WinGet ist pro Benutzer registriert)

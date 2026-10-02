@@ -68,7 +68,7 @@ function Update-HMAuSourceList {
     $c = Get-HMAuConfig
     $ui.pnlAuSources.Children.Clear()
     if (-not @($script:AuSources).Count) {
-        $t = New-Object System.Windows.Controls.TextBlock; $t.Text = $(if ($script:AuReady) { 'keine Quellen gefunden' } else { '(WinGet nicht bereit)' }); $t.Foreground = New-Brush '#FF6C7086'; $t.FontSize = 11
+        $t = New-Object System.Windows.Controls.TextBlock; $t.Text = $(if ($script:AuReady) { "werden mit 'Updates suchen' gelesen - angehakt: $((Get-HMAuConfig).Sources -join ', ')" } else { '(WinGet nicht bereit)' }); $t.TextWrapping = 'Wrap'; $t.Foreground = New-Brush '#FF6C7086'; $t.FontSize = 11
         [void]$ui.pnlAuSources.Children.Add($t); return
     }
     foreach ($s in @($script:AuSources)) {
@@ -123,15 +123,12 @@ function Update-HMAuState([switch]$Search) {
         param($eng)
         . $eng
         $st = Get-HMAuState
-        $src = @()
-        if ($st.Ready) { try { $src = @(Get-HMAuSources) } catch { } }
-        [pscustomobject]@{ State = $st; Sources = $src }
+        [pscustomobject]@{ State = $st }
     } -ArgumentList @($script:AuEngine) -TimeoutSec 90 -BusyTag 'Au' -BusyText 'WinGet wird geprueft ...' -State @{ Search = [bool]$Search } -OnComplete {
         param($r, $stt)
         if (-not $r -or $r -is [string]) { $ui.lblAuInfo.Text = "WinGet nicht pruefbar: $r"; $ui.btnAuSetup.Visibility = 'Visible'; return }
         $s = $r.State
         $script:AuReady = [bool]$s.Ready
-        $script:AuSources = @($r.Sources | Where-Object { $_ })
         $ui.btnAuSetup.Visibility = $(if ($s.Ready -or -not $s.OsOk) { 'Collapsed' } else { 'Visible' })
         $ui.lblAuInfo.Text = $(if ($s.Ready) { "WinGet $($s.WinGet)  |  Modul Microsoft.WinGet.Client $($s.Module)  |  App Installer $($s.AppInstaller)  |  Gelesen wird als SYSTEM (Programme fuer alle Benutzer) und im Konto des oben gewaehlten Benutzers (nur fuer ihn installierte - er muss angemeldet sein)." } else { "$($s.Problem)" })
         foreach ($b in @($ui.btnAuSearch, $ui.btnAuUpdateSel, $ui.btnAuUpdateAll, $ui.btnAuSourceAdd)) { $b.IsEnabled = [bool]$s.Ready -and -not $script:JobRunning }
@@ -167,6 +164,7 @@ function Start-HMAuSearch {
         param($r)
         if (-not $r -or $r -is [string]) { $ui.lblAuListTitle.Text = 'VERFUEGBARE UPDATES'; Out-Console "App-Updates: Suche fehlgeschlagen - $r" 'Error'; return }
         foreach ($e in @($r.Errors)) { Out-Console "App-Updates: $e" 'Warning' }
+        if (@($r.Sources).Count) { $script:AuSources = @($r.Sources); Update-HMAuSourceList }
         $u = $script:AuUser
         if ($u -and $u.Account -and -not $r.LoggedOn) { Out-Console "App-Updates: $($u.Account) ist nicht angemeldet - nur Programme fuer alle Benutzer gelesen. Fuer seine eigenen Programme muss er angemeldet sein." 'Warning'; $script:AuUser = [pscustomobject]@{ Account = ''; Sid = '' } }
         elseif (-not ($u -and $u.Account)) { Out-Console 'App-Updates: kein Benutzer gewaehlt - nur Programme fuer alle Benutzer gelesen.' 'Info' }
@@ -307,23 +305,23 @@ function Remove-HMAuExclusionUi {
 function Add-HMAuSourceUi {
     $v = Show-HMAuInputDialog 'WinGet-Quelle hinzufuegen' "Eigene Quelle fuer diesen PC (braucht Administratorrechte). Nur vertrauenswuerdige Quellen verwenden - sie entscheiden, was installiert wird.`nREST-Quelle: https-Adresse (Typ Microsoft.Rest). Vorindizierte Quelle: Adresse oder Netzwerkpfad (Typ Microsoft.PreIndexed.Package)." @('Name:', 'Adresse / Pfad:', 'Typ:') @('', '', 'Microsoft.Rest') @('Microsoft.Rest', 'Microsoft.PreIndexed.Package')
     if (-not $v -or -not $v[0] -or -not $v[1]) { return }
-    Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $a, $t) . $eng; Add-HMAuSource $n $a $t; 'OK' } -ArgumentList @($script:AuEngine, $v[0], $v[1], $v[2]) -TimeoutSec 120 -BusyTag 'Au' -BusyText 'Quelle wird hinzugefuegt ...' -State @{ Name = $v[0] } -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $a, $t) . $eng; Add-HMAuSource $n $a $t; 'OK' } -ArgumentList @($script:AuEngine, $v[0], $v[1], $v[2]) -TimeoutSec 360 -BusyTag 'Au' -BusyText 'Quelle wird hinzugefuegt ...' -State @{ Name = $v[0] } -OnComplete {
         param($r, $st)
         if ("$r" -ne 'OK') { Out-Console "Quelle $($st.Name) nicht hinzugefuegt: $r" 'Error'; return }
         $c = Get-HMAuConfig
         Save-HMAuConfig (@($c.Sources) + @($st.Name) | Select-Object -Unique) $c.Exclude
         Out-Console "Quelle $($st.Name) hinzugefuegt und fuer Standort $($c.Location) angehakt." 'Success'
-        Update-HMAuState
+        Start-HMAuSearch
     }
 }
 function Remove-HMAuSourceUi([string]$Name) {
     if (-not $Name) { return }
     if (-not (Confirm-Action "Quelle '$Name' von diesem PC entfernen?$(if ($Name -in @('winget', 'msstore', 'winget-font')) { "`n`nACHTUNG: Standardquelle von WinGet - wiederherstellen mit: winget source reset --force" })" 'App-Updates')) { return }
-    Invoke-AsyncCommand -ScriptBlock { param($eng, $n) . $eng; Remove-HMAuSource $n; 'OK' } -ArgumentList @($script:AuEngine, $Name) -TimeoutSec 60 -BusyTag 'Au' -State @{ Name = $Name } -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $n) . $eng; Remove-HMAuSource $n; 'OK' } -ArgumentList @($script:AuEngine, $Name) -TimeoutSec 360 -BusyTag 'Au' -State @{ Name = $Name } -OnComplete {
         param($r, $st)
         if ("$r" -ne 'OK') { Out-Console "Quelle $($st.Name) nicht entfernt: $r" 'Error'; return }
         Out-Console "Quelle $($st.Name) entfernt." 'Info'
-        Update-HMAuState
+        Start-HMAuSearch
     }
 }
 
