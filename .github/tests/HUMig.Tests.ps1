@@ -186,33 +186,52 @@ Describe 'App-Updates (WinGet)' {
         $r.Ok | Should -BeTrue; $r.Reboot | Should -BeTrue
         (Format-HMAuCliResult 5 'Zugriff verweigert').Text | Should -Match 'Zugriff verweigert'
     }
-    It 'Aktualisieren: SYSTEM fuer alle Benutzer, Benutzer-Aufgabe fuer eigene, Uebersprungen bei laufendem Programm' {
-        $global:AuCalls = @()
-        Mock Invoke-HMAuTaskRun {
-            $global:AuCalls += $Account
-            if ($Account -eq 'SYSTEM') { $global:AuCli = [bool]$Request.Cli }
-            $res = @(foreach ($i in @($Request.Items)) {
-                    if ($i.Id -eq 'A.A') { [pscustomobject]@{ Id = 'A.A'; Status = 'Cli'; Code = -1978334967; Text = '' } }
-                    elseif ($i.Id -eq 'B.B') { [pscustomobject]@{ Id = 'B.B'; Status = 'InstallError'; InstallerErrorCode = 1603; ExtendedErrorCode = 0; Reboot = $false } }
-                })
-            [pscustomobject]@{ Account = $Account; Items = @(); Results = $res; Errors = @() }
+    It 'Aktualisieren: je PC ein Auftrag, Uebersprungen bei laufendem Programm, Ergebnis je PC' {
+        $global:AuCall = $null
+        Mock Invoke-HMAuTarget {
+            $global:AuCall = @{ Computers = @($Computers); Op = $Op; Payload = $Payload }
+            $out = @{}
+            foreach ($k in @($Payload.ByPc.Keys)) {
+                $res = @(foreach ($i in @($Payload.ByPc[$k].Items)) {
+                        if ($i.Id -eq 'A.A') { [pscustomobject]@{ Id = 'A.A'; Status = 'Cli'; Code = -1978334967; Text = '' } }
+                        elseif ($i.Id -eq 'B.B') { [pscustomobject]@{ Id = 'B.B'; Status = 'InstallError'; InstallerErrorCode = 1603; ExtendedErrorCode = 0; Reboot = $false } }
+                    })
+                $out[$k] = [pscustomobject]@{ Results = $res; Errors = @() }
+            }
+            $out
         }
         $job = @{ Log = $null; Progress = 0; Status = ''; Cancel = $false; Result = $null }
-        $ctx = @{ UserAccount = 'PC\lehrer'; UserSid = 'S-1-5-21-1'; Items = @(
-                [pscustomobject]@{ Id = 'A.A'; Name = 'Alpha'; Source = 'winget'; Installed = '1'; Available = '2'; Scope = 'Machine' },
-                [pscustomobject]@{ Id = 'B.B'; Name = 'Beta'; Source = 'winget'; Installed = '1'; Available = '2'; Scope = 'User' },
-                [pscustomobject]@{ Id = 'C.C'; Name = 'Gamma'; Source = 'winget'; Installed = '1'; Available = '2'; Scope = 'User' })
+        $lk = "$env:COMPUTERNAME".ToUpper()
+        $ctx = @{ Op = 'Update'; ByPc = @{
+                $lk = @{ UserSid = 'S-1-5-21-1'; UserAccount = 'PC\lehrer'; Items = @(
+                        [pscustomobject]@{ Id = 'A.A'; Name = 'Alpha'; Source = 'winget'; Installed = '1'; Available = '2'; Scope = 'Machine' },
+                        [pscustomobject]@{ Id = 'C.C'; Name = 'Gamma'; Source = 'winget'; Installed = '1'; Available = '2'; Scope = 'User' }) }
+                'PC-R2' = @{ UserSid = ''; UserAccount = ''; Items = @([pscustomobject]@{ Id = 'B.B'; Name = 'Beta'; Source = 'winget'; Installed = '1'; Available = '2'; Scope = 'Machine' }) }
+            }
             Running = @([pscustomobject]@{ Id = 'C.C'; Name = 'Gamma'; Running = 'gamma (1)'; Procs = @() }); ProcDecisions = @{ 'C.C' = 'Skip' }
         }
         Start-HMAppUpdate -Ctx $ctx -Job $job
-        $global:AuCalls -join ',' | Should -Be 'SYSTEM,PC\lehrer'
-        $global:AuCli | Should -BeTrue
+        $global:AuCall.Op | Should -Be 'Update'
+        @($global:AuCall.Computers).Count | Should -Be 2
+        @($global:AuCall.Payload.ByPc[$lk].Items).Count | Should -Be 1   # Gamma uebersprungen
         $it = @($job.Result.Items)
         $it.Count | Should -Be 3
         ($it | Where-Object Id -eq 'A.A').Status | Should -Be 'OK'
+        ($it | Where-Object Id -eq 'A.A').Computer | Should -Be $lk
+        ($it | Where-Object Id -eq 'B.B').Computer | Should -Be 'PC-R2'
         ($it | Where-Object Id -eq 'B.B').Text | Should -Match '1603'
         ($it | Where-Object Id -eq 'C.C').Status | Should -Be 'Skipped'
         $job.Result.Status | Should -Be 'Warning'
         $job.Result.Reboot | Should -BeTrue
+    }
+    It 'Ziel-Skripte: gueltige Syntax, Ziel-PC findet seinen Auftrag' {
+        foreach ($f in 'AppUpdates-Target.ps1', 'AppUpdates-Auto.ps1', 'AppUpdates-Worker.ps1') {
+            $t = $null; $e = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root "Functions\$f"), [ref]$t, [ref]$e)
+            @($e).Count | Should -Be 0
+        }
+        Get-HMAuPcKey 'localhost' | Should -Be "$env:COMPUTERNAME".ToUpper()
+        Get-HMAuPcKey 'pc-01.schule.local' | Should -Be 'PC-01.SCHULE.LOCAL'
+        (Format-HMAuCliResult -1978335215 '').Text | Should -Match 'Pruefsumme'
     }
 }

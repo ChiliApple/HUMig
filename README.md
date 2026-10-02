@@ -53,7 +53,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 | Windows-Einstellungen (optional) | Microsoft USMT (ScanState/LoadState), legt beim Restore auch das Profil an |
 | Inkrementell | Vorhandenes Backup desselben PCs/Benutzers wird weitergefuehrt - nur neue/geaenderte Dateien werden kopiert |
 | Sicherheit | Platzpruefung vor dem Start, Pruefung danach (Vergleich + SHA-256-Stichprobe), **Pruefsummen-Katalog** (spaeter jederzeit pruefbar), Warnung bei unverschluesseltem USB-Laufwerk (BitLocker To Go direkt aus dem Tool) |
-| Programme | **Programm-Katalog** erkennt installierte Programme, sichert deren Einstellungen mit, nennt Lizenz-Hinweise und Nacharbeiten und installiert fehlende Programme am neuen PC aus der Softwareverteilung |
+| Programme | **Programm-Katalog** erkennt installierte Programme, sichert deren Einstellungen mit, nennt Lizenz-Hinweise und Nacharbeiten und installiert fehlende Programme am neuen PC aus der Softwareverteilung oder ueber WinGet |
 | Protokoll | `Bericht_Backup.html` / `Bericht_Restore_*.html` (druckbar, mit Unterschriftsfeldern und abgehakter Checkliste), `manifest.json`, `Pruefsummen.tsv`, `HUMig.log`, `Robocopy.log`; `Backups.html` = Uebersicht aller Backups im Backup-Ordner. Absichtlich ausgelassene Dateien (versteckt/System wie `pagefile.sys`, Nur-Cloud, Ausschlussmuster) werden getrennt ausgewiesen - kein Fehler |
 
 ## Bedienung
@@ -62,7 +62,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 2. Reiter **Backup**: Vorlage oder Module anhaken -> *Vorab-Pruefung* / *Groesse ermitteln* (Groesse je Modul + Summe, Rechtsklick = alle Module) -> **Backup starten**.
    Beim Verbinden werden installierte Programme erkannt: deren Einstellungen erscheinen in der Gruppe *Programme* und sind angehakt (Knopf *Programme* = Uebersicht)
 3. Reiter **Restore**: Backup waehlen (vorhandene Module werden angehakt), Zielbenutzer im Kopfbereich -> optional *Vorschau* -> **Restore starten** -> Checkliste abhaken
-   (*Fehlende Programme installieren ...* vergleicht Backup und neuen PC und installiert aus der Softwareverteilung)
+   (*Fehlende Programme installieren ...* vergleicht Backup und neuen PC und installiert aus der Softwareverteilung, sonst ueber WinGet)
 4. Reiter **Werkzeuge**: fuer den gewaehlten Computer/Benutzer (lokal oder remote) - siehe unten
 
 Linksklick = Hauptfunktion, Rechtsklick = Zweitfunktion (steht im Tooltip). Konsole: Rechtsklick = leeren.
@@ -157,7 +157,7 @@ Vorlagen: Standard, Komplett, Nur Browser + Office, Neuer PC (mit USMT), **Noteb
 | Vorschau: was wird ueberschrieben? | Zeigt je Datei: neu / ueberschreibt aeltere Zieldatei / **Zieldatei neuer** / gleich - nach dem Restore auch als Kontrolle |
 | Neuere Dateien am Ziel behalten | Robocopy `/XO`: am Ziel neuere Dateien werden nicht ueberschrieben |
 | Checkliste | Nach dem Restore abhaken (Punkte in Einstellungen > Restore + Nacharbeiten der erkannten Programme) - Stand und Bemerkung landen im Restore-Protokoll |
-| Fehlende Programme installieren ... | Programmliste des Backups mit dem Ziel-PC vergleichen, fehlende mit Paket nacheinander installieren |
+| Fehlende Programme installieren ... | Programmliste des Backups mit dem Ziel-PC vergleichen, fehlende nacheinander installieren (Softwareverteilung, sonst WinGet) |
 | Backup pruefen | Gegen den Pruefsummen-Katalog (Ergebnis `Pruefung_*.txt`, Status in der Uebersicht) |
 | Vergleichen ... | Zwei Backups (z.B. derselbe Benutzer vorher/nachher): geaendert, nur in A, nur in B |
 | Uebersicht | `Backups.html` im Backup-Ordner: alle Backups mit Status, Groesse, Pruefung, Links zu den Protokollen (Filter, Sortierung) |
@@ -255,13 +255,14 @@ auf der Platte braucht jede weitere Version nur die Aenderungen (zweite Version 
 
 ## App-Updates (WinGet)
 
-Reiter **App-Updates** (HUMig als Administrator): installierte Programme dieses PCs ueber WinGet aktualisieren.
-- **WinGet einrichten**: offizielles Modul `Microsoft.WinGet.Client` aus der PowerShell Gallery (alle Benutzer) + WinGet fuer das Konto registrieren/reparieren
-- Gelesen wird im Konto des **gewaehlten, angemeldeten Benutzers** (einmalige geplante Aufgabe - sieht Programme fuer alle Benutzer und nur fuer ihn installierte); Bereich aus dem Deinstallations-Eintrag; aktualisiert wird fuer alle Benutzer als **SYSTEM** (winget.exe, ohne UAC), eigene Programme im Benutzerkonto
-- **Updates suchen** -> Liste mit Haken (installiert, neu, Bereich, Quelle, Paket-ID) -> **Angehakte** bzw. **Alle aktualisieren** (still, nacheinander); laufende Programme werden vorher erkannt (schliessen / notfalls beenden / nicht aktualisieren)
-- **Ausnahmen** je Standort (Muster auf Paket-ID oder Name, mit Grund) - werden nie aktualisiert; vorbelegt: selbstaktualisierende Programme (Edge, Chrome, Teams, Office, OneDrive) und Pruefungssoftware (Next-Exam, Safe Exam Browser)
+Reiter **App-Updates** (neben *Werkzeuge*, HUMig als Administrator): installierte Programme ueber WinGet aktualisieren - am oben gewaehlten PC oder an **mehreren PCs / EDV-Saal** (AD-Auswahl, WinRM, parallel).
+- **Updates suchen** -> Liste je PC mit Haken (installiert, neu, Bereich, Quelle, Paket-ID) -> **Angehakte** bzw. **Alle aktualisieren** (still, je PC nacheinander, Ergebnis sofort in der Konsole); laufende Programme werden an diesem PC vorher erkannt (schliessen / notfalls beenden / nicht aktualisieren)
+- Gelesen wird am Ziel-PC im Konto des **angemeldeten Benutzers** (sieht Programme fuer alle Benutzer und nur fuer ihn installierte); ist niemand angemeldet, als **SYSTEM mit PowerShell 7** (Programme fuer alle Benutzer). PowerShell 7 und das Modul `Microsoft.WinGet.Client` installiert HUMig bei Bedarf (alle Benutzer). Aktualisiert wird fuer alle Benutzer als **SYSTEM** (winget.exe, ohne UAC), eigene Programme im Benutzerkonto
+- **Zeitplan**: geplante Aufgabe *HUMig App-Updates* an den Ziel-PCs (taeglich / Wochentage, Uhrzeit, PC wecken, verpasste Termine nachholen) - aktualisiert als SYSTEM alle Programme fuer alle Benutzer ausser den Ausnahmen; **Zeitplaene ansehen**: naechster/letzter Lauf, Ergebnis, Verlauf uebernehmen, entfernen
+- **Ausnahmen** je Standort (Muster auf Paket-ID oder Name, mit Grund) - nie aktualisiert, auch nicht vom Zeitplan; vorbelegt: selbstaktualisierende Programme (Edge, Chrome, Teams, Office, OneDrive) und Pruefungssoftware (Next-Exam, Safe Exam Browser)
 - **Quellen** je Standort (Standard nur *winget*), eigene Quelle hinzufuegen/entfernen; **Verlauf** aller Updates
-- Grenzen: Benutzer muss fuer seine eigenen Programme angemeldet sein; Installer im Benutzerbereich, die Adminrechte verlangen, schlagen fehl; Windows Server 2019/2022 ohne WinGet
+- **Fehlende Programme installieren** (nach dem Restore): ohne Paket in der Softwareverteilung ueber WinGet, wenn der Katalog-Eintrag eine `WingetId` hat
+- Grenzen: andere PCs brauchen WinRM; Programme nur fuer einen Benutzer nur, wenn er angemeldet ist; Installer im Benutzerbereich, die Adminrechte verlangen, schlagen fehl; Windows Server 2019/2022 ohne WinGet
 
 ## Update
 

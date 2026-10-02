@@ -215,6 +215,7 @@ function Start-HMAppReinstall {
         $pk = @(); try { $pk = @(Get-SwPackages) } catch { }
         $rows = New-Object System.Collections.Generic.List[object]
         $script:ReinstallPackages = @{}
+        $script:ReinstallWinget = @{}
         $noPkg = 0
         foreach ($s in @($st.State.Src | Sort-Object Name -Unique)) {
             if ($have -contains $s.Name) { continue }
@@ -225,28 +226,41 @@ function Start-HMAppReinstall {
             $app = @($script:AppCatalog | Where-Object { "$($_.Detect)" -and $s.Name -match "$($_.Detect)" })[0]
             if ($app) { $pkg = Find-HMAppPackage $app $pk; $how = 'Katalog' }
             if (-not $pkg) { foreach ($p in $pk) { if ("$($p.Settings.DetectName)" -and $s.Name -like "$($p.Settings.DetectName)") { $pkg = $p; $how = 'Paket-Erkennung'; break } } }
-            if ($pkg) { $script:ReinstallPackages["$($pkg.Id)"] = $pkg } else { $noPkg++ }
-            $rows.Add(@($(if ($pkg) { 'Paket vorhanden' } else { 'kein Paket' }), $s.Name, "$($s.Version)", $(if ($pkg) { "$($pkg.Id)" } else { '' }), $how, $(if ($app) { "$($app.License)" } else { '' })))
+            # sonst WinGet (Katalog-Eintrag mit WingetId) - Softwareverteilung hat Vorrang
+            $wg = ''
+            if (-not $pkg -and $app -and "$($app.WingetId)".Trim()) { $wg = "$($app.WingetId)".Trim(); $script:ReinstallWinget["winget:$wg"] = [pscustomobject]@{ Id = $wg; Name = "$($app.Name)" }; $how = 'Katalog (WinGet)' }
+            if ($pkg) { $script:ReinstallPackages["$($pkg.Id)"] = $pkg } elseif (-not $wg) { $noPkg++ }
+            $rows.Add(@($(if ($pkg) { 'Paket vorhanden' } elseif ($wg) { 'WinGet' } else { 'kein Paket' }), $s.Name, "$($s.Version)", $(if ($pkg) { "$($pkg.Id)" } elseif ($wg) { "winget:$wg" } else { '' }), $how, $(if ($app) { "$($app.License)" } else { '' })))
         }
         if (-not $rows.Count) { Out-Console "Alle Programme aus dem Backup sind an $($st.Computer) installiert." 'Success'; return }
-        $withPkg = $rows.Count - $noPkg
-        Out-Console "$($rows.Count) Programme fehlen an $($st.Computer) - $withPkg mit Paket in der Softwareverteilung" $(if ($withPkg) { 'Info' } else { 'Warning' })
+        $nWg = $script:ReinstallWinget.Count
+        $withPkg = $rows.Count - $noPkg - $nWg
+        Out-Console "$($rows.Count) Programme fehlen an $($st.Computer) - $withPkg mit Paket in der Softwareverteilung$(if ($nWg) { ", $nWg ueber WinGet" })" $(if ($withPkg + $nWg) { 'Info' } else { 'Warning' })
         Show-DataGridWindow -Title "Fehlende Programme - $($st.Computer)  (Backup $($b.Name))" -Columns @('Status', 'Programm', 'Version (Backup)', 'Paket', 'Zuordnung', 'Lizenz') -Rows $rows.ToArray() `
-            -Sort 'Status DESC, Programm ASC' -CountText "$($rows.Count) fehlen, $withPkg mit Paket - Pakete ablegen: Softwareverteilung-Ordner" -Width 1400 -Height 620 `
+            -Sort 'Status DESC, Programm ASC' -CountText "$($rows.Count) fehlen, $withPkg mit Paket, $nWg ueber WinGet (aktuelle Version, fuer alle Benutzer) - Pakete ablegen: Softwareverteilung-Ordner" -Width 1400 -Height 620 `
             -ActionContext @{ Computer = $st.Computer } -Actions @(
                 @{ Text = 'Markierte installieren'; Color = '#FFA6E3A1'; Handler = { param($rows, $win, $ctx) Start-HMReinstallQueue $win $ctx.Computer @($rows | Where-Object { $_.Paket } | ForEach-Object { "$($_.Paket)" }) } }
-                @{ Text = 'Alle mit Paket installieren'; Color = '#FF89B4FA'; NoSelection = $true; Handler = { param($rows, $win, $ctx) Start-HMReinstallQueue $win $ctx.Computer @($script:ReinstallPackages.Keys) } }
+                @{ Text = 'Alle mit Paket / WinGet installieren'; Color = '#FF89B4FA'; NoSelection = $true; Handler = { param($rows, $win, $ctx) Start-HMReinstallQueue $win $ctx.Computer (@($script:ReinstallPackages.Keys) + @($script:ReinstallWinget.Keys)) } }
             )
     }
 }
 # Pakete nacheinander installieren (msiexec vertraegt keine parallelen Installationen)
 $script:SwQueue = $null
+# Paket-IDs: Softwareverteilung, 'winget:<Id>' = WinGet (danach, als ein Hintergrundvorgang - Installer stoeren sich sonst)
+$script:ReinstallWinget = @{}
+$script:SwQueueThen = $null
 function Start-HMReinstallQueue($Win, [string]$Computer, [string[]]$PackageIds) {
-    $ids = @($PackageIds | Where-Object { $_ } | Select-Object -Unique)
-    if (-not $ids.Count) { [void][System.Windows.MessageBox]::Show($Win, 'Keine Zeile mit Paket markiert.', 'Installieren', 'OK', 'Information'); return }
+    $all = @($PackageIds | Where-Object { $_ } | Select-Object -Unique)
+    $wgs = @($all | Where-Object { "$_".StartsWith('winget:') -and $script:ReinstallWinget.ContainsKey("$_") } | ForEach-Object { $script:ReinstallWinget["$_"] })
+    $ids = @($all | Where-Object { -not "$_".StartsWith('winget:') -and $script:ReinstallPackages.ContainsKey("$_") })
+    if (-not ($ids.Count + $wgs.Count)) { [void][System.Windows.MessageBox]::Show($Win, 'Keine Zeile mit Paket markiert.', 'Installieren', 'OK', 'Information'); return }
     if ($script:SwQueue -and $script:SwQueue.Count) { [void][System.Windows.MessageBox]::Show($Win, 'Es laeuft bereits eine Installations-Warteschlange.', 'Installieren', 'OK', 'Information'); return }
-    $names = @($ids | ForEach-Object { "$($script:ReinstallPackages[$_].Settings.Name)" })
-    if ("$([System.Windows.MessageBox]::Show($Win, "$($ids.Count) Paket(e) nacheinander an $Computer installieren?`n`n$(($names | Select-Object -First 20) -join "`n")", 'Programme installieren', 'YesNo', 'Question'))" -ne 'Yes') { return }
+    if ($wgs.Count -and $script:JobRunning) { [void][System.Windows.MessageBox]::Show($Win, 'Es laeuft bereits ein Vorgang - WinGet-Installation danach erneut starten.', 'Installieren', 'OK', 'Information'); return }
+    $names = @($ids | ForEach-Object { "$($script:ReinstallPackages[$_].Settings.Name)" }) + @($wgs | ForEach-Object { "$($_.Name) (WinGet $($_.Id))" })
+    if ("$([System.Windows.MessageBox]::Show($Win, "$($names.Count) Programm(e) nacheinander an $Computer installieren?$(if ($wgs.Count) { "`nWinGet: aktuelle Version fuer alle Benutzer, nach den Paketen der Softwareverteilung." })`n`n$(($names | Select-Object -First 20) -join "`n")", 'Programme installieren', 'YesNo', 'Question'))" -ne 'Yes') { return }
+    $script:SwQueueThen = $null
+    if ($wgs.Count) { $script:SwQueueThen = @{ Computer = $Computer; Items = @($wgs) } }
+    if (-not $ids.Count) { $t = $script:SwQueueThen; $script:SwQueueThen = $null; Start-HMAuInstall $t.Computer $t.Items; return }
     $script:SwQueue = New-Object System.Collections.Generic.Queue[object]
     foreach ($id in $ids) { $script:SwQueue.Enqueue(@{ Host = $Computer; Package = $script:ReinstallPackages[$id] }) }
     $script:SwQueueTotal = $ids.Count
@@ -254,7 +268,11 @@ function Start-HMReinstallQueue($Win, [string]$Computer, [string[]]$PackageIds) 
 }
 function Invoke-HMSwQueueNext {
     if (-not $script:SwQueue) { return }
-    if ($script:SwQueue.Count -eq 0) { $script:SwQueue = $null; Out-Console 'Installations-Warteschlange fertig.' 'Success'; return }
+    if ($script:SwQueue.Count -eq 0) {
+        $script:SwQueue = $null; Out-Console 'Installations-Warteschlange fertig.' 'Success'
+        if ($script:SwQueueThen) { $t = $script:SwQueueThen; $script:SwQueueThen = $null; Start-HMAuInstall $t.Computer $t.Items }
+        return
+    }
     $n = $script:SwQueue.Dequeue()
     Start-SoftwareDeploy -Hosts @($n.Host) -Package $n.Package -Label ("{0}/{1}" -f ($script:SwQueueTotal - $script:SwQueue.Count), $script:SwQueueTotal)
 }

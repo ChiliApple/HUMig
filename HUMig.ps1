@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.63'
+$script:Version   = '2.0.64'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -246,7 +246,7 @@ foreach ($n in @('imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings
     'tabServerBackup', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
     'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'cmbSbAfter', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
     'pnlSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'btnSbConflicts', 'dotSbBusy', 'lblSbBusy', 'dotBusy', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule',
-    'tabAppUpdates', 'btnAuSearch', 'btnAuUpdateSel', 'btnAuUpdateAll', 'btnAuCancel', 'chkAuUnknown', 'btnAuSetup', 'dotAuBusy', 'lblAuBusy', 'lblAuInfo', 'lblAuListTitle', 'dgAu',
+    'tabAppUpdates', 'btnAuSearch', 'btnAuUpdateSel', 'btnAuUpdateAll', 'btnAuCancel', 'chkAuUnknown', 'btnAuSetup', 'dotAuBusy', 'lblAuBusy', 'lblAuInfo', 'lblAuTarget', 'btnAuPcs', 'btnAuPcTop', 'btnAuSchedule', 'btnAuScheduleView', 'lblAuListTitle', 'dgAu',
     'lblAuLocation', 'pnlAuSources', 'btnAuSourceAdd', 'btnAuExclAdd', 'btnAuExclDel', 'lstAuExcl', 'dgAuHistory')) { $ui[$n] = Get-UI $n }
 Initialize-HMTaskbar
 $script:RowConsole = $ui.rowConsole

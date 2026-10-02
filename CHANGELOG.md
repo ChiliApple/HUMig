@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.0.64 - 2026-10-02
+### Neu
+- **App-Updates an mehreren PCs**: Ziel *Mehrere PCs / EDV-Saal* (AD-Auswahl) - Suchen und Aktualisieren laufen parallel auf allen PCs (WinRM), Liste mit Spalte *PC*, Ergebnis je PC; ist am Ziel-PC niemand angemeldet, wird als SYSTEM mit PowerShell 7 gelesen (PowerShell 7 und WinGet-Modul werden bei Bedarf installiert)
+- **App-Updates nach Zeitplan**: geplante Aufgabe *HUMig App-Updates* an den Ziel-PCs (taeglich oder Wochentage, Uhrzeit, PC wecken) - aktualisiert als SYSTEM alle Programme fuer alle Benutzer, Ausnahmen des Standorts gelten; *Zeitplaene ansehen* (naechster/letzter Lauf, Ergebnis, Verlauf uebernehmen, entfernen)
+- **Fehlende Programme installieren** ueber WinGet, wenn kein Paket in der Softwareverteilung liegt (Katalog-Feld `WingetId`, fuer 33 Programme vorbelegt)
+### Geaendert
+- Reiter *App-Updates* steht jetzt neben *Werkzeuge*, *Server-Backup* ganz rechts
+- App-Updates: Ergebnis je Programm erscheint sofort (nicht erst am Ende); erfolgreich aktualisierte verschwinden aus der Liste ohne neue Suche
+- App-Updates: Fehler *Pruefsumme des Installers passt nicht* (0x8A150011) im Klartext - WinGet installiert dann aus Sicherheitsgruenden nicht
+
 ## v2.0.63 - 2026-10-02
 ### Behoben
 - App-Updates: beim Suchen/Aktualisieren im Benutzerkonto ging ein leeres Konsolenfenster auf (Windows 11 / Windows Terminal) - startet jetzt ohne Fenster

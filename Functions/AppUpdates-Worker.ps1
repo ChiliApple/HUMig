@@ -88,7 +88,8 @@ try {
             Write-WLog "START|$($it.Id)"
             $r = [ordered]@{ Id = "$($it.Id)"; Status = ''; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = ''; Code = 0 }
             try {
-                $a = @('upgrade', '--id', "$($it.Id)", '--exact', '--source', "$($it.Source)", '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
+                $a = if ("$($req.Mode)" -eq 'Install') { @('install', '--id', "$($it.Id)", '--exact', '--source', "$($it.Source)", '--scope', 'machine') } else { @('upgrade', '--id', "$($it.Id)", '--exact', '--source', "$($it.Source)") }
+                $a += @('--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
                 if ([bool]$it.Unknown) { $a += '--include-unknown' }
                 $out = @(& $wg @a 2>&1 | ForEach-Object { "$_" })
                 $code = [int]$LASTEXITCODE
@@ -97,13 +98,13 @@ try {
                 $r.Status = 'Cli'; $r.Text = $last
             } catch { $r.Status = 'Exception'; $r.Text = "$($_.Exception.Message)" }
             $res.Results += [pscustomobject]$r
-            Write-WLog "DONE|$($it.Id)|$($r.Status)"
+            Write-WLog "DONE|$($it.Id)|$($r.Status)|$($r.Code)|$($r.InstallerErrorCode)|$($r.ExtendedErrorCode)|$($r.Reboot)"
         }
     } else {
         foreach ($it in @($req.Items | Where-Object { $_ })) {
             if (Test-Path -LiteralPath (Join-Path $Dir 'cancel')) { Write-WLog 'CANCEL'; break }
             Write-WLog "START|$($it.Id)"
-            $r = [ordered]@{ Id = "$($it.Id)"; Status = ''; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = '' }
+            $r = [ordered]@{ Id = "$($it.Id)"; Status = ''; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = ''; Code = 0 }
             try {
                 $up = @{ Id = "$($it.Id)"; Source = "$($it.Source)"; MatchOption = 'Equals'; Mode = 'Silent'; ErrorAction = 'Stop' }
                 if ([bool]$it.Unknown) { $up.IncludeUnknown = $true }
@@ -114,7 +115,7 @@ try {
                 $r.Reboot = [bool]$u.RebootRequired
             } catch { $r.Status = 'Exception'; $r.Text = "$($_.Exception.Message)" }
             $res.Results += [pscustomobject]$r
-            Write-WLog "DONE|$($it.Id)|$($r.Status)"
+            Write-WLog "DONE|$($it.Id)|$($r.Status)|$($r.Code)|$($r.InstallerErrorCode)|$($r.ExtendedErrorCode)|$($r.Reboot)"
         }
     }
 } catch { $res.Errors += "WinGet ($($res.Account)): $($_.Exception.Message)" }
