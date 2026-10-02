@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.62 - 2026-10-02
+### Behoben
+- App-Updates: Bereich falsch (*nur Benutzer*), wenn der WinGet-Name vom Deinstallations-Eintrag abweicht (z.B. *Adobe Acrobat Reader (64-bit)* / *Adobe Acrobat (64-bit)*, *Mozilla Thunderbird (de)* / *(x64 de)*) - Vergleich ohne Klammerzusaetze, Architektur und Versionsnummern, Teilnamen ab 8 Zeichen
+
 ## v2.0.61 - 2026-10-02
 ### Geaendert
 - App-Updates: das WinGet-Modul laeuft als SYSTEM nur unter PowerShell 7 (*This cmdlet is not supported in Windows PowerShell*) - die Liste wird deshalb nur noch im Konto des angemeldeten Benutzers gelesen (sieht alle Programme), der *Bereich* kommt aus dem Deinstallations-Eintrag (Computer/Benutzer); Programme fuer alle Benutzer werden als SYSTEM ueber winget.exe aktualisiert (Ergebnis-Codes im Klartext)
