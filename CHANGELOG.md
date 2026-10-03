@@ -1,5 +1,8 @@
 # Changelog
 
+## Dokumentation (nach v2.0.81)
+- README/Anleitung: Programm-Katalog (rund 140 Programme, *nicht uebertragbar*, Geraete-Identitaeten), App-Updates (Zweitversuch im Benutzerkonto, Fehlercodes als Klartext, Programme mit eigenem Updater als Ausnahme), Backup loeschen (schreibgeschuetzte Ordner, OneDrive)
+
 ## v2.0.81 - 2026-10-03
 ### Behoben
 - Backup loeschen in einem OneDrive-Ordner: der Backup-Ordner selbst blieb leer stehen (*Zugriff verweigert*) - OneDrive setzt auf Ordnern das Attribut *Schreibgeschuetzt*, das wird jetzt vor dem Entfernen auch beim obersten Ordner aufgehoben
