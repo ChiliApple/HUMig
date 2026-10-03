@@ -81,11 +81,14 @@ Taskleiste/Hintergrund/Farben, Desktop-Symbole, Startmenue (best effort), Schnel
 WLAN, Netzlaufwerke, Netzwerkdrucker, Drucker komplett (PrintBrm), Ordnerfreigaben (mit Rechten), ODBC, VPN, USMT, Aufgabenplanung, Treiber, Info-Export,
 iPhone-Backups, KeePass, Autodesk. Eigene Module: `Config\modules.json` (Ordner, Dateien, Registry-Schluessel - ohne Programmierung).
 
-**Programm-Katalog** (`Config\apps.default.json`, eigene Eintraege in `Config\apps.json`): rund 40 Programme - u.a. Firefox, Chrome, Edge, Microsoft 365,
+**Programm-Katalog** (`Config\apps.default.json`, eigene Eintraege in `Config\apps.json`): rund 140 Programme - u.a. Firefox, Chrome, Edge, Microsoft 365,
 Thunderbird, Notepad++, 7-Zip, VLC, LibreOffice, Acrobat/Foxit, GIMP, Inkscape, Audacity, Paint.NET, OBS, VS Code, KeePass/KeePassXC,
 FileZilla, PuTTY, WinSCP, mRemoteNG, AnyDesk, TeamViewer, FortiClient VPN, Zotero, Citavi, Arduino, GeoGebra, SketchUp, Autodesk,
-SMART Notebook, ActivInspire, Untis, Packet Tracer, Zoom, Teams. Je Programm: was uebertragbar ist (Einstellungen), Lizenz-Hinweis,
+SMART Notebook, ActivInspire, Untis, Packet Tracer, Zoom, Teams, dazu Brave, Vivaldi, LibreWolf, Git, GitHub Desktop/CLI, Windows Terminal,
+PowerToys, VeraCrypt, KiCad, QGIS, Blender, FreeCAD, PrusaSlicer, Cura, Bambu Studio, Krita, MuseScore, OpenBoard, Wireshark, VirtualBox,
+JetBrains-IDEs, DBeaver, HeidiSQL, MobaXterm, RustDesk, Citrix Workspace u.v.m. Je Programm: was uebertragbar ist (Einstellungen), Lizenz-Hinweis,
 Nacharbeiten (landen in der Checkliste) und passendes Paket der Softwareverteilung. Eintraege ohne Dateien/Registry dienen nur als Hinweis.
+**Nicht uebertragbar** steht je Eintrag dabei - z.B. gespeicherte Kennwoerter und Cookies in Chrome, Edge, Brave, Vivaldi (an Windows-Konto und PC gebunden: vorher Browser-Sync oder Kennwort-Export). Geraete-Identitaeten (RustDesk-ID, Syncthing-Schluessel, Chrome-Remotedesktop-Host) werden absichtlich nicht kopiert. Neue Eintraege sind *ungeprueft*, bis sie an einem echten PC bestaetigt sind (Katalog-Editor > Quelle).
 **Lizenzen mitnehmen:** Programme mit Lizenzdatei/-schluessel (z.B. WinRAR `rarreg.key`, Total Commander `wincmd.key`, Beyond Compare, Sublime Text) werden mit Lizenz gesichert und sind am neuen PC gleich registriert (Modulname *(+ Lizenz)*).
 Eigene Programme in `Config\apps.json` - Eintrag mit `"License": true`, z.B.:
 `{ "Apps": [ { "Id": "App_MeinTool", "Name": "Mein Tool", "Detect": "^Mein Tool", "Items": [ { "Type": "Files", "Name": "LIC", "Path": "{PROGRAMFILES}\\MeinTool", "Filter": [ "*.lic" ], "License": true } ] } ] }`
@@ -161,7 +164,7 @@ Vorlagen: Standard, Komplett, Nur Browser + Office, Neuer PC (mit USMT), **Noteb
 | Backup pruefen | Gegen den Pruefsummen-Katalog (Ergebnis `Pruefung_*.txt`, Status in der Uebersicht) |
 | Vergleichen ... | Zwei Backups (z.B. derselbe Benutzer vorher/nachher): geaendert, nur in A, nur in B |
 | Uebersicht | `Backups.html` im Backup-Ordner: alle Backups mit Status, Groesse, Pruefung, Links zu den Protokollen (Filter, Sortierung) |
-| Alte Backups ... | Aufbewahrung nach Regel: je PC + Benutzer die neuesten N behalten, aeltere nach X Tagen vorschlagen (Einstellungen > Allgemein) - Loeschen immer mit Rueckfrage |
+| Alte Backups ... | Aufbewahrung nach Regel: je PC + Benutzer die neuesten N behalten, aeltere nach X Tagen vorschlagen (Einstellungen > Allgemein) - Loeschen immer mit Rueckfrage, ganz oder gar nicht (vorher jede Datei geprueft; schreibgeschuetzte Dateien/Ordner und Backups in OneDrive-Ordnern werden mit geloescht) |
 
 Beim Restore werden mitgesicherte OneDrive-Dateien nie in den Sync-Ordner geschrieben (dort koennten neuere Cloud-Versionen ueberschrieben werden);
 optional landen sie in `Profil\OneDrive-Wiederherstellung`.
@@ -261,6 +264,7 @@ Reiter **App-Updates** (neben *Werkzeuge*, HUMig als Administrator): installiert
 - Gelesen wird am Ziel-PC im Konto des **angemeldeten Benutzers** (sieht Programme fuer alle Benutzer und nur fuer ihn installierte); ist niemand angemeldet, als **SYSTEM mit PowerShell 7** (Programme fuer alle Benutzer). Das Modul `Microsoft.WinGet.Client` installiert HUMig bei Bedarf (alle Benutzer); PowerShell 7: vorhandenes MSI oder eigene Kopie aus dem offiziellen ZIP-Paket (Pruefsumme geprueft) unter `Programme\HUMig\PowerShell7`. Aktualisiert wird fuer alle Benutzer als **SYSTEM** (winget.exe, ohne UAC), eigene Programme im Benutzerkonto
 - **Zeitplan**: geplante Aufgabe *HUMig App-Updates* an den Ziel-PCs (taeglich / Wochentage, Uhrzeit, PC wecken, verpasste Termine nachholen) - aktualisiert als SYSTEM alle Programme fuer alle Benutzer ausser den Ausnahmen; **Zeitplaene ansehen**: naechster/letzter Lauf, Ergebnis, Fortschritt eines laufenden Laufs, Protokoll, Verlauf uebernehmen, entfernen
 - **Ausnahmen** je Standort (Muster auf Paket-ID oder Name, mit Grund) - nie aktualisiert, auch nicht vom Zeitplan; vorbelegt: selbstaktualisierende Programme (Edge, Chrome, Teams, Office, OneDrive, Autodesk Fusion), Pruefungssoftware (Next-Exam, Safe Exam Browser) und WSL (ueber WinGet nicht aktualisierbar)
+- Findet WinGet ein Programm als SYSTEM nicht (nur fuer einen Benutzer installiert), versucht HUMig es automatisch im Konto des angemeldeten Benutzers; WinGet-Fehlercodes werden als Klartext angezeigt (z.B. *Datei in Benutzung*, *Pruefsumme passt nicht*)
 - **Quellen** je Standort (Standard nur *winget*), eigene Quelle hinzufuegen/entfernen; **Verlauf** aller Updates
 - **Fehlende Programme installieren** (nach dem Restore): ohne Paket in der Softwareverteilung ueber WinGet, wenn der Katalog-Eintrag eine `WingetId` hat
 - Grenzen: andere PCs brauchen WinRM; Programme nur fuer einen Benutzer nur, wenn er angemeldet ist; Installer im Benutzerbereich, die Adminrechte verlangen, schlagen fehl; Windows Server 2019/2022 ohne WinGet
