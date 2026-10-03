@@ -48,12 +48,20 @@ function Import-HMAppCatalog([System.Collections.Generic.List[object]]$Mods) {
         if ($exists) { continue }
         $user = @($a.Items | Where-Object { ($_.Path -match '^\{(PROFILE|APPDATA|LOCALAPPDATA)\}') -or ($_.Key -match '^HK(CU|EY_CURRENT_USER)') }).Count -gt 0
         $lic = @($a.Items | Where-Object { $_ -and $_.License }).Count
-        $hint = "$($a.Name): $($a.Transfer)" + $(if ($a.License) { "`nLizenz: $($a.License)" } else { '' }) + $(if ($lic) { "`nLIZENZDATEI wird mitgesichert - am neuen PC gleich lizenziert" } else { '' }) + "`n(Programm-Katalog - wird eingeblendet, wenn das Programm installiert ist)"
-        $Mods.Add([pscustomobject]@{ Id = "$($a.Id)"; Name = "$($a.Name)$(if ($lic) { ' (+ Lizenz)' })"; Group = 'Programme'; Default = $false; Show = $false; Catalog = $true
+        $trial = Test-HMAppTrial $a
+        $hint = "$($a.Name): $($a.Transfer)" + $(if ($a.License) { "`nLizenz: $($a.License)" } else { '' }) + $(if ($lic) { "`nLIZENZDATEI wird mitgesichert - am neuen PC gleich lizenziert" } else { '' }) + $(if ($trial) { "`nACHTUNG: $script:HMAppTrialText" } else { '' }) + "`n(Programm-Katalog - wird eingeblendet, wenn das Programm installiert ist)"
+        $Mods.Add([pscustomobject]@{ Id = "$($a.Id)"; Name = "$($a.Name)$(if ($lic) { ' (+ Lizenz)' })$(if ($trial) { ' (ungeprueft)' })"; Group = 'Programme'; Default = $false; Show = $false; Catalog = $true
             Scope = $(if ($user) { 'User' } else { 'Machine' }); Remote = $true; Hint = $hint; Items = @($a.Items)
             CloseProcess = $cp; StopService = $ss; AppId = "$($a.Id)" })
     }
 }
+
+# Katalog-Eintrag nur testweise: kopiert Dateien/Registry, ist aber noch an keinem PC bestaetigt (Verified.Date leer)
+function Test-HMAppTrial($App) {
+    if (-not $App -or -not @($App.Items | Where-Object { $_ }).Count) { return $false }
+    return -not ($App.Verified -and "$($App.Verified.Date)".Trim())
+}
+$script:HMAppTrialText = 'ungeprueft - nur testweise im Katalog: nach dem Umzug Programm testen und Rueckmeldung geben (Fenster Programme > Rueckmeldung)'
 
 # Module eines Katalog-Eintrags (eigene Items -> Modul mit Id des Eintrags, sonst "Modules")
 function Get-HMAppModuleIds($App) {
@@ -115,7 +123,9 @@ function Start-HMAppDetect([switch]$Show) {
         $script:DetectedModuleIds = $ids
         if ($newOnes.Count -or $gone.Count) { Update-BackupPanelKeepChecks -Check @($newOnes | Where-Object { $_ -like 'App_*' }) }
         if ($found.Count) {
-            Out-Console ("Programme erkannt ({0}): {1}" -f $found.Count, (@($found | ForEach-Object { $_.Name }) -join ', ')) 'Info'
+            $tr = @{}; foreach ($a in $script:AppCatalog) { if (Test-HMAppTrial $a) { $tr[$a.Id] = $true } }
+            Out-Console ("Programme erkannt ({0}): {1}" -f $found.Count, (@($found | ForEach-Object { "$($_.Name)$(if ($tr[$_.Id]) { '*' })" }) -join ', ')) 'Info'
+            if (@($found | Where-Object { $tr[$_.Id] }).Count) { Out-Console "   * = $script:HMAppTrialText" 'Warning' }
             $auto = @($newOnes | Where-Object { $_ -like 'App_*' })
             if ($auto.Count) { Out-Console "   Einstellungen dieser Programme werden mitgesichert (Gruppe PROGRAMME, abwaehlbar) - Details: Knopf 'Programme'" 'Info' }
         } elseif ($script:AppDetectShow) { Out-Console 'Keine Programme aus dem Katalog gefunden.' 'Info' }
@@ -149,7 +159,7 @@ function Show-HMAppCatalog {
         $pkg = Find-HMAppPackage $a $pk
         $licItems = @($a.Items | Where-Object { $_ -and $_.License } | ForEach-Object { if ($_.Filter) { @($_.Filter) -join ',' } elseif ($_.Key) { "$($_.Key)" } else { Split-Path "$($_.Path)" -Leaf } } | Select-Object -Unique)
         $db = @($a.Items | Where-Object { $_ -and "$($_.Role)" -eq 'Database' } | ForEach-Object { if ("$($_.DbKind)" -eq 'Service') { 'Dienst' } else { 'Datei' } } | Select-Object -Unique)
-        $ver = if ($a.Verified -and "$($a.Verified.Date)") { "$($a.Verified.Date)" } else { 'nein' }
+        $ver = if ($a.Verified -and "$($a.Verified.Date)") { "$($a.Verified.Date)" } elseif (Test-HMAppTrial $a) { 'nein - testweise' } else { 'nein (nur Hinweis/Modul)' }
         $rows.Add(@($(if ($d) { 'installiert' } else { '-' }), "$($a.Name)", $(if ($d) { "$($d.Version)" } else { '' }), "$($a.Transfer)", "$($a.NotTransfer)", $(if ($licItems.Count) { "JA: $($licItems -join ', ')" } else { 'nein' }), "$($a.License)", ($db -join ', '), (@(@($a.CloseProcess) | Where-Object { $_ }) -join ', '), ($mods -join ', '), $(if ($pkg) { "$($pkg.Id)" } else { '' }), ((@($a.After) | Where-Object { $_ }) -join ' | '), $ver, "$($a.Id)"))
     }
     $n = @($script:DetectedApps).Count
@@ -158,7 +168,17 @@ function Show-HMAppCatalog {
         -Actions @(
             @{ Text = '+ Programm hinzufuegen ...'; Color = '#FFA6E3A1'; NoSelection = $true; Handler = { param($sel, $w, $c) Start-HMAppWizard } }
             @{ Text = 'Katalog bearbeiten ...'; Color = '#FFCBA6F7'; NoSelection = $true; Handler = { param($sel, $w, $c) $id = if (@($sel).Count) { "$(@($sel)[0].Id)" } else { '' }; Show-HMAppEditor -SelectId $id } }
+            @{ Text = 'Rueckmeldung geben ...'; Color = '#FFF9E2AF'; NoSelection = $true; Handler = { param($sel, $w, $c) Start-HMAppFeedback @($sel) } }
         )
+}
+
+# Rueckmeldung zu Katalog-Eintraegen: oeffnet ein vorausgefuelltes GitHub-Issue im Browser (keine Daten werden automatisch gesendet)
+function Start-HMAppFeedback([object[]]$Sel) {
+    $names = @($Sel | Where-Object { $_ } | ForEach-Object { "$($_.Programm) ($($_.Id))" })
+    $title = if ($names.Count -eq 1) { "Katalog: $($names[0])" } elseif ($names.Count) { "Katalog: $($names.Count) Programme" } else { 'Katalog: Rueckmeldung' }
+    $body = "Programm(e): $(if ($names.Count) { $names -join ', ' } else { '(bitte eintragen)' })`nHUMig-Version: $script:Version`nProgramm-Version:`n`nErgebnis nach dem Umzug (passt / fehlte etwas / falscher Pfad):`n`n(keine Kennwoerter, Benutzernamen oder Pfade mit Personennamen eintragen)"
+    $url = "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)/issues/new?title=$([uri]::EscapeDataString($title))&body=$([uri]::EscapeDataString($body))"
+    try { Start-Process -FilePath explorer.exe -ArgumentList "`"$url`"" } catch { Out-Console "Browser nicht startbar: $url" 'Warning' }
 }
 
 # Paket in der Softwareverteilung zu einem Katalog-Eintrag (Package = Regex auf Ordner-/Dateiname oder Paketnamen)
@@ -181,6 +201,7 @@ function Get-HMAppAfterSteps($Backup) {
         if (@($a.Items | Where-Object { $_ -and $_.License }).Count) { $out.Add("Lizenz $($a.Name): Lizenzdatei wurde uebertragen - registriert?") }
         elseif ("$($a.License)" -match '(?i)konto|lizenz|schluessel|abmelden|aktivier|abo') { $out.Add("Lizenz $($a.Name): $($a.License)") }
         if ("$($a.NotTransfer)".Trim()) { $out.Add("$($a.Name) - nicht uebertragen: $($a.NotTransfer)") }
+        if (Test-HMAppTrial $a) { $out.Add("$($a.Name): Katalog-Eintrag $script:HMAppTrialText") }
         if ("$($a.Version)".Trim()) { $out.Add("$($a.Name) - Version: $($a.Version)") }
         $dbs = @($a.Items | Where-Object { $_ -and "$($_.Role)" -eq 'Database' })
         if (@($dbs | Where-Object { "$($_.DbKind)" -eq 'Service' }).Count) { $out.Add("$($a.Name): Dienst-Datenbank zurueckkopiert - Programm starten und Datenbank pruefen (ggf. im Programm/SQL-Verwaltung anfuegen bzw. Hersteller-Sicherung verwenden)") }
