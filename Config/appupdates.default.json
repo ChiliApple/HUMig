@@ -1,5 +1,5 @@
 {
-  "_Info": "App-Updates (WinGet): Standard-Ausnahmen und -Quellen. Wird beim ersten Oeffnen je Standort in Config\\appupdates.json uebernommen und dort im Reiter App-Updates gepflegt (diese Datei bleibt unveraendert). Pattern: Platzhalter * ? auf Paket-ID oder Programmname.",
+  "_Info": "App-Updates (WinGet): Standard-Ausnahmen und -Quellen. Wird beim ersten Oeffnen je Standort in Config\\appupdates.json uebernommen und dort im Reiter App-Updates gepflegt (diese Datei bleibt unveraendert). Eintraege mit Since kamen spaeter dazu und werden bestehenden Standorten einmalig ergaenzt (geloeschte kommen nicht wieder). Pattern: Platzhalter * ? auf Paket-ID oder Programmname.",
   "Sources": [ "winget" ],
   "Exclude": [
     { "Pattern": "Microsoft.Edge*", "Reason": "aktualisiert sich selbst" },
@@ -9,6 +9,8 @@
     { "Pattern": "Microsoft.OneDrive*", "Reason": "aktualisiert sich selbst" },
     { "Pattern": "*Next-Exam*", "Reason": "Pruefungssoftware - Version gezielt verteilen" },
     { "Pattern": "*Safe Exam Browser*", "Reason": "Pruefungssoftware - Version gezielt verteilen" },
-    { "Pattern": "*SafeExamBrowser*", "Reason": "Pruefungssoftware - Version gezielt verteilen" }
+    { "Pattern": "*SafeExamBrowser*", "Reason": "Pruefungssoftware - Version gezielt verteilen" },
+    { "Pattern": "Autodesk.Fusion", "Reason": "aktualisiert sich selbst (WinGet meldet OK, Version bleibt gleich)", "Since": "2.0.78" },
+    { "Pattern": "Microsoft.WSL", "Reason": "ueber WinGet nicht aktualisierbar - als Administrator: wsl --update", "Since": "2.0.78" }
   ]
 }
