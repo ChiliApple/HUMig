@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.85 - 2026-10-03
+### Programm-Katalog
+- 135 weitere Programme (externe Recherche, Pfade gegen Hersteller-Doku/Quellcode/Forensik-Pfadlisten belegt, WinGet-IDs gegen winget-pkgs geprueft; als *ungeprueft* markiert, Herkunft in den Feldern Confidence/Sources/Note), u. a. Slack, Discord, Telegram, Signal, Opera, Docker Desktop, SSMS, pgAdmin, MySQL Workbench, WinMerge, TortoiseGit/SVN, Veyon, NVDA, calibre, Anki, OrcaSlicer, Kodi
+- nicht uebernommen: Eintraege mit geringer Belegsicherheit und VPN-Clients (Konfiguration/Schluessel geraetegebunden)
+
 ## v2.0.84 - 2026-10-03
 ### Geaendert
 - Programme: Katalog alphabetisch sortiert (Fenster *Programme*, erkannte Programme in der Konsole, Gruppe PROGRAMME)
