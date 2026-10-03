@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.81 - 2026-10-03
+### Behoben
+- Backup loeschen in einem OneDrive-Ordner: der Backup-Ordner selbst blieb leer stehen (*Zugriff verweigert*) - OneDrive setzt auf Ordnern das Attribut *Schreibgeschuetzt*, das wird jetzt vor dem Entfernen auch beim obersten Ordner aufgehoben
+
 ## v2.0.80 - 2026-10-03
 ### Behoben
 - Backup loeschen in einem OneDrive-Ordner: der zuletzt geleerte Backup-Ordner meldete *Zugriff verweigert* (OneDrive haelt ihn kurz offen) - HUMig wiederholt das Entfernen bis ca. 5 Sekunden und wertet ein bereits vorgemerktes Loeschen als erfolgreich

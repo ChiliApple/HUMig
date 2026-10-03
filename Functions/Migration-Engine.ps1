@@ -395,6 +395,7 @@ namespace HMFs
         static int RemoveDir(string full)
         {
             int err = 0;
+            SetFileAttributesW(L(full), 0x10);   // Schreibschutz-Attribut weg (OneDrive setzt es auf Ordnern) - sonst Zugriff verweigert
             for (int i = 0; i < 20; i++)
             {
                 if (RemoveDirectoryW(L(full))) return 0;
