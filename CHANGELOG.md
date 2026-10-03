@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.76 - 2026-10-03
+### Behoben
+- App-Updates: meldet WinGet als SYSTEM *kein installiertes Paket gefunden* (0x8A150014, z. B. WSL - Paket ist nur im Benutzerkonto sichtbar), versucht HUMig dasselbe Programm automatisch noch einmal im Konto des angemeldeten Benutzers
+- App-Updates: WinGet-Fehlercodes bei Programmen nur fuer einen Benutzer werden lesbar angezeigt (z. B. 2316632067 -> *Befehl fehlgeschlagen ... (0x8A150003)*), neu u. a. 0x8A150103 *Datei in Benutzung*
+
 ## v2.0.75 - 2026-10-03
 ### Behoben
 - App-Updates: Programme nur fuer einen Benutzer - haengt ein Update laenger als 15 Minuten (meist wartet der Installer auf eine Administrator-Bestaetigung, die der Benutzer nicht geben kann), wird es abgebrochen und mit Hinweis gemeldet; die uebrigen Programme laufen weiter (vorher bis zu 3 Stunden Wartezeit)
