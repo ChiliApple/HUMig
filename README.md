@@ -25,7 +25,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 | | |
 |---|---|
 | **Backup & Restore** | Dateien, Browser, Office, Windows-Einstellungen, Drucker, WLAN, Netzlaufwerke – Robocopy mit bis zu 128 Threads, inkrementell, mit Prüfung, **Zeitplan** (automatisch auf USB/Netz) |
-| **Programm-Katalog** | erkennt rund 280 Programme, sichert deren Einstellungen, Plug-ins, Datenbanken und **Lizenzdateien** mit, schliesst Programme vorher, installiert fehlende am neuen PC nach - mit **Katalog-Editor** |
+| **Programm-Katalog** | erkennt rund 480 Programme, sichert deren Einstellungen, Plug-ins, Datenbanken und **Lizenzdateien** mit, schliesst Programme vorher, installiert fehlende am neuen PC nach - mit **Katalog-Editor** |
 | **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
 | **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung |
 | **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |
@@ -81,15 +81,16 @@ Taskleiste/Hintergrund/Farben, Desktop-Symbole, Startmenue (best effort), Schnel
 WLAN, Netzlaufwerke, Netzwerkdrucker, Drucker komplett (PrintBrm), Ordnerfreigaben (mit Rechten), ODBC, VPN, USMT, Aufgabenplanung, Treiber, Info-Export,
 iPhone-Backups, KeePass, Autodesk. Eigene Module: `Config\modules.json` (Ordner, Dateien, Registry-Schluessel - ohne Programmierung).
 
-**Programm-Katalog** (`Config\apps.default.json`, eigene Eintraege in `Config\apps.json`): rund 280 Programme - u.a. Firefox, Chrome, Edge, Microsoft 365,
+**Programm-Katalog** (`Config\apps.default.json`, eigene Eintraege in `Config\apps.json`): rund 480 Programme - u.a. Firefox, Chrome, Edge, Microsoft 365,
 Thunderbird, Notepad++, 7-Zip, VLC, LibreOffice, Acrobat/Foxit, GIMP, Inkscape, Audacity, Paint.NET, OBS, VS Code, KeePass/KeePassXC,
 FileZilla, PuTTY, WinSCP, mRemoteNG, AnyDesk, TeamViewer, FortiClient VPN, Zotero, Citavi, Arduino, GeoGebra, SketchUp, Autodesk,
 SMART Notebook, ActivInspire, Untis, Packet Tracer, Zoom, Teams, dazu Brave, Vivaldi, LibreWolf, Git, GitHub Desktop/CLI, Windows Terminal,
 PowerToys, VeraCrypt, KiCad, QGIS, Blender, FreeCAD, PrusaSlicer, Cura, Bambu Studio, Krita, MuseScore, OpenBoard, Wireshark, VirtualBox,
 JetBrains-IDEs, DBeaver, HeidiSQL, MobaXterm, RustDesk, Citrix Workspace, Slack, Discord, Telegram, Signal, Opera, Docker Desktop, SSMS, pgAdmin, MySQL Workbench,
-WinMerge, TortoiseGit/SVN, Veyon, NVDA, calibre, Anki, OrcaSlicer, Kodi u.v.m. Je Programm: was uebertragbar ist (Einstellungen), Lizenz-Hinweis,
+WinMerge, TortoiseGit/SVN, Veyon, NVDA, calibre, Anki, OrcaSlicer, Kodi, dazu Schul- und Fachsoftware (Next-Exam, LanSchool, NetSupport School,
+TI-Nspire, Mathematica, Maple, SOLIDWORKS, CATIA, Creo, Archicad, SAP GUI, Dynamics NAV, Adobe-Programme, CorelDRAW, JAWS, Read&Write) u.v.m. Je Programm: was uebertragbar ist (Einstellungen), Lizenz-Hinweis,
 Nacharbeiten (landen in der Checkliste) und passendes Paket der Softwareverteilung. Eintraege ohne Dateien/Registry dienen nur als Hinweis.
-**Nicht uebertragbar** steht je Eintrag dabei - z.B. gespeicherte Kennwoerter und Cookies in Chrome, Edge, Brave, Vivaldi (an Windows-Konto und PC gebunden: vorher Browser-Sync oder Kennwort-Export). Geraete-Identitaeten (RustDesk-ID, Syncthing-Schluessel, Chrome-Remotedesktop-Host) werden absichtlich nicht kopiert. Neue Eintraege sind *ungeprueft*, bis sie an einem echten PC bestaetigt sind (Katalog-Editor > Quelle).
+**Nicht uebertragbar** steht je Eintrag dabei - z.B. gespeicherte Kennwoerter und Cookies in Chrome, Edge, Brave, Vivaldi (an Windows-Konto und PC gebunden: vorher Browser-Sync oder Kennwort-Export). Geraete-Identitaeten (RustDesk-ID, AnyDesk-ID, Syncthing-Schluessel, Chrome-Remotedesktop-Host, VPN-Schluessel) werden absichtlich nicht kopiert; VPN-Clients, Virenschutz, Kartenleser und Signatursoftware stehen als reine Hinweise im Katalog (Nacharbeit in der Checkliste). Vertrauliche Daten, die bewusst mitgehen (z.B. Telegram-Sitzung, gespeicherte Zugangsdaten in FileZilla/WinSCP/DBeaver, API-Schluessel in Konfigurationen), sind im Eintrag markiert - Backup vertraulich behandeln. Neue Eintraege sind *ungeprueft*, bis sie an einem echten PC bestaetigt sind (Katalog-Editor > Quelle).
 **Lizenzen mitnehmen:** Programme mit Lizenzdatei/-schluessel (z.B. WinRAR `rarreg.key`, Total Commander `wincmd.key`, Beyond Compare, Sublime Text) werden mit Lizenz gesichert und sind am neuen PC gleich registriert (Modulname *(+ Lizenz)*).
 Eigene Programme in `Config\apps.json` - Eintrag mit `"License": true`, z.B.:
 `{ "Apps": [ { "Id": "App_MeinTool", "Name": "Mein Tool", "Detect": "^Mein Tool", "Items": [ { "Type": "Files", "Name": "LIC", "Path": "{PROGRAMFILES}\\MeinTool", "Filter": [ "*.lic" ], "License": true } ] } ] }`

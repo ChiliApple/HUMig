@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.0.86 - 2026-10-03
+### Programm-Katalog (jetzt rund 480 Programme)
+- 193 weitere Programme aus einer zweiten, unabhaengig nachgeprueften Recherche: Schulsoftware (Next-Exam, LanSchool, NetSupport School, TI-Nspire, Mathematica, Maple, Moodle Desktop, Barrierefreiheit wie JAWS, Read&Write, SuperNova), HTL/HAK-Fachsoftware (SOLIDWORKS, CATIA, Creo, Archicad, Rhino, Altium, SAP GUI, Dynamics NAV, B&R), Buero und Medien (Adobe-Programme, CorelDRAW, ABBYY, Visio, OneNote, DaVinci Resolve) sowie Helfer; als *ungeprueft* markiert
+- reine Hinweis-Eintraege (ohne Dateien, Nacharbeit in der Checkliste) fuer VPN-Clients (WireGuard, Tailscale, Proton VPN, Surfshark, AmneziaVPN, OpenVPN Connect, Cisco Secure Client, GlobalProtect, Sophos Connect), Virenschutz, Kartenleser- und Signatursoftware (A-Trust, ID Austria-Umfeld)
+- OpenVPN GUI: Verbindungsprofile des Benutzers (*.ovpn) werden mitgenommen - mit Hinweis, dass sie private Schluessel enthalten
+- 23 Korrekturen am Bestand, u. a.: Telegram (tdata ist die angemeldete Sitzung - Backup vertraulich), DBeaver (Kennwoerter mit festem Schluessel, gehen mit), pgAdmin (ab 7.2 im Windows-Passwortspeicher, nicht uebertragbar), FileZilla/WinSCP/mRemoteNG/MobaXterm (Kennwort-Speicherung genau beschrieben), AnyDesk (service.conf mit der ID wird nicht kopiert), Arduino IDE 2 (.arduinoIDE ergaenzt), Claude (MSIX-Pfad, API-Schluessel im Klartext), JetBrains und GitHub Desktop (Erkennung erweitert), Total Commander/XYplorer/Charles/MakeMKV (Lizenz wird uebertragen)
+- nicht uebernommen: Eintraege mit geringer Belegsicherheit
+
 ## v2.0.85 - 2026-10-03
 ### Programm-Katalog
 - 135 weitere Programme (externe Recherche, Pfade gegen Hersteller-Doku/Quellcode/Forensik-Pfadlisten belegt, WinGet-IDs gegen winget-pkgs geprueft; als *ungeprueft* markiert, Herkunft in den Feldern Confidence/Sources/Note), u. a. Slack, Discord, Telegram, Signal, Opera, Docker Desktop, SSMS, pgAdmin, MySQL Workbench, WinMerge, TortoiseGit/SVN, Veyon, NVDA, calibre, Anki, OrcaSlicer, Kodi
