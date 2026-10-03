@@ -360,6 +360,23 @@ function Get-HMAuRunning($Items) {
     $keys = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*')
     $reg = @(foreach ($k in $keys) { Get-ItemProperty -Path $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } })
     $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path })
+    # Art je Prozess: Dienst (Win32_Service), Fenster, Hintergrund (ohne Fenster, z.B. Infobereich). Fenster sind nur in der eigenen
+    # Sitzung erkennbar - Prozesse anderer Sitzungen gelten als 'Fenster' (hoeflich schliessen, wie bisher).
+    $svc = @{}
+    foreach ($x in @(Get-CimInstance -ClassName Win32_Service -Filter "State='Running'" -ErrorAction SilentlyContinue)) { if ([int]$x.ProcessId -gt 0) { $svc[[int]$x.ProcessId] = @($svc[[int]$x.ProcessId]) + @("$($x.Name)") | Where-Object { $_ } } }
+    $mySess = -1; try { $mySess = (Get-Process -Id $PID).SessionId } catch { }
+    $kindOf = {
+        param($pr)
+        if ($svc.ContainsKey([int]$pr.Id)) { return 'Service' }
+        if ([int]$pr.SessionId -ne $mySess) { return 'Window' }
+        if ([int64]$pr.MainWindowHandle -ne 0) { return 'Window' }
+        return 'Background'
+    }
+    $ownerOf = {
+        param($id)
+        try { $w = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$id" -ErrorAction Stop; $o = Invoke-CimMethod -InputObject $w -MethodName GetOwner -ErrorAction Stop; if ($o.User) { return "$($o.Domain)\$($o.User)" } } catch { }
+        return ''
+    }
     $bad = @("$env:SystemRoot", "$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramData", "$env:SystemDrive\") | Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\').ToLower() }
     foreach ($it in @($Items)) {
         $n = "$($it.Name)".Trim()
@@ -373,11 +390,73 @@ function Get-HMAuRunning($Items) {
         if (-not $dirs.Count) { continue }
         $run = @($procs | Where-Object { $pp = "$($_.Path)".ToLower(); @($dirs | Where-Object { $pp.StartsWith($_.ToLower() + '\') }).Count })
         if ($run.Count) {
+            $pl = @($run | ForEach-Object {
+                    $k = & $kindOf $_
+                    [pscustomobject]@{ Name = "$($_.ProcessName)"; Id = [int]$_.Id; SessionId = [int]$_.SessionId; Kind = $k; Path = "$($_.Path)"
+                        Services = @($(if ($k -eq 'Service') { $svc[[int]$_.Id] })); Owner = $(if ($k -eq 'Background') { & $ownerOf ([int]$_.Id) } else { '' }) }
+                })
+            $kt = @{ Service = 'Dienst'; Window = 'Fenster'; Background = 'Hintergrund' }
             [pscustomobject]@{
-                Id = "$($it.Id)"; Name = $n; Running = (@($run | ForEach-Object { "$($_.ProcessName) ($($_.Id))" }) -join ', ')
-                Procs = @($run | ForEach-Object { [pscustomobject]@{ Name = "$($_.ProcessName)"; Id = [int]$_.Id; SessionId = [int]$_.SessionId } })
+                Id = "$($it.Id)"; Name = $n; Running = (@($pl | ForEach-Object { "$($_.Name) ($($_.Id), $($kt[$_.Kind])$(if ($_.Kind -eq 'Service') { ': ' + (@($_.Services) -join ',') }))" }) -join ', ')
+                Procs = $pl
             }
         }
+    }
+}
+
+# Laufendes Programm vor dem Update beenden - je nach Art (nur am eigenen PC):
+#   Fenster: hoeflich schliessen (wie der Benutzer, ungespeicherte Arbeit fragt das Programm), notfalls beenden nur bei CloseForce
+#   Hintergrund (kein Fenster, z.B. Infobereich): direkt beenden - nichts zu speichern; nach dem Update im Konto des Besitzers neu starten
+#   Dienst: Dienst stoppen; nach dem Update wieder starten, falls der Installer das nicht selbst getan hat
+# Rueckgabe: Ids, die noch laufen
+function Stop-HMAuRunning([hashtable]$Pc, $Job, $Item, [object[]]$Procs, [bool]$Force, [hashtable]$Restart) {
+    $win = @($Procs | Where-Object { "$($_.Kind)" -ne 'Service' -and "$($_.Kind)" -ne 'Background' })
+    $bg = @($Procs | Where-Object { "$($_.Kind)" -eq 'Background' })
+    $sv = @($Procs | Where-Object { "$($_.Kind)" -eq 'Service' })
+    $left = @()
+    foreach ($n in @($sv | ForEach-Object { @($_.Services) } | Where-Object { $_ } | Select-Object -Unique)) {
+        try {
+            Stop-Service -Name $n -Force -ErrorAction Stop
+            Write-HMLog $Job "      Dienst $n gestoppt (wird nach dem Update wieder gestartet)" 'Info'
+            if (-not $Restart.Services.Contains($n)) { $Restart.Services.Add($n) }
+        } catch { Write-HMLog $Job "      Dienst $n nicht stoppbar: $($_.Exception.Message)" 'Warning' }
+    }
+    foreach ($p in $bg) {
+        try {
+            Stop-Process -Id ([int]$p.Id) -Force -ErrorAction Stop
+            Write-HMLog $Job "      $($p.Name) ($($p.Id)) beendet - Hintergrundprogramm ohne Fenster" 'Info'
+            if ($p.Path -and $p.Owner -and -not @($Restart.Apps | Where-Object { $_.Path -eq $p.Path -and $_.Owner -eq $p.Owner }).Count) { $Restart.Apps.Add([pscustomobject]@{ Path = "$($p.Path)"; Owner = "$($p.Owner)"; Name = "$($p.Name)" }) }
+        } catch { }
+    }
+    if ($win.Count) { $left += @(Close-HMProcs $Pc $Job $win $Force 20) }
+    if ($bg.Count -or $sv.Count) {
+        Start-Sleep -Seconds 2
+        $left += @(foreach ($p in @($bg + $sv)) { if (Get-Process -Id ([int]$p.Id) -ErrorAction SilentlyContinue) { [int]$p.Id } })
+    }
+    return @($left | Select-Object -Unique)
+}
+# Nach dem Update: gestoppte Dienste und beendete Hintergrundprogramme wieder starten (nur, wenn sie nicht schon laufen)
+function Restart-HMAuStopped($Job, [hashtable]$Restart) {
+    foreach ($n in @($Restart.Services)) {
+        try {
+            $s = Get-Service -Name $n -ErrorAction Stop
+            if ("$($s.Status)" -ne 'Running') { Start-Service -Name $n -ErrorAction Stop; Write-HMLog $Job "  Dienst $n wieder gestartet" 'Success' }
+        } catch { Write-HMLog $Job "  Dienst $n nicht startbar: $($_.Exception.Message)" 'Warning' }
+    }
+    foreach ($a in @($Restart.Apps)) {
+        if (@(Get-Process -ErrorAction SilentlyContinue | Where-Object { "$($_.Path)" -ieq $a.Path }).Count) { continue }   # Installer hat es schon gestartet
+        if (-not (Test-Path -LiteralPath $a.Path)) { Write-HMLog $Job "  $($a.Name) nicht neu gestartet: $($a.Path) gibt es nach dem Update nicht mehr" 'Warning'; continue }
+        $n = 'HUMig_Restart_' + [guid]::NewGuid().ToString('N')
+        try {
+            $act = New-ScheduledTaskAction -Execute $a.Path
+            $pr = New-ScheduledTaskPrincipal -UserId $a.Owner -LogonType Interactive -RunLevel Limited
+            $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
+            Register-ScheduledTask -TaskName $n -TaskPath '\' -Action $act -Principal $pr -Settings $set -Force -ErrorAction Stop | Out-Null
+            Start-ScheduledTask -TaskPath '\' -TaskName $n
+            Start-Sleep -Seconds 3
+            Write-HMLog $Job "  $($a.Name) fuer $($a.Owner) wieder gestartet" 'Success'
+        } catch { Write-HMLog $Job "  $($a.Name) nicht neu gestartet: $($_.Exception.Message)" 'Warning' }
+        finally { Unregister-ScheduledTask -TaskPath '\' -TaskName $n -Confirm:$false -ErrorAction SilentlyContinue }
     }
 }
 
@@ -397,6 +476,7 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
     $res = @()
     $new = { param($pc, $it) [ordered]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Computer = $pc; Id = "$($it.Id)"; Name = "$($it.Name)"; From = "$($it.Installed)"; To = "$($it.Available)"; Source = "$($it.Source)"; Scope = "$($it.Scope)"; Status = ''; Text = ''; Reboot = $false } }
     $byPc = @{}; $names = @{}
+    $restart = @{ Services = [System.Collections.Generic.List[string]]::new(); Apps = [System.Collections.Generic.List[object]]::new() }   # nach dem Update wieder starten
     foreach ($k in $pcs) {
         $todo = @()
         foreach ($it in @($Ctx.ByPc[$k].Items | Where-Object { $_ })) {
@@ -411,7 +491,7 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
                 if ($run -and $dec -match '^Close') {
                     Write-HMLog $Job "  $($it.Name): Programm schliessen ($($run.Running)) ..." 'Info'
                     $pc = @{ Computer = $env:COMPUTERNAME; IsRemote = $false; Credential = $null; Account = "$($Ctx.ByPc[$k].UserAccount)" }
-                    $left = @(Close-HMProcs $pc $Job @($run.Procs) ($dec -eq 'CloseForce') 20)
+                    $left = @(Stop-HMAuRunning $pc $Job $it @($run.Procs) ($dec -eq 'CloseForce') $restart)
                     if ($left.Count) {
                         $e = & $new $k $it; $e.Status = 'Skipped'; $e.Text = 'uebersprungen - Programm liess sich nicht schliessen'
                         Write-HMLog $Job "  $($it.Name): $($e.Text)" 'Warning'; $res += [pscustomobject]$e; continue
@@ -480,6 +560,7 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
             $res += [pscustomobject]$e
         }
     }
+    Restart-HMAuStopped $Job $restart
     $Job.Progress = 100
     $ok = @($res | Where-Object { $_.Status -eq 'OK' }).Count
     $err = @($res | Where-Object { $_.Status -eq 'Error' }).Count

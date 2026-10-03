@@ -285,7 +285,7 @@ function Start-HMAuUpdate([switch]$All) {
         $dec = @{}
         if ($running.Count) {
             $dec = Show-HMProcDialog $running 'App-Update' $env:COMPUTERNAME -Options @(@('Close', 'Schliessen'), @('CloseForce', 'Schliessen, notfalls beenden'), @('Skip', 'Nicht aktualisieren'), @('Run', 'Trotzdem aktualisieren')) `
-                -Note 'Schliessen = wie der Benutzer das Fenster schliesst (ungespeicherte Arbeit fragt das Programm selbst nach). Laesst sich das Programm in 20 s nicht schliessen, wird es nicht aktualisiert - ausser notfalls beenden ist gewaehlt. Trotzdem aktualisieren: der Installer kann fehlschlagen (Code 1603) oder das Programm selbst beenden.'
+                -Note 'Schliessen: Programme mit Fenster wie der Benutzer schliessen (ungespeicherte Arbeit fragt das Programm selbst nach; nach 20 s ohne Erfolg wird nicht aktualisiert - ausser notfalls beenden). Hintergrundprogramme ohne Fenster werden beendet, Dienste gestoppt - beides nach dem Update wieder gestartet. Trotzdem aktualisieren: der Installer kann fehlschlagen (Code 1603) oder das Programm selbst beenden.'
             if ($null -eq $dec) { Out-Console 'App-Updates abgebrochen (laufende Programme).' 'Warning'; return }
             foreach ($x in $running) { Out-Console ("   {0}: {1} -> {2}" -f $x.Name, $x.Running, $(switch ("$($dec[$x.Id])") { 'Close' { 'schliessen' } 'CloseForce' { 'schliessen, notfalls beenden' } 'Skip' { 'nicht aktualisieren' } default { 'trotzdem aktualisieren' } })) 'Info' }
         }
