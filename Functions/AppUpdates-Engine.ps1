@@ -42,7 +42,11 @@ function Format-HMAuResult([string]$Status, $InstallerCode, $ExtendedCode, [bool
         default { "$Status" }
     }
     $code = 0; try { $code = [int64]$InstallerCode } catch { }
-    if ($code -and $Status -ne 'Ok') {
+    $wgc = $false; try { $wgc = ('{0:X8}' -f [uint32](($code + 4294967296) % 4294967296)) -like '8A15*' } catch { }
+    if ($code -and $Status -ne 'Ok' -and $wgc) {
+        # WinGet-Fehlercode (HRESULT) statt Installer-Code -> Klartext wie bei winget.exe
+        $t += " - $((Format-HMAuCliResult $code '').Text)"
+    } elseif ($code -and $Status -ne 'Ok') {
         $c = switch ($code) { 1602 { ' - vom Benutzer abgebrochen' } 1603 { ' - schwerer Fehler beim Installieren (oft: Programm laeuft noch)' } 1618 { ' - andere Installation laeuft gerade' } 1638 { ' - andere Version bereits installiert' } default { '' } }
         $t += " (Code $code$c)"
     }
@@ -72,6 +76,8 @@ function Format-HMAuCliResult([int64]$Code, [string]$Out) {
         '0x8A150010' { 'kein passender Installer fuer alle Benutzer bzw. diesen PC (nur pro Benutzer installierbar?)' }
         '0x8A150061' { 'schon installiert' }
         '0x8A15010D' { 'andere Version ist schon installiert' }
+        '0x8A150003' { 'Befehl fehlgeschlagen (oft: Datei oder Programm in Benutzung - Programm schliessen und erneut versuchen)' }
+        '0x8A150103' { 'Datei in Benutzung - Programm schliessen und erneut versuchen' }
         '0x8A150011' { 'Pruefsumme des Installers passt nicht (Hersteller hat die Datei getauscht, Paketliste noch nicht nachgezogen) - aus Sicherheitsgruenden nicht installiert, in einigen Tagen erneut versuchen' }
         default { 'Fehler' }
     }

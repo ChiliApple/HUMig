@@ -216,9 +216,24 @@ try {
                 Invoke-TTask 'SYSTEM' @{ Mode = $Op; Cli = $true; Items = @($mach | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) } $false 10800
                 if ($script:TRes) { $res += @($script:TRes.Results) }
             }
+            $usid = "$($My.UserSid)"
+            # 0x8A150014 als SYSTEM: Paket ist nur im Benutzerkonto sichtbar (z.B. WSL) -> im Benutzerkonto noch einmal versuchen
+            if ($Op -eq 'Update' -and $res.Count) {
+                $nf = @($res | Where-Object { "$($_.Status)" -eq 'Cli' -and "$($_.Code)" -eq '-1978335212' })
+                if ($nf.Count) {
+                    $rs = Get-TUserSid
+                    if ($rs) {
+                        $ids = @($nf | ForEach-Object { "$($_.Id)" })
+                        $res = @($res | Where-Object { $ids -notcontains "$($_.Id)" })
+                        $usr = @($usr) + @($mach | Where-Object { $ids -contains "$($_.Id)" })
+                        if (-not $usid -or @(Get-TLoggedOnSids) -notcontains $usid) { $usid = $rs }
+                        Out-L "$($ids.Count) Programm(e) als SYSTEM nicht gefunden - neuer Versuch im Benutzerkonto $(Get-TAccount $usid) ..."
+                    }
+                }
+            }
             if ($usr.Count) {
                 $sids = @(Get-TLoggedOnSids)
-                $sid = "$($My.UserSid)"
+                $sid = $usid
                 if (-not $sid -or $sids -notcontains $sid) { $script:TErr += "Programme nur fuer einen Benutzer: $(if ($sid) { Get-TAccount $sid } else { 'Benutzer' }) ist nicht (mehr) angemeldet" }
                 else {
                     Out-L "$($usr.Count) Programm(e) nur fuer $(Get-TAccount $sid) (als dieser Benutzer) ..."
