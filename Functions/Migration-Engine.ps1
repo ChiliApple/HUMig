@@ -1496,6 +1496,7 @@ function Backup-HMFolderItem {
     # Cloud-Ordner, die ohnehin ausgeschlossen sind (z.B. C:\Users bei "Daten auf Systemlaufwerk"), nicht extra behandeln
     $fixedXd = @($xd | Where-Object { $_ -and $_ -notmatch '[\*\?]' })
     $subRoots = @($subRoots | Where-Object { $rr = Convert-HMPath $Ctx $_; -not @($fixedXd | Where-Object { Test-HMPathUnder $rr $_ }).Count })
+    if ($Item.Type -eq 'Files') { $subRoots = @() }   # einzelne Dateien ohne Unterordner - Cloud-Unterordner spielen keine Rolle
     foreach ($r in $subRoots) { $xd += (Convert-HMPath $Ctx $r) }
 
     # Schutz gegen unbekannte Cloud-Anbieter: Quelle vor dem Kopieren nach Nur-Cloud-Platzhaltern durchsuchen
