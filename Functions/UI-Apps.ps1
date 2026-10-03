@@ -153,6 +153,7 @@ function Show-HMAppCatalog {
     $rows = New-Object System.Collections.Generic.List[object]
     $det = @{}; foreach ($d in @($script:DetectedApps)) { $det[$d.Id] = $d }
     $pk = @(); try { $pk = @(Get-SwPackages) } catch { }
+    $stats = @{}; try { $stats = Read-HMCatalogStats (Get-BackupRoot) } catch { }
     foreach ($a in $script:AppCatalog) {
         $d = $det[$a.Id]
         $mods = @(Get-HMAppModuleIds $a | ForEach-Object { $id = $_; $m = @($script:Modules | Where-Object { $_.Id -eq $id })[0]; if ($m) { $m.Name } })
@@ -160,15 +161,16 @@ function Show-HMAppCatalog {
         $licItems = @($a.Items | Where-Object { $_ -and $_.License } | ForEach-Object { if ($_.Filter) { @($_.Filter) -join ',' } elseif ($_.Key) { "$($_.Key)" } else { Split-Path "$($_.Path)" -Leaf } } | Select-Object -Unique)
         $db = @($a.Items | Where-Object { $_ -and "$($_.Role)" -eq 'Database' } | ForEach-Object { if ("$($_.DbKind)" -eq 'Service') { 'Dienst' } else { 'Datei' } } | Select-Object -Unique)
         $ver = if ($a.Verified -and "$($a.Verified.Date)") { "$($a.Verified.Date)" } elseif (Test-HMAppTrial $a) { 'nein - testweise' } else { 'nein (nur Hinweis/Modul)' }
-        $rows.Add(@($(if ($d) { 'installiert' } else { '-' }), "$($a.Name)", $(if ($d) { "$($d.Version)" } else { '' }), "$($a.Transfer)", "$($a.NotTransfer)", $(if ($licItems.Count) { "JA: $($licItems -join ', ')" } else { 'nein' }), "$($a.License)", ($db -join ', '), (@(@($a.CloseProcess) | Where-Object { $_ }) -join ', '), ($mods -join ', '), $(if ($pkg) { "$($pkg.Id)" } else { '' }), ((@($a.After) | Where-Object { $_ }) -join ' | '), $ver, "$($a.Id)"))
+        $rows.Add(@($(if ($d) { 'installiert' } else { '-' }), "$($a.Name)", $(if ($d) { "$($d.Version)" } else { '' }), "$($a.Transfer)", "$($a.NotTransfer)", $(if ($licItems.Count) { "JA: $($licItems -join ', ')" } else { 'nein' }), "$($a.License)", ($db -join ', '), (@(@($a.CloseProcess) | Where-Object { $_ }) -join ', '), ($mods -join ', '), $(if ($pkg) { "$($pkg.Id)" } else { '' }), ((@($a.After) | Where-Object { $_ }) -join ' | '), $ver, $(if ($stats.ContainsKey("$($a.Id)")) { (Get-HMCatalogStatsSummary $stats["$($a.Id)"]).Text } else { '' }), "$($a.Id)"))
     }
     $n = @($script:DetectedApps).Count
-    Show-DataGridWindow -Title "Programm-Katalog - $(Get-TargetComputer)" -Columns @('Status', 'Programm', 'Version', 'Uebertragbar', 'Nicht_uebertragbar', 'Lizenz uebertragen', 'Lizenz-Hinweis', 'DB', 'Schliessen', 'Modul', 'Paket', 'Nacharbeit', 'Geprueft', 'Id') -Rows $rows.ToArray() `
+    Show-DataGridWindow -Title "Programm-Katalog - $(Get-TargetComputer)" -Columns @('Status', 'Programm', 'Version', 'Uebertragbar', 'Nicht_uebertragbar', 'Lizenz uebertragen', 'Lizenz-Hinweis', 'DB', 'Schliessen', 'Modul', 'Paket', 'Nacharbeit', 'Geprueft', 'Praxis (Backups)', 'Id') -Rows $rows.ToArray() `
         -Sort 'Status DESC, Programm ASC' -CountText "$n von $($rows.Count) Katalog-Programmen installiert - eigene Eintraege: Config\apps.json" -Width 1600 -Height 640 `
         -Actions @(
             @{ Text = '+ Programm hinzufuegen ...'; Color = '#FFA6E3A1'; NoSelection = $true; Handler = { param($sel, $w, $c) Start-HMAppWizard } }
             @{ Text = 'Katalog bearbeiten ...'; Color = '#FFCBA6F7'; NoSelection = $true; Handler = { param($sel, $w, $c) $id = if (@($sel).Count) { "$(@($sel)[0].Id)" } else { '' }; Show-HMAppEditor -SelectId $id } }
             @{ Text = 'Rueckmeldung geben ...'; Color = '#FFF9E2AF'; NoSelection = $true; Handler = { param($sel, $w, $c) Start-HMAppFeedback -Rows @($sel) } }
+            @{ Text = 'Katalog-Statistik ...'; Color = '#FF94E2D5'; NoSelection = $true; Handler = { param($sel, $w, $c) Show-HMCatalogStats } }
         )
 }
 
@@ -193,7 +195,8 @@ function Start-HMAppFeedback([object[]]$Rows = @(), [ValidateSet('', 'Detected',
         if (-not $apps.Count) { Out-Console 'Rueckmeldung: keine ungeprueften Katalog-Eintraege dabei - danke, nichts zu melden. Einzelne Eintraege: Knopf Programme > Zeile markieren > Rueckmeldung geben.' 'Info'; return }
     }
     $title = if ($apps.Count -eq 1) { "Katalog: $($apps[0].Name) ($($apps[0].Id))" } elseif ($apps.Count) { "Katalog: $($apps.Count) Programme" } else { 'Katalog: Rueckmeldung' }
-    $lines = @(foreach ($a in $apps) { "- $($a.Name) ($($a.Id)): passt / fehlte: ... / falscher Pfad: ..." })
+    $stats = @{}; try { $stats = Read-HMCatalogStats (Get-BackupRoot) } catch { }
+    $lines = @(foreach ($a in $apps) { $st = if ($stats.ContainsKey("$($a.Id)")) { " [Backups: $((Get-HMCatalogStatsSummary $stats["$($a.Id)"]).Text)]" } else { '' }; "- $($a.Name) ($($a.Id))$($st): passt / fehlte: ... / falscher Pfad: ..." })
     $body = "HUMig-Version: $script:Version`nWindows: $([Environment]::OSVersion.Version)`n`nErgebnis nach dem Umzug je Programm (Zutreffendes stehen lassen):`n$(if ($lines.Count) { $lines -join "`n" } else { '- (Programm eintragen)' })`n`nBemerkungen:`n`n(bitte keine Kennwoerter, Benutzernamen oder Pfade mit Personennamen eintragen)"
     $mail = "$($script:Settings.FeedbackMail)".Trim()
     $how = 'GitHub'
@@ -215,6 +218,54 @@ function Start-HMAppFeedback([object[]]$Rows = @(), [ValidateSet('', 'Detected',
             Out-Console 'Rueckmeldung: GitHub-Issue im Browser geoeffnet - bitte ergaenzen und absenden (GitHub-Konto noetig).' 'Info'
         }
     } catch { Out-Console "Rueckmeldung: konnte nicht geoeffnet werden ($($_.Exception.Message))." 'Warning' }
+}
+
+# Katalog-Statistik (Katalog-Statistik.json im Backup-Ordner): welche Eintraege in der Praxis Daten hatten
+function Show-HMCatalogStats {
+    $root = Get-BackupRoot
+    $stats = Read-HMCatalogStats $root
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($a in $script:AppCatalog) {
+        if (-not $stats.ContainsKey("$($a.Id)")) { continue }
+        $s = Get-HMCatalogStatsSummary $stats["$($a.Id)"]
+        $ver = if ($a.Verified -and "$($a.Verified.Date)") { "$($a.Verified.Date)" } elseif (Test-HMAppTrial $a) { 'nein - testweise' } else { 'nein' }
+        $rows.Add(@("$($a.Name)", $ver, [int]$s.Found, [int]$s.Partial, [int]$s.Missing, "$($s.Last)", "$($a.Id)"))
+    }
+    Show-DataGridWindow -Title "Katalog-Statistik - $root" -Columns @('Programm', 'Geprueft', 'gefunden', 'teilweise', 'nicht_vorhanden', 'zuletzt', 'Id') -Rows $rows.ToArray() `
+        -Sort 'nicht_vorhanden DESC, gefunden DESC' -CountText "$($rows.Count) Katalog-Programme mit Backup-Ergebnis (je PC + Benutzer das letzte Backup) - nur lokal, nichts wird gesendet" -Width 1100 -Height 600 `
+        -Actions @(
+            @{ Text = 'Aus vorhandenen Backups einlesen'; Color = '#FF94E2D5'; NoSelection = $true; Handler = { param($sel, $w, $c) $n = Import-HMCatalogStatsFromBackups (Get-BackupRoot); Out-Console "Katalog-Statistik: $n Backup(s) eingelesen - Fenster neu oeffnen." 'Success'; $w.Close(); Show-HMCatalogStats } }
+            @{ Text = 'Markierte als geprueft ...'; Color = '#FFA6E3A1'; Handler = { param($sel, $w, $c) Set-HMAppsVerifiedFromStats @($sel) } }
+            @{ Text = 'Rueckmeldung geben ...'; Color = '#FFF9E2AF'; NoSelection = $true; Handler = { param($sel, $w, $c) Start-HMAppFeedback -Rows @($sel) } }
+        )
+}
+# Markierte Katalog-Eintraege als geprueft speichern (Config\apps.json, gleiche Id ueberschreibt den Standard-Eintrag)
+function Set-HMAppsVerifiedFromStats([object[]]$Sel) {
+    if (-not $isAdmin) { Out-Console 'Als geprueft markieren: nur als Administrator.' 'Warning'; return }
+    $ids = @($Sel | Where-Object { $_ } | ForEach-Object { "$($_.Id)" })
+    if (-not $ids.Count) { return }
+    $stats = Read-HMCatalogStats (Get-BackupRoot)
+    $bad = @($ids | Where-Object { -not $stats.ContainsKey($_) -or (Get-HMCatalogStatsSummary $stats[$_]).Found -lt 1 })
+    $msg = "$($ids.Count) Eintrag/Eintraege als geprueft markieren (Datum heute, Notiz mit dem Backup-Ergebnis)?$(if ($bad.Count) { "`n`nACHTUNG: $($bad.Count) davon wurden noch an keinem PC vollstaendig gefunden." })`n`nNur markieren, wenn das Programm nach einem Restore auch wirklich mit seinen Einstellungen lief. Gespeichert in Config\apps.json."
+    if (-not (Confirm-Action $msg 'Katalog')) { return }
+    $p = Join-Path $script:ConfigDir 'apps.json'
+    $loc = Read-JsonFile $p
+    $list = New-Object System.Collections.Generic.List[object]
+    foreach ($x in @($loc.Apps)) { if ($x -and $ids -notcontains "$($x.Id)") { $list.Add($x) } }
+    foreach ($id in $ids) {
+        $a = @($script:AppCatalog | Where-Object { $_.Id -eq $id })[0]
+        if (-not $a) { continue }
+        $c = $a | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+        $sum = if ($stats.ContainsKey($id)) { (Get-HMCatalogStatsSummary $stats[$id]).Text } else { '' }
+        $c | Add-Member -NotePropertyName Verified -NotePropertyValue ([pscustomobject]@{ Date = (Get-Date).ToString('yyyy-MM-dd'); Sources = @(); Note = "geprueft am Standort ($env:USERDOMAIN)$(if ($sum) { "; Backups: $sum" })" }) -Force
+        $list.Add($c)
+    }
+    $obj = [ordered]@{}
+    if ($loc) { foreach ($pp in $loc.PSObject.Properties) { if ($pp.Name -ne 'Apps') { $obj[$pp.Name] = $pp.Value } } }
+    $obj.Apps = $list.ToArray()
+    Write-JsonFile $p ([pscustomobject]$obj)
+    Out-Console "Katalog: $($ids.Count) Eintrag/Eintraege als geprueft markiert (Config\apps.json)." 'Success'
+    Update-HMAeCatalog
 }
 
 # Paket in der Softwareverteilung zu einem Katalog-Eintrag (Package = Regex auf Ordner-/Dateiname oder Paketnamen)
