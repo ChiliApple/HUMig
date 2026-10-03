@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.0.68 - 2026-10-03
+### Sicherheit / Zuverlaessigkeit
+- **Ordnerrechte**: HUMig prueft beim Start als Administrator, ob Nicht-Administratoren im HUMig-Ordner schreiben oder Dateien anlegen duerfen (z. B. unter C:\Tools Standard), und bietet an abzusichern (Vererbung aus, Administratoren + SYSTEM Vollzugriff, Benutzer Lesen; Logs und Backup-Ordner im HUMig-Ordner bleiben fuer den Benutzer-Modus beschreibbar, nur eigene Dateien). *Abbrechen* = nie mehr fragen
+- **Nach-Skript** (Restore) laeuft nur, wenn die Skriptdatei nicht fuer Nicht-Administratoren beschreibbar ist
+- Backup: nicht gesicherte Dateien machen Modul und Backup immer **rot** (Fehler), nie nur gelb
+- Restore aus einem Backup mit Fehlern oder einem abgebrochenen Backup: eigene Rueckfrage mit den betroffenen Modulen
+- Weitergefuehrtes Backup: Bericht nennt je Modul die Dateien, die nur noch im Backup liegen (an der Quelle geloescht/verschoben)
+- Schliessen waehrend Server-Backup: *wbadmin stop job* nur noch, wenn HUMigs eigene Sicherung laeuft (nicht beim Warten auf eine fremde)
+- Schliessen waehrend eines Vorgangs: HUMig wartet bis 30 s auf das Aufraeumen (Benutzer-Registry entladen, Dienste starten)
+- Robocopy: klare Fehlermeldung, falls die Befehlszeile durch sehr viele Ausschluesse zu lang wuerde (statt still abgeschnitten)
+
 ## v2.0.67 - 2026-10-02
 ### Neu
 - Server-Backup, *Platte einrichten*: **Uebernehmen (ohne Formatieren)** fuer Platten, die schon anders genutzt werden - nur die Bezeichnung wird geaendert (z. B. *My Book* -> *HUMIG-BHAK-1*), nichts geloescht. Rueckfrage mit Belegung, freiem Platz und vorhandenen Ordnern; zweite Warnung, wenn auf der Platte schon eine Windows-Sicherung dieses Hosts liegt (gleicher Ordner *WindowsImageBackup\<Host>*); Hinweis, wenn die Platte frueher von HUMig anders benannt war; schon vergebene Bezeichnung wird abgelehnt

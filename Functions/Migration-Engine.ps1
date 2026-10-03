@@ -440,6 +440,31 @@ function ConvertTo-HMSafeName([string]$Text) { return (($Text -replace '[\\/:*?"
 # ============================================================================
 # ZIEL-PC: REMOTE-AUSFUEHRUNG, PFADE, FREIGABEN
 # ============================================================================
+# Darf jemand ausser Administratoren/SYSTEM/TrustedInstaller/Ersteller-Besitzer hier schreiben oder anlegen?
+# Rueckgabe: '' = sicher, sonst Text (Konto: Recht). Datei: Schreibrechte auf die Datei; Ordner: auch Anlegen von Dateien/Ordnern.
+function Get-HMWritableByNonAdmins([string]$Path) {
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $safe = @('S-1-5-18', 'S-1-5-32-544', 'S-1-3-0', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $w = [System.Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteExtendedAttributes, WriteAttributes, Delete, ChangePermissions, TakeOwnership'
+    $out = @()
+    foreach ($r in @($acl.Access)) {
+        if ("$($r.AccessControlType)" -ne 'Allow') { continue }
+        if (([int]$r.FileSystemRights -band [int]$w) -eq 0) { continue }
+        $sid = ''
+        try { $sid = $r.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $sid = "$($r.IdentityReference)" }
+        if ($safe -contains $sid) { continue }
+        # einzelnes Konto, das selbst Administrator ist (z.B. der Installierende), ist unkritisch
+        try { $nt = $r.IdentityReference.Translate([System.Security.Principal.NTAccount]).Value } catch { $nt = "$($r.IdentityReference)" }
+        if ($sid -like 'S-1-5-21-*' -and $sid -notmatch '-(513|515|545)$') {
+            $isAdm = $false
+            try { $isAdm = [bool](@(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop | Where-Object { "$($_.SID)" -eq $sid }).Count) } catch { }
+            if ($isAdm) { continue }
+        }
+        $out += "$nt`: $($r.FileSystemRights)"
+    }
+    return (@($out | Select-Object -Unique) -join '; ')
+}
+
 function Test-HMIsLocal([string]$Computer) {
     if ([string]::IsNullOrWhiteSpace($Computer)) { return $true }
     $c = $Computer.Trim().ToUpper()
@@ -824,10 +849,12 @@ function Exit-HMModule([hashtable]$Ctx, $Job, [hashtable]$State) {
 # ROBOCOPY
 # ============================================================================
 function Get-HMRobocopySummary([string]$Text) {
-    $s = [ordered]@{ FilesTotal = 0; FilesCopied = 0; FilesSkipped = 0; FilesFailed = 0; BytesTotal = [long]0; BytesCopied = [long]0; BytesSkipped = [long]0 }
+    $s = [ordered]@{ FilesTotal = 0; FilesCopied = 0; FilesSkipped = 0; FilesFailed = 0; FilesExtra = 0; BytesTotal = [long]0; BytesCopied = [long]0; BytesSkipped = [long]0 }
     foreach ($line in ($Text -split "`r?`n")) {
-        if ($line -match '^\s*(Dateien|Files)\s*:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)') {
+        # Spalten: Gesamt, Kopiert, Uebersprungen, Keine Uebereinstimmung, FEHLER, Extras (Extras = nur am Ziel vorhanden)
+        if ($line -match '^\s*(Dateien|Files)\s*:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?') {
             $s.FilesTotal = [int]$Matches[2]; $s.FilesCopied = [int]$Matches[3]; $s.FilesSkipped = [int]$Matches[4]; $s.FilesFailed = [int]$Matches[6]
+            if ($Matches[7]) { $s.FilesExtra = [int]$Matches[7] }
         } elseif ($line -match '^\s*Bytes\s*:\s+(\d+)\s+(\d+)\s+(\d+)') {
             $s.BytesTotal = [long]$Matches[1]; $s.BytesCopied = [long]$Matches[2]; $s.BytesSkipped = [long]$Matches[3]
         }
@@ -862,6 +889,8 @@ function Invoke-HMRobocopy {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = Join-Path $env:windir 'System32\Robocopy.exe'
     $psi.Arguments = ($a -join ' ')
+    # Windows begrenzt die Befehlszeile auf 32767 Zeichen - lieber klar abbrechen als still abgeschnittene Ausschluesse
+    if ($psi.Arguments.Length -gt 30000) { throw "Robocopy-Befehlszeile zu lang ($($psi.Arguments.Length) Zeichen, sehr viele Ausschluesse) - Ausschlusslisten kuerzen" }
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $proc = [System.Diagnostics.Process]::Start($psi)
@@ -890,7 +919,7 @@ function Invoke-HMRobocopy {
     $lvl = if (Test-HMCancel $Job) { 'Cancel' } elseif ($code -ge 8) { 'Error' } elseif ($code -ge 4) { 'Warning' } else { 'OK' }
     return [pscustomobject]@{ ExitCode = $code; Level = $lvl; FilesTotal = $sum.FilesTotal; FilesCopied = $sum.FilesCopied
         FilesSkipped = $sum.FilesSkipped; FilesFailed = $sum.FilesFailed; BytesTotal = $sum.BytesTotal; BytesCopied = $sum.BytesCopied
-        BytesSkipped = $sum.BytesSkipped; Args = $psi.Arguments; FailedFiles = @($failed) }
+        BytesSkipped = $sum.BytesSkipped; FilesExtra = $sum.FilesExtra; Args = $psi.Arguments; FailedFiles = @($failed) }
 }
 
 # ============================================================================
@@ -1451,8 +1480,10 @@ function Backup-HMFolderItem {
     if ($rc.FilesFailed -gt 0) {
         $msg += ", $($rc.FilesFailed) FEHLGESCHLAGEN (gesperrt/keine Rechte - siehe Robocopy-Log)"
         if (@($rc.FailedFiles).Count) { $msg += ': ' + (@($rc.FailedFiles | ForEach-Object { ConvertFrom-HMPath "$_" }) -join '; ') }
-        if ($st -eq 'OK') { $st = 'Warning' }
+        if ($st -ne 'Cancel') { $st = 'Error' }   # nicht gesicherte Dateien = Fehler (rot), nie nur Warnung
     }
+    # Backup ergaenzt: Dateien, die nur noch im Backup liegen (an der Quelle geloescht/verschoben) - bleiben im Backup und kaemen beim Restore zurueck
+    if (-not $fresh -and -not $Ctx.ListOnly -and [int]$rc.FilesExtra -gt 0) { $msg += " | $($rc.FilesExtra) Datei(en) nur noch im Backup (an der Quelle geloescht/verschoben - Restore spielt sie wieder ein)" }
     if ($rc.Level -eq 'Error') { $msg += " (Robocopy-Code $($rc.ExitCode))" }
 
     # Cloud-Ordner innerhalb der Quelle: auslassen (Standard) oder nur lokal vorhandene Dateien sichern
@@ -2165,7 +2196,7 @@ function Restore-HMFolderItem {
     $st = switch ($rc.Level) { 'OK' { 'OK' } 'Warning' { 'Warning' } 'Cancel' { 'Cancel' } default { 'Error' } }
     $msg = "{0} Dateien, {1} -> {2}" -f $rc.FilesTotal, (Format-HMSize $rc.BytesTotal), $dstLocal
     if ($Ctx.Options.KeepNewer -and $rc.FilesCopied -lt $rc.FilesTotal) { $msg += " ($($rc.FilesCopied) kopiert, neuere/gleiche am Ziel behalten)" }
-    if ($rc.FilesFailed -gt 0) { $msg += ", $($rc.FilesFailed) FEHLGESCHLAGEN (Datei geoeffnet? siehe Robocopy-Log)" }
+    if ($rc.FilesFailed -gt 0) { $msg += ", $($rc.FilesFailed) FEHLGESCHLAGEN (Datei geoeffnet? siehe Robocopy-Log)"; if ($st -ne 'Cancel') { $st = 'Error' } }
     foreach ($s in $syncs) {
         if (Test-HMCancel $Job) { break }
         $sp = Join-Path $src $s.Rel
@@ -2516,7 +2547,11 @@ function Invoke-HMPostRestore {
     foreach ($l in @($r)) { Write-HMLog $Job "   $l" 'Success' }
     if ($o.PostScript) {
         $ps = "$($o.PostScript)"
-        if (Test-Path -LiteralPath $ps) {
+        $unsafe = ''
+        if (Test-Path -LiteralPath $ps) { $unsafe = Get-HMWritableByNonAdmins $ps }
+        if ($unsafe) {
+            Write-HMLog $Job "   Nach-Skript NICHT ausgefuehrt: $ps ist fuer Nicht-Administratoren beschreibbar ($unsafe) - wuerde mit Administratorrechten laufen. Datei an einen Ort legen, den nur Administratoren aendern koennen." 'Error'
+        } elseif (Test-Path -LiteralPath $ps) {
             Write-HMLog $Job "   Nach-Skript: $ps" 'Info'
             try {
                 $code = Get-Content -LiteralPath $ps -Raw

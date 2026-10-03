@@ -235,3 +235,27 @@ Describe 'App-Updates (WinGet)' {
         (Format-HMAuCliResult -1978335215 '').Text | Should -Match 'Pruefsumme'
     }
 }
+
+Describe 'Migration: Robocopy-Auswertung' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+    }
+    It 'Zusammenfassung: Fehler und Extras (nur im Backup) werden gelesen' {
+        $t = @'
+               Insgesamt   KopiertÜbersprungenKeine Übereinstimmung    FEHLER    Extras
+    Verzeich.:        12         0        12         0         0         1
+      Dateien:       120        10       105         0         5         7
+        Bytes:    100000     20000     70000         0     10000      3000
+'@
+        $s = Get-HMRobocopySummary $t
+        $s.FilesTotal | Should -Be 120
+        $s.FilesFailed | Should -Be 5
+        $s.FilesExtra | Should -Be 7
+        $s.BytesCopied | Should -Be 20000
+    }
+    It 'Zusammenfassung ohne Extras-Spalte (aeltere Ausgabe) bleibt lesbar' {
+        $s = Get-HMRobocopySummary '   Files :  3  1  2  0  0'
+        $s.FilesTotal | Should -Be 3
+        $s.FilesExtra | Should -Be 0
+    }
+}

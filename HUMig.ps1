@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.67'
+$script:Version   = '2.0.68'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -1129,6 +1129,15 @@ $ui.btnRestore.Add_Click({
     if ($b.User -and $b.User -ne $p.Folder) { $msg += "`n`nACHTUNG: anderer Benutzer als im Backup ($($b.User))!" }
     if ($p.Loaded) { $msg += "`n`nDer Benutzer ist angemeldet: offene Programme schliessen, Einstellungen wirken nach Neuanmeldung." }
     if (-not (Confirm-Action ($msg + "`n`nStarten?") 'Restore')) { return }
+    # Backup mit Fehlern (nicht alles gesichert) oder abgebrochen: ausdruecklich bestaetigen
+    $bst = "$(if ($b.Manifest) { $b.Manifest.Status })"
+    if ($bst -in @('Error', 'Cancelled')) {
+        $bad = @(@($b.Manifest.Modules) | Where-Object { "$($_.Status)" -eq 'Error' -and ($mods | Where-Object Id -eq "$($_.Id)") } | ForEach-Object { "$($_.Name)" })
+        $wm = "ACHTUNG: Dieses Backup ist $(if ($bst -eq 'Error') { 'mit FEHLERN' } else { 'ABGEBROCHEN' }) beendet worden - es ist nicht vollstaendig.`n" +
+            "$(if ($bad.Count) { "Gewaehlte Module mit Fehlern: $($bad -join ', ')`n" })Details: Bericht_Backup.html im Backup-Ordner.`n`nTrotzdem wiederherstellen?"
+        if ("$([System.Windows.MessageBox]::Show($script:Window, $wm, 'Restore aus unvollstaendigem Backup', 'YesNo', 'Warning', 'No'))" -ne 'Yes') { Out-Console 'Restore abgebrochen (Backup unvollstaendig).' 'Warning'; return }
+        Out-Console "Restore aus unvollstaendigem Backup ($bst) bestaetigt." 'Warning'
+    }
     $ctx = New-HMRestoreCtx
     if (-not $ctx) { return }
     Out-Separator
@@ -1725,6 +1734,49 @@ function Set-HMUserModeUi {
 # ============================================================================
 # START / ENDE
 # ============================================================================
+# Nach Abbruch auf das Ende des Hintergrundvorgangs warten (finally-Bloecke: Registry entladen, Dienste starten ...)
+function Wait-HMJobEnd($Job, [int]$Seconds) {
+    if (-not $Job) { return }
+    $t0 = Get-Date
+    while (-not $Job.Done -and ((Get-Date) - $t0).TotalSeconds -lt $Seconds) { Start-Sleep -Milliseconds 300 }
+}
+# HUMig-Ordner: duerfen Nicht-Administratoren dort schreiben/anlegen? HUMig laeuft als Administrator -> wer hier Dateien
+# anlegen kann (z.B. Config\settings.json mit Nach-Skript), koennte Code mit Adminrechten ausfuehren lassen. Einmal anbieten abzusichern.
+function Test-HMAppFolderSecurity {
+    if (-not $isAdmin -or $script:UserMode) { return }
+    if ([bool]$script:Settings.AclCheckOff) { return }
+    $root = $script:AppRoot
+    if ($root -like '\\*') { return }   # Netzwerkfreigabe: Rechte verwaltet der Server
+    $w = ''
+    try { $w = Get-HMWritableByNonAdmins $root } catch { return }   # z.B. FAT/exFAT-USB-Stick: keine Rechte
+    if (-not $w) { return }
+    $m = "Im HUMig-Ordner duerfen auch Nicht-Administratoren schreiben bzw. Dateien anlegen:`n$root`n$w`n`n" +
+        "HUMig laeuft als Administrator. Wer hier Dateien anlegen kann (z.B. Einstellungen mit einem Nach-Skript), koennte Code mit Administratorrechten ausfuehren lassen.`n`n" +
+        "Ja = absichern: Vererbung aus, Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen (gilt fuer alle Dateien darin; Protokolle und Backup-Ordner bleiben fuer den Benutzer-Modus beschreibbar - nur eigene Dateien)`n" +
+        "Nein = diesmal nicht`nAbbrechen = nie mehr fragen"
+    $a = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'HUMig - Ordnerrechte', 'YesNoCancel', 'Warning', 'Yes'))"
+    if ($a -eq 'Cancel') { Save-LocalSetting 'AclCheckOff' $true; Out-Console 'Ordnerrechte: Pruefung abgeschaltet (Einstellung AclCheckOff in settings.json).' 'Warning'; return }
+    if ($a -ne 'Yes') { Out-Console "Ordnerrechte: Nicht-Administratoren duerfen in $root schreiben/anlegen ($w)." 'Warning'; return }
+    try {
+        $o1 = & icacls.exe "$root" /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "icacls: $($o1 -join ' ')" }
+        # Unterordner/Dateien: nur noch die vererbten Rechte (entfernt auch Rechte auf Dateien, die Benutzer angelegt haben)
+        $o2 = & icacls.exe (Join-Path $root '*') /reset /T /C /Q 2>&1
+        if ($LASTEXITCODE -ne 0) { Out-Console "Ordnerrechte: einzelne Dateien nicht zurueckgesetzt: $(@($o2) -join ' ')" 'Warning' }
+        # Daten-Ordner (kein Code): Benutzer-Modus muss dort weiter Backups/Protokolle anlegen koennen - wie bisher nur eigene (Ersteller-Besitzer)
+        $data = @($script:LogDir)
+        try { $br = Get-BackupRoot; if ($br -and $br.StartsWith($root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { $data += $br } } catch { }
+        foreach ($d in @($data | Select-Object -Unique)) {
+            try {
+                if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+                $o3 = & icacls.exe "$d" /grant '*S-1-5-32-545:(CI)(AD)' '*S-1-5-32-545:(CI)(WD)' '*S-1-3-0:(OI)(CI)(IO)F' 2>&1
+                if ($LASTEXITCODE -ne 0) { Out-Console "Ordnerrechte ${d}: $(@($o3) -join ' ')" 'Warning' } else { Out-Console "   Daten-Ordner fuer Benutzer-Modus beschreibbar (nur eigene Dateien): $d" 'Info' }
+            } catch { }
+        }
+        $rest = Get-HMWritableByNonAdmins $root
+        if ($rest) { Out-Console "Ordnerrechte: noch beschreibbar fuer $rest" 'Warning' } else { Out-Console "Ordnerrechte abgesichert: $root (Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen)" 'Success' }
+    } catch { Out-Console "Ordnerrechte konnten nicht gesetzt werden: $($_.Exception.Message)" 'Error' }
+}
 $script:Window.Add_Closing({
     param($s, $e)
     if ($script:JobRunning -and "$($script:JobTitle)" -like 'Server-Backup*') {
@@ -1733,13 +1785,21 @@ $script:Window.Add_Closing({
         $a = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'HUMig beenden', 'YesNoCancel', 'Warning'))"
         if ($a -eq 'Cancel') { $e.Cancel = $true; return }
         if ($a -eq 'Yes') {
-            if ($script:CurrentJob) { $script:CurrentJob.Cancel = $true }
-            try { $sp = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\wbadmin.exe') -ArgumentList 'stop job -quiet' -WindowStyle Hidden -PassThru -ErrorAction Stop; [void]$sp.WaitForExit(60000) } catch { }
-            if ($script:CurrentJob) { Stop-HMJobProcess $script:CurrentJob }
+            $cj = $script:CurrentJob
+            # nur stoppen, wenn gerade HUMigs EIGENE Sicherung laeuft (wbadmin stop job wirkt auf jede Sicherung am Host -
+            # wartet HUMig noch auf eine fremde Sicherung, bleibt diese unberuehrt)
+            $own = $false
+            try { $own = [bool]($cj -and $cj.Process -and -not $cj.Process.HasExited -and "$($cj.Process.StartInfo.Arguments)" -match 'start\s+backup') } catch { }
+            if ($cj) { $cj.Cancel = $true }
+            if ($own) { try { $sp = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\wbadmin.exe') -ArgumentList 'stop job -quiet' -WindowStyle Hidden -PassThru -ErrorAction Stop; [void]$sp.WaitForExit(60000) } catch { } }
+            if ($cj) { Stop-HMJobProcess $cj }
+            Wait-HMJobEnd $cj 30
         }
     } elseif ($script:JobRunning) {
         if (-not (Confirm-Action 'Ein Backup/Restore laeuft noch. Wirklich beenden (Vorgang wird abgebrochen)?')) { $e.Cancel = $true; return }
         if ($script:CurrentJob) { $script:CurrentJob.Cancel = $true; Stop-HMJobProcess $script:CurrentJob }
+        # Aufraeumen abwarten (u.a. Benutzer-Registry entladen - bliebe sonst bis zum Neustart geladen)
+        Wait-HMJobEnd $script:CurrentJob 30
     }
     Save-HMWindowState
     try { $us = Get-HMUiScaleSetting; if ([double]$us -ne [double]$script:SettingsBase.UiScale) { Save-LocalSetting 'UiScale' $us } } catch { }
@@ -1754,6 +1814,7 @@ $script:Window.Add_ContentRendered({
         $script:Splash = $null
     }
     $script:Window.Activate() | Out-Null
+    if (-not $script:AclChecked) { $script:AclChecked = $true; try { Test-HMAppFolderSecurity } catch { } }
 })
 
 Initialize-HMUiScale
