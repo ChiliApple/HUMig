@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.69 - 2026-10-03
+### Geaendert
+- Ordnerrechte absichern: Logs- und Backup-Ordner im HUMig-Ordner werden beim Zuruecksetzen ausgelassen (enthalten keinen Code; grosse Backup-Ordner haetten sonst lange gedauert)
+
 ## v2.0.68 - 2026-10-03
 ### Sicherheit / Zuverlaessigkeit
 - **Ordnerrechte**: HUMig prueft beim Start als Administrator, ob Nicht-Administratoren im HUMig-Ordner schreiben oder Dateien anlegen duerfen (z. B. unter C:\Tools Standard), und bietet an abzusichern (Vererbung aus, Administratoren + SYSTEM Vollzugriff, Benutzer Lesen; Logs und Backup-Ordner im HUMig-Ordner bleiben fuer den Benutzer-Modus beschreibbar, nur eigene Dateien). *Abbrechen* = nie mehr fragen

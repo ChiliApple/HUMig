@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.68'
+$script:Version   = '2.0.69'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -1760,12 +1760,17 @@ function Test-HMAppFolderSecurity {
     try {
         $o1 = & icacls.exe "$root" /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' 2>&1
         if ($LASTEXITCODE -ne 0) { throw "icacls: $($o1 -join ' ')" }
-        # Unterordner/Dateien: nur noch die vererbten Rechte (entfernt auch Rechte auf Dateien, die Benutzer angelegt haben)
-        $o2 = & icacls.exe (Join-Path $root '*') /reset /T /C /Q 2>&1
-        if ($LASTEXITCODE -ne 0) { Out-Console "Ordnerrechte: einzelne Dateien nicht zurueckgesetzt: $(@($o2) -join ' ')" 'Warning' }
         # Daten-Ordner (kein Code): Benutzer-Modus muss dort weiter Backups/Protokolle anlegen koennen - wie bisher nur eigene (Ersteller-Besitzer)
         $data = @($script:LogDir)
         try { $br = Get-BackupRoot; if ($br -and $br.StartsWith($root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { $data += $br } } catch { }
+        # Code und Einstellungen: nur noch die vererbten Rechte (entfernt auch Rechte auf Dateien, die Benutzer angelegt haben).
+        # Daten-Ordner werden ausgelassen (grosse Backup-Ordner wuerden sonst lange dauern, enthalten keinen Code).
+        $skip = @($data | ForEach-Object { "$_".TrimEnd('\').ToLower() })
+        foreach ($c in @(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue)) {
+            if ($skip -contains $c.FullName.TrimEnd('\').ToLower()) { continue }
+            $o2 = if ($c.PSIsContainer) { & icacls.exe "$($c.FullName)" /reset /T /C /Q 2>&1 } else { & icacls.exe "$($c.FullName)" /reset /C /Q 2>&1 }
+            if ($LASTEXITCODE -ne 0) { Out-Console "Ordnerrechte $($c.Name): $(@($o2) -join ' ')" 'Warning' }
+        }
         foreach ($d in @($data | Select-Object -Unique)) {
             try {
                 if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
