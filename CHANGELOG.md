@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.73 - 2026-10-03
+### Behoben
+- App-Updates, laufende Programme *Schliessen*: Programme ohne Fenster blieben offen (z. B. Dienste wie Surfshark.Service, Hintergrundprogramme im Infobereich wie PowerToys) und wurden uebersprungen. HUMig erkennt jetzt je Prozess *Fenster*, *Hintergrund* oder *Dienst*: Fenster werden wie bisher hoeflich geschlossen, Hintergrundprogramme beendet und nach dem Update im Konto des Benutzers wieder gestartet, Dienste gestoppt und danach wieder gestartet (falls der Installer das nicht schon getan hat)
+
 ## v2.0.72 - 2026-10-03 (enthaelt v2.0.71, nicht freigegeben)
 ### Dokumentation
 - INSTALL: Ordnerrechte, App-Updates (Voraussetzungen, PowerShell 7), Platte uebernehmen
