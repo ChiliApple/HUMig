@@ -187,13 +187,18 @@ function Start-HMRenameComputer {
 # 2. IP-ADRESSE STATISCH / DHCP (als SYSTEM-Aufgabe am Ziel - Verbindungsabbruch egal)
 # ============================================================================
 $script:RS_NetInfo = {
-    foreach ($c in @(Get-NetIPConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.NetAdapter.Status -eq 'Up' })) {
-        $dhcp = $null; try { $dhcp = "$((Get-NetIPInterface -InterfaceIndex $c.InterfaceIndex -AddressFamily IPv4 -ErrorAction Stop).Dhcp)" } catch { }
-        $ip = @($c.IPv4Address)[0]
+    # ohne Get-NetIPConfiguration: das bricht auf manchen PCs ab ("Exception setting NetAdapter ... Object[]", z.B. bei
+    # mehreren Adaptern mit gleichem Index/Namen, Hyper-V) - Werte einzeln aus NetAdapter/NetIPAddress/NetRoute/DnsClient
+    foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { "$($_.Status)" -eq 'Up' } | Sort-Object ifIndex)) {
+        $idx = [int]$a.ifIndex
+        $dhcp = $null; try { $dhcp = "$((Get-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction Stop).Dhcp)" } catch { }
+        $ip = @(Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { "$($_.IPAddress)" -notlike '169.254.*' })[0]
+        $gw = @(Get-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Sort-Object RouteMetric)[0]
+        $dns = @(Get-DnsClientServerAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | ForEach-Object { $_.ServerAddresses })
         [pscustomobject]@{
-            Index = [int]$c.InterfaceIndex; Name = "$($c.InterfaceAlias)"; Desc = "$($c.NetAdapter.InterfaceDescription)"; Mac = "$($c.NetAdapter.MacAddress)"
-            IP = "$($ip.IPAddress)"; Prefix = "$($ip.PrefixLength)"; Gateway = "$(@($c.IPv4DefaultGateway)[0].NextHop)"; Dhcp = $dhcp
-            Dns = (@($c.DNSServer | Where-Object { $_.AddressFamily -eq 2 } | ForEach-Object { $_.ServerAddresses }) -join ',')
+            Index = $idx; Name = "$($a.Name)"; Desc = "$($a.InterfaceDescription)"; Mac = "$($a.MacAddress)"
+            IP = "$(if ($ip) { $ip.IPAddress })"; Prefix = "$(if ($ip) { $ip.PrefixLength })"; Gateway = "$(if ($gw) { $gw.NextHop })"; Dhcp = $dhcp
+            Dns = (@($dns | Where-Object { $_ }) -join ',')
         }
     }
 }
