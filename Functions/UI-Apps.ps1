@@ -28,7 +28,7 @@ function Import-HMAppCatalog([System.Collections.Generic.List[object]]$Mods) {
         for ($i = 0; $i -lt $list.Count; $i++) { if ($list[$i].Id -eq $a.Id) { $idx = $i; break } }
         if ($idx -ge 0) { $list[$idx] = $a } else { $list.Add($a) }
     }
-    $script:AppCatalog = $list.ToArray()
+    $script:AppCatalog = @($list.ToArray() | Sort-Object { "$($_.Name)" })   # alphabetisch (Liste Programme, Erkennung, Konsole)
     foreach ($a in $script:AppCatalog) {
         $cp = @(@($a.CloseProcess) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() -replace '\.exe$', '' })
         $ss = @(@($a.StopService) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })

@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.84 - 2026-10-03
+### Geaendert
+- Programme: Katalog alphabetisch sortiert (Fenster *Programme*, erkannte Programme in der Konsole, Gruppe PROGRAMME)
+- Backup-Protokoll: bei einzelnen Dateien aus dem Benutzerordner (z.B. Advanced IP Scanner) keine Liste ausgelassener Cloud-Ordner mehr
+
 ## v2.0.83 - 2026-10-03
 ### Behoben
 - Update/Pull: liefert der Download-Link von GitHub einen Fehler (z.B. *503 Server nicht verfuegbar*), werden Pruefsummen- und Signaturdatei ueber die GitHub-API geladen (gleiche Datei, Echtheit weiter ueber Signatur geprueft)
