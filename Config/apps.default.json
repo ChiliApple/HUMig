@@ -1,5 +1,5 @@
 {
-  "_Info": "Programm-Katalog: erkennt installierte Programme (Detect = Regex auf den Anzeigenamen) und schlaegt passende Module vor. Bearbeiten: HUMig > Programme > Katalog bearbeiten (speichert in Config\\apps.json, gleiche Id ueberschreibt; diese Datei bleibt unveraendert). Felder: Id (App_...), Name, Detect, Package (Regex auf Paketnamen in der Softwareverteilung), WingetId (WinGet-Paket-ID - fehlt ein Paket in der Softwareverteilung, installiert \"Programme neu installieren\" ueber WinGet), Modules (vorhandene Modul-Ids) oder Items, Transfer, NotTransfer (nicht uebertragbar), License (Hinweis), Version (Versionsverhalten), After (Checkliste), CloseProcess (Prozessnamen ohne .exe - Programm wird vor Backup/Restore geschlossen), StopService (Dienstnamen - werden gestoppt und danach wieder gestartet, nur als Administrator), Verified { Date, Sources, Note } (geprueft; fehlt = ungeprueft), Confidence/Sources/Note (Recherche-Herkunft, nur Information). Items: Type (Folder/Files/Reg), Name (Unterordner im Backup, eindeutig), Path mit {PROFILE} {APPDATA} {LOCALAPPDATA} {SYSTEMDRIVE} {WINDIR} {PROGRAMDATA} {PROGRAMFILES} {PROGRAMFILESX86} {PUBLIC} oder Key (HKCU = Benutzer, HKLM), Filter (bei Files), XD, XF, NoHidden, License (true = Lizenzdatei/-schluessel), Role (Settings/Plugins/Data/Database/License/Template), DbKind (File/Service, nur bei Database; SQLite-Begleitdateien -wal/-shm/-journal werden mitkopiert).",
+  "_Info": "Programm-Katalog: erkennt installierte Programme (Detect = Regex auf den Anzeigenamen) und schlaegt passende Module vor. Bearbeiten: HUMig > Programme > Katalog bearbeiten (speichert in Config\\apps.json, gleiche Id ueberschreibt; diese Datei bleibt unveraendert). Felder: Id (App_...), Name, Detect, Package (Regex auf Paketnamen in der Softwareverteilung), WingetId (WinGet-Paket-ID - fehlt ein Paket in der Softwareverteilung, installiert \"Programme neu installieren\" ueber WinGet), Modules (vorhandene Modul-Ids) oder Items, Transfer, NotTransfer (nicht uebertragbar), License (Hinweis), Version (Versionsverhalten), After (Checkliste), CloseProcess (Prozessnamen ohne .exe - Programm wird vor Backup/Restore geschlossen), StopService (Dienstnamen - werden gestoppt und danach wieder gestartet, nur als Administrator), Verified { Date, Sources, Note } (geprueft an einem echten PC; fehlt = ungeprueft = nur testweise im Katalog, HUMig kennzeichnet solche Eintraege), Confidence/Sources/Note (Recherche-Herkunft, nur Information). Items: Type (Folder/Files/Reg), Name (Unterordner im Backup, eindeutig), Path mit {PROFILE} {APPDATA} {LOCALAPPDATA} {SYSTEMDRIVE} {WINDIR} {PROGRAMDATA} {PROGRAMFILES} {PROGRAMFILESX86} {PUBLIC} oder Key (HKCU = Benutzer, HKLM), Filter (bei Files), XD, XF, NoHidden, License (true = Lizenzdatei/-schluessel), Role (Settings/Plugins/Data/Database/License/Template), DbKind (File/Service, nur bei Database; SQLite-Begleitdateien -wal/-shm/-journal werden mitkopiert).",
   "Apps": [
     {
       "Id": "App_Firefox",
@@ -452,7 +452,12 @@
         "https://winscp.net/eng/docs/ui_pref_security",
         "https://winscp.net/eng/docs/config"
       ],
-      "Note": "geprüft: Aussage zur Kennwort-Speicherung (Master-Passwort / verschleierte Ablage) fehlte; Pfade (Registry HKCU\\Software\\Martin Prikryl, %APPDATA%\\WinSCP.ini) stimmen mit Herstellerdoku überein."
+      "Note": "geprüft: Aussage zur Kennwort-Speicherung (Master-Passwort / verschleierte Ablage) fehlte; Pfade (Registry HKCU\\Software\\Martin Prikryl, %APPDATA%\\WinSCP.ini) stimmen mit Herstellerdoku überein.",
+      "Verified": {
+        "Date": "2026-10-03",
+        "Sources": [],
+        "Note": "Backup an einem Windows-11-PC: Registry gesichert (keine WinSCP.ini vorhanden)"
+      }
     },
     {
       "Id": "App_mRemoteNG",
@@ -1305,7 +1310,7 @@
         }
       ],
       "Transfer": "Server-Einstellungen (ID-/Relay-Server, Schluessel), Oberflaeche, Gegenstellen",
-      "NotTransfer": "eigene ID und Schluesselpaar (RustDesk.toml - wird absichtlich nicht kopiert, sonst doppelte ID), dauerhaftes Kennwort und gespeicherte Kennwoerter (an den PC gebunden)",
+      "NotTransfer": "eigene ID und Schluesselpaar (RustDesk.toml - wird absichtlich nicht kopiert, sonst doppelte ID), dauerhaftes Kennwort und gespeicherte Kennwoerter (an den PC gebunden); RustDesk2.toml aus dem Dienst-Profil enthaelt Server-Einstellungen sowie unlock_pin und trusted_devices (keine Geraete-ID) - Backup vertraulich behandeln",
       "License": "kostenlos | Server Pro: eigene Lizenz",
       "After": [
         "RustDesk: neue ID weitergeben, dauerhaftes Kennwort neu setzen",
@@ -3073,7 +3078,12 @@
       "WingetId": "Famatech.AdvancedIPScanner",
       "After": [
         "Advanced IP Scanner: Favoriten pruefen (sicherer Weg: Datei > Favoriten speichern/laden)"
-      ]
+      ],
+      "Verified": {
+        "Date": "2026-10-03",
+        "Sources": [],
+        "Note": "Backup an einem Windows-11-PC: Registry + 3 .bin-Dateien gesichert"
+      }
     },
     {
       "Id": "App_AngryIP",
@@ -3097,7 +3107,12 @@
         "ipscan"
       ],
       "Package": "angry",
-      "WingetId": "angryziber.AngryIPScanner"
+      "WingetId": "angryziber.AngryIPScanner",
+      "Verified": {
+        "Date": "2026-10-03",
+        "Sources": [],
+        "Note": "Backup an einem Windows-11-PC: Registry (Java-Prefs) gesichert"
+      }
     },
     {
       "Id": "App_BambuStudio",

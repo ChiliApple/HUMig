@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.87 - 2026-10-03
+### Programm-Katalog
+- Ungepruefte Eintraege (Dateien/Registry, noch an keinem PC bestaetigt) sind klar als **testweise** gekennzeichnet: `*` bei *Programme erkannt* mit Erklaerung, Zusatz *(ungeprueft)* in der Backup-Liste und im Bericht, eigener Punkt in der Checkliste, Spalte *Geprueft* im Fenster *Programme* (*nein - testweise*)
+- Neuer Knopf **Rueckmeldung geben ...** im Fenster *Programme*: oeffnet ein vorausgefuelltes GitHub-Issue zu den markierten Eintraegen (nichts wird automatisch gesendet)
+- Advanced IP Scanner, Angry IP Scanner und WinSCP als geprueft markiert (Backup an einem Windows-11-PC)
+- RustDesk: Hinweis, dass RustDesk2.toml aus dem Dienst-Profil auch unlock_pin und trusted_devices enthaelt (keine Geraete-ID)
+
 ## v2.0.86 - 2026-10-03
 ### Programm-Katalog (jetzt rund 480 Programme)
 - 193 weitere Programme aus einer zweiten, unabhaengig nachgeprueften Recherche: Schulsoftware (Next-Exam, LanSchool, NetSupport School, TI-Nspire, Mathematica, Maple, Moodle Desktop, Barrierefreiheit wie JAWS, Read&Write, SuperNova), HTL/HAK-Fachsoftware (SOLIDWORKS, CATIA, Creo, Archicad, Rhino, Altium, SAP GUI, Dynamics NAV, B&R), Buero und Medien (Adobe-Programme, CorelDRAW, ABBYY, Visio, OneNote, DaVinci Resolve) sowie Helfer; als *ungeprueft* markiert
