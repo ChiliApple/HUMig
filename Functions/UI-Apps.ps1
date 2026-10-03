@@ -61,7 +61,7 @@ function Test-HMAppTrial($App) {
     if (-not $App -or -not @($App.Items | Where-Object { $_ }).Count) { return $false }
     return -not ($App.Verified -and "$($App.Verified.Date)".Trim())
 }
-$script:HMAppTrialText = 'ungeprueft - nur testweise im Katalog: nach dem Umzug Programm testen und Rueckmeldung geben (Fenster Programme > Rueckmeldung)'
+$script:HMAppTrialText = 'ungeprueft - nur testweise im Katalog: nach dem Umzug Programm testen und Rueckmeldung geben (gelber Knopf Rueckmeldung im Reiter Backup bzw. Restore)'
 
 # Module eines Katalog-Eintrags (eigene Items -> Modul mit Id des Eintrags, sonst "Modules")
 function Get-HMAppModuleIds($App) {
@@ -168,17 +168,53 @@ function Show-HMAppCatalog {
         -Actions @(
             @{ Text = '+ Programm hinzufuegen ...'; Color = '#FFA6E3A1'; NoSelection = $true; Handler = { param($sel, $w, $c) Start-HMAppWizard } }
             @{ Text = 'Katalog bearbeiten ...'; Color = '#FFCBA6F7'; NoSelection = $true; Handler = { param($sel, $w, $c) $id = if (@($sel).Count) { "$(@($sel)[0].Id)" } else { '' }; Show-HMAppEditor -SelectId $id } }
-            @{ Text = 'Rueckmeldung geben ...'; Color = '#FFF9E2AF'; NoSelection = $true; Handler = { param($sel, $w, $c) Start-HMAppFeedback @($sel) } }
+            @{ Text = 'Rueckmeldung geben ...'; Color = '#FFF9E2AF'; NoSelection = $true; Handler = { param($sel, $w, $c) Start-HMAppFeedback -Rows @($sel) } }
         )
 }
 
-# Rueckmeldung zu Katalog-Eintraegen: oeffnet ein vorausgefuelltes GitHub-Issue im Browser (keine Daten werden automatisch gesendet)
-function Start-HMAppFeedback([object[]]$Sel) {
-    $names = @($Sel | Where-Object { $_ } | ForEach-Object { "$($_.Programm) ($($_.Id))" })
-    $title = if ($names.Count -eq 1) { "Katalog: $($names[0])" } elseif ($names.Count) { "Katalog: $($names.Count) Programme" } else { 'Katalog: Rueckmeldung' }
-    $body = "Programm(e): $(if ($names.Count) { $names -join ', ' } else { '(bitte eintragen)' })`nHUMig-Version: $script:Version`nProgramm-Version:`n`nErgebnis nach dem Umzug (passt / fehlte etwas / falscher Pfad):`n`n(keine Kennwoerter, Benutzernamen oder Pfade mit Personennamen eintragen)"
-    $url = "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)/issues/new?title=$([uri]::EscapeDataString($title))&body=$([uri]::EscapeDataString($body))"
-    try { Start-Process -FilePath explorer.exe -ArgumentList "`"$url`"" } catch { Out-Console "Browser nicht startbar: $url" 'Warning' }
+# Rueckmeldung zu Katalog-Eintraegen: GitHub-Issue im Browser oder (wenn in den Einstellungen eine Adresse steht) E-Mail
+# ueber das Mailprogramm - vorausgefuellt, es wird nichts automatisch gesendet.
+#   -Rows: markierte Zeilen im Fenster Programme | -Source Detected: erkannte Programme am PC | -Source Backup: Programme des markierten Backups
+function Start-HMAppFeedback([object[]]$Rows = @(), [ValidateSet('', 'Detected', 'Backup')][string]$Source = '') {
+    $apps = @()
+    if (@($Rows | Where-Object { $_ }).Count) {
+        $apps = @(foreach ($r in $Rows) { $a = @($script:AppCatalog | Where-Object { $_.Id -eq "$($r.Id)" })[0]; if ($a) { $a } })
+    } else {
+        $ids = @()
+        if ($Source -eq 'Backup') {
+            $b = $script:SelectedBackup
+            if (-not $b -or -not $b.Manifest -or -not @($b.Manifest.Apps).Count) { Out-Console 'Rueckmeldung: im Reiter Restore zuerst ein Backup markieren (Programme aus dem Katalog stehen im Backup).' 'Warning'; return }
+            $ids = @($b.Manifest.Apps | ForEach-Object { "$($_.Id)" })
+        } else {
+            if (-not @($script:DetectedApps).Count) { Out-Console "Rueckmeldung: zuerst Knopf 'Programme' (erkennt die installierten Programme)." 'Warning'; return }
+            $ids = @($script:DetectedApps | ForEach-Object { "$($_.Id)" })
+        }
+        $apps = @($script:AppCatalog | Where-Object { $ids -contains $_.Id -and (Test-HMAppTrial $_) })
+        if (-not $apps.Count) { Out-Console 'Rueckmeldung: keine ungeprueften Katalog-Eintraege dabei - danke, nichts zu melden. Einzelne Eintraege: Knopf Programme > Zeile markieren > Rueckmeldung geben.' 'Info'; return }
+    }
+    $title = if ($apps.Count -eq 1) { "Katalog: $($apps[0].Name) ($($apps[0].Id))" } elseif ($apps.Count) { "Katalog: $($apps.Count) Programme" } else { 'Katalog: Rueckmeldung' }
+    $lines = @(foreach ($a in $apps) { "- $($a.Name) ($($a.Id)): passt / fehlte: ... / falscher Pfad: ..." })
+    $body = "HUMig-Version: $script:Version`nWindows: $([Environment]::OSVersion.Version)`n`nErgebnis nach dem Umzug je Programm (Zutreffendes stehen lassen):`n$(if ($lines.Count) { $lines -join "`n" } else { '- (Programm eintragen)' })`n`nBemerkungen:`n`n(bitte keine Kennwoerter, Benutzernamen oder Pfade mit Personennamen eintragen)"
+    $mail = "$($script:Settings.FeedbackMail)".Trim()
+    $how = 'GitHub'
+    if ($mail) {
+        $m = "Rueckmeldung zu $($apps.Count) Programm(en) senden:`n`nJa = E-Mail an $mail (Mailprogramm, ohne Konto)`nNein = GitHub-Issue im Browser (GitHub-Konto noetig)`nAbbrechen = nichts tun`n`nDer Text ist vorausgefuellt - vor dem Senden ergaenzen. Es wird nichts automatisch gesendet."
+        $r = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'HUMig - Rueckmeldung', 'YesNoCancel', 'Question', 'Yes'))"
+        if ($r -eq 'Cancel') { return }
+        $how = if ($r -eq 'Yes') { 'Mail' } else { 'GitHub' }
+    }
+    try {
+        if ($how -eq 'Mail') {
+            $mb = $body
+            if ($mb.Length -gt 1500) { $mb = $mb.Substring(0, 1500) + "`n... (gekuerzt)" }   # mailto-Links sind in der Laenge begrenzt
+            Start-Process -FilePath ("mailto:{0}?subject={1}&body={2}" -f $mail, [uri]::EscapeDataString("HUMig $title"), [uri]::EscapeDataString(($mb -replace "`r?`n", "`r`n")))
+            Out-Console "Rueckmeldung: E-Mail an $mail im Mailprogramm geoeffnet - bitte ergaenzen und senden." 'Info'
+        } else {
+            $url = "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)/issues/new?title=$([uri]::EscapeDataString($title))&body=$([uri]::EscapeDataString($body))"
+            Start-Process -FilePath explorer.exe -ArgumentList "`"$url`""
+            Out-Console 'Rueckmeldung: GitHub-Issue im Browser geoeffnet - bitte ergaenzen und absenden (GitHub-Konto noetig).' 'Info'
+        }
+    } catch { Out-Console "Rueckmeldung: konnte nicht geoeffnet werden ($($_.Exception.Message))." 'Warning' }
 }
 
 # Paket in der Softwareverteilung zu einem Katalog-Eintrag (Package = Regex auf Ordner-/Dateiname oder Paketnamen)

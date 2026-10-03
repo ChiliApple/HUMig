@@ -327,6 +327,7 @@
                                     <Button x:Name="btnPrecheck" Content="Vorab-Pruefung" Style="{StaticResource BtnTeal}" ToolTip="Verbindung, Anmeldestatus, OneDrive, USMT, freier Platz"/>
                                     <Button x:Name="btnProfileSize" Content="Groesse ermitteln" Style="{StaticResource BtnDefault}" ToolTip="Groesse der gewaehlten Module mit Ausnahmen (Robocopy-Simulation, ohne zu kopieren)"/>
                                     <Button x:Name="btnApps" Content="Programme" Style="{StaticResource BtnMauve}" ToolTip="Links: installierte Programme erkennen - Einstellungen erkannter Programme werden als Module eingeblendet und angehakt; Uebersicht was uebertragbar ist (Einstellungen, Lizenzen, Nacharbeiten) | Rechts: nur Uebersicht"/>
+                                    <Button x:Name="btnFeedback" Content="Rueckmeldung" Style="{StaticResource BtnYellow}" ToolTip="Rueckmeldung zu den erkannten Programmen mit Katalog-Eintrag 'ungeprueft' (nur testweise): GitHub-Issue im Browser oder E-Mail (Adresse in Einstellungen > Allgemein). Es wird nichts automatisch gesendet."/>
                                 </WrapPanel>
                                 <Button x:Name="btnBackup" Content="Backup starten" Style="{StaticResource BtnGreen}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
                                 <Button x:Name="btnCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False"/>
@@ -392,6 +393,7 @@
                                 <Button x:Name="btnRestorePreview" Content="Vorschau: was wird ueberschrieben?" Style="{StaticResource BtnTeal}" Margin="0,0,0,4" ToolTip="Zeigt fuer die gewaehlten Module, welche Dateien am Ziel neu angelegt, ueberschrieben oder uebersprungen wuerden - auch nach dem Restore zur Kontrolle (alles gleich = vollstaendig)"/>
                                 <Button x:Name="btnReinstall" Content="Fehlende Programme installieren ..." Style="{StaticResource BtnMauve}" Margin="0,0,0,4" ToolTip="Programme aus dem markierten Backup mit dem Ziel-PC vergleichen - fehlende aus der Softwareverteilung nachinstallieren (nacheinander)"/>
                                 <Button x:Name="btnChecklist" Content="Checkliste" Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Checkliste nach dem Restore abhaken - landet im Restore-Protokoll"/>
+                                <Button x:Name="btnFeedbackR" Content="Rueckmeldung zu Programmen" Style="{StaticResource BtnYellow}" Margin="0,0,0,4" ToolTip="Nach dem Umzug: Rueckmeldung zu den Programmen des markierten Backups, deren Katalog-Eintrag ungeprueft ist (passt / was fehlte) - GitHub-Issue oder E-Mail. Es wird nichts automatisch gesendet."/>
                                 <Button x:Name="btnRestore" Content="Restore starten" Style="{StaticResource BtnGreen}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
                                 <Button x:Name="btnCancelRestore" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False"/>
                             </StackPanel>

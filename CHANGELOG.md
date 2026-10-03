@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.88 - 2026-10-03
+### Neu
+- Gelber Knopf **Rueckmeldung** im Reiter *Backup* (ungepruefte Eintraege der erkannten Programme) und **Rueckmeldung zu Programmen** im Reiter *Restore* (ungepruefte Eintraege des markierten Backups): vorausgefuellte Liste je Programm (passt / fehlte / falscher Pfad)
+- Rueckmeldung wahlweise per **E-Mail** ueber das Mailprogramm, ohne GitHub-Konto: Adresse unter *Einstellungen > Allgemein > Rueckmeldung per E-Mail an* (leer = nur GitHub-Issue). Es wird nie etwas automatisch gesendet
+- Hinweis in der Konsole nennt jetzt den Weg zum Knopf
+
 ## v2.0.87 - 2026-10-03
 ### Programm-Katalog
 - Ungepruefte Eintraege (Dateien/Registry, noch an keinem PC bestaetigt) sind klar als **testweise** gekennzeichnet: `*` bei *Programme erkannt* mit Erklaerung, Zusatz *(ungeprueft)* in der Backup-Liste und im Bericht, eigener Punkt in der Checkliste, Spalte *Geprueft* im Fenster *Programme* (*nein - testweise*)
