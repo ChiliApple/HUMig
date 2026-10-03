@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.0.82 - 2026-10-03
+### Programm-Katalog
+- WinSCP: WinSCP.ini ist eine Datei in AppData (war als Ordner eingetragen und ging nicht mit)
+- mRemoteNG: user.config (LocalAppData) ergaenzt
+- RustDesk: Server-Einstellungen (RustDesk2.toml) aus dem Dienst-Profil der installierten Version; eigene ID weiterhin nicht
+- Advanced IP Scanner: Favoriten/Aliase/Kommentare (.bin-Dateien im Benutzerordner - vom Profil-Backup sonst ausgenommen)
+- Angry IP Scanner: zusaetzlich .java\.userPrefs (Registry bleibt der eigentliche Speicherort unter Windows)
+- GeoGebra: Classic 6 (AppData\GeoGebra) und Classic 5 (AppData\GeoGebra 5.0)
+
 ## Dokumentation (nach v2.0.81)
 - README/Anleitung: Programm-Katalog (rund 140 Programme, *nicht uebertragbar*, Geraete-Identitaeten), App-Updates (Zweitversuch im Benutzerkonto, Fehlercodes als Klartext, Programme mit eigenem Updater als Ausnahme), Backup loeschen (schreibgeschuetzte Ordner, OneDrive)
 
