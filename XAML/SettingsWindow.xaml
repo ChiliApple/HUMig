@@ -30,7 +30,7 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Text="Backup-Ordner:" Style="{DynamicResource Lbl}"/>
                         <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,8">
@@ -80,6 +80,11 @@
                         <StackPanel Grid.Row="8" Grid.Column="1" Orientation="Horizontal">
                             <Button x:Name="btnLauncher" Content="HUMig.exe neu erstellen" Style="{DynamicResource BtnMauve}" ToolTip="Starter mit Logo (startet HUMig ohne Konsolenfenster, kann an die Taskleiste angeheftet werden)"/>
                             <Button x:Name="btnShortcut" Content="Desktop-Verknuepfung" Style="{DynamicResource BtnDefault}"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="13" Text="Rueckmeldung per E-Mail an:" Style="{DynamicResource Lbl}"/>
+                        <StackPanel Grid.Row="13" Grid.Column="1" Margin="0,10,0,0">
+                            <TextBox x:Name="txtFeedbackMail" Style="{DynamicResource DarkTextBox}" ToolTip="Optional: E-Mail-Adresse fuer Rueckmeldungen zu ungeprueften Programmen (z.B. Systembetreuung). Leer = nur GitHub-Issue"/>
+                            <TextBlock Text="Knopf 'Rueckmeldung': leer = GitHub-Issue im Browser (GitHub-Konto noetig); mit Adresse wahlweise E-Mail ueber das Mailprogramm (ohne Konto)" Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>
