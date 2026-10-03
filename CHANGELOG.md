@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.70 - 2026-10-03
+### Restore / Zuverlaessigkeit
+- Nach dem Restore wird der **Besitzer** der wiederhergestellten Profil-Ordner auf den Zielbenutzer gesetzt (vorher: Administratoren; stoerte z. B. SSH, manche Browser-Profile, Lizenzpruefungen). Rechte bleiben unveraendert (kein pauschales Grant). Danach Schreibprobe ueber die Rechte auf Desktop, AppData\Roaming und einem Programm-Ordner - Ergebnis im Protokoll
+- Benutzer-Registry: HUMig vermerkt am Ziel-PC, wenn es NTUSER.DAT geladen hat. Bleibt sie nach einem harten Abbruch (Task-Manager, Absturz) geladen, wird sie beim naechsten Start bzw. vor dem naechsten Laden entladen - nur wenn der Benutzer nicht angemeldet ist und das ladende HUMig nicht mehr laeuft (Fernzugriff: nach 24 h). Der Vermerk wird beim erfolgreichen Entladen geloescht
+
 ## v2.0.69 - 2026-10-03
 ### Geaendert
 - Ordnerrechte absichern: Logs- und Backup-Ordner im HUMig-Ordner werden beim Zuruecksetzen ausgelassen (enthalten keinen Code; grosse Backup-Ordner haetten sonst lange gedauert)
