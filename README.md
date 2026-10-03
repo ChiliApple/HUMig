@@ -272,6 +272,7 @@ Reiter **App-Updates** (neben *Werkzeuge*, HUMig als Administrator): installiert
 - **Pruefung**: jede Version hat `HUMig-files.sha256` (von den automatischen Tests erstellt); das Update laedt alle Dateien, prueft sie und ersetzt erst dann - bei einer Abweichung bleibt alles unveraendert
 - **Signatur**: der Herausgeber signiert die Pruefsummen-Datei jedes Releases (`HUMig-files.sha256.p7s`). HUMig installiert nur Releases mit gueltiger Signatur des eingebauten Zertifikats - nichts einzustellen. Eine Version, die jemand anderer auf GitHub ablegt, wird abgelehnt. Neue Versionen werden erst nach der Signatur angeboten
 - **Eigene Quelle** (eigenes Repo): Fingerabdruck des eigenen Zertifikats unter Einstellungen > Update; signieren mit Rechtsklick auf *Update* > *Release signieren* (erscheint nur auf dem PC mit dem privaten Schluessel) oder `Tools\Sign-HUMigRelease.ps1`
+- **Ordnerrechte**: HUMig prueft beim Start als Administrator, ob Nicht-Admins im HUMig-Ordner schreiben/anlegen duerfen, und bietet an abzusichern (Admins + SYSTEM Vollzugriff, Benutzer Lesen; Logs/Backup-Ordner fuer den Benutzer-Modus nur eigene Dateien). Ein Nach-Skript laeuft nur, wenn die Datei nicht fuer Nicht-Admins beschreibbar ist
 - **Automatische Tests** bei jedem Push (Windows PowerShell 5.1): Syntax, XAML und Steuerelemente, PSScriptAnalyzer, Pester-Tests, Selbsttest, beim Release zusaetzlich der komplette Update-Weg
 
 ## Grenzen
@@ -280,6 +281,7 @@ Reiter **App-Updates** (neben *Werkzeuge*, HUMig als Administrator): installiert
 - Taskleisten- und Startmenue-Pins unter Windows 11 nur eingeschraenkt
 - USMT: keine Migration zwischen AD- und Entra-ID-Geraeten (laut Microsoft)
 - OneDrive/SharePoint: Standard = auslassen (Cloud); Nur-Cloud-Dateien werden auch mit Option nie heruntergeladen
+- Backup mit nicht gesicherten Dateien = Fehler (rot); Restore daraus nur nach ausdruecklicher Rueckfrage. Weitergefuehrtes Backup: geloeschte Dateien bleiben drin (Bericht zeigt die Anzahl)
 - Pruefsummen-Stichprobe direkt nach dem Backup = Stichprobe; die Vollpruefung macht *Backup pruefen* mit dem Katalog
 - Programm-Katalog: Pfade/Registry-Schluessel nach Herstellerangaben bzw. Erfahrung (best effort, Spalte *Geprueft*) - Lizenzdateien nur bei Programmen mit *(+ Lizenz)*, konto-/hardwaregebundene Lizenzen nie; gespeicherte Kennwoerter (DPAPI) und Store-Apps sind nicht uebertragbar
 - Dienst-Datenbanken per Dateikopie nur bei gleicher Datenbank-Version am Ziel verlaesslich - sonst die Sicherung des Herstellers verwenden

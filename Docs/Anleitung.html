@@ -185,7 +185,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h3>Optionen</h3>
   <table>
     <tr><th style="width:290px">Option</th><th>Wirkung</th></tr>
-    <tr><td>Vorhandenes Backup aktualisieren</td><td>Gibt es schon ein Backup dieses PCs/Benutzers, wird es weitergeführt – nur Neues/Geändertes wird kopiert. Gelöschte Dateien bleiben im Backup.</td></tr>
+    <tr><td>Vorhandenes Backup aktualisieren</td><td>Gibt es schon ein Backup dieses PCs/Benutzers, wird es weitergeführt – nur Neues/Geändertes wird kopiert. Gelöschte Dateien bleiben im Backup und kämen beim Restore zurück; der Bericht nennt je Modul, wie viele Dateien nur noch im Backup liegen. Ein frisches Backup („Neu“) enthält nur den aktuellen Stand.</td></tr>
     <tr><td>Platz vor dem Start prüfen</td><td>Simuliert das Backup und startet nicht, wenn der Platz nicht reicht (Rückfrage).</td></tr>
     <tr><td>Backup danach prüfen</td><td>Vergleich Quelle ↔ Backup und SHA-256-Stichprobe.</td></tr>
     <tr><td>Prüfsummen-Katalog erstellen</td><td><b>Standard aus.</b> SHA-256 jeder Datei (<code>Pruefsummen.tsv</code>) – damit lässt sich das Backup später jederzeit vollständig prüfen. Der erste Lauf dauert lange, weil jede Datei gelesen wird.</td></tr>
@@ -318,6 +318,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>Neuere Dateien am Ziel nicht überschreiben</td><td>Ist eine Datei am Ziel neuer, bleibt sie erhalten</td></tr>
     <tr><td>OneDrive-Dateien in eigenen Ordner</td><td>Mitgesicherte Cloud-Dateien landen in <code>Profil\OneDrive-Wiederherstellung</code> – nie direkt im Sync-Ordner (dort könnten neuere Cloud-Versionen überschrieben werden)</td></tr>
     <tr><td>Nacharbeiten</td><td>gpupdate /force · Treiber über Windows Update aus · NumLock beim Start an · Explorer-Favoriten einblenden · Schnellstart aus</td></tr>
+    <tr><td>Nach-Skript</td><td>Eigenes PowerShell-Skript am Ende des Restores (läuft am Ziel-PC mit den Rechten von HUMig, also als Administrator). Es wird nur ausgeführt, wenn die Skriptdatei <b>nicht</b> von Nicht-Administratoren verändert werden kann – sonst Fehler im Protokoll.</td></tr>
   </table>
   <h3>Vorschau, Programme, Checkliste</h3>
   <ul>
@@ -325,6 +326,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <li><span class="ui">Fehlende Programme installieren …</span> – vergleicht die Programmliste des Backups mit dem Ziel-PC und installiert fehlende nacheinander: zuerst aus der Softwareverteilung, sonst über <b>WinGet</b> (Status <i>WinGet</i>, aktuelle Version für alle Benutzer – für Programme mit WinGet-Paket-ID im Katalog). Das Ergebnis steht auch im Verlauf der App-Updates.</li>
     <li><span class="ui">Checkliste</span> – nach dem Restore abhaken (eigene Punkte + Nacharbeiten der erkannten Programme). Stand und Bemerkung landen im Restore-Protokoll.</li>
   </ul>
+  <div class="note warn"><b class="h">Backup mit Fehlern</b>Konnten beim Backup Dateien nicht gesichert werden (geöffnet, keine Rechte), ist das Modul und das ganze Backup <b>rot</b> (Fehler), nie nur gelb. Ein Restore aus einem Backup mit Fehlern oder einem abgebrochenen Backup fragt ausdrücklich nach und nennt die betroffenen Module.</div>
   <div class="note"><b class="h">Test am selben PC</b>Wird auf den PC zurückgespielt, auf dem das Backup gemacht wurde, zeigt die Vorschau bei laufenden Programmen (z. B. Chrome) „überschreibt neuere Zieldatei“. Programme vorher schließen oder <i>Neuere Dateien am Ziel nicht überschreiben</i> aktivieren.</div>
 </section>
 
@@ -639,6 +641,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>Eigene Quelle</td><td>Wer HUMig aus einem eigenen Repository verteilt: Fingerabdruck des eigenen Zertifikats unter Einstellungen › Update eintragen. Signieren: Rechtsklick auf <span class="ui">Update</span> › <i>Release signieren (Herausgeber)</i> – erscheint nur auf dem PC, auf dem der private Schlüssel liegt; einmalig wird ein GitHub-Token mit Schreibrecht abgefragt. Alternativ <code>Tools\Sign-HUMigRelease.ps1</code>.</td></tr>
     <tr><td>Ergebnis</td><td>Info-Fenster (Logo / <span class="ui">Info</span>): installierte Version, Kanal und Prüfung. Protokoll im Update-Fenster.</td></tr>
   </table>
+  <div class="note warn"><b class="h">Ordnerrechte</b>HUMig läuft als Administrator. Dürfen im HUMig-Ordner auch normale Benutzer Dateien anlegen (z. B. unter <code>C:\Tools</code> Standard), könnte jemand Einstellungen mit einem Nach-Skript hinterlegen. HUMig prüft das beim Start und bietet an, den Ordner abzusichern: Administratoren und SYSTEM Vollzugriff, Benutzer nur Lesen; <code>Logs</code> und ein Backup-Ordner im HUMig-Ordner bleiben für den Benutzer-Modus beschreibbar (nur eigene Dateien). <i>Abbrechen</i> = nie mehr fragen.</div>
   <div class="note tip"><b class="h">Was schützt was?</b>Die Prüfsumme erkennt beschädigte oder unterwegs veränderte Downloads. Gegen ein manipuliertes Repository (z. B. missbrauchtes GitHub-Konto) hilft die Signatur – der private Schlüssel liegt nur beim Herausgeber, nie auf GitHub. HUMig prüft offline, ohne Domäne oder Internet-Dienst: Signatur gültig und Zertifikat = eingebauter Fingerabdruck.</div>
 </section>
 
