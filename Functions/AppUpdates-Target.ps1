@@ -65,8 +65,13 @@ function Install-TModule {
 }
 
 # einmalige Aufgabe: $Who = 'SYSTEM' oder Benutzer-SID. Setzt $script:TRes, gibt Protokollzeilen aus.
-function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec) {
+# $ItemTimeoutMin > 0: haengt ein Programm laenger (START ohne DONE), Aufgabe beenden -> $script:TTimedOut = Paket-Id;
+# bereits fertige Programme stehen dann in $script:TDone (aus den DONE-Zeilen des Protokolls)
+function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec, [int]$ItemTimeoutMin = 0) {
     $script:TRes = $null
+    $script:TTimedOut = ''
+    $script:TDone = @()
+    $curId = ''; $curT = $null
     $id = [guid]::NewGuid().ToString('N')
     $dir = Join-Path $Base "run_$id"
     $name = "HUMig_AppUpdates_$id"
@@ -94,11 +99,20 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec) 
         while ($true) {
             if (Test-Path -LiteralPath $lf) {
                 $lines = @(Get-Content -LiteralPath $lf -Encoding UTF8 -ErrorAction SilentlyContinue)
-                for ($i = $seen; $i -lt $lines.Count; $i++) { Out-L "#$($lines[$i])" }
+                for ($i = $seen; $i -lt $lines.Count; $i++) {
+                    Out-L "#$($lines[$i])"
+                    $pp = "$($lines[$i])".Split('|')
+                    if ($pp[0] -eq 'START') { $curId = $pp[1]; $curT = Get-Date }
+                    elseif ($pp[0] -eq 'DONE') { $curId = ''; $script:TDone += , $pp }
+                }
                 # nur weiterzaehlen: ist die Datei gerade gesperrt (Lesen liefert nichts/weniger), nicht von vorne anfangen
                 if ($lines.Count -gt $seen) { $seen = $lines.Count }
             }
             if (Test-Path -LiteralPath $rf) { $script:TRes = Get-Content -LiteralPath $rf -Raw -Encoding UTF8 | ConvertFrom-Json; break }
+            if ($ItemTimeoutMin -gt 0 -and $curId -and $curT -and ((Get-Date) - $curT).TotalMinutes -ge $ItemTimeoutMin) {
+                try { Stop-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction SilentlyContinue } catch { }
+                $script:TTimedOut = $curId; break
+            }
             if (-not $cancelSent -and $Payload.Job -and $Payload.Job.Cancel) { New-Item -ItemType File -Path (Join-Path $dir 'cancel') -Force | Out-Null; $cancelSent = $true }
             $st = ''; try { $st = "$((Get-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction Stop).State)" } catch { }
             if ($st -and $st -ne 'Running' -and $st -ne 'Queued') {
@@ -208,8 +222,24 @@ try {
                 if (-not $sid -or $sids -notcontains $sid) { $script:TErr += "Programme nur fuer einen Benutzer: $(if ($sid) { Get-TAccount $sid } else { 'Benutzer' }) ist nicht (mehr) angemeldet" }
                 else {
                     Out-L "$($usr.Count) Programm(e) nur fuer $(Get-TAccount $sid) (als dieser Benutzer) ..."
-                    Invoke-TTask $sid @{ Mode = 'Update'; Items = @($usr | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) } $false 10800
-                    if ($script:TRes) { $res += @($script:TRes.Results) }
+                    # je Programm hoechstens $lim Minuten: Installer im Benutzerkonto, die Adminrechte verlangen, warten sonst auf eine
+                    # UAC-Bestaetigung, die niemand gibt -> abbrechen, Rest in einer neuen Aufgabe weiter
+                    $lim = 15
+                    $todo = @($usr)
+                    while ($todo.Count) {
+                        Invoke-TTask $sid @{ Mode = 'Update'; Items = @($todo | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) } $false 10800 $lim
+                        if ($script:TRes) { $res += @($script:TRes.Results); break }
+                        $got = @()
+                        foreach ($d in @($script:TDone)) {
+                            $res += [pscustomobject]@{ Id = "$($d[1])"; Status = "$($d[2])"; Code = $(if ($d.Count -gt 3) { $d[3] } else { 0 }); InstallerErrorCode = $(if ($d.Count -gt 4) { $d[4] } else { 0 }); ExtendedErrorCode = $(if ($d.Count -gt 5) { $d[5] } else { 0 }); Reboot = ($d.Count -gt 6 -and $d[6] -eq 'True'); Text = '' }
+                            $got += "$($d[1])"
+                        }
+                        if (-not $script:TTimedOut) { break }
+                        $res += [pscustomobject]@{ Id = "$($script:TTimedOut)"; Status = 'Exception'; Code = 0; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = "abgebrochen nach $lim min - wartet vermutlich auf eine Administrator-Bestaetigung (UAC) beim Benutzer; als Administrator fuer alle Benutzer installieren oder am PC bestaetigen" }
+                        Out-L "$($script:TTimedOut): nach $lim min abgebrochen (wartet vermutlich auf Administrator-Bestaetigung)"
+                        $got += "$($script:TTimedOut)"
+                        $todo = @($todo | Where-Object { $got -notcontains "$($_.Id)" })
+                    }
                 }
             }
             Out-R ([pscustomobject]@{ Results = @($res | Where-Object { $_ }); Errors = $script:TErr })

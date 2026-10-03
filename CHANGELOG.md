@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.75 - 2026-10-03
+### Behoben
+- App-Updates: Programme nur fuer einen Benutzer - haengt ein Update laenger als 15 Minuten (meist wartet der Installer auf eine Administrator-Bestaetigung, die der Benutzer nicht geben kann), wird es abgebrochen und mit Hinweis gemeldet; die uebrigen Programme laufen weiter (vorher bis zu 3 Stunden Wartezeit)
+
 ## v2.0.74 - 2026-10-03
 ### Behoben
 - App-Updates: bei laengeren Installationen (z. B. VirtualBox) erschienen alle bisherigen Zeilen ein zweites Mal in der Konsole - das Protokoll der Hilfsaufgabe wurde nach einem kurz gesperrten Lesezugriff von vorne gelesen
