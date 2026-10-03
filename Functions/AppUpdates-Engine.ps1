@@ -225,7 +225,8 @@ function Wait-HMAuTask($Handle, [int]$TimeoutSec, $Job = $null, [scriptblock]$On
             if (Test-Path -LiteralPath $lf) {
                 $lines = @(Get-Content -LiteralPath $lf -Encoding UTF8 -ErrorAction SilentlyContinue)
                 for ($i = $seen; $i -lt $lines.Count; $i++) { if ($OnLine) { & $OnLine $lines[$i] } }
-                $seen = $lines.Count
+                # nur weiterzaehlen: ist die Datei gerade gesperrt (Lesen liefert nichts/weniger), nicht von vorne anfangen
+                if ($lines.Count -gt $seen) { $seen = $lines.Count }
             }
             if (Test-Path -LiteralPath $rf) { return (Get-Content -LiteralPath $rf -Raw -Encoding UTF8 | ConvertFrom-Json) }
             if ($Job -and $Job.Cancel -and -not $cancelSent) { try { New-Item -ItemType File -Path (Join-Path $Handle.Dir 'cancel') -Force | Out-Null } catch { }; $cancelSent = $true }
@@ -518,6 +519,7 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
             $st.Job.Progress = [int]($st.Done * 100 / $st.Total)
             Write-HMLog $st.Job "  $pre$($x.Name) ($($x.Id))$(if ($x.Installed -or $x.Available) { ": $($x.Installed) -> $($x.Available)" }) ..." 'Info'
         } elseif ($p[0] -eq 'DONE') {
+            if ($st.Logged.ContainsKey("$pc|$($p[1])")) { return }   # Zeile schon verarbeitet
             $st.Done++
             # Ergebnis sofort zeigen (DONE|Id|Status|Code|InstallerCode|ExtendedCode|Reboot)
             $c = $null

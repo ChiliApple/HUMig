@@ -95,7 +95,8 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec) 
             if (Test-Path -LiteralPath $lf) {
                 $lines = @(Get-Content -LiteralPath $lf -Encoding UTF8 -ErrorAction SilentlyContinue)
                 for ($i = $seen; $i -lt $lines.Count; $i++) { Out-L "#$($lines[$i])" }
-                $seen = $lines.Count
+                # nur weiterzaehlen: ist die Datei gerade gesperrt (Lesen liefert nichts/weniger), nicht von vorne anfangen
+                if ($lines.Count -gt $seen) { $seen = $lines.Count }
             }
             if (Test-Path -LiteralPath $rf) { $script:TRes = Get-Content -LiteralPath $rf -Raw -Encoding UTF8 | ConvertFrom-Json; break }
             if (-not $cancelSent -and $Payload.Job -and $Payload.Job.Cancel) { New-Item -ItemType File -Path (Join-Path $dir 'cancel') -Force | Out-Null; $cancelSent = $true }
