@@ -1,5 +1,5 @@
 {
-  "_Info": "Programm-Katalog: erkennt installierte Programme (Detect = Regex auf den Anzeigenamen) und schlaegt passende Module vor. Bearbeiten: HUMig > Programme > Katalog bearbeiten (speichert in Config\\apps.json, gleiche Id ueberschreibt; diese Datei bleibt unveraendert). Felder: Id (App_...), Name, Detect, Package (Regex auf Paketnamen in der Softwareverteilung), WingetId (WinGet-Paket-ID - fehlt ein Paket in der Softwareverteilung, installiert \"Programme neu installieren\" ueber WinGet), Modules (vorhandene Modul-Ids) oder Items, Transfer, NotTransfer (nicht uebertragbar), License (Hinweis), Version (Versionsverhalten), After (Checkliste), CloseProcess (Prozessnamen ohne .exe - Programm wird vor Backup/Restore geschlossen), StopService (Dienstnamen - werden gestoppt und danach wieder gestartet, nur als Administrator), Verified { Date, Sources, Note } (geprueft; fehlt = ungeprueft). Items: Type (Folder/Files/Reg), Name (Unterordner im Backup, eindeutig), Path mit {PROFILE} {APPDATA} {LOCALAPPDATA} {SYSTEMDRIVE} {WINDIR} {PROGRAMDATA} {PROGRAMFILES} {PROGRAMFILESX86} {PUBLIC} oder Key (HKCU = Benutzer, HKLM), Filter (bei Files), XD, XF, NoHidden, License (true = Lizenzdatei/-schluessel), Role (Settings/Plugins/Data/Database/License/Template), DbKind (File/Service, nur bei Database; SQLite-Begleitdateien -wal/-shm/-journal werden mitkopiert).",
+  "_Info": "Programm-Katalog: erkennt installierte Programme (Detect = Regex auf den Anzeigenamen) und schlaegt passende Module vor. Bearbeiten: HUMig > Programme > Katalog bearbeiten (speichert in Config\\apps.json, gleiche Id ueberschreibt; diese Datei bleibt unveraendert). Felder: Id (App_...), Name, Detect, Package (Regex auf Paketnamen in der Softwareverteilung), WingetId (WinGet-Paket-ID - fehlt ein Paket in der Softwareverteilung, installiert \"Programme neu installieren\" ueber WinGet), Modules (vorhandene Modul-Ids) oder Items, Transfer, NotTransfer (nicht uebertragbar), License (Hinweis), Version (Versionsverhalten), After (Checkliste), CloseProcess (Prozessnamen ohne .exe - Programm wird vor Backup/Restore geschlossen), StopService (Dienstnamen - werden gestoppt und danach wieder gestartet, nur als Administrator), Verified { Date, Sources, Note } (geprueft; fehlt = ungeprueft), Confidence/Sources/Note (Recherche-Herkunft, nur Information). Items: Type (Folder/Files/Reg), Name (Unterordner im Backup, eindeutig), Path mit {PROFILE} {APPDATA} {LOCALAPPDATA} {SYSTEMDRIVE} {WINDIR} {PROGRAMDATA} {PROGRAMFILES} {PROGRAMFILESX86} {PUBLIC} oder Key (HKCU = Benutzer, HKLM), Filter (bei Files), XD, XF, NoHidden, License (true = Lizenzdatei/-schluessel), Role (Settings/Plugins/Data/Database/License/Template), DbKind (File/Service, nur bei Database; SQLite-Begleitdateien -wal/-shm/-journal werden mitkopiert).",
   "Apps": [
     {
       "Id": "App_Firefox",
@@ -3304,6 +3304,4043 @@
         "claude"
       ],
       "WingetId": "Anthropic.Claude"
+    },
+    {
+      "Id": "App_Slack",
+      "Name": "Slack",
+      "Detect": "^Slack($|\\s)",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Slack",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "Crashpad",
+            "GrShaderCache",
+            "ShaderCache",
+            "DawnCache",
+            "blob_storage",
+            "CacheStorage",
+            "logs",
+            "Dictionaries"
+          ]
+        }
+      ],
+      "Transfer": "App-Einstellungen und Workspace-Liste aus %APPDATA%\\Slack (klassische Installation, nicht MSIX).",
+      "NotTransfer": "Anmeldung/Sitzungs-Cookies (Chromium/Electron, mit DPAPI-gebundenem Schlüssel geschützt) – am neuen PC neu anmelden. Bei MSIX-Installation liegen die Daten unter %LOCALAPPDATA%\\Packages\\com.tinyspeck.slackdesktop_8yrtsj140pw4g\\LocalCache\\Roaming\\Slack.",
+      "License": "Konto (Workspace-Anmeldung)",
+      "After": [
+        "Slack starten und in den Workspaces neu anmelden."
+      ],
+      "CloseProcess": [
+        "slack"
+      ],
+      "WingetId": "SlackTechnologies.Slack",
+      "Confidence": "medium",
+      "Sources": [
+        "https://slack.com/intl/en-gb/help/articles/212475728-Deploy-Slack-for-Windows",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/s/SlackTechnologies/Slack"
+      ],
+      "Note": "Pfad %APPDATA%\\Slack laut Slack-Hilfe (Deploy Slack for Windows); DPAPI-Aussage abgeleitet aus Chromium-Standardverhalten (Electron)."
+    },
+    {
+      "Id": "App_Discord",
+      "Name": "Discord",
+      "Detect": "^Discord$",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\discord",
+          "Filter": [
+            "settings.json"
+          ]
+        }
+      ],
+      "Transfer": "App-Einstellungen (settings.json, z. B. Autostart, Hardwarebeschleunigung).",
+      "NotTransfer": "Anmelde-Token (Electron Local Storage, an Windows-Konto/DPAPI gebunden) – neu anmelden. Cache-Ordner (Cache, Code Cache, GPUCache) nicht kopieren.",
+      "License": "Konto (kostenlos)",
+      "After": [
+        "Discord starten und anmelden (ggf. QR-Code/2FA)."
+      ],
+      "CloseProcess": [
+        "Discord"
+      ],
+      "WingetId": "Discord.Discord",
+      "Confidence": "medium",
+      "Sources": [
+        "https://support.discord.com/hc/en-us/articles/31623498041623-Discord-Troubleshooting-Guide",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/d/Discord/Discord"
+      ],
+      "Note": "Datenordner %APPDATA%\\discord laut Discord-Support (Cache-Löschanleitung); settings.json-Dateiname aus Electron-App-Verhalten, in der Hersteller-Doku nicht explizit beschrieben."
+    },
+    {
+      "Id": "App_SignalDesktop",
+      "Name": "Signal Desktop",
+      "Detect": "^Signal( |$)",
+      "Transfer": "Nichts: Signal Desktop ist ein gekoppeltes Gerät.",
+      "NotTransfer": "Datenbank (%APPDATA%\\Signal\\sql) ist mit einem über Electron safeStorage (Windows DPAPI) geschützten Schlüssel verschlüsselt und gerätegebunden; Geräte-/Kopplungsidentität darf nicht kopiert werden.",
+      "License": "Konto (Rufnummer), kostenlos",
+      "After": [
+        "Signal Desktop am neuen PC neu mit dem Smartphone koppeln (QR-Code); alte Verknüpfung am Telefon entfernen.",
+        "Nachrichtenverlauf wird nicht übertragen, sofern nicht vom Telefon synchronisiert."
+      ],
+      "CloseProcess": [
+        "Signal"
+      ],
+      "WingetId": "OpenWhisperSystems.Signal",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/signalapp/Signal-Desktop/main/app/main.main.ts",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/o/OpenWhisperSystems/Signal"
+      ],
+      "Note": "Bewusst ohne Items (Geräte-Identität + DPAPI-gebundener DB-Schlüssel)."
+    },
+    {
+      "Id": "App_TelegramDesktop",
+      "Name": "Telegram Desktop",
+      "Detect": "^Telegram Desktop",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "TDATA",
+          "Path": "{APPDATA}\\Telegram Desktop\\tdata",
+          "XD": [
+            "user_data",
+            "emoji",
+            "tdummy",
+            "dumps"
+          ]
+        }
+      ],
+      "Transfer": "Ordner tdata mit Sitzungsdaten und Einstellungen; Sitzung bleibt in der Regel erhalten (Kopie von tdata ist das übliche Verfahren).",
+      "NotTransfer": "Cache (tdata\\user_data) wird neu aufgebaut. Ist ein lokaler Telegram-Code (Passcode) gesetzt, ist tdata damit verschlüsselt – der Code wird am neuen PC benötigt. Nicht von Telegram als Migrationsweg dokumentiert.",
+      "License": "Konto (Rufnummer), kostenlos",
+      "After": [
+        "Telegram starten; falls Sitzung nicht akzeptiert wird, per QR/Rufnummer neu anmelden."
+      ],
+      "CloseProcess": [
+        "Telegram"
+      ],
+      "WingetId": "Telegram.TelegramDesktop",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/telegramdesktop/tdesktop/dev/Telegram/SourceFiles/core/launcher.cpp",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/Telegram/TelegramDesktop"
+      ],
+      "Note": "Ordnername tdata aus Quellcode belegt; Standardpfad %APPDATA%\\Telegram Desktop aus Programmverhalten, nicht in offizieller Doku gefunden."
+    },
+    {
+      "Id": "App_Element",
+      "Name": "Element",
+      "Detect": "^Element$",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Element",
+          "Filter": [
+            "config.json"
+          ]
+        }
+      ],
+      "Transfer": "Benutzerdefinierte config.json (z. B. voreingestellter Homeserver).",
+      "NotTransfer": "Sitzung und Ende-zu-Ende-Schlüssel (IndexedDB/Schlüsselbund, gerätegebunden) – neu anmelden und Schlüssel per Wiederherstellungsschlüssel/Schlüssel-Backup wiederherstellen.",
+      "License": "Konto (kostenlos)",
+      "After": [
+        "Element starten, anmelden, Sitzung mit Wiederherstellungsschlüssel verifizieren."
+      ],
+      "CloseProcess": [
+        "Element"
+      ],
+      "WingetId": "Element.Element",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/element-hq/element-desktop/develop/README.md",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/e/Element/Element"
+      ]
+    },
+    {
+      "Id": "App_MattermostDesktop",
+      "Name": "Mattermost Desktop",
+      "Detect": "^Mattermost",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Mattermost",
+          "Filter": [
+            "config.json",
+            "allowedProtocols.json",
+            "trustedOrigins.json",
+            "certificate.json",
+            "permissions.json"
+          ]
+        }
+      ],
+      "Transfer": "Serverliste und App-Einstellungen (config.json), vertraute Zertifikate/Origins, Berechtigungen.",
+      "NotTransfer": "Anmeldesitzung (Electron-Cookies, DPAPI-gebunden) – neu anmelden.",
+      "License": "Konto am Server (kostenlos)",
+      "After": [
+        "Mattermost starten und auf den Servern anmelden."
+      ],
+      "CloseProcess": [
+        "Mattermost"
+      ],
+      "WingetId": "Mattermost.MattermostDesktop",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/mattermost/desktop/master/src/main/constants.ts",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/Mattermost/MattermostDesktop"
+      ],
+      "Note": "Dateinamen aus Quellcode (userData-Verzeichnis). Dass userData = %APPDATA%\\Mattermost ist, folgt aus dem Electron-Produktnamen, nicht aus Doku."
+    },
+    {
+      "Id": "App_Dropbox",
+      "Name": "Dropbox",
+      "Detect": "^Dropbox$",
+      "Transfer": "Nichts aus dem Programmprofil. Der Dropbox-Ordner im Benutzerprofil (meist %USERPROFILE%\\Dropbox) kann mit dem Profil mitgehen.",
+      "NotTransfer": "Konfigurationsdatenbanken (config.dbx, instance.dbx unter %LOCALAPPDATA%\\Dropbox) sind mit Schlüsseln aus HKCU\\Software\\Dropbox\\ks/ks1 (DPAPI) verschlüsselt und enthalten die Geräte-ID (host_id) – nicht kopieren.",
+      "License": "Konto",
+      "After": [
+        "Dropbox am neuen PC installieren und anmelden; vorhandenen Ordner als Speicherort wählen, damit nicht neu geladen wird."
+      ],
+      "CloseProcess": [
+        "Dropbox"
+      ],
+      "WingetId": "Dropbox.Dropbox",
+      "Confidence": "medium",
+      "Sources": [
+        "https://help.dropbox.com/installs/locate-dropbox-folder",
+        "https://belkasoft.com/investigating_dropbox_desktop_app",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/d/Dropbox/Dropbox"
+      ],
+      "Note": "Bewusst ohne Items (Geräte-Identität, DPAPI-gebundene Schlüssel)."
+    },
+    {
+      "Id": "App_GoogleDrive",
+      "Name": "Google Drive für Desktop",
+      "Detect": "^Google Drive$",
+      "Transfer": "Nichts aus dem Programmprofil. Gespiegelte Ordner/Meine Ablage liegen im Benutzerprofil bzw. im Laufwerk G:.",
+      "NotTransfer": "Lokaler Cache %LOCALAPPDATA%\\Google\\DriveFS enthält Konto-Token, Sync-Datenbank und noch nicht hochgeladene Dateien; gerätegebunden – nicht kopieren (Hersteller warnt vor Löschen/Verschieben des Cache bei laufenden Uploads).",
+      "License": "Google-Konto",
+      "After": [
+        "Vorher sicherstellen, dass alle Uploads abgeschlossen sind.",
+        "Am neuen PC installieren, anmelden und Ordner-Synchronisierung neu einrichten."
+      ],
+      "CloseProcess": [
+        "GoogleDriveFS"
+      ],
+      "WingetId": "Google.GoogleDrive",
+      "Confidence": "medium",
+      "Sources": [
+        "https://support.google.com/a/answer/2490100?hl=en",
+        "https://support.google.com/a/answer/7644837",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/g/Google/GoogleDrive"
+      ],
+      "Note": "Bewusst ohne Items."
+    },
+    {
+      "Id": "App_MEGAsync",
+      "Name": "MEGAsync",
+      "Detect": "^MEGAsync",
+      "Transfer": "Nichts aus dem Programmprofil; Sync-Paare werden neu eingerichtet.",
+      "NotTransfer": "MEGAsync.cfg ist verschlüsselt (EncryptedSettings), der Schlüssel (LocalStorageKey) wird im Betriebssystem-Speicher abgelegt; enthält Sitzung/Gerätezuordnung – nicht kopieren.",
+      "License": "Konto",
+      "After": [
+        "MEGAsync installieren, anmelden, Sync-Ordner neu auswählen."
+      ],
+      "CloseProcess": [
+        "MEGAsync"
+      ],
+      "WingetId": "Mega.MEGASync",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/meganz/MEGAsync/master/src/MEGASync/control/Preferences/EncryptedSettings.cpp",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/Mega/MEGASync"
+      ],
+      "Note": "Bewusst ohne Items."
+    },
+    {
+      "Id": "App_Cyberduck",
+      "Name": "Cyberduck",
+      "Detect": "^Cyberduck",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Cyberduck",
+          "XD": [
+            "Transfers",
+            "History"
+          ]
+        }
+      ],
+      "Transfer": "Lesezeichen (Bookmarks\\*.duck), Verbindungsprofile (Profiles), Einstellungen (Cyberduck.user.config).",
+      "NotTransfer": "Gespeicherte Kennwörter: werden mit Windows-DPAPI verschlüsselt (DataProtector) – am neuen PC nicht lesbar, neu eingeben.",
+      "License": "kostenlos (Spende) / Mac-App-Store-Version ist separat",
+      "After": [
+        "Verbindungen öffnen und Kennwörter neu speichern."
+      ],
+      "CloseProcess": [
+        "Cyberduck"
+      ],
+      "WingetId": "Iterate.Cyberduck",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/iterate-ch/cyberduck/master/core/src/main/csharp/ch/cyberduck/core/DataProtectorPasswordStore.cs",
+        "https://raw.githubusercontent.com/iterate-ch/cyberduck/master/core/src/main/csharp/ch/cyberduck/core/preferences/LocalSharedFileSettingsProvider.cs",
+        "https://raw.githubusercontent.com/iterate-ch/cyberduck/master/core/src/main/java/ch/cyberduck/core/BookmarkCollection.java",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/i/Iterate/Cyberduck"
+      ]
+    },
+    {
+      "Id": "App_Opera",
+      "Name": "Opera",
+      "Detect": "^Opera (Stable|\\d)",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "PROFILE",
+          "Path": "{APPDATA}\\Opera Software\\Opera Stable",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "Crashpad",
+            "GrShaderCache",
+            "ShaderCache",
+            "DawnCache",
+            "blob_storage",
+            "CacheStorage",
+            "logs",
+            "component_crx_cache",
+            "Safe Browsing",
+            "optimization_guide_model_store",
+            "Crash Reports"
+          ]
+        }
+      ],
+      "Transfer": "Profil: Lesezeichen, Verlauf, Erweiterungen, Einstellungen (Preferences), Sitzung.",
+      "NotTransfer": "Gespeicherte Kennwörter und Cookies (Login Data/Cookies) sind laut Opera nur auf dem erzeugenden Rechner lesbar (DPAPI-Schlüssel in Local State) – über Opera-Konto-Sync oder Export übertragen.",
+      "License": "kostenlos",
+      "After": [
+        "Opera starten; Passwörter via Opera-Sync oder CSV-Export/Import übernehmen."
+      ],
+      "CloseProcess": [
+        "opera"
+      ],
+      "WingetId": "Opera.Opera",
+      "Confidence": "high",
+      "Sources": [
+        "https://help.opera.com/en/latest/crashes-and-issues/",
+        "https://forums.opera.com/topic/35469/can-t-open-user-profile-directory-because-you-lack-sufficient-privileges/11?lang=en-US",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/o/Opera/Opera"
+      ],
+      "Note": "Opera GX hat eigenen Profilordner (siehe App_OperaGX). Cache liegt separat unter %LOCALAPPDATA%\\Opera Software."
+    },
+    {
+      "Id": "App_OperaGX",
+      "Name": "Opera GX",
+      "Detect": "^Opera GX",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "PROFILE",
+          "Path": "{APPDATA}\\Opera Software\\Opera GX Stable",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "Crashpad",
+            "GrShaderCache",
+            "ShaderCache",
+            "DawnCache",
+            "blob_storage",
+            "CacheStorage",
+            "logs",
+            "component_crx_cache",
+            "Safe Browsing",
+            "optimization_guide_model_store",
+            "Crash Reports"
+          ]
+        }
+      ],
+      "Transfer": "Profil: Lesezeichen, Verlauf, Erweiterungen, GX-Einstellungen.",
+      "NotTransfer": "Kennwörter/Cookies nicht übertragbar (DPAPI, nur auf dem erzeugenden Rechner lesbar) – Opera-Konto-Sync oder Export nutzen.",
+      "License": "kostenlos",
+      "After": [
+        "Opera GX starten und per Konto-Sync oder Export/Import Passwörter übernehmen."
+      ],
+      "CloseProcess": [
+        "opera"
+      ],
+      "WingetId": "Opera.OperaGX",
+      "Confidence": "medium",
+      "Sources": [
+        "https://help.opera.com/en/latest/crashes-and-issues/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/o/Opera/OperaGX"
+      ],
+      "Note": "Ordnername 'Opera GX Stable' aus Programmverhalten, nicht ausdrücklich in Hersteller-Doku bestätigt (Opera-Doku nennt nur 'opera:about' für den Pfad)."
+    },
+    {
+      "Id": "App_eMClient",
+      "Name": "eM Client",
+      "Detect": "^eM Client",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\eM Client",
+          "XD": []
+        }
+      ],
+      "Transfer": "Komplette Datenbank (Mails, Kontakte, Kalender, Konten, Regeln, Signaturen) – laut Hersteller darf der gesamte Datenbankordner auf ein neues Gerät verschoben werden.",
+      "NotTransfer": "Nur kopieren, wenn eM Client beendet ist. Lizenz ist an Lizenzschlüssel/Konto gebunden. Standard-Backupordner Dokumente\\eM Client geht mit dem Profil mit.",
+      "License": "Lizenzschlüssel/Konto (Free-Version auf 2 Konten begrenzt)",
+      "After": [
+        "eM Client starten und prüfen, ob Konten verbinden; ggf. Kennwörter bestätigen.",
+        "Lizenz unter Menü > Hilfe > Lizenz neu eingeben."
+      ],
+      "CloseProcess": [
+        "MailClient"
+      ],
+      "WingetId": "eMClient.eMClient",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.emclient.com/blog/transfer-your-em-client-data-to-a-new-device-816",
+        "https://www.emclient.com/faq-getting-started",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/e/eMClient/eMClient"
+      ],
+      "Note": "Prozessname MailClient aus Programmverhalten, nicht in Quelle belegt."
+    },
+    {
+      "Id": "App_Pidgin",
+      "Name": "Pidgin",
+      "Detect": "^Pidgin",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "PURPLE",
+          "Path": "{APPDATA}\\.purple",
+          "XD": []
+        }
+      ],
+      "Transfer": "Konten (accounts.xml), Einstellungen (prefs.xml), Buddy-Liste (blist.xml), Zertifikate, Plugin-Einstellungen, Chat-Logs.",
+      "NotTransfer": "Kennwörter stehen standardmäßig im Klartext in accounts.xml (sofern kein Schlüsselbund-Plugin aktiv) – übertragbar, aber vertraulich behandeln.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Pidgin starten und Konten prüfen."
+      ],
+      "CloseProcess": [
+        "pidgin"
+      ],
+      "WingetId": "Pidgin.Pidgin",
+      "Confidence": "medium",
+      "Sources": [
+        "https://developer.pidgin.im/wiki/Using%20Pidgin",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/Pidgin/Pidgin"
+      ],
+      "Note": "Klartext-Kennwort-Aussage aus allgemeinem Pidgin-Verhalten; in der geprüften Quelle nur der .purple-Pfad belegt."
+    },
+    {
+      "Id": "App_Neovim",
+      "Name": "Neovim",
+      "Detect": "^Neovim",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CONFIG",
+          "Path": "{LOCALAPPDATA}\\nvim"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\nvim-data",
+          "XD": [
+            "swap",
+            "undo",
+            "log"
+          ]
+        }
+      ],
+      "Transfer": "Konfiguration (init.lua/init.vim, nvim\\lua), Plugins und Shada-Daten (nvim-data).",
+      "NotTransfer": "Externe Abhängigkeiten (Compiler, Language Servers, ripgrep, Node/Python-Provider) müssen neu installiert werden; Plugin-Binaries ggf. neu bauen.",
+      "License": "kostenlos (Apache 2.0)",
+      "After": [
+        "Neovim starten und Plugin-Manager Sync/Update ausführen."
+      ],
+      "CloseProcess": [
+        "nvim",
+        "nvim-qt"
+      ],
+      "WingetId": "Neovim.Neovim",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/neovim/neovim/master/runtime/doc/starting.txt",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/n/Neovim/Neovim"
+      ]
+    },
+    {
+      "Id": "App_WezTerm",
+      "Name": "WezTerm",
+      "Detect": "^WezTerm",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{PROFILE}",
+          "Filter": [
+            ".wezterm.lua"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "CFGDIR",
+          "Path": "{PROFILE}\\.config\\wezterm"
+        }
+      ],
+      "Transfer": "Konfigurationsdatei .wezterm.lua bzw. Ordner %USERPROFILE%\\.config\\wezterm.",
+      "NotTransfer": "Nichts Besonderes; Schriftarten und Shell-Programme, auf die die Konfiguration verweist, müssen installiert sein.",
+      "License": "kostenlos (MIT)",
+      "After": [
+        "Verwendete Schriftarten installieren."
+      ],
+      "CloseProcess": [
+        "wezterm-gui",
+        "wezterm"
+      ],
+      "WingetId": "wez.wezterm",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/wezterm/wezterm/main/docs/config/files.md",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/w/wez/wezterm"
+      ],
+      "Note": "Ordnerpfad .config\\wezterm aus der Doku sinngemäß (XDG-Variante) – Existenz abhängig vom Benutzer."
+    },
+    {
+      "Id": "App_Alacritty",
+      "Name": "Alacritty",
+      "Detect": "^Alacritty",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\alacritty"
+        }
+      ],
+      "Transfer": "Konfiguration alacritty.toml und Themes in %APPDATA%\\alacritty.",
+      "NotTransfer": "Nichts Besonderes.",
+      "License": "kostenlos (Apache 2.0)",
+      "CloseProcess": [
+        "alacritty"
+      ],
+      "WingetId": "Alacritty.Alacritty",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/alacritty/alacritty/master/extra/man/alacritty.5.scd",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/Alacritty/Alacritty"
+      ]
+    },
+    {
+      "Id": "App_CopyQ",
+      "Name": "CopyQ",
+      "Detect": "^CopyQ",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\copyq"
+        }
+      ],
+      "Transfer": "Einstellungen (copyq.ini), Tabs/Zwischenablage-Verlauf, Befehle, Themes.",
+      "NotTransfer": "Bei der portablen Version liegt alles neben dem Programm.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "copyq"
+      ],
+      "WingetId": "hluk.CopyQ",
+      "Confidence": "high",
+      "Sources": [
+        "https://copyq.readthedocs.io/en/latest/faq.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/h/hluk/CopyQ"
+      ]
+    },
+    {
+      "Id": "App_DockerDesktop",
+      "Name": "Docker Desktop",
+      "Detect": "^Docker Desktop",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Docker",
+          "Filter": [
+            "settings-store.json"
+          ]
+        },
+        {
+          "Type": "Files",
+          "Name": "CLI",
+          "Path": "{PROFILE}\\.docker",
+          "Filter": [
+            "config.json"
+          ]
+        }
+      ],
+      "Transfer": "Docker-Desktop-Einstellungen (settings-store.json) und CLI-Konfiguration (%USERPROFILE%\\.docker\\config.json, Kontexte).",
+      "NotTransfer": "Images, Container und Volumes (WSL-Distribution docker-desktop-data bzw. VHDX) werden nicht übertragen; Registry-Anmeldungen in config.json hängen vom Credential-Helper (Windows-Anmeldespeicher, nicht übertragbar) ab.",
+      "License": "Abo-Lizenz für große Unternehmen / kostenlos für Bildung & kleine Firmen",
+      "After": [
+        "Docker Desktop starten, bei Registries neu anmelden, benötigte Images neu pullen."
+      ],
+      "CloseProcess": [
+        "Docker Desktop",
+        "com.docker.backend"
+      ],
+      "WingetId": "Docker.DockerDesktop",
+      "Confidence": "medium",
+      "Sources": [
+        "https://docs.docker.com/desktop/settings-and-maintenance/settings/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/d/Docker/DockerDesktop"
+      ],
+      "Note": ".docker\\config.json als CLI-Konfiguration gemäß Docker-CLI-Doku; hier nicht gesondert geprüft."
+    },
+    {
+      "Id": "App_Calibre",
+      "Name": "calibre",
+      "Detect": "^calibre",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\calibre",
+          "XD": []
+        }
+      ],
+      "Transfer": "Einstellungen, Plugins, gespeicherte Suchen, Anzeigeprofile aus %APPDATA%\\calibre. Die Bibliothek (Standard Dokumente\\Calibre Library, Pfad steht in global.py.json) geht mit dem Profil mit.",
+      "NotTransfer": "Bei geändertem Bibliothekspfad Pfad in calibre prüfen; Plugin-Lizenzen (z. B. DeDRM) separat.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Bibliothek über 'Bibliothek wechseln' prüfen."
+      ],
+      "CloseProcess": [
+        "calibre",
+        "calibre-parallel"
+      ],
+      "WingetId": "calibre.calibre",
+      "Confidence": "medium",
+      "Sources": [
+        "https://manual.calibre-ebook.com/customize.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/c/calibre/calibre"
+      ],
+      "Note": "Konfigurationsordner %APPDATA%\\calibre aus Programmverhalten; Doku nennt nur CALIBRE_CONFIG_DIRECTORY."
+    },
+    {
+      "Id": "App_pgAdmin",
+      "Name": "pgAdmin 4",
+      "Detect": "^pgAdmin 4",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\pgadmin",
+          "XD": [
+            "sessions"
+          ]
+        }
+      ],
+      "Transfer": "Konfigurationsdatenbank pgadmin4.db (Servergruppen, Verbindungen), Einstellungen, Abfrage-Verlauf, Desktop-Konfiguration.",
+      "NotTransfer": "Gespeicherte Kennwörter sind in pgadmin4.db verschlüsselt (Schlüssel aus Master-Passwort bzw. an Konfiguration gebunden) – bei Abfrage ggf. neu eingeben.",
+      "License": "kostenlos (PostgreSQL-Lizenz)",
+      "After": [
+        "pgAdmin starten, Master-Passwort eingeben, Verbindungen testen."
+      ],
+      "CloseProcess": [
+        "pgAdmin4"
+      ],
+      "WingetId": "PostgreSQL.pgAdmin",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.pgadmin.org/docs/pgadmin4/latest/desktop_deployment.html",
+        "https://www.pgadmin.org/docs/pgadmin4/latest/import_export_servers.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/PostgreSQL/pgAdmin"
+      ]
+    },
+    {
+      "Id": "App_Geany",
+      "Name": "Geany",
+      "Detect": "^Geany",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\geany"
+        }
+      ],
+      "Transfer": "Einstellungen (geany.conf), Tastenkürzel, Dateityp-Definitionen, Vorlagen, Plugin-Einstellungen aus %APPDATA%\\geany.",
+      "NotTransfer": "Nichts Besonderes.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "geany"
+      ],
+      "WingetId": "Geany.Geany",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.geany.org/manual/current/index.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/g/Geany/Geany"
+      ],
+      "Note": "Handbuch nennt den Pfad in der Form C:\\users\\UserName\\Roaming\\geany (= %APPDATA%\\geany)."
+    },
+    {
+      "Id": "App_Anki",
+      "Name": "Anki",
+      "Detect": "^Anki",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Anki2",
+          "XD": [
+            "backups"
+          ]
+        }
+      ],
+      "Transfer": "Alle Profile: Sammlungen (collection.anki2), Medien, Add-ons (addons21), Einstellungen (prefs21.db).",
+      "NotTransfer": "Backups-Ordner wird nicht mitkopiert (werden neu erzeugt). Anki muss beendet sein (Sammlung sonst gesperrt).",
+      "License": "kostenlos (AnkiWeb-Konto optional)",
+      "After": [
+        "Anki starten; bei Bedarf mit AnkiWeb synchronisieren."
+      ],
+      "CloseProcess": [
+        "anki"
+      ],
+      "WingetId": "Anki.Anki",
+      "Confidence": "high",
+      "Sources": [
+        "https://docs.ankiweb.net/files.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/Anki/Anki"
+      ],
+      "Note": "AnkiWeb-Synchronisationsschlüssel liegt in prefs21.db (kein Klartext-Kennwort)."
+    },
+    {
+      "Id": "App_Zed",
+      "Name": "Zed",
+      "Detect": "^Zed($|\\s)",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Zed"
+        }
+      ],
+      "Transfer": "Einstellungen (settings.json), Tastenkürzel (keymap.json), Aufgaben (tasks.json), Themes.",
+      "NotTransfer": "Erweiterungen unter %LOCALAPPDATA%\\Zed\\extensions werden anhand 'auto_install_extensions' neu installiert. Anmeldung (Zed-Konto/KI-Anbieter) liegt im Windows-Anmeldespeicher – nicht übertragbar.",
+      "License": "kostenlos",
+      "After": [
+        "Zed starten, anmelden und KI-Anbieter-Schlüssel neu hinterlegen."
+      ],
+      "CloseProcess": [
+        "Zed"
+      ],
+      "WingetId": "ZedIndustries.Zed",
+      "Confidence": "medium",
+      "Sources": [
+        "https://zed.dev/docs/configuring-zed",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/z/ZedIndustries/Zed"
+      ],
+      "Note": "Ordner %APPDATA%\\Zed für Windows aus Zed-Verhalten; Doku-Seite belegt settings.json und %LOCALAPPDATA%\\Zed\\extensions."
+    },
+    {
+      "Id": "App_Vim",
+      "Name": "Vim (gVim)",
+      "Detect": "^Vim( |$)",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "RC",
+          "Path": "{PROFILE}",
+          "Filter": [
+            "_vimrc",
+            "_gvimrc",
+            ".vimrc",
+            ".gvimrc",
+            ".viminfo",
+            "_viminfo"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "VIMFILES",
+          "Path": "{PROFILE}\\vimfiles"
+        }
+      ],
+      "Transfer": "Konfiguration (_vimrc, _gvimrc), Ordner vimfiles (Plugins, Farbschemata, Syntax).",
+      "NotTransfer": "Nur Dateien im Profil; Konfigurationen unter $VIM (Installationsordner) sind nicht übertragbar. Externe Tools (Python, Ruby, ctags) neu installieren.",
+      "License": "kostenlos (Charityware)",
+      "After": [
+        "Plugins prüfen/aktualisieren."
+      ],
+      "CloseProcess": [
+        "gvim",
+        "vim"
+      ],
+      "WingetId": "vim.vim",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/vim/vim/master/runtime/doc/usr_05.txt",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/v/vim/vim"
+      ]
+    },
+    {
+      "Id": "App_VSCodium",
+      "Name": "VSCodium",
+      "Detect": "^VSCodium",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "USER",
+          "Path": "{APPDATA}\\VSCodium\\User",
+          "XD": [
+            "workspaceStorage",
+            "History"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "EXT",
+          "Path": "{PROFILE}\\.vscode-oss\\extensions"
+        }
+      ],
+      "Transfer": "Benutzereinstellungen (settings.json, keybindings.json, snippets), Erweiterungen.",
+      "NotTransfer": "Anmeldungen/Tokens (globalStorage, Electron-Verschlüsselung per DPAPI) sind am neuen PC ungültig. Settings Sync gibt es bei VSCodium nicht (Microsoft-Dienst).",
+      "License": "kostenlos (MIT)",
+      "After": [
+        "Erweiterungen auf Funktion prüfen (Open VSX statt Microsoft Marketplace)."
+      ],
+      "CloseProcess": [
+        "VSCodium"
+      ],
+      "WingetId": "VSCodium.VSCodium",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/VSCodium/vscodium/master/prepare_vscode.sh",
+        "https://code.visualstudio.com/docs/editor/settings",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/v/VSCodium/VSCodium"
+      ],
+      "Note": "Pfade analog zu VS Code (%APPDATA%\\Code\\User) mit Produktname VSCodium; Ordner .vscode-oss entspricht dem Upstream-Standardwert von dataFolderName (kein Override im Build-Skript für Stable). Nicht direkt in Hersteller-Doku bestätigt."
+    },
+    {
+      "Id": "App_TortoiseGit",
+      "Name": "TortoiseGit",
+      "Detect": "^TortoiseGit",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\TortoiseGit"
+        }
+      ],
+      "Transfer": "Einstellungen, Blame-/Log-Optionen, Verlauf von Commit-Meldungen und URLs (Registry).",
+      "NotTransfer": "Zugangsdaten verwaltet Git (Credential Manager / Windows-Anmeldespeicher) – nicht übertragbar. Git for Windows und PuTTY/Pageant-Schlüssel separat.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Git for Windows installieren; Zugangsdaten neu eingeben."
+      ],
+      "CloseProcess": [
+        "TGitCache"
+      ],
+      "WingetId": "TortoiseGit.TortoiseGit",
+      "Confidence": "medium",
+      "Sources": [
+        "https://tortoisegit.org/docs/tortoisegit/tgit-dug-settings.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/TortoiseGit/TortoiseGit"
+      ],
+      "Note": "Registry-Schlüsselname HKCU\\Software\\TortoiseGit aus Programmverhalten; Doku belegt Registry-Nutzung."
+    },
+    {
+      "Id": "App_TortoiseSVN",
+      "Name": "TortoiseSVN",
+      "Detect": "^TortoiseSVN",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\TortoiseSVN"
+        },
+        {
+          "Type": "Folder",
+          "Name": "SVNCFG",
+          "Path": "{APPDATA}\\Subversion",
+          "XD": [
+            "svn.simple"
+          ]
+        }
+      ],
+      "Transfer": "TortoiseSVN-Einstellungen (Registry), Subversion-Konfiguration (config, servers) und Zertifikat-Ausnahmen.",
+      "NotTransfer": "Zwischengespeicherte Kennwörter (auth\\svn.simple) sind mit Windows-DPAPI verschlüsselt (Standard-Provider) – nicht übertragbar, daher ausgeschlossen.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Beim ersten Zugriff auf Repositories neu anmelden."
+      ],
+      "CloseProcess": [
+        "TSVNCache",
+        "TortoiseProc"
+      ],
+      "WingetId": "TortoiseSVN.TortoiseSVN",
+      "Confidence": "medium",
+      "Sources": [
+        "https://tortoisesvn.net/docs/release/TortoiseSVN_en/tsvn-dug-settings.html",
+        "https://svnbook.red-bean.com/en/1.8/svn.advanced.confarea.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/TortoiseSVN/TortoiseSVN"
+      ],
+      "Note": "DPAPI-Aussage zu svn.simple aus Subversion-Standardverhalten (wincrypt-Provider), im Svnbook-Abschnitt nur auth-Verzeichnis belegt."
+    },
+    {
+      "Id": "App_WinMerge",
+      "Name": "WinMerge",
+      "Detect": "^WinMerge",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Thingamahoochie\\WinMerge"
+        }
+      ],
+      "Transfer": "Programmeinstellungen (Registry); Filter-/Plugin-Dateien liegen in Dokumente\\WinMerge und gehen mit dem Profil mit.",
+      "NotTransfer": "Nichts Besonderes.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "WinMergeU"
+      ],
+      "WingetId": "WinMerge.WinMerge",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/WinMerge/winmerge/master/Src/Merge.cpp",
+        "https://manual.winmerge.org/en/Command_line.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/w/WinMerge/WinMerge"
+      ],
+      "Note": "Bei Nutzung von WinMerge.ini (portabler Modus) liegen Einstellungen in der INI-Datei statt in der Registry."
+    },
+    {
+      "Id": "App_Notepad3",
+      "Name": "Notepad3",
+      "Detect": "^Notepad3",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Rizonesoft\\Notepad3"
+        }
+      ],
+      "Transfer": "Notepad3.ini (Einstellungen, MRU-Liste, Themes), sofern per Umleitung nach %APPDATA%\\Rizonesoft\\Notepad3 abgelegt.",
+      "NotTransfer": "Liegt Notepad3.ini direkt neben der Notepad3.exe (Standard), ist sie am neuen PC mit der Installation neu anzulegen/zu kopieren.",
+      "License": "kostenlos (BSD)",
+      "After": [
+        "Notepad3.ini im Installationsordner prüfen."
+      ],
+      "CloseProcess": [
+        "Notepad3"
+      ],
+      "WingetId": "Rizonesoft.Notepad3",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/rizonesoft/Notepad3/master/readme/faq/FAQ.md",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/r/Rizonesoft/Notepad3"
+      ],
+      "Note": "Standardmäßig liegt die INI neben der EXE; Umleitung nach %APPDATA% ist in der FAQ beschrieben und im Quellcode (Config.cpp) als Suchpfad vorhanden."
+    },
+    {
+      "Id": "App_Insomnia",
+      "Name": "Insomnia",
+      "Detect": "^Insomnia($|\\s)",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Insomnia",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "Crashpad",
+            "GrShaderCache",
+            "ShaderCache",
+            "DawnCache",
+            "blob_storage",
+            "CacheStorage",
+            "logs",
+            "Local Storage",
+            "Session Storage"
+          ]
+        }
+      ],
+      "Transfer": "Lokale Datenbanken (Workspaces, Requests, Umgebungen, Zertifikate), Plugins, Einstellungen.",
+      "NotTransfer": "Cloud-Sync-Anmeldung (Insomnia-Konto) neu durchführen; Geheimnisse in Umgebungen liegen in den lokalen DB-Dateien.",
+      "License": "kostenlos / Konto (Cloud-Sync kostenpflichtig)",
+      "After": [
+        "Insomnia starten und ggf. am Konto anmelden."
+      ],
+      "CloseProcess": [
+        "Insomnia"
+      ],
+      "WingetId": "Insomnia.Insomnia",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/Kong/insomnia/develop/packages/insomnia/src/entry.main.ts",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/i/Insomnia/Insomnia"
+      ],
+      "Note": "Datenordner = userData-Pfad + '../Insomnia' (productName Insomnia) gemäß Quellcode; Umgebungsvariable INSOMNIA_DATA_PATH kann ihn überschreiben."
+    },
+    {
+      "Id": "App_BeekeeperStudio",
+      "Name": "Beekeeper Studio",
+      "Detect": "^Beekeeper Studio",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\beekeeper-studio",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "Crashpad",
+            "GrShaderCache",
+            "ShaderCache",
+            "DawnCache",
+            "blob_storage",
+            "CacheStorage",
+            "logs",
+            "Local Storage",
+            "Session Storage"
+          ]
+        }
+      ],
+      "Transfer": "Gespeicherte Verbindungen (app.db), Abfragen, Einstellungen sowie die Schlüsseldatei .key.",
+      "NotTransfer": "Verbindungskennwörter sind mit dem Schlüssel in der Datei .key verschlüsselt (liegt im selben Ordner) – übertragbar, aber vertraulich behandeln. Lizenzschlüssel (Commercial) an Konto/Schlüssel gebunden.",
+      "License": "kostenlos (Community) / Lizenzschlüssel (Ultimate)",
+      "After": [
+        "Verbindungen testen."
+      ],
+      "CloseProcess": [
+        "Beekeeper Studio"
+      ],
+      "WingetId": "beekeeper-studio.beekeeper-studio",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/beekeeper-studio/beekeeper-studio/master/apps/studio/src/common/encryption_key.ts",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/b/beekeeper-studio/beekeeper-studio"
+      ],
+      "Note": "Pfad %APPDATA%\\beekeeper-studio aus Electron-Standard (package.json name = beekeeper-studio, kein productName); .key im userData-Verzeichnis laut Quellcode."
+    },
+    {
+      "Id": "App_RedisInsight",
+      "Name": "Redis Insight",
+      "Detect": "^Redis ?Insight",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{PROFILE}\\.redis-insight",
+          "XD": [
+            "logs"
+          ]
+        }
+      ],
+      "Transfer": "Datenbank redisinsight.db (Verbindungen, Einstellungen, Workbench-Verlauf), Plugins.",
+      "NotTransfer": "Gespeicherte Passwörter/TLS-Daten sind mit einem Schlüssel verschlüsselt, der standardmäßig im Windows-Anmeldespeicher (keytar, Dienst 'redisinsight') liegt – am neuen PC nicht lesbar, Passwörter neu eingeben.",
+      "License": "kostenlos",
+      "After": [
+        "Verbindungen öffnen und Kennwörter neu eingeben."
+      ],
+      "CloseProcess": [
+        "RedisInsight",
+        "Redis Insight"
+      ],
+      "WingetId": "RedisInsight.RedisInsight",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/redis/RedisInsight/main/redisinsight/api/config/production.ts",
+        "https://raw.githubusercontent.com/redis/RedisInsight/main/redisinsight/api/config/default.ts",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/r/RedisInsight/RedisInsight"
+      ]
+    },
+    {
+      "Id": "App_Hyper",
+      "Name": "Hyper",
+      "Detect": "^Hyper($|\\s)",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Hyper",
+          "Filter": [
+            ".hyper.js",
+            "hyper.json"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "PLUGINS",
+          "Path": "{APPDATA}\\Hyper\\plugins\\local"
+        }
+      ],
+      "Transfer": "Konfiguration .hyper.js (inkl. Plugin-Liste und Profile) und lokale Plugins.",
+      "NotTransfer": "npm-Plugins werden beim Start neu installiert.",
+      "License": "kostenlos (MIT)",
+      "After": [
+        "Hyper starten und Plugin-Installation abwarten."
+      ],
+      "CloseProcess": [
+        "Hyper"
+      ],
+      "WingetId": "Vercel.Hyper",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/vercel/hyper/canary/app/config/paths.ts",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/v/Vercel/Hyper"
+      ]
+    },
+    {
+      "Id": "App_Zettlr",
+      "Name": "Zettlr",
+      "Detect": "^Zettlr",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Zettlr",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "Crashpad",
+            "GrShaderCache",
+            "ShaderCache",
+            "DawnCache",
+            "blob_storage",
+            "CacheStorage",
+            "logs",
+            "Local Storage",
+            "Session Storage"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (config.json), Tags, Benutzerwörterbuch, Snippets, Fenster-/Workspace-Zustand. Markdown-Dateien liegen in selbstgewählten Ordnern (meist Dokumente).",
+      "NotTransfer": "Nichts Besonderes; Workspace-Pfade in config.json müssen am neuen PC existieren.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Workspace-Ordner prüfen."
+      ],
+      "CloseProcess": [
+        "Zettlr"
+      ],
+      "WingetId": "Zettlr.Zettlr",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/Zettlr/Zettlr/develop/source/app/service-providers/config/index.ts",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/z/Zettlr/Zettlr"
+      ],
+      "Note": "userData = %APPDATA%\\Zettlr (productName Zettlr)."
+    },
+    {
+      "Id": "App_DBBrowserSQLite",
+      "Name": "DB Browser for SQLite",
+      "Detect": "^DB Browser for SQLite",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\sqlitebrowser"
+        }
+      ],
+      "Transfer": "Programmeinstellungen, zuletzt geöffnete Dateien, Fensteranordnung, Erweiterungen-Liste (QSettings in Registry).",
+      "NotTransfer": "Datenbankdateien (*.db) liegen an frei gewählten Orten.",
+      "License": "kostenlos (GPL/MPL)",
+      "CloseProcess": [
+        "DB Browser for SQLite"
+      ],
+      "WingetId": "DBBrowserForSQLite.DBBrowserForSQLite",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/sqlitebrowser/sqlitebrowser/master/src/Settings.cpp",
+        "https://raw.githubusercontent.com/sqlitebrowser/sqlitebrowser/master/src/Application.cpp",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/d/DBBrowserForSQLite/DBBrowserForSQLite"
+      ],
+      "Note": "Registry-Pfad folgt aus QSettings(Org=sqlitebrowser) im NativeFormat; wird mit -s/--settings-Parameter auf eine INI-Datei umgelenkt."
+    },
+    {
+      "Id": "App_SystemInformer",
+      "Name": "System Informer",
+      "Detect": "^System Informer",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\SystemInformer",
+          "Filter": [
+            "settings.xml"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (settings.xml: Spalten, Farben, Plugin-Optionen).",
+      "NotTransfer": "Treiber (KSystemInformer) und Dienste werden vom Installer eingerichtet, nicht kopieren.",
+      "License": "kostenlos (MIT)",
+      "CloseProcess": [
+        "SystemInformer"
+      ],
+      "WingetId": "WinsiderSS.SystemInformer",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/winsiderss/systeminformer/master/tools/CustomSetupTool/util.c",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/w/WinsiderSS/SystemInformer"
+      ]
+    },
+    {
+      "Id": "App_Pinta",
+      "Name": "Pinta",
+      "Detect": "^Pinta",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Pinta"
+        }
+      ],
+      "Transfer": "Einstellungen (settings.xml: Werkzeuge, Fenster, zuletzt benutzte Optionen).",
+      "NotTransfer": "Nichts Besonderes.",
+      "License": "kostenlos (MIT)",
+      "CloseProcess": [
+        "Pinta"
+      ],
+      "WingetId": "Pinta.Pinta",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/PintaProject/Pinta/master/Pinta.Core/Managers/SettingsManager.cs",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/Pinta/Pinta"
+      ]
+    },
+    {
+      "Id": "App_ImageGlass",
+      "Name": "ImageGlass",
+      "Detect": "^ImageGlass",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{LOCALAPPDATA}\\ImageGlass"
+        }
+      ],
+      "Transfer": "Einstellungen (igconfig.json), Themes, Sprachpakete und Tastenkürzel aus %LOCALAPPDATA%\\ImageGlass.",
+      "NotTransfer": "Im portablen Modus liegt die Konfiguration im Programmordner (nicht Standard).",
+      "License": "kostenlos (GPL); Store-Version separat",
+      "CloseProcess": [
+        "ImageGlass"
+      ],
+      "WingetId": "DuongDieuPhap.ImageGlass",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/d2phap/ImageGlass/develop/v9/Components/ImageGlass.Base/App.cs",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/d/DuongDieuPhap/ImageGlass"
+      ]
+    },
+    {
+      "Id": "App_NAPS2",
+      "Name": "NAPS2",
+      "Detect": "^NAPS2",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\NAPS2"
+        }
+      ],
+      "Transfer": "Scan-Profile (profiles.xml), Einstellungen (config.xml), OCR-Spracheinstellungen.",
+      "NotTransfer": "Scanner-Treiber/Geräte (TWAIN/WIA/ESCL) sind rechnerabhängig – Profile ggf. neu zuordnen; heruntergeladene OCR-Sprachdaten ggf. neu laden.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Scan-Profile testen und Scanner neu auswählen."
+      ],
+      "CloseProcess": [
+        "NAPS2"
+      ],
+      "WingetId": "Cyanfish.NAPS2",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/cyanfish/naps2/master/NAPS2.Lib/Paths.cs",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/c/Cyanfish/NAPS2"
+      ],
+      "Note": "Dateinamen profiles.xml/config.xml aus Programmverhalten; Quelle belegt nur den Ordner %APPDATA%\\NAPS2."
+    },
+    {
+      "Id": "App_nomacs",
+      "Name": "nomacs",
+      "Detect": "^nomacs",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\nomacs"
+        }
+      ],
+      "Transfer": "Programmeinstellungen (QSettings in der Registry).",
+      "NotTransfer": "Nichts Besonderes.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "nomacs"
+      ],
+      "WingetId": "nomacs.nomacs",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/nomacs/nomacs/master/ImageLounge/src/main.cpp",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/n/nomacs/nomacs"
+      ],
+      "Note": "Registry-Pfad folgt aus QSettings (Organisation nomacs, App 'Image Lounge') im Windows-Standardformat; nicht in Doku bestätigt."
+    },
+    {
+      "Id": "App_ScreenToGif",
+      "Name": "ScreenToGif",
+      "Detect": "^ScreenToGif",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\ScreenToGif",
+          "Filter": [
+            "Settings.xaml"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (Settings.xaml).",
+      "NotTransfer": "Liegt eine Settings.xaml neben der EXE (portabel), hat diese Vorrang.",
+      "License": "kostenlos (MIT)",
+      "CloseProcess": [
+        "ScreenToGif"
+      ],
+      "WingetId": "NickeManarin.ScreenToGif",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/NickeManarin/ScreenToGif/master/ScreenToGif.Util/Settings/UserSettings.cs",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/n/NickeManarin/ScreenToGif"
+      ]
+    },
+    {
+      "Id": "App_Kodi",
+      "Name": "Kodi",
+      "Detect": "^Kodi",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Kodi",
+          "XD": [
+            "temp",
+            "Thumbnails",
+            "cache"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Profile, Datenbanken (Bibliothek, Wiedergabestände), Add-ons und deren Konfiguration, Skins, Tastenbelegungen.",
+      "NotTransfer": "Quellen/Add-on-Zugangsdaten werden im Klartext in Dateien wie sources.xml bzw. addon_data gespeichert – übertragbar, aber vertraulich. Thumbnails-Cache wird neu aufgebaut.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Kodi starten; Add-ons aktualisieren."
+      ],
+      "CloseProcess": [
+        "Kodi"
+      ],
+      "WingetId": "XBMCFoundation.Kodi",
+      "Confidence": "medium",
+      "Sources": [
+        "https://kodi.wiki/view/Userdata",
+        "https://kodi.wiki/view/Sources.xml",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/x/XBMCFoundation/Kodi"
+      ],
+      "Note": "Standardpfad %APPDATA%\\Kodi für die installierte (nicht portable) Version aus Kodi-Wiki-Praxis."
+    },
+    {
+      "Id": "App_Rainmeter",
+      "Name": "Rainmeter",
+      "Detect": "^Rainmeter",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Rainmeter"
+        }
+      ],
+      "Transfer": "Rainmeter.ini (geladene Skins, Positionen, Einstellungen) und Layouts. Skins/Plugins liegen unter Dokumente\\Rainmeter und gehen mit dem Profil mit.",
+      "NotTransfer": "Skins mit Abhängigkeiten (Schriftarten, Plugins) benötigen diese am neuen PC.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Benötigte Schriftarten installieren, Rainmeter starten."
+      ],
+      "CloseProcess": [
+        "Rainmeter"
+      ],
+      "WingetId": "Rainmeter.Rainmeter",
+      "Confidence": "medium",
+      "Sources": [
+        "https://docs.rainmeter.net/manual/settings/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/r/Rainmeter/Rainmeter"
+      ],
+      "Note": "Pfad %APPDATA%\\Rainmeter aus Programmverhalten (Installer-Version); Doku belegt nur den Dateinamen Rainmeter.ini."
+    },
+    {
+      "Id": "App_Spyder",
+      "Name": "Spyder",
+      "Detect": "^Spyder",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{PROFILE}\\.spyder-py3",
+          "XD": [
+            "temp"
+          ]
+        }
+      ],
+      "Transfer": "Konfiguration (config\\*.ini), Projekte-Liste, Verlauf, Layouts, Arbeitsverzeichnis-Voreinstellungen.",
+      "NotTransfer": "Python-Umgebungen (conda/venv) und Pakete müssen neu eingerichtet werden; ältere Versionen nutzen .spyder bzw. .spyder2.",
+      "License": "kostenlos (MIT)",
+      "After": [
+        "Interpreter in Spyder (Einstellungen > Python-Interpreter) prüfen."
+      ],
+      "CloseProcess": [
+        "Spyder",
+        "spyder"
+      ],
+      "WingetId": "Spyder.Spyder",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/spyder-ide/spyder/master/spyder/config/base.py",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/s/Spyder/Spyder"
+      ]
+    },
+    {
+      "Id": "App_LibreCAD",
+      "Name": "LibreCAD",
+      "Detect": "^LibreCAD",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\LibreCAD"
+        }
+      ],
+      "Transfer": "Programmeinstellungen, Zeichnungsvorgaben, zuletzt geöffnete Dateien (QSettings in der Registry).",
+      "NotTransfer": "Nichts Besonderes.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "LibreCAD"
+      ],
+      "WingetId": "LibreCAD.LibreCAD",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/LibreCAD/LibreCAD/master/librecad/src/main/console_dxf2png.cpp",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/l/LibreCAD/LibreCAD"
+      ],
+      "Note": "Registry-Pfad folgt aus QSettings-Organisation LibreCAD (Windows-Standardformat); nicht in Doku bestätigt."
+    },
+    {
+      "Id": "App_OpenShot",
+      "Name": "OpenShot Video Editor",
+      "Detect": "^OpenShot",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{PROFILE}\\.openshot_qt",
+          "XD": [
+            "thumbnail",
+            "cache",
+            "blender"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (openshot.settings), eigene Profile/Vorlagen/Übergänge, Wiederherstellungsdaten der letzten Projekte.",
+      "NotTransfer": "Thumbnail-/Cache-Ordner werden neu erzeugt. Projektdateien liegen an selbstgewählten Orten; Medienpfade müssen gleich bleiben.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Projekte öffnen und fehlende Medien prüfen."
+      ],
+      "CloseProcess": [
+        "openshot-qt"
+      ],
+      "WingetId": "OpenShot.OpenShot",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/OpenShot/openshot-qt/develop/src/classes/info.py",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/o/OpenShot/OpenShot"
+      ],
+      "Note": "Unterordnernamen thumbnail/cache/blender für XD aus Programmverhalten."
+    },
+    {
+      "Id": "App_Mixxx",
+      "Name": "Mixxx",
+      "Detect": "^Mixxx",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\Mixxx"
+        }
+      ],
+      "Transfer": "Einstellungen (mixxx.cfg), Bibliotheksdatenbank (mixxxdb.sqlite: Tracks, Crates, Cue-Punkte), Controller-Mappings, Skins, Aufnahmen-Einstellungen.",
+      "NotTransfer": "Musikdateien liegen an selbstgewählten Orten; Pfade in der Bibliothek müssen am neuen PC identisch sein.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Bibliothek neu scannen, falls Musikpfade abweichen."
+      ],
+      "CloseProcess": [
+        "mixxx"
+      ],
+      "WingetId": "Mixxx.Mixxx",
+      "Confidence": "medium",
+      "Sources": [
+        "https://manual.mixxx.org/latest/en/chapters/appendix/settings_directory.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/Mixxx/Mixxx"
+      ]
+    },
+    {
+      "Id": "App_JabRef",
+      "Name": "JabRef",
+      "Detect": "^JabRef",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\JavaSoft\\Prefs\\org\\jabref"
+        }
+      ],
+      "Transfer": "Programmeinstellungen (Java-Preferences in der Registry): Gruppen, Exportformate, Zitierstil-Einstellungen, zuletzt geöffnete Datenbanken.",
+      "NotTransfer": "Literaturdatenbanken (*.bib) und Anhänge liegen an selbstgewählten Orten. Sind Schlüssel (z. B. Proxy-Kennwort) gesetzt, werden sie im Preferences-Speicher abgelegt.",
+      "License": "kostenlos (MIT)",
+      "After": [
+        "Pfade zu .bib-Dateien und Anhangsordner prüfen."
+      ],
+      "CloseProcess": [
+        "JabRef"
+      ],
+      "WingetId": "JabRef.JabRef",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/JabRef/jabref/main/jablib/src/main/java/org/jabref/logic/preferences/JabRefCliPreferences.java",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/j/JabRef/JabRef"
+      ],
+      "Note": "Registry-Pfad folgt aus Java-Preferences-Standard (HKCU\\Software\\JavaSoft\\Prefs\\<Paketname>); genauer Knotenname org\\jabref nicht in Quelle verifiziert."
+    },
+    {
+      "Id": "App_PDFsamBasic",
+      "Name": "PDFsam Basic",
+      "Detect": "^PDFsam",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\JavaSoft\\Prefs\\org\\pdfsam"
+        }
+      ],
+      "Transfer": "Programmeinstellungen, Fensterzustand, zuletzt verwendete Werte (Java-Preferences in der Registry).",
+      "NotTransfer": "PDF-Dateien und Ausgabeordner liegen an selbstgewählten Orten.",
+      "License": "kostenlos (AGPL); Enhanced/Visual-Module Lizenz",
+      "CloseProcess": [
+        "pdfsam-basic",
+        "PDFsam Basic"
+      ],
+      "WingetId": "PDFsam.PDFsam",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/torakiki/pdfsam/master/pdfsam-persistence/src/main/java/org/pdfsam/persistence/PreferencesRepository.java",
+        "https://raw.githubusercontent.com/torakiki/pdfsam/master/pdfsam-gui/src/main/java/org/pdfsam/gui/configuration/PersistenceConfig.java",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/PDFsam/PDFsam"
+      ],
+      "Note": "Registry-Pfad folgt aus Java-Preferences-Knoten /org/pdfsam/... (HKCU\\Software\\JavaSoft\\Prefs-Standard)."
+    },
+    {
+      "Id": "App_1Password",
+      "Name": "1Password",
+      "Detect": "^1Password($|\\s)",
+      "Transfer": "Nichts: Daten werden nach der Anmeldung aus dem Konto neu synchronisiert.",
+      "NotTransfer": "Lokale Datenbank (%LOCALAPPDATA%\\1Password\\data) ist an Konto, Secret Key und Gerät gebunden; Geräteautorisierung darf nicht kopiert werden.",
+      "License": "Konto/Abo (1Password)",
+      "After": [
+        "1Password installieren, mit E-Mail, Secret Key und Master-Passwort anmelden (Emergency Kit bereithalten)."
+      ],
+      "CloseProcess": [
+        "1Password"
+      ],
+      "WingetId": "AgileBits.1Password",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/EricZimmerman/KapeFiles/master/Targets/Apps/1Password.tkape",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/AgileBits/1Password"
+      ],
+      "Note": "Bewusst ohne Items (Konto-/Geräte-Identität). Pfad aus der GitHub-Zielliste KapeFiles (Forensik-Artefaktpfade, keine Herstellerdoku); Aufteilung in Einstellungen/Cache nach Programmverhalten."
+    },
+    {
+      "Id": "App_AgentRansack",
+      "Name": "Agent Ransack",
+      "Detect": "^Agent Ransack",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Mythicsoft\\AgentRansack",
+          "XD": [
+            "logs",
+            "CrashReports",
+            "IndexLog"
+          ]
+        }
+      ],
+      "Transfer": "Konfiguration (config), gespeicherte Suchen/Filter.",
+      "NotTransfer": "Nichts Besonderes.",
+      "License": "kostenlos (Privatnutzung/Firma Einzelplatz)",
+      "CloseProcess": [
+        "AgentRansack"
+      ],
+      "WingetId": "Mythicsoft.AgentRansack",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/EricZimmerman/KapeFiles/master/Targets/Apps/AgentRansack.tkape",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/Mythicsoft/AgentRansack"
+      ],
+      "Note": "Pfad aus der GitHub-Zielliste KapeFiles (Forensik-Artefaktpfade, keine Herstellerdoku); Aufteilung in Einstellungen/Cache nach Programmverhalten."
+    },
+    {
+      "Id": "App_NVDA",
+      "Name": "NVDA Screenreader",
+      "Detect": "^NVDA",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\nvda"
+        }
+      ],
+      "Transfer": "Benutzerkonfiguration (nvda.ini), Konfigurationsprofile, Zusatzmodule (addons), Gestenzuordnungen, Wörterbücher.",
+      "NotTransfer": "Die systemweite Kopie der Einstellungen für Anmelde-/Sicherheitsbildschirme (systemConfig) muss am neuen PC neu über 'Gespeicherte Einstellungen auf Anmeldebildschirm anwenden' erzeugt werden. Zusatzmodule müssen zur NVDA-Version passen.",
+      "License": "kostenlos (GPL, Spenden)",
+      "After": [
+        "NVDA starten; Zusatzmodule auf Kompatibilität prüfen.",
+        "Optional: NVDA-Menü > Einstellungen > Allgemein > Gespeicherte Einstellungen auf Anmeldebildschirm anwenden."
+      ],
+      "CloseProcess": [
+        "nvda"
+      ],
+      "WingetId": "NVAccess.NVDA",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/nvaccess/nvda/master/user_docs/en/userGuide.md",
+        "https://raw.githubusercontent.com/EricZimmerman/KapeFiles/master/Targets/Apps/NVDA.tkape",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/n/NVAccess/NVDA"
+      ]
+    },
+    {
+      "Id": "App_HexChat",
+      "Name": "HexChat",
+      "Detect": "^HexChat",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\HexChat"
+        }
+      ],
+      "Transfer": "Einstellungen (hexchat.conf), Serverliste (servlist.conf), Addons/Skripte, Chat-Logs.",
+      "NotTransfer": "Serverkennwörter/NickServ-Kennwörter stehen in servlist.conf bzw. hexchat.conf im Klartext (übertragbar, aber vertraulich).",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "hexchat"
+      ],
+      "WingetId": "HexChat.HexChat",
+      "Confidence": "medium",
+      "Sources": [
+        "https://hexchat.readthedocs.io/en/latest/settings.html",
+        "https://raw.githubusercontent.com/EricZimmerman/KapeFiles/master/Targets/Apps/HexChat.tkape",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/h/HexChat/HexChat"
+      ],
+      "Note": "Klartext-Aussage zu Kennwörtern aus allgemeinem HexChat-Verhalten, in den geprüften Quellen nicht ausdrücklich belegt. Pfad aus der GitHub-Zielliste KapeFiles (Forensik-Artefaktpfade, keine Herstellerdoku); Aufteilung in Einstellungen/Cache nach Programmverhalten."
+    },
+    {
+      "Id": "App_Veyon",
+      "Name": "Veyon",
+      "Detect": "^Veyon",
+      "Transfer": "Nichts über Datei-/Registry-Kopie: Konfiguration über veyon-cli (config export/import) übertragen.",
+      "NotTransfer": "Veyon-Konfiguration liegt maschinenweit (HKLM, Dienst) und enthält den privaten Authentifizierungsschlüssel des Rechners; Schlüssel dürfen nur gezielt per 'veyon-cli authkeys export/import' verteilt werden (Lehrer-/Schüler-PC-Rolle beachten).",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Auf dem alten PC: veyon-cli config export <datei.json>; am neuen PC: veyon-cli config import <datei.json>.",
+        "Authentifizierungsschlüssel (Master/Client) gezielt exportieren/importieren."
+      ],
+      "CloseProcess": [
+        "veyon-master",
+        "veyon-configurator",
+        "veyon-server"
+      ],
+      "WingetId": "VeyonSolutions.Veyon",
+      "Confidence": "medium",
+      "Sources": [
+        "https://docs.veyon.io/en/latest/admin/cli.html",
+        "https://docs.veyon.io/en/latest/admin/configuration.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/v/VeyonSolutions/Veyon"
+      ],
+      "Note": "Bewusst ohne Items: Dienst/HKLM-Konfiguration und Schlüssel gehören nicht in ein Profil-Kopierverfahren."
+    },
+    {
+      "Id": "App_TeraCopy",
+      "Name": "TeraCopy",
+      "Detect": "^TeraCopy",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\TeraCopy"
+        }
+      ],
+      "Transfer": "Einstellungen, Listen und Profile aus %APPDATA%\\TeraCopy.",
+      "NotTransfer": "Pro-Lizenzschlüssel neu eingeben.",
+      "License": "kostenlos (Home) / Lizenzschlüssel (Pro)",
+      "After": [
+        "Pro-Lizenz neu eintragen."
+      ],
+      "CloseProcess": [
+        "TeraCopy"
+      ],
+      "WingetId": "CodeSector.TeraCopy",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/EricZimmerman/KapeFiles/master/Targets/Apps/TeraCopy.tkape",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/c/CodeSector/TeraCopy"
+      ],
+      "Note": "Pfad aus der GitHub-Zielliste KapeFiles (Forensik-Artefaktpfade, keine Herstellerdoku); Aufteilung in Einstellungen/Cache nach Programmverhalten."
+    },
+    {
+      "Id": "App_TreeSize",
+      "Name": "TreeSize",
+      "Detect": "^TreeSize",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\JAM Software\\TreeSize"
+        }
+      ],
+      "Transfer": "Einstellungen und Scan-Verlauf (scanhistory.xml).",
+      "NotTransfer": "Professional-Lizenz separat aktivieren.",
+      "License": "kostenlos (Free) / Lizenz (Professional)",
+      "CloseProcess": [
+        "TreeSizeFree",
+        "TreeSize"
+      ],
+      "WingetId": "JAMSoftware.TreeSize.Free",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/EricZimmerman/KapeFiles/master/Targets/Apps/TreeSize.tkape",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/j/JAMSoftware/TreeSize/Free"
+      ],
+      "Note": "Gilt für TreeSize Free; Professional (JAMSoftware.TreeSize) nutzt denselben Ordner laut KapeFiles. Pfad aus der GitHub-Zielliste KapeFiles (Forensik-Artefaktpfade, keine Herstellerdoku); Aufteilung in Einstellungen/Cache nach Programmverhalten."
+    },
+    {
+      "Id": "App_Viber",
+      "Name": "Viber",
+      "Detect": "^Viber",
+      "Transfer": "Nichts: Viber Desktop ist ein am Telefon aktiviertes Zweitgerät.",
+      "NotTransfer": "%APPDATA%\\ViberPC enthält Konfigurations-/Nachrichtendatenbanken (config.db, viber.db), gerätegebunden; Aktivierung per Handy-QR-Code nötig.",
+      "License": "Konto (Rufnummer), kostenlos",
+      "After": [
+        "Viber am neuen PC installieren und per Telefon (QR-Code) aktivieren."
+      ],
+      "CloseProcess": [
+        "Viber"
+      ],
+      "WingetId": "Rakuten.Viber",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/EricZimmerman/KapeFiles/master/Targets/Apps/Viber.tkape",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/r/Rakuten/Viber"
+      ],
+      "Note": "Bewusst ohne Items (Geräte-Identität). Pfad aus der GitHub-Zielliste KapeFiles (Forensik-Artefaktpfade, keine Herstellerdoku); Aufteilung in Einstellungen/Cache nach Programmverhalten."
+    },
+    {
+      "Id": "App_XYplorer",
+      "Name": "XYplorer",
+      "Detect": "^XYplorer",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\XYplorer",
+          "XD": [
+            "AutoBackup"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (XYplorer.ini), Panes, Tags/Labels (*.dat), Katalog, Tastenkürzel.",
+      "NotTransfer": "Lizenzschlüssel ggf. neu eingeben. Nur für die installierte Version; die portable Version legt Daten neben die EXE.",
+      "License": "Lizenzschlüssel (Pro) / Freeware (eingeschränkt)",
+      "After": [
+        "Lizenz prüfen."
+      ],
+      "CloseProcess": [
+        "XYplorer"
+      ],
+      "WingetId": "CologneCodeCompany.XYplorer",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/EricZimmerman/KapeFiles/master/Targets/Apps/XYplorer.tkape",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/c/CologneCodeCompany/XYplorer"
+      ],
+      "Note": "Pfad aus der GitHub-Zielliste KapeFiles (Forensik-Artefaktpfade, keine Herstellerdoku); Aufteilung in Einstellungen/Cache nach Programmverhalten."
+    },
+    {
+      "Id": "App_GoogleEarthPro",
+      "Name": "Google Earth Pro",
+      "Detect": "^Google Earth Pro",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "PLACES",
+          "Path": "{PROFILE}\\AppData\\LocalLow\\Google\\GoogleEarth",
+          "Filter": [
+            "myplaces.kml",
+            "myplaces.backup.kml"
+          ]
+        }
+      ],
+      "Transfer": "Meine Orte (myplaces.kml) und deren Sicherung.",
+      "NotTransfer": "Cache (dbCache, Bildkacheln) wird neu aufgebaut.",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "googleearth"
+      ],
+      "WingetId": "Google.EarthPro",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/EricZimmerman/KapeFiles/master/Targets/Apps/GoogleEarth.tkape",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/g/Google/EarthPro"
+      ],
+      "Note": "Pfad aus der GitHub-Zielliste KapeFiles (Forensik-Artefaktpfade, keine Herstellerdoku); Aufteilung in Einstellungen/Cache nach Programmverhalten."
+    },
+    {
+      "Id": "App_Session",
+      "Name": "Session",
+      "Detect": "^Session$",
+      "Transfer": "Nichts.",
+      "NotTransfer": "%APPDATA%\\Session enthält die Konto-Identität (Kontoschlüssel/Datenbank) – nur per Wiederherstellungspasswort (Recovery Phrase) auf einem neuen Gerät wiederherstellbar.",
+      "License": "kostenlos (Open Source)",
+      "After": [
+        "Session am neuen PC mit Wiederherstellungs-Phrase wiederherstellen."
+      ],
+      "CloseProcess": [
+        "Session"
+      ],
+      "WingetId": "Session.Session",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/EricZimmerman/KapeFiles/master/Targets/Apps/Session.tkape",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/s/Session/Session"
+      ],
+      "Note": "Bewusst ohne Items (Identität). Pfad aus der GitHub-Zielliste KapeFiles (Forensik-Artefaktpfade, keine Herstellerdoku); Aufteilung in Einstellungen/Cache nach Programmverhalten."
+    },
+    {
+      "Id": "App_Espanso",
+      "Name": "Espanso",
+      "Detect": "^[Ee]spanso",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\espanso"
+        }
+      ],
+      "Transfer": "Konfiguration (config, match: Textbausteine/Snippets) und installierte Pakete.",
+      "NotTransfer": "Nichts Besonderes.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "espanso restart ausführen."
+      ],
+      "CloseProcess": [
+        "espanso",
+        "espansod"
+      ],
+      "WingetId": "Espanso.Espanso",
+      "Confidence": "high",
+      "Sources": [
+        "https://espanso.org/docs/configuration/basics/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/e/Espanso/Espanso"
+      ]
+    },
+    {
+      "Id": "App_Ollama",
+      "Name": "Ollama",
+      "Detect": "^Ollama",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "MODELS",
+          "Path": "{PROFILE}\\.ollama\\models"
+        }
+      ],
+      "Transfer": "Heruntergeladene Modelle (Ordner .ollama\\models; teils viele GB).",
+      "NotTransfer": "Die Schlüsseldatei id_ed25519 im Ordner %USERPROFILE%\\.ollama ist die Geräte-Identität und wird bewusst nicht kopiert. Logs/Updates unter %LOCALAPPDATA%\\Ollama nicht kopieren. Ist OLLAMA_MODELS gesetzt, liegen Modelle anderswo.",
+      "License": "kostenlos (MIT)",
+      "After": [
+        "Ollama starten und 'ollama list' prüfen."
+      ],
+      "CloseProcess": [
+        "ollama app",
+        "ollama"
+      ],
+      "WingetId": "Ollama.Ollama",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/ollama/ollama/main/docs/windows.mdx",
+        "https://raw.githubusercontent.com/ollama/ollama/main/docs/faq.mdx",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/o/Ollama/Ollama"
+      ],
+      "Note": "Unterordner models und Datei id_ed25519 sind in den Doku-Quellen nicht ausdrücklich genannt (Programmverhalten)."
+    },
+    {
+      "Id": "App_TriliumNotes",
+      "Name": "Trilium Notes",
+      "Detect": "^Trilium",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\trilium-data"
+        }
+      ],
+      "Transfer": "Datenverzeichnis (document.db mit allen Notizen, config.ini, Backups).",
+      "NotTransfer": "Bei Server-Synchronisation (Sync-Konfiguration) ggf. Sync-Passwort neu eingeben. Bei gesetzter Umgebungsvariable TRILIUM_DATA_DIR liegt das Verzeichnis anderswo.",
+      "License": "kostenlos (AGPL)",
+      "After": [
+        "Trilium schließen vor dem Kopieren, danach starten und Sync prüfen."
+      ],
+      "CloseProcess": [
+        "trilium"
+      ],
+      "WingetId": "TriliumNext.Notes",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/TriliumNext/Trilium/main/docs/User%20Guide/User%20Guide/Installation%20%26%20Setup/Data%20directory.md",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/TriliumNext/Notes"
+      ]
+    },
+    {
+      "Id": "App_PrismLauncher",
+      "Name": "Prism Launcher",
+      "Detect": "^Prism Launcher",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\PrismLauncher",
+          "XD": [
+            "cache",
+            "logs",
+            "meta",
+            "java",
+            "translations"
+          ]
+        }
+      ],
+      "Transfer": "Instanzen (Welten, Mods, Ressourcenpakete), Einstellungen (prismlauncher.cfg), Konten (accounts.json), Icons und Themes.",
+      "NotTransfer": "Microsoft-/Mojang-Anmeldung in accounts.json läuft ab bzw. muss ggf. erneuert werden; Java-Laufzeit und Metadaten werden neu geladen (nicht kopieren).",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Prism starten, Konto prüfen, Java neu herunterladen lassen."
+      ],
+      "CloseProcess": [
+        "prismlauncher"
+      ],
+      "WingetId": "PrismLauncher.PrismLauncher",
+      "Confidence": "medium",
+      "Sources": [
+        "https://prismlauncher.org/wiki/getting-started/data-location/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/PrismLauncher/PrismLauncher"
+      ],
+      "Note": "XD-Ordnernamen (cache, logs, meta, java, translations) aus Programmverhalten, nicht aus Doku-Seite."
+    },
+    {
+      "Id": "App_TuxPaint",
+      "Name": "Tux Paint",
+      "Detect": "^Tux Paint",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\TuxPaint"
+        }
+      ],
+      "Transfer": "Konfiguration (tuxpaint.cfg) und gespeicherte Bilder (Ordner saved).",
+      "NotTransfer": "Nichts Besonderes. Systemweite Konfiguration (Installationsordner/ProgramData) separat verteilen.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "tuxpaint"
+      ],
+      "WingetId": "NewBreedSoftware.TuxPaint",
+      "Confidence": "high",
+      "Sources": [
+        "https://tuxpaint.org/docs/en/html/OPTIONS.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/n/NewBreedSoftware/TuxPaint"
+      ]
+    },
+    {
+      "Id": "App_qBittorrent",
+      "Name": "qBittorrent",
+      "Detect": "^qBittorrent",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\qBittorrent"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\qBittorrent",
+          "XD": [
+            "logs"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (qBittorrent.ini inkl. Webinterface-Kennwort-Hash), Torrent-Liste und Fortschritt (BT_backup unter %LOCALAPPDATA%).",
+      "NotTransfer": "Heruntergeladene Daten müssen am gleichen Zielpfad liegen, sonst Neu-Prüfung (Recheck).",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Torrents neu prüfen lassen, falls Speicherpfade abweichen."
+      ],
+      "CloseProcess": [
+        "qbittorrent"
+      ],
+      "WingetId": "qBittorrent.qBittorrent",
+      "Confidence": "high",
+      "Sources": [
+        "https://github.com/qbittorrent/qBittorrent/wiki/Frequently-Asked-Questions",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/q/qBittorrent/qBittorrent"
+      ],
+      "Note": "BT_backup und logs als Unterordner aus Programmverhalten; FAQ nennt '.torrent files, logs, etc'."
+    },
+    {
+      "Id": "App_MinecraftEducation",
+      "Name": "Minecraft Education",
+      "Detect": "^Minecraft Education",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "GAMES",
+          "Path": "{APPDATA}\\Minecraft Education Edition\\games\\com.mojang"
+        }
+      ],
+      "Transfer": "Welten (minecraftWorlds), Ressourcen-/Verhaltenspakete und Einstellungen der Desktop-(.exe/MSI-)Version.",
+      "NotTransfer": "Bei der Microsoft-Store-Version liegen die Daten unter %LOCALAPPDATA%\\Packages\\Microsoft.MinecraftEducationEdition_8wekyb3d8bbwe\\LocalState\\games\\com.mojang (hier nicht erfasst). Anmeldung mit Schulkonto (Microsoft 365 Education) neu durchführen; Lizenz über Schulkonto.",
+      "License": "Lizenz über Microsoft 365 Education-Konto",
+      "After": [
+        "Mit Schulkonto anmelden; Welten prüfen."
+      ],
+      "CloseProcess": [
+        "Minecraft.Windows",
+        "Minecraft Education"
+      ],
+      "Confidence": "medium",
+      "Sources": [
+        "https://edusupport.minecraft.net/hc/en-us/articles/4404785703316-Location-of-World-Files"
+      ],
+      "Note": "Hersteller-Doku nennt den minecraftWorlds-Pfad; der übergeordnete Ordner com.mojang (inkl. Einstellungen) ist abgeleitet. WingetId nicht belegt (nicht in winget-pkgs gefunden). Prozessname aus Programmverhalten."
+    },
+    {
+      "Id": "App_BlueJ",
+      "Name": "BlueJ",
+      "Detect": "^BlueJ",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{PROFILE}\\bluej"
+        }
+      ],
+      "Transfer": "Benutzereinstellungen (bluej.properties) laut BlueJ-FAQ im Benutzerordner.",
+      "NotTransfer": "Systemweite bluej.defs liegt im Installationsordner (Admin-Konfiguration, nicht Teil des Profils). Projekte liegen an selbstgewählten Orten.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "JDK-Pfad in BlueJ prüfen."
+      ],
+      "CloseProcess": [
+        "BlueJ"
+      ],
+      "WingetId": "BlueJTeam.BlueJ",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.bluej.org/faq.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/b/BlueJTeam/BlueJ"
+      ],
+      "Note": "Ordner %USERPROFILE%\\bluej: FAQ nennt 'C:\\Users\\<Name>\\blu...' (Text gekürzt), Existenz des Ordners 'bluej' aus Suchergebnis-Auszug der FAQ."
+    },
+    {
+      "Id": "App_Duplicati",
+      "Name": "Duplicati",
+      "Detect": "^Duplicati",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\Duplicati"
+        }
+      ],
+      "Transfer": "Konfigurationsdatenbank Duplicati-server.sqlite (Sicherungsaufträge, Zeitpläne, Ziele, Optionen) und lokale Job-Datenbanken.",
+      "NotTransfer": "Läuft Duplicati als Windows-Dienst (SYSTEM), liegt die Datenbank im Profil von SYSTEM (nicht Teil dieses Profils). Passphrasen/Zugangsdaten stehen in der Datenbank (Feldverschlüsselung mit Programmschlüssel möglich) – vertraulich behandeln. Sicherungsdaten selbst liegen am Ziel.",
+      "License": "kostenlos (LGPL)",
+      "After": [
+        "Jobs prüfen und Testlauf starten (Pfade von Quellordnern müssen existieren)."
+      ],
+      "CloseProcess": [
+        "Duplicati",
+        "Duplicati.GUI.TrayIcon"
+      ],
+      "WingetId": "Duplicati.Duplicati",
+      "Confidence": "medium",
+      "Sources": [
+        "https://docs.duplicati.com/database-and-storage/the-server-database",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/d/Duplicati/Duplicati"
+      ],
+      "Note": "Aussage zu Passphrasen aus allgemeinem Programmverhalten (Doku-Seite behandelt den DB-Speicherort)."
+    },
+    {
+      "Id": "App_MySQLWorkbench",
+      "Name": "MySQL Workbench",
+      "Detect": "^MySQL Workbench",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\MySQL\\Workbench",
+          "XD": [
+            "log",
+            "cache"
+          ]
+        }
+      ],
+      "Transfer": "Gespeicherte Verbindungen (connections.xml), Servereinstellungen, Snippets, SQL-Editor-Einstellungen.",
+      "NotTransfer": "Kennwörter liegen im benutzerspezifischen Anmelde-Tresor (Windows-Anmeldeinformationsverwaltung, nicht übertragbar) – neu eingeben. Offizieller Weg: Tools > Configuration > Backup/Restore Connections.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Verbindungen öffnen und Kennwörter neu speichern."
+      ],
+      "CloseProcess": [
+        "MySQLWorkbench"
+      ],
+      "WingetId": "Oracle.MySQLWorkbench",
+      "Confidence": "medium",
+      "Sources": [
+        "https://dev.mysql.com/doc/workbench/en/wb-configuring-files.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/o/Oracle/MySQLWorkbench"
+      ],
+      "Note": "Quelle (MySQL-Handbuch 3.3 Settings and Log Files) per Websuche bestätigt, aber vom Download-Dienst blockiert (403); XD-Namen log/cache aus Programmverhalten."
+    },
+    {
+      "Id": "App_VMwareWorkstation",
+      "Name": "VMware Workstation",
+      "Detect": "^VMware Workstation",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "PREF",
+          "Path": "{APPDATA}\\VMware",
+          "Filter": [
+            "preferences.ini"
+          ]
+        }
+      ],
+      "Transfer": "Benutzereinstellungen (preferences.ini: zuletzt geöffnete VMs, Fensterlayout, Standardpfade). Virtuelle Maschinen liegen meist unter Dokumente\\Virtual Machines und gehen mit dem Profil mit.",
+      "NotTransfer": "Systemweite config.ini unter %PROGRAMDATA%\\VMware\\VMware Workstation nicht kopieren. VMs sollten vor dem Kopieren heruntergefahren sein (nicht suspendiert).",
+      "License": "kostenlos (persönliche Nutzung seit 2024) / Lizenzschlüssel (Pro gewerblich)",
+      "After": [
+        "Bei Kopie von VMs 'Ich habe sie kopiert' wählen (neue UUID/MAC)."
+      ],
+      "CloseProcess": [
+        "vmware",
+        "vmware-vmx"
+      ],
+      "Confidence": "medium",
+      "Sources": [
+        "https://knowledge.broadcom.com/external/article/315652/the-color-theme-section-is-not-visible-i.html"
+      ],
+      "Note": "WingetId: in winget-pkgs nicht eindeutig belegt, daher leer."
+    },
+    {
+      "Id": "App_SSMS",
+      "Name": "SQL Server Management Studio",
+      "Detect": "^(Microsoft )?SQL Server Management Studio",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Microsoft\\SQL Server Management Studio"
+        }
+      ],
+      "Transfer": "Zuletzt verwendete Verbindungen und Benutzereinstellungen (versionsabhängig: SqlStudio.bin bzw. UserSettings.xml).",
+      "NotTransfer": "Gespeicherte Kennwörter in den Verbindungslisten sind nach Programmverhalten an das Windows-Benutzerkonto gebunden (DPAPI) – am neuen PC neu eingeben. Eigene Einstellungen besser über Tools > Import and Export Settings sichern.",
+      "License": "kostenlos",
+      "After": [
+        "Verbindungen öffnen und Kennwörter neu eingeben."
+      ],
+      "CloseProcess": [
+        "Ssms"
+      ],
+      "WingetId": "Microsoft.SQLServerManagementStudio.22",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.mssqltips.com/sqlservertip/7279/ssms-server-connection-information-import-export/",
+        "https://learn.microsoft.com/en-us/ssms/tutorials/import-export-settings",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/Microsoft/SQLServerManagementStudio/22"
+      ],
+      "Note": "Quelle mssqltips ist ein Community-Artikel, keine Herstellerdoku; Microsoft Learn belegt den Import/Export von Einstellungen. WinGet-Pakete sind nach Hauptversion getrennt (hier 22)."
+    },
+    {
+      "Id": "App_Gpg4win",
+      "Name": "Gpg4win (Kleopatra/GnuPG)",
+      "Detect": "^Gpg4win",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "GNUPG",
+          "Path": "{APPDATA}\\gnupg"
+        }
+      ],
+      "Transfer": "Gesamtes GnuPG-Heimatverzeichnis: private Schlüssel (private-keys-v1.d), öffentliche Schlüsselbunde, Vertrauensdaten (trustdb), Konfiguration (gpg.conf, gpg-agent.conf, scdaemon.conf).",
+      "NotTransfer": "Private Schlüssel sind durch die Passphrase geschützt (übertragbar mit Passphrase, aber hochvertraulich). Smartcard-/Token-gebundene Schlüssel bleiben auf der Karte. Kleopatra/gpg-agent müssen beim Kopieren beendet sein.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Mit 'gpg --list-secret-keys' prüfen, dass die Schlüssel vorhanden sind."
+      ],
+      "CloseProcess": [
+        "kleopatra",
+        "gpg-agent",
+        "gpg",
+        "dirmngr",
+        "scdaemon"
+      ],
+      "WingetId": "GnuPG.Gpg4win",
+      "Confidence": "high",
+      "Sources": [
+        "https://www.gnupg.com/kb/backup-restore.html",
+        "https://gpg4win.org/doc/en/gpg4win-compendium_28.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/g/GnuPG/Gpg4win"
+      ]
+    },
+    {
+      "Id": "App_XournalPP",
+      "Name": "Xournal++",
+      "Detect": "^Xournal",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{LOCALAPPDATA}\\xournalpp"
+        }
+      ],
+      "Transfer": "Einstellungen (settings.xml), Seitenvorlagen, Werkzeug- und Tastenkonfiguration, Palette.",
+      "NotTransfer": "Cache-Ordner (separat) nicht kopieren; Notizdateien (*.xopp) liegen an selbstgewählten Orten.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "xournalpp"
+      ],
+      "WingetId": "Xournal++.Xournal++",
+      "Confidence": "high",
+      "Sources": [
+        "https://xournalpp.github.io/guide/file-locations/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/x/Xournal++/Xournal++"
+      ]
+    },
+    {
+      "Id": "App_CherryTree",
+      "Name": "CherryTree",
+      "Detect": "^CherryTree",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{LOCALAPPDATA}\\cherrytree"
+        }
+      ],
+      "Transfer": "Programmeinstellungen (config.cfg) und Dokumentliste.",
+      "NotTransfer": "Notiz-Dokumente (*.ctb/*.ctx/*.ctd) liegen an selbstgewählten Orten; bei Passwort geschützten Dokumenten Kennwort nötig. Portable-Variante nutzt Ordner neben der EXE.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Pfade der zuletzt geöffneten Dokumente prüfen."
+      ],
+      "CloseProcess": [
+        "cherrytree"
+      ],
+      "WingetId": "Giuspen.Cherrytree",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/giuspen/cherrytree/master/src/ct/ct_filesystem.cc",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/g/Giuspen/Cherrytree"
+      ],
+      "Note": "Konfigurationsordner = Glib::get_user_config_dir()/cherrytree (unter Windows %LOCALAPPDATA%); config.cfg als Dateiname aus Programmverhalten."
+    },
+    {
+      "Id": "App_ApacheOpenOffice",
+      "Name": "Apache OpenOffice",
+      "Detect": "^OpenOffice|^Apache OpenOffice",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "USER",
+          "Path": "{APPDATA}\\OpenOffice\\4\\user",
+          "XD": [
+            "backup",
+            "temp",
+            "cache"
+          ]
+        }
+      ],
+      "Transfer": "Benutzerprofil: Einstellungen (registrymodifications.xcu), Autokorrektur, Vorlagen, Wörterbücher, Makros, Erweiterungen.",
+      "NotTransfer": "Backup-/Temp-Ordner werden neu angelegt. Erweiterungen mit Versionsbezug prüfen.",
+      "License": "kostenlos (Apache 2.0)",
+      "After": [
+        "OpenOffice starten und Erweiterungen prüfen."
+      ],
+      "CloseProcess": [
+        "soffice",
+        "soffice.bin"
+      ],
+      "WingetId": "Apache.OpenOffice",
+      "Confidence": "medium",
+      "Sources": [
+        "https://wiki.openoffice.org/wiki/Documentation/How_Tos/Handling_the_OpenOffice.org_User_Profile",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/Apache/OpenOffice"
+      ],
+      "Note": "Pfad %APPDATA%\\OpenOffice\\4\\user per Websuche aus dem Apache-OpenOffice-Wiki bestätigt (Seite vom Download-Dienst nicht abrufbar). XD-Namen backup/temp/uno_packages\\cache aus Programmverhalten."
+    },
+    {
+      "Id": "App_StreamlabsDesktop",
+      "Name": "Streamlabs Desktop",
+      "Detect": "^Streamlabs",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\slobs-client",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "Crashpad",
+            "GrShaderCache",
+            "ShaderCache",
+            "DawnCache",
+            "blob_storage",
+            "CacheStorage",
+            "logs"
+          ]
+        }
+      ],
+      "Transfer": "Szenensammlungen (SceneCollections), Einstellungen, Profile, Overlays/Widgets-Konfiguration.",
+      "NotTransfer": "Streamlabs-Anmeldung (Token in Electron-Speicher, DPAPI-gebunden) neu durchführen; Mediendateien der Szenen müssen am gleichen Pfad liegen.",
+      "License": "Konto (kostenlos; Prime optional)",
+      "After": [
+        "Anmelden, Szenen und Medienpfade prüfen."
+      ],
+      "CloseProcess": [
+        "Streamlabs Desktop"
+      ],
+      "WingetId": "Streamlabs.Streamlabs",
+      "Confidence": "medium",
+      "Sources": [
+        "https://github.com/StreamlabsSupport/Streamlabs-Desktop",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/s/Streamlabs/Streamlabs"
+      ],
+      "Note": "Ordner %APPDATA%\\slobs-client laut Streamlabs-Repo/Suchergebnis; XD-Namen aus Electron/Programmverhalten."
+    },
+    {
+      "Id": "App_TeamSpeak3",
+      "Name": "TeamSpeak 3 Client",
+      "Detect": "^TeamSpeak",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\TS3Client",
+          "XD": [
+            "cache",
+            "logs",
+            "crashdumps"
+          ]
+        }
+      ],
+      "Transfer": "settings.db mit Lesezeichen, Identitäten, Einstellungen sowie Add-ons/Styles/Soundpakete.",
+      "NotTransfer": "Die Identität (in settings.db) ist an die Server-Rechte gebunden – nur auf EINEM aktiven PC nutzen. Ältere Identitäten ggf. zusätzlich exportieren.",
+      "License": "kostenlos",
+      "After": [
+        "Identität prüfen (Extras > Identitäten)."
+      ],
+      "CloseProcess": [
+        "ts3client_win64",
+        "ts3client_win32"
+      ],
+      "WingetId": "TeamSpeakSystems.TeamSpeakClient",
+      "Confidence": "medium",
+      "Sources": [
+        "https://community.teamspeak.com/t/restoring-backup-settings/25966",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/TeamSpeakSystems/TeamSpeakClient"
+      ],
+      "Note": "Ordnernamen der XD-Liste aus Programmverhalten; Quelle ist das offizielle TeamSpeak-Community-Forum."
+    },
+    {
+      "Id": "App_Mumble",
+      "Name": "Mumble",
+      "Detect": "^Mumble",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DB",
+          "Path": "{APPDATA}\\Mumble"
+        },
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Mumble\\Mumble"
+        },
+        {
+          "Type": "Files",
+          "Name": "JSON",
+          "Path": "{LOCALAPPDATA}\\Mumble\\Mumble",
+          "Filter": [
+            "mumble_settings.json"
+          ]
+        }
+      ],
+      "Transfer": "Datenbank mumble.sqlite (Serverliste, Zertifikate, Berechtigungen) und Einstellungen (Registry bzw. ab 1.5 mumble_settings.json).",
+      "NotTransfer": "Das Benutzerzertifikat (Identität gegenüber registrierten Servern) liegt in Datenbank/Einstellungen – übertragbar, nur auf EINEM PC aktiv nutzen oder separat exportieren.",
+      "License": "kostenlos (BSD)",
+      "After": [
+        "Zertifikat unter Konfiguration > Zertifikatsassistent prüfen."
+      ],
+      "CloseProcess": [
+        "mumble"
+      ],
+      "WingetId": "Mumble.Mumble.Client",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.mumble.info/documentation/user/settings-storage-location/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/Mumble/Mumble/Client"
+      ],
+      "Note": "Offizielle Seite nennt Datenbank in %APPDATA% und Registry; mumble_settings.json unter %LOCALAPPDATA%\\Mumble\\Mumble stammt aus GitHub-Issues zu Mumble 1.5 (nicht in dieser Doku-Seite)."
+    },
+    {
+      "Id": "App_Postbox",
+      "Name": "Postbox",
+      "Detect": "^Postbox",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "PROFILE",
+          "Path": "{APPDATA}\\PostboxApp",
+          "XD": [
+            "Crash Reports"
+          ]
+        }
+      ],
+      "Transfer": "Profile (Profiles\\<Name>): Konten, Mails (lokale Ordner/Cache), Einstellungen, Adressbuch, Filter, Erweiterungen.",
+      "NotTransfer": "Gespeicherte Kennwörter liegen wie bei Thunderbird/Firefox in key4.db/logins.json im Profil (übertragbar, sofern kein Master-Passwort-Wechsel; mit Master-Passwort nur mit diesem). Lizenzschlüssel (Postbox) separat prüfen.",
+      "License": "Lizenz/Abo (Postbox)",
+      "After": [
+        "Postbox starten, Profil prüfen."
+      ],
+      "CloseProcess": [
+        "postbox"
+      ],
+      "WingetId": "Postbox.Postbox",
+      "Confidence": "medium",
+      "Sources": [
+        "https://support.postbox-inc.com/hc/en-us/articles/202197680-Postbox-Profile-Data",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/Postbox/Postbox"
+      ],
+      "Note": "Aussage zu key4.db/logins.json folgt aus der Firefox/Thunderbird-Basis (nicht in Postbox-Doku geprüft); XD 'Crash Reports' aus Mozilla-Standard."
+    },
+    {
+      "Id": "App_ClawsMail",
+      "Name": "Claws Mail",
+      "Detect": "^Claws Mail",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Claws-mail"
+        }
+      ],
+      "Transfer": "Gesamtes Konfigurationsverzeichnis: Konten (accountrc), Einstellungen (clawsrc), Filter, Adressbuch, Signaturen sowie lokale MH-Mailordner (Mail).",
+      "NotTransfer": "Kennwörter: ohne Master-Passwort nur verschleiert gespeichert (übertragbar, vertraulich); mit Master-Passwort (passwordstorerc) übertragbar mit Passwort.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Claws Mail starten und Konten prüfen."
+      ],
+      "CloseProcess": [
+        "claws-mail"
+      ],
+      "WingetId": "ClawsMail.ClawsMail",
+      "Confidence": "medium",
+      "Sources": [
+        "https://claws-mail.org/pipermail/users/2016-August/017070.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/c/ClawsMail/ClawsMail"
+      ],
+      "Note": "Quelle ist die offizielle Claws-Mail-Mailingliste (Nutzerantworten); Kennwort-Aussage aus Programmverhalten (passwordstorerc/accountrc)."
+    },
+    {
+      "Id": "App_Mp3tag",
+      "Name": "Mp3tag",
+      "Detect": "^Mp3tag",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Mp3tag"
+        }
+      ],
+      "Transfer": "Einstellungen, Aktionen, Aktionsgruppen, Exportkonfigurationen, Tag-Quellen (Web Sources), Skripte, Spaltenlayouts.",
+      "NotTransfer": "Bei portabler Installation liegen die Daten im Programmordner (nicht Standard).",
+      "License": "kostenlos (Freeware)",
+      "After": [
+        "Offizieller Weg zusätzlich: Datei > Konfiguration speichern."
+      ],
+      "CloseProcess": [
+        "Mp3tag"
+      ],
+      "WingetId": "FlorianHeidenreich.Mp3tag",
+      "Confidence": "high",
+      "Sources": [
+        "https://docs.mp3tag.de/getting-started/installation/",
+        "https://community.mp3tag.de/t/installation-backup/964",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/f/FlorianHeidenreich/Mp3tag"
+      ]
+    },
+    {
+      "Id": "App_FarManager",
+      "Name": "Far Manager",
+      "Detect": "^Far Manager",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "PROFILE",
+          "Path": "{APPDATA}\\Far Manager"
+        }
+      ],
+      "Transfer": "Portables Benutzerprofil: Einstellungen, Makros, Plugin-Konfiguration, Farbschemata (FARPROFILE).",
+      "NotTransfer": "Lokale Daten (Verlauf, Plugin-Cache) liegen unter %LOCALAPPDATA%\\Far Manager (nicht kopiert). Mit Far.exe.ini kann das Profil umgeleitet sein.",
+      "License": "kostenlos (BSD)",
+      "CloseProcess": [
+        "Far"
+      ],
+      "WingetId": "FarManager.FarManager",
+      "Confidence": "medium",
+      "Sources": [
+        "https://forum.farmanager.com/viewtopic.php?t=12983",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/f/FarManager/FarManager"
+      ],
+      "Note": "Pfad aus Websuche-Treffer im offiziellen Far-Forum (Far FAQ, nicht per Download bestätigt)."
+    },
+    {
+      "Id": "App_SMPlayer",
+      "Name": "SMPlayer",
+      "Detect": "^SMPlayer",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{PROFILE}\\.smplayer",
+          "XD": [
+            "file_settings"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (smplayer.ini), Wiedergabelisten, zuletzt gespielt, Tastenkürzel.",
+      "NotTransfer": "Pro-Datei-Einstellungen (file_settings) werden nicht übernommen. Bei portabler Installation liegt smplayer.ini neben der EXE.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "smplayer",
+        "mpv"
+      ],
+      "WingetId": "SMPlayer.SMPlayer",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.smplayer.info/en/faq",
+        "http://old-forum.smplayer.info/viewtopic.php?f=2&t=115",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/s/SMPlayer/SMPlayer"
+      ],
+      "Note": "XD-Name file_settings aus Programmverhalten."
+    },
+    {
+      "Id": "App_MicroSIP",
+      "Name": "MicroSIP",
+      "Detect": "^MicroSIP",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\MicroSIP"
+        }
+      ],
+      "Transfer": "Konfiguration microsip.ini (Konten, Einstellungen), Kontakte und Anrufverlauf.",
+      "NotTransfer": "SIP-Kennwörter stehen in microsip.ini (nur verschleiert/ggf. im Klartext) – übertragbar, aber vertraulich behandeln.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Registrierung der Konten prüfen."
+      ],
+      "CloseProcess": [
+        "microsip"
+      ],
+      "WingetId": "MicroSIP.MicroSIP",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.microsip.org/help",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/MicroSIP/MicroSIP"
+      ],
+      "Note": "Pfad %APPDATA%\\MicroSIP aus Websuche (Habr/GitHub-Quellen); Hersteller-Hilfe nennt microsip.ini. Kennwortspeicherung nicht ausdrücklich belegt."
+    },
+    {
+      "Id": "App_SecureCRT",
+      "Name": "SecureCRT",
+      "Detect": "^SecureCRT",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\VanDyke\\Config"
+        }
+      ],
+      "Transfer": "Konfigurationsordner: Sitzungen (Sessions), globale Optionen, Tastenzuordnungen, Skripteinstellungen, Schlüsselverweise.",
+      "NotTransfer": "Gespeicherte Kennwörter sind mit einer Konfigurations-Passphrase (falls gesetzt) bzw. dem Programmstandard verschlüsselt – übertragbar nur mit dieser Passphrase. Private SSH-Schlüssel (Dateien) separat und vertraulich übertragen. Lizenz (Seriennummer/Lizenzdatei) neu eintragen.",
+      "License": "Lizenz (Seriennummer/Lizenzdatei, kostenpflichtig)",
+      "After": [
+        "Konfigurationspfad unter Optionen > Globale Optionen > Allgemein prüfen.",
+        "Lizenz eintragen."
+      ],
+      "CloseProcess": [
+        "SecureCRT"
+      ],
+      "Confidence": "medium",
+      "Sources": [
+        "https://vandyke.com/products/securecrt/faq/index.html"
+      ],
+      "Note": "Pfad laut VanDyke-FAQ; Aussage zur Passphrase aus allgemeinem Programmverhalten. WingetId nicht belegt."
+    },
+    {
+      "Id": "App_SublimeMerge",
+      "Name": "Sublime Merge",
+      "Detect": "^Sublime Merge",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Sublime Merge",
+          "XD": [
+            "Cache",
+            "Index",
+            "Lib"
+          ]
+        }
+      ],
+      "Transfer": "Benutzerpakete (Packages\\User: Einstellungen, Themes, Keybindings), installierte Pakete, Lizenzdatei (Local\\License.sublime_license).",
+      "NotTransfer": "Lizenz: Lizenzschlüssel/-datei muss ggf. neu eingegeben werden; Cache/Index werden neu erzeugt.",
+      "License": "Lizenzschlüssel (kostenpflichtig, Testversion möglich)",
+      "After": [
+        "Lizenz unter Help > Enter License prüfen."
+      ],
+      "CloseProcess": [
+        "sublime_merge",
+        "git"
+      ],
+      "WingetId": "SublimeHQ.SublimeMerge",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.sublimemerge.com/docs/packages",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/s/SublimeHQ/SublimeMerge"
+      ],
+      "Note": "XD-Ordnernamen (Cache, Index, Lib) und Lizenzdatei aus Programmverhalten; Doku belegt nur Datenordner und Packages\\User."
+    },
+    {
+      "Id": "App_GitExtensions",
+      "Name": "Git Extensions",
+      "Detect": "^Git Extensions",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\GitExtensions\\GitExtensions"
+        }
+      ],
+      "Transfer": "Einstellungen (GitExtensions.settings), Repository-Historie (zuletzt geöffnete Repositories), Plugin-Einstellungen.",
+      "NotTransfer": "Git for Windows, Zugangsdaten (Git Credential Manager = Windows-Anmeldespeicher, nicht übertragbar) und SSH-Schlüssel separat.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Git-Pfad in Git Extensions prüfen; Zugangsdaten neu eingeben."
+      ],
+      "CloseProcess": [
+        "GitExtensions"
+      ],
+      "WingetId": "GitExtensionsTeam.GitExtensions",
+      "Confidence": "medium",
+      "Sources": [
+        "https://git-extensions-documentation.readthedocs.io/en/release-6.0/manual_settings.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/g/GitExtensionsTeam/GitExtensions"
+      ]
+    },
+    {
+      "Id": "App_NoMachine",
+      "Name": "NoMachine",
+      "Detect": "^NoMachine",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{PROFILE}\\.nx\\config",
+          "Filter": [
+            "player.cfg"
+          ]
+        }
+      ],
+      "Transfer": "Client-Konfiguration player.cfg (Voreinstellungen). Verbindungsdateien (.nxs) liegen im Standard unter Dokumente\\NoMachine und gehen mit dem Profil mit.",
+      "NotTransfer": "Server-Identität/Schlüssel (Host-Schlüssel, Server-Konfiguration im Installationsordner/ProgramData) und gespeicherte Kennwörter nicht kopieren; Geräteauthentifizierung neu einrichten.",
+      "License": "kostenlos (Free) / Abo (Enterprise)",
+      "After": [
+        "Verbindungen öffnen und Zugangsdaten neu eingeben."
+      ],
+      "CloseProcess": [
+        "nxplayer",
+        "nxclient",
+        "nxnode"
+      ],
+      "WingetId": "NoMachine.NoMachine",
+      "Confidence": "medium",
+      "Sources": [
+        "https://kb.nomachine.com/DT11R00186",
+        "https://kb.nomachine.com/AR10R01097",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/n/NoMachine/NoMachine"
+      ],
+      "Note": "Bewusst nur player.cfg (kein kompletter .nx-Ordner wegen Schlüsseln/Identität)."
+    },
+    {
+      "Id": "App_CharlesProxy",
+      "Name": "Charles Web Debugging Proxy",
+      "Detect": "^Charles",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Charles",
+          "Filter": [
+            "charles.config"
+          ]
+        }
+      ],
+      "Transfer": "Preferences-Datei charles.config inkl. SSL-Proxying-Einstellungen, Recording-Einstellungen und – laut Hersteller – dem Lizenzschlüssel.",
+      "NotTransfer": "Das Charles-Root-Zertifikat (im Zertifikatspeicher/Browser) muss am neuen PC neu installiert und vertraut werden.",
+      "License": "Lizenzschlüssel wird laut Hersteller in der Preferences-Datei gespeichert (Hersteller beschreibt Kopie von charles.config zum Verteilen der Lizenz)",
+      "After": [
+        "Root-Zertifikat neu installieren (Help > SSL Proxying)."
+      ],
+      "CloseProcess": [
+        "Charles"
+      ],
+      "WingetId": "XK72.Charles",
+      "Confidence": "high",
+      "Sources": [
+        "https://www.charlesproxy.com/documentation/faqs/deploying-license-keys-during-installation/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/x/XK72/Charles"
+      ]
+    },
+    {
+      "Id": "App_Flameshot",
+      "Name": "Flameshot",
+      "Detect": "^Flameshot",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\flameshot",
+          "Filter": [
+            "flameshot.ini"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen und Tastenkürzel (flameshot.ini).",
+      "NotTransfer": "Imgur-Upload-Verlauf/-Token nicht gesondert geprüft. Portable Builds nutzen flameshot.ini im Programmordner.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "flameshot"
+      ],
+      "WingetId": "Flameshot.Flameshot",
+      "Confidence": "high",
+      "Sources": [
+        "https://github.com/flameshot-org/flameshot/blob/master/README.md",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/f/Flameshot/Flameshot"
+      ]
+    },
+    {
+      "Id": "App_OrcaSlicer",
+      "Name": "OrcaSlicer",
+      "Detect": "^OrcaSlicer",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\OrcaSlicer",
+          "XD": [
+            "log",
+            "cache"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (OrcaSlicer.conf), eigene Drucker-, Filament- und Prozessprofile (Unterordner user), Plattform-Presets.",
+      "NotTransfer": "Bei Cloud-Anmeldung liegen Profile in einem Konto-Ordner unter user\\<ID>; Anmeldung am neuen PC neu durchführen.",
+      "License": "kostenlos (AGPL)",
+      "After": [
+        "Ggf. an Cloud anmelden; Profile prüfen."
+      ],
+      "CloseProcess": [
+        "orca-slicer"
+      ],
+      "WingetId": "SoftFever.OrcaSlicer",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.orcaslicer.com/wiki/user_profiles/user_profiles",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/s/SoftFever/OrcaSlicer"
+      ],
+      "Note": "XD-Namen (log, cache) nicht belegt, vorsorglich; Prozessname aus Programmverhalten. Die Microsoft-Store-Version nutzt laut Wiki denselben Ordner."
+    },
+    {
+      "Id": "App_CodeBlocks",
+      "Name": "Code::Blocks",
+      "Detect": "^(CodeBlocks|Code::Blocks)",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\CodeBlocks"
+        }
+      ],
+      "Transfer": "Konfiguration default.conf (bzw. <Persönlichkeit>.conf), Compiler-Einstellungen, Tastenkürzel, Vorlagen und Tools.",
+      "NotTransfer": "Compiler (MinGW) und Pfade zu Toolchains müssen am neuen PC vorhanden sein.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Compiler-Pfade unter Einstellungen > Compiler prüfen."
+      ],
+      "CloseProcess": [
+        "codeblocks"
+      ],
+      "WingetId": "CodeBlocks.CodeBlocks",
+      "Confidence": "high",
+      "Sources": [
+        "https://wiki.codeblocks.org/index.php/FAQ-Settings",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/c/CodeBlocks/CodeBlocks"
+      ]
+    },
+    {
+      "Id": "App_LyX",
+      "Name": "LyX",
+      "Detect": "^LyX",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\LyX2.4"
+        }
+      ],
+      "Transfer": "Benutzerverzeichnis: preferences, bind-Dateien, eigene Layouts/Vorlagen, Einstellungen, Sitzungsdaten.",
+      "NotTransfer": "LaTeX-Distribution (MiKTeX/TeX Live) und Python werden separat installiert.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Vorhandene LaTeX-Distribution prüfen: Extras > Neu konfigurieren."
+      ],
+      "CloseProcess": [
+        "lyx"
+      ],
+      "WingetId": "LyX.LyX",
+      "Confidence": "medium",
+      "Sources": [
+        "https://wiki.lyx.org/LyX/UserDir",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/l/LyX/LyX"
+      ],
+      "Note": "Ordnername enthält die Programmversion (hier LyX2.4); bei LyX 2.3 heißt er LyX2.3 – nicht belegt, daher nur 2.4 eingetragen."
+    },
+    {
+      "Id": "App_AIMP",
+      "Name": "AIMP",
+      "Detect": "^AIMP",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "PROFILE",
+          "Path": "{APPDATA}\\AIMP"
+        }
+      ],
+      "Transfer": "Profilordner: Einstellungen, Wiedergabelisten, Equalizer-Presets, Skin-/Plug-in-Einstellungen, Bibliothek.",
+      "NotTransfer": "Pre-Update-Sicherungen im Programmordner (!Backup) werden nicht mitgenommen.",
+      "License": "kostenlos",
+      "After": [
+        "Profilordner in AIMP unter Einstellungen > Profilordner prüfen."
+      ],
+      "CloseProcess": [
+        "AIMP"
+      ],
+      "WingetId": "AIMP.AIMP",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.aimp.ru/forum/index.php?topic=74090.0",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/AIMP/AIMP"
+      ],
+      "Note": "Forum (Herstellerforum) per Suchtreffer gelesen, Seite blockierte den Abruf (403)."
+    },
+    {
+      "Id": "App_MakeMKV",
+      "Name": "MakeMKV",
+      "Detect": "^MakeMKV",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\MakeMKV"
+        }
+      ],
+      "Transfer": "Einstellungen (Registry). Benutzerprofile (XML) liegen im frei wählbaren MakeMKV-Datenverzeichnis (Einstellungen > Allgemein).",
+      "NotTransfer": "Registrierungs-/Beta-Schlüssel ggf. neu eintragen; Datenverzeichnis-Pfad prüfen.",
+      "License": "Beta-Schlüssel (kostenlos, wird regelmäßig erneuert) oder gekaufter Schlüssel",
+      "After": [
+        "Datenverzeichnis in den Einstellungen prüfen."
+      ],
+      "CloseProcess": [
+        "makemkv"
+      ],
+      "WingetId": "GuinpinSoft.MakeMKV",
+      "Confidence": "medium",
+      "Sources": [
+        "https://forum.makemkv.com/forum/viewtopic.php?t=14666",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/g/GuinpinSoft/MakeMKV"
+      ],
+      "Note": "Quelle: Antwort des MakeMKV-Moderators im Herstellerforum."
+    },
+    {
+      "Id": "App_VidCoder",
+      "Name": "VidCoder",
+      "Detect": "^VidCoder",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "DB",
+          "Path": "{APPDATA}\\VidCoder",
+          "Filter": [
+            "VidCoder.sqlite"
+          ]
+        }
+      ],
+      "Transfer": "Datenbank VidCoder.sqlite: Einstellungen, Presets, Auswahlregeln (Pickers), Warteschlange.",
+      "NotTransfer": "Portable-Version speichert neben der EXE; Beta nutzt %APPDATA%\\VidCoder-Beta.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "VidCoder"
+      ],
+      "WingetId": "RandomEngy.VidCoder",
+      "Confidence": "medium",
+      "Sources": [
+        "https://vidcoder.net/Documentation/Installation.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/r/RandomEngy/VidCoder"
+      ]
+    },
+    {
+      "Id": "App_Nmap",
+      "Name": "Nmap / Zenmap",
+      "Detect": "^Nmap",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "ZENMAP",
+          "Path": "{PROFILE}\\.zenmap"
+        }
+      ],
+      "Transfer": "Zenmap-Benutzerdateien: Scan-Profile (scan_profile.usp), zuletzt verwendete Scans, Konfiguration.",
+      "NotTransfer": "Npcap (Treiber) wird von der Nmap-Installation neu installiert, nicht kopieren. Gespeicherte Scan-Ergebnisse liegen an frei gewählten Orten.",
+      "License": "kostenlos (Nmap Public Source License)",
+      "CloseProcess": [
+        "zenmap",
+        "nmap"
+      ],
+      "WingetId": "Insecure.Nmap",
+      "Confidence": "high",
+      "Sources": [
+        "https://nmap.org/book/zenmap-files.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/i/Insecure/Nmap"
+      ]
+    },
+    {
+      "Id": "App_StandardNotes",
+      "Name": "Standard Notes",
+      "Detect": "^Standard Notes",
+      "Transfer": "Nichts: Notizen kommen nach der Anmeldung aus dem Konto (Sync). Lokale Sicherungen sind frei wählbare Dateien.",
+      "NotTransfer": "Lokale Electron-Daten unter %APPDATA%\\Standard Notes enthalten Sitzungsdaten/Verschlüsselungsschlüssel der Anmeldung; nicht kopieren.",
+      "License": "Konto (kostenlos / Abo)",
+      "After": [
+        "Am neuen PC anmelden; ggf. zuvor Backup über Standard Notes (Datei > Sicherung) erstellen."
+      ],
+      "CloseProcess": [
+        "Standard Notes"
+      ],
+      "WingetId": "StandardNotes.StandardNotes",
+      "Confidence": "medium",
+      "Sources": [
+        "https://standardnotes.com/help/14",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/s/StandardNotes/StandardNotes"
+      ],
+      "Note": "Bewusst ohne Items. Datenpfad %APPDATA%\\Standard Notes aus GitHub-Issues (standardnotes/desktop #323, per Suche gesehen); Aussage zu Sitzungsdaten/Schlüsseln sinngemäß aus dem Programmaufbau, nicht ausdrücklich belegt."
+    },
+    {
+      "Id": "App_Zulip",
+      "Name": "Zulip",
+      "Detect": "^Zulip",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Zulip\\config"
+        }
+      ],
+      "Transfer": "Serverliste (domain.json), Zertifikate (certificates.json), App-Einstellungen im Ordner config.",
+      "NotTransfer": "Anmelde-Sitzungen (Electron-Cookies) werden bewusst nicht kopiert; neu anmelden.",
+      "License": "kostenlos (Apache 2.0)",
+      "After": [
+        "An jedem Server neu anmelden."
+      ],
+      "CloseProcess": [
+        "Zulip"
+      ],
+      "WingetId": "Zulip.Zulip",
+      "Confidence": "medium",
+      "Sources": [
+        "https://github.com/zulip/zulip-desktop/blob/master/app/main/index.ts",
+        "https://github.com/zulip/zulip-desktop/issues/1215",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/z/Zulip/Zulip"
+      ],
+      "Note": "Pfad %APPDATA%\\Zulip\\config laut Suchtreffern im Zulip-Desktop-Repository (GitHub-Issues/Quellcode), die Seiten selbst enthielten keinen Keyword-Treffer beim Abruf."
+    },
+    {
+      "Id": "App_Linphone",
+      "Name": "Linphone",
+      "Detect": "^Linphone",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{LOCALAPPDATA}\\linphone",
+          "XD": [
+            "logs"
+          ]
+        }
+      ],
+      "Transfer": "Konfiguration linphonerc (SIP-Konten, Einstellungen), linphone.conf, Kontakte/Verlauf.",
+      "NotTransfer": "SIP-Kennwörter/Authentifizierungsdaten stehen in linphonerc (Speicherform nicht belegt) – vertraulich behandeln. Ältere Versionen nutzten %APPDATA%\\Linphone.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "SIP-Registrierung prüfen."
+      ],
+      "CloseProcess": [
+        "linphone"
+      ],
+      "WingetId": "BelledonneCommunications.Linphone",
+      "Confidence": "medium",
+      "Sources": [
+        "https://wiki.linphone.org/xwiki/wiki/public/view/Linphone/Desktop%20application%20Files%20Tree/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/b/BelledonneCommunications/Linphone"
+      ],
+      "Note": "XD 'logs' vorsorglich, Ordnername nicht belegt."
+    },
+    {
+      "Id": "App_RealVNCViewer",
+      "Name": "RealVNC VNC Viewer",
+      "Detect": "^(RealVNC )?VNC Viewer",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "STORE",
+          "Path": "{APPDATA}\\RealVNC\\ViewerStore"
+        }
+      ],
+      "Transfer": "Adressbuch/Verbindungseinträge des VNC Viewer (6.x).",
+      "NotTransfer": "Gespeicherte Kennwörter: Speicherform nicht belegt, ggf. nicht übertragbar. Offiziell: Datei > Verbindungen exportieren/importieren. Ältere Versionen: %APPDATA%\\RealVNC\\VNC Viewer.",
+      "License": "kostenlos (Viewer)",
+      "After": [
+        "Alternativ: File > Export connections / Import connections."
+      ],
+      "CloseProcess": [
+        "vncviewer"
+      ],
+      "WingetId": "RealVNC.VNCViewer",
+      "Confidence": "medium",
+      "Sources": [
+        "https://help.realvnc.com/hc/en-us/community/posts/4417500798353-Sharing-VNC-Viewer-connections-between-all-users-of-a-windows-pc",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/r/RealVNC/VNCViewer"
+      ]
+    },
+    {
+      "Id": "App_BleachBit",
+      "Name": "BleachBit",
+      "Detect": "^BleachBit",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\BleachBit",
+          "XD": [
+            "Cache",
+            "logs"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (bleachbit.ini): Auswahl der Reinigungsoptionen, Whitelist, eigene Cleaner.",
+      "NotTransfer": "Portable-Version liest bleachbit.ini aus dem Programmordner (Herstellerangabe).",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "bleachbit"
+      ],
+      "WingetId": "BleachBit.BleachBit",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.bleachbit.org/forum/which-files-are-current-settings-stored",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/b/BleachBit/BleachBit"
+      ],
+      "Note": "Pfad %APPDATA%\\BleachBit\\bleachbit.ini aus Suchtreffern (GitHub-Issues bleachbit/bleachbit #1889, #1661); Herstellerforum belegt nur die Portable-Variante."
+    },
+    {
+      "Id": "App_WinDirStat",
+      "Name": "WinDirStat",
+      "Detect": "^WinDirStat",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\WinDirStat"
+        }
+      ],
+      "Transfer": "Einstellungen (Fensterposition, Sprache, Scan-Optionen, Spalten).",
+      "NotTransfer": "Portable-Modus nutzt WinDirStat.ini neben der EXE statt der Registry.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "WinDirStat"
+      ],
+      "WingetId": "WinDirStat.WinDirStat",
+      "Confidence": "medium",
+      "Sources": [
+        "https://windirstat.dev/technical.html",
+        "https://samibs.github.io/Registry-Keys-for-Open-Source-Applications-on-Windows/windirstat/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/w/WinDirStat/WinDirStat"
+      ],
+      "Note": "Der Schlüssel HKCU\\Software\\WinDirStat stammt aus dem Suchtreffer der Projektseite windirstat.dev (Abruf per curl nicht möglich) und einer Drittseite; ältere Versionen nutzten laut Drittseite einen anderen Schlüssel."
+    },
+    {
+      "Id": "App_MarkText",
+      "Name": "MarkText",
+      "Detect": "^MarkText",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\marktext",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "logs"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (preferences.json), Tastenkürzel (keybindings.json), Datenwörterbuch, Fensterzustand.",
+      "NotTransfer": "Im Portable-Modus liegt alles in marktext-user-data neben der EXE.",
+      "License": "kostenlos (MIT)",
+      "CloseProcess": [
+        "MarkText"
+      ],
+      "WingetId": "MarkText.MarkText",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/marktext/marktext/11c8cc1e1929a7975df39fa5f4503130fef53547/docs/APPLICATION_DATA_DIRECTORY.md",
+        "https://github.com/marktext/marktext/blob/11c8cc1e/docs/PREFERENCES.md",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/MarkText/MarkText"
+      ],
+      "Note": "XD-Ordner sind übliche Electron-Caches, nicht einzeln belegt."
+    },
+    {
+      "Id": "App_NetBeans",
+      "Name": "Apache NetBeans",
+      "Detect": "^(Apache )?NetBeans",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "USERDIR",
+          "Path": "{APPDATA}\\NetBeans"
+        }
+      ],
+      "Transfer": "Benutzerverzeichnis (userdir, je Version ein Unterordner): Einstellungen, Tastenkürzel, Plugins, Projekt-Verlauf.",
+      "NotTransfer": "Hersteller rät vom blinden Kopieren eines kompletten userdir zwischen Versionen ab; besser Tools > Options > Import bzw. exportierte Einstellungen (ZIP). JDK-Pfade (netbeans_jdkhome) und Plugins prüfen.",
+      "License": "kostenlos (Apache 2.0)",
+      "After": [
+        "Gleiche NetBeans-Version installieren oder Tools > Options > Import nutzen.",
+        "JDK-Pfad prüfen."
+      ],
+      "CloseProcess": [
+        "netbeans64",
+        "netbeans"
+      ],
+      "WingetId": "Apache.NetBeans",
+      "Confidence": "medium",
+      "Sources": [
+        "https://github.com/apache/netbeans/blob/master/nb/ide.launcher/netbeans.conf",
+        "https://docs.oracle.com/netbeans/nb82/netbeans/NBDAG/working_nbeans.htm",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/Apache/NetBeans"
+      ],
+      "Note": "Die Ordner-Unterstruktur je Version (z. B. NetBeans\\<Version>) ist nach Regel zusammengefasst (übergeordneter Ordner)."
+    },
+    {
+      "Id": "App_QtCreator",
+      "Name": "Qt Creator",
+      "Detect": "^Qt ?Creator",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\QtProject"
+        }
+      ],
+      "Transfer": "Einstellungen (QtCreator.ini), Kits, Qt-Versionen (qtversion.xml), Toolchains (toolChains.xml), Debugger, Sitzungen.",
+      "NotTransfer": "Kits/Toolchains verweisen auf absolute Pfade: Qt-Installation und Compiler müssen am neuen PC gleich liegen, sonst Kits neu erkennen.",
+      "License": "kostenlos (Open Source) / kommerzielle Lizenz (Qt-Konto)",
+      "After": [
+        "Kits unter Einstellungen > Kits prüfen."
+      ],
+      "CloseProcess": [
+        "qtcreator"
+      ],
+      "WingetId": "TheQtCompanyLtd.QtCreator",
+      "Confidence": "medium",
+      "Sources": [
+        "https://doc.qt.io/qtcreator/creator-how-to-find-settings-files.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/TheQtCompanyLtd/QtCreator"
+      ],
+      "Note": "Detect: ARP-Name 'Qt Creator' laut winget; der Ordner QtProject wird auch von anderen Qt-Anwendungen (z. B. Qt Designer) genutzt."
+    },
+    {
+      "Id": "App_Lazarus",
+      "Name": "Lazarus",
+      "Detect": "^Lazarus",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{LOCALAPPDATA}\\lazarus"
+        }
+      ],
+      "Transfer": "Primäres Konfigurationsverzeichnis: Umgebungsoptionen, Editor-/Code-Vorlagen (.dci), Pakete, Compiler-Pfade.",
+      "NotTransfer": "Compiler- und Lazarus-Pfade in den Optionen sind absolut: Installationspfad am neuen PC gleich wählen oder Pfade anpassen.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Pfade unter Tools > Optionen > Umgebung prüfen."
+      ],
+      "CloseProcess": [
+        "lazarus"
+      ],
+      "WingetId": "Lazarus.Lazarus",
+      "Confidence": "high",
+      "Sources": [
+        "https://wiki.freepascal.org/pcp",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/l/Lazarus/Lazarus"
+      ],
+      "Note": "Wiki-Seite pcp per curl gelesen: Standardordner unter Windows Vista und höher ist C:\\Users\\USERNAME\\AppData\\Local\\lazarus."
+    },
+    {
+      "Id": "App_DigiKam",
+      "Name": "digiKam",
+      "Detect": "^digiKam",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "RC",
+          "Path": "{LOCALAPPDATA}",
+          "Filter": [
+            "digikamrc",
+            "digikam_systemrc"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\digikam"
+        }
+      ],
+      "Transfer": "Hauptkonfiguration (digikamrc, digikam_systemrc) sowie interne Daten (Deep-Learning-Modelle) unter %APPDATA%\\digikam. Die SQLite-Datenbanken liegen im Sammlungsordner (z. B. Bilder\\digikam4.db) und gehen mit dem Profil mit.",
+      "NotTransfer": "Bei MySQL/MariaDB-Datenbank bleiben Zugangsdaten und Server separat. Pfade zu Sammlungen müssen am neuen PC identisch sein.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Datenbankeinstellungen unter Einstellungen > digiKam einrichten prüfen."
+      ],
+      "CloseProcess": [
+        "digikam"
+      ],
+      "WingetId": "KDE.digiKam",
+      "Confidence": "medium",
+      "Sources": [
+        "https://docs.digikam.org/en/getting_started/installation.html",
+        "https://docs.digikam.org/en/setup_application/database_settings.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/k/KDE/digiKam"
+      ]
+    },
+    {
+      "Id": "App_Aseprite",
+      "Name": "Aseprite",
+      "Detect": "^Aseprite",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Aseprite"
+        }
+      ],
+      "Transfer": "Einstellungen (aseprite.ini), Erweiterungen, Skripte, Paletten, Tastenkürzel im Konfigurationsordner.",
+      "NotTransfer": "Lizenz bzw. Steam-Bibliothek separat; Lizenzdatei-Übertragung vom Hersteller nicht beschrieben.",
+      "License": "Kauf (Aseprite/Steam), nicht belegt wie übertragbar",
+      "CloseProcess": [
+        "aseprite"
+      ],
+      "Confidence": "medium",
+      "Sources": [
+        "https://aseprite.com/docs/preferences-folder/"
+      ],
+      "Note": "Kein winget-Paket gefunden. Steam-Version: Eintrag ggf. nicht in 'Programme und Features'."
+    },
+    {
+      "Id": "App_Octave",
+      "Name": "GNU Octave",
+      "Detect": "^(GNU )?Octave",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\octave"
+        },
+        {
+          "Type": "Files",
+          "Name": "RC",
+          "Path": "{PROFILE}",
+          "Filter": [
+            ".octaverc"
+          ]
+        }
+      ],
+      "Transfer": "Persönliche Startdateien octaverc (%APPDATA%\\octave) und .octaverc im Benutzerordner; Octave-Oberflächeneinstellungen im selben Konfigurationsordner (nicht einzeln belegt).",
+      "NotTransfer": "Installierte Octave-Pakete (pkg) liegen in einem eigenen Paketverzeichnis und müssen am neuen PC erneut installiert werden.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Benötigte Pakete mit 'pkg install' erneut installieren."
+      ],
+      "CloseProcess": [
+        "octave",
+        "octave-gui"
+      ],
+      "WingetId": "GNU.Octave",
+      "Confidence": "medium",
+      "Sources": [
+        "https://docs.octave.org/latest/Startup-Files.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/g/GNU/Octave"
+      ],
+      "Note": "Aussage zu GUI-Einstellungen und Paketverzeichnis nicht aus der Quelle belegt (Ordner octave unter %APPDATA% ist laut Octave-Doku das Konfigurationsverzeichnis)."
+    },
+    {
+      "Id": "App_Strawberry",
+      "Name": "Strawberry Music Player",
+      "Detect": "^Strawberry($|\\s)",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Strawberry\\Strawberry"
+        },
+        {
+          "Type": "Files",
+          "Name": "DB",
+          "Path": "{LOCALAPPDATA}\\Strawberry\\Strawberry",
+          "Filter": [
+            "strawberry.db"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (Registry) und Bibliotheks-/Wiedergabelisten-Datenbank (strawberry.db).",
+      "NotTransfer": "Zugangsdaten für Streamingdienste/Last.fm nicht geprüft; Musikordner-Pfade müssen gleich bleiben.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Sammlung neu scannen, falls Pfade abweichen."
+      ],
+      "CloseProcess": [
+        "strawberry"
+      ],
+      "Confidence": "medium",
+      "Sources": [
+        "https://forum.strawberrymusicplayer.org/topic/371/no-config-file-on-windows"
+      ],
+      "Note": "Antwort des Projektentwicklers im Strawberry-Forum. Kein winget-Paket in winget-pkgs gefunden (nur 'StrawberryPerl', anderes Programm)."
+    },
+    {
+      "Id": "App_Tiled",
+      "Name": "Tiled",
+      "Detect": "^Tiled",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\SOFTWARE\\mapeditor.org\\Tiled"
+        }
+      ],
+      "Transfer": "Programmeinstellungen und zuletzt verwendete Dateien/Layout (Registry).",
+      "NotTransfer": "Bei Portable-Betrieb mit tiled.ini neben der EXE werden die Einstellungen dort gespeichert.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "tiled"
+      ],
+      "WingetId": "Tiled.Tiled",
+      "Confidence": "high",
+      "Sources": [
+        "https://docs.mapeditor.org/en/stable/manual/preferences/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/Tiled/Tiled"
+      ]
+    },
+    {
+      "Id": "App_GNUEmacs",
+      "Name": "GNU Emacs",
+      "Detect": "^(GNU )?Emacs",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "EMACSD",
+          "Path": "{APPDATA}\\.emacs.d"
+        },
+        {
+          "Type": "Files",
+          "Name": "EMACS",
+          "Path": "{APPDATA}",
+          "Filter": [
+            ".emacs"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "HOMEEMACSD",
+          "Path": "{PROFILE}\\.emacs.d"
+        },
+        {
+          "Type": "Files",
+          "Name": "HOMEEMACS",
+          "Path": "{PROFILE}",
+          "Filter": [
+            ".emacs"
+          ]
+        }
+      ],
+      "Transfer": "Init-Dateien (.emacs bzw. .emacs.d\\init.el), installierte Pakete (elpa), eigene Lisp-Dateien, Verlauf.",
+      "NotTransfer": "Ob %APPDATA% oder %USERPROFILE% als HOME dient, hängt von der Umgebungsvariable HOME ab (nicht gesetzt: %APPDATA%). Native Pakete (z. B. mit Compiler) ggf. neu bauen.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Mit C-h v user-init-file prüfen, welche Init-Datei geladen wird."
+      ],
+      "CloseProcess": [
+        "emacs",
+        "runemacs"
+      ],
+      "WingetId": "GNU.Emacs",
+      "Confidence": "medium",
+      "Sources": [
+        "https://doc.emacsen.de/efaq-w32/location-of-init-file.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/g/GNU/Emacs"
+      ],
+      "Note": "Quelle ist eine Kopie der GNU-Emacs-FAQ für Windows (doc.emacsen.de), keine gnu.org-Seite. Beide HOME-Varianten sind als Items eingetragen."
+    },
+    {
+      "Id": "App_LiteXL",
+      "Name": "Lite XL",
+      "Detect": "^Lite[ -]XL",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{PROFILE}\\.config\\lite-xl"
+        }
+      ],
+      "Transfer": "Benutzerkonfiguration: init.lua, Plugins, Farbschemata im Ordner .config\\lite-xl.",
+      "NotTransfer": "Liegt ein Ordner 'user' neben lite-xl.exe (Portable-Betrieb), hat dieser Vorrang.",
+      "License": "kostenlos (MIT)",
+      "CloseProcess": [
+        "lite-xl"
+      ],
+      "WingetId": "LiteXLTeam.LiteXL",
+      "Confidence": "high",
+      "Sources": [
+        "https://lite-xl.github.io/user-guide/configuration/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/l/LiteXLTeam/LiteXL"
+      ]
+    },
+    {
+      "Id": "App_UltraVNCViewer",
+      "Name": "UltraVNC",
+      "Detect": "^UltraVNC",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "VIEWER",
+          "Path": "{APPDATA}\\UltraVNC",
+          "Filter": [
+            "options.vnc"
+          ]
+        }
+      ],
+      "Transfer": "Viewer-Standardoptionen (options.vnc) aus %APPDATA%\\UltraVNC.",
+      "NotTransfer": "Server-Konfiguration (ultravnc.ini im Programmordner, Passwörter) und Dienst bewusst nicht erfasst. Liegt options.vnc neben vncviewer.exe (beschreibbarer Ordner), hat diese Datei Vorrang.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "vncviewer"
+      ],
+      "WingetId": "uvncbvba.UltraVNC",
+      "Confidence": "medium",
+      "Sources": [
+        "https://github.com/ultravnc/UltraVNC/blob/857e8de5/vncviewer/VNCOptions.cpp",
+        "https://forum.uvnc.com/viewtopic.php?p=100233",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/u/uvncbvba/UltraVNC"
+      ],
+      "Note": "Pfad %APPDATA%\\UltraVNC aus Quellcode vncviewer/VNCOptions.cpp (Suchtreffer bestätigt, Abruf bestätigt options.vnc)."
+    },
+    {
+      "Id": "App_Mendeley",
+      "Name": "Mendeley Reference Manager",
+      "Detect": "^Mendeley",
+      "Transfer": "Nichts: Bibliothek (Referenzen, Sammlungen, Dateien, Annotationen) kommt nach der Anmeldung aus der Mendeley-Cloud.",
+      "NotTransfer": "Lokale Dateien (u. a. %APPDATA%\\Mendeley Reference Manager\\userfiles) werden neu geladen; Offline-Dateien am neuen PC erneut herunterladen.",
+      "License": "Konto (Elsevier/Mendeley, kostenlos)",
+      "After": [
+        "Auf dem alten PC synchronisieren, am neuen PC installieren und mit demselben Konto anmelden."
+      ],
+      "CloseProcess": [
+        "Mendeley Reference Manager"
+      ],
+      "WingetId": "Elsevier.MendeleyReferenceManager",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.elsevier.support/mendeley/news/how-do-i-migrate-from-the-original-mendeley-desktop-to-mendeley-reference-manager",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/e/Elsevier/MendeleyReferenceManager"
+      ],
+      "Note": "Bewusst ohne Items (Cloud-Bibliothek). Seite des Herstellers (Elsevier Support) wurde im Suchergebnis gelesen; direkter Abruf per curl lieferte keine Inhalte. Das ältere Mendeley Desktop ist eingestellt."
+    },
+    {
+      "Id": "App_SonicPi",
+      "Name": "Sonic Pi",
+      "Detect": "^Sonic Pi",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{PROFILE}\\.sonic-pi",
+          "XD": [
+            "log"
+          ]
+        }
+      ],
+      "Transfer": "Benutzerordner .sonic-pi: config\\init.rb (Startcode), Einstellungen, Beispiel-/Benutzercode-Daten (ohne Logs).",
+      "NotTransfer": "Eigene Arbeitsdateien (.rb) liegen meist in Dokumenten und gehen mit dem Profil mit.",
+      "License": "kostenlos (MIT)",
+      "CloseProcess": [
+        "sonic-pi"
+      ],
+      "WingetId": "SonicPi.SonicPi",
+      "Confidence": "medium",
+      "Sources": [
+        "https://in-thread.sonic-pi.net/t/init-rb-file-location/5972",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/s/SonicPi/SonicPi"
+      ],
+      "Note": "XD 'log' nicht belegt (üblicher Ordnername); Quelle ist das offizielle Sonic-Pi-Forum (in_thread)."
+    },
+    {
+      "Id": "App_Scilab",
+      "Name": "Scilab",
+      "Detect": "^Scilab",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "SCIHOME",
+          "Path": "{APPDATA}\\Scilab"
+        }
+      ],
+      "Transfer": "SCIHOME je Version (Unterordner): Einstellungen, Verlauf, Startdatei scilab.ini bzw. .scilab.",
+      "NotTransfer": "Toolboxen (ATOMS) liegen im SCIHOME der jeweiligen Version; Versionsnummer am neuen PC möglichst gleich halten.",
+      "License": "kostenlos (GPL/CeCILL)",
+      "After": [
+        "Nach Versionswechsel Toolboxen über ATOMS neu installieren."
+      ],
+      "CloseProcess": [
+        "WScilex",
+        "Scilex",
+        "scilab"
+      ],
+      "WingetId": "Scilab.Scilab",
+      "Confidence": "high",
+      "Sources": [
+        "https://help.scilab.org/docs/2023.0.0/en_US/SCIHOME.html",
+        "https://help.scilab.org/docs/2026.1.0/en_US/startup.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/s/Scilab/Scilab"
+      ],
+      "Note": "Versionierter Unterordner (SCIHOME\\<Version>) zusammengefasst auf den übergeordneten Ordner %APPDATA%\\Scilab."
+    },
+    {
+      "Id": "App_WxMaxima",
+      "Name": "wxMaxima",
+      "Detect": "^(wx)?Maxima",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\wxMaxima"
+        }
+      ],
+      "Transfer": "wxMaxima-Einstellungen (Registry), enthalten Fensterlayout, Zeichenformat, Pfade.",
+      "NotTransfer": "Die Maxima-Installation selbst und Pfade zu Zusatzpaketen müssen am neuen PC vorhanden sein.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "wxmaxima"
+      ],
+      "WingetId": "MaximaTeam.Maxima",
+      "Confidence": "high",
+      "Sources": [
+        "https://raw.githubusercontent.com/wxMaxima-developers/wxmaxima/main/info/wxmaxima.md",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/MaximaTeam/Maxima"
+      ],
+      "Note": "WingetId MaximaTeam.Maxima installiert Maxima inkl. wxMaxima; der Anzeigename im Installer-Eintrag ist ggf. 'Maxima' – Detect deckt beides ab."
+    },
+    {
+      "Id": "App_Pencil2D",
+      "Name": "Pencil2D",
+      "Detect": "^Pencil2D",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Pencil2D\\Pencil2D"
+        }
+      ],
+      "Transfer": "Programmeinstellungen (Registry, QSettings).",
+      "NotTransfer": "Zeichnungen (.pclx) liegen an frei gewählten Orten, meist in Dokumenten.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "pencil2d"
+      ],
+      "WingetId": "Pencil2D.Pencil",
+      "Confidence": "medium",
+      "Sources": [
+        "https://discuss.pencil2d.org/t/windows-10-how-to-restore-default-pencil2d-settings/1148",
+        "https://dev.pencil2d.org/pencilsettings_8cpp_source.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/Pencil2D/Pencil"
+      ]
+    },
+    {
+      "Id": "App_Betterbird",
+      "Name": "Betterbird",
+      "Detect": "^Betterbird",
+      "Transfer": "Nichts zusätzlich: Betterbird nutzt laut Hersteller dieselben Profilordner wie Thunderbird (%APPDATA%\\Thunderbird); die Übertragung erfolgt über den bereits erfassten Thunderbird-Eintrag.",
+      "NotTransfer": "Passwörter/Zertifikate liegen im Profil (key4.db/logins.json); ohne Master-Passwort übertragbar, mit Master-Passwort nur mit diesem Passwort.",
+      "License": "kostenlos",
+      "After": [
+        "Betterbird starten und mit Help > Troubleshooting Information > about:profiles das Profil prüfen."
+      ],
+      "CloseProcess": [
+        "betterbird"
+      ],
+      "WingetId": "Betterbird.Betterbird",
+      "Confidence": "medium",
+      "Sources": [
+        "https://blog.betterbird.eu/2025/12/mozilla-profiles",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/b/Betterbird/Betterbird"
+      ],
+      "Note": "Bewusst ohne Items, um den Thunderbird-Ordner nicht doppelt zu kopieren. Hinweis: Manche Installationen sollen laut Nutzerberichten %APPDATA%\\Betterbird nutzen (nicht herstellerbelegt). Aussage zu key4.db/logins.json entspricht allgemeinem Mozilla-Profilaufbau."
+    },
+    {
+      "Id": "App_Mailspring",
+      "Name": "Mailspring",
+      "Detect": "^Mailspring",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Mailspring",
+          "XD": [
+            "files"
+          ]
+        }
+      ],
+      "Transfer": "Datenordner: config.json (Konten, Einstellungen, Signaturen). Der Hersteller beschreibt das Kopieren des kompletten Ordners; der Mail-Cache (edgehill.db) und die Anhänge (Ordner files) werden vom Server neu aufgebaut.",
+      "NotTransfer": "Kennwörter und Anmelde-Token sind mit einem Schlüssel verschlüsselt, der nur am alten PC existiert (Herstellerangabe) – nicht übertragbar; jedes Konto muss neu verbunden werden.",
+      "License": "kostenlos / Pro-Abo (Mailspring ID)",
+      "After": [
+        "Mailspring starten, bei Mailspring ID anmelden, unter Preferences > Accounts jedes Konto mit 'Reconnect' neu verbinden."
+      ],
+      "CloseProcess": [
+        "mailspring",
+        "mailsync"
+      ],
+      "WingetId": "Foundry376.Mailspring",
+      "Confidence": "high",
+      "Sources": [
+        "https://www.getmailspring.com/docs/moving-mailspring-to-a-new-computer",
+        "https://www.getmailspring.com/docs/mail-storage-location",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/f/Foundry376/Mailspring"
+      ],
+      "Note": "edgehill.db lässt sich über XD nicht ausschließen (Datei); kann bei Bedarf weggelassen werden."
+    },
+    {
+      "Id": "App_Bandizip",
+      "Name": "Bandizip",
+      "Detect": "^Bandizip",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Bandizip"
+        }
+      ],
+      "Transfer": "Benutzereinstellungen (Registry). Hersteller-Weg: Erweiterte Einstellungen > 'Export Bandizip Settings' erzeugt eine REG-Datei.",
+      "NotTransfer": "Maschinenweite Einstellungen (HKLM\\Software\\Bandizip) und Registrierungs-/Lizenzdaten (Bandizip Standard/Enterprise) separat.",
+      "License": "kostenlos (Standard) / Lizenz (Professional/Enterprise)",
+      "After": [
+        "Alternativ den Export/Import des Herstellers verwenden (Bandizip vorher schließen)."
+      ],
+      "CloseProcess": [
+        "Bandizip"
+      ],
+      "WingetId": "Bandisoft.Bandizip",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.bandisoft.com/bandizip/help/how-to-export-bandizip-settings/",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/b/Bandisoft/Bandizip"
+      ],
+      "Note": "Registry-Schlüssel HKCU\\Software\\Bandizip aus Suchergebnis (AppDeployNews), Herstellerseite beschreibt Export als REG-Datei."
+    },
+    {
+      "Id": "App_TwinkleTray",
+      "Name": "Twinkle Tray",
+      "Detect": "^Twinkle Tray",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\twinkle-tray",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "logs"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (settings.json), erkannte Monitore (known-displays.json).",
+      "NotTransfer": "Monitor-IDs gelten nur für gleiche Monitore; neue Monitore werden neu erkannt (known-displays ggf. veraltet).",
+      "License": "kostenlos (MIT)",
+      "After": [
+        "Bei anderen Monitoren Zuordnung in den Einstellungen prüfen."
+      ],
+      "CloseProcess": [
+        "Twinkle Tray"
+      ],
+      "WingetId": "xanderfrangos.twinkletray",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/xanderfrangos/twinkle-tray/master/src/electron.js",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/x/xanderfrangos/twinkletray"
+      ],
+      "Note": "Pfad %APPDATA%\\twinkle-tray aus Quellcode (app.getPath('userData'), App-Name twinkle-tray); XD sind übliche Electron-Caches. Store-/Portable-Version nutzt andere Pfade."
+    },
+    {
+      "Id": "App_RocketChat",
+      "Name": "Rocket.Chat Desktop",
+      "Detect": "^Rocket\\.Chat",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Rocket.Chat",
+          "Filter": [
+            "config.json",
+            "overridden-settings.json"
+          ]
+        }
+      ],
+      "Transfer": "Serverliste und App-Einstellungen (config.json), Admin-Overrides (overridden-settings.json).",
+      "NotTransfer": "Anmeldesitzungen (Chromium-Cookies, verschlüsselt mit Windows-Anmeldedaten/DPAPI) bleiben bewusst unberücksichtigt; an jedem Server neu anmelden.",
+      "License": "kostenlos (MIT)",
+      "After": [
+        "An jedem Rocket.Chat-Server neu anmelden."
+      ],
+      "CloseProcess": [
+        "Rocket.Chat"
+      ],
+      "WingetId": "RocketChat.RocketChat",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/RocketChat/Rocket.Chat.Electron/master/docs/corporate-certificate-configuration.md",
+        "https://raw.githubusercontent.com/RocketChat/Rocket.Chat.Electron/master/src/app/main/persistence.ts",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/r/RocketChat/RocketChat"
+      ],
+      "Note": "Pfad aus der Projektdoku; config.json als Standarddatei von electron-store (Quellcode persistence.ts, Dateiname nicht ausdrücklich im Code gelesen); Cookie-Aussage allgemeines Chromium-Verhalten."
+    },
+    {
+      "Id": "App_Kiwix",
+      "Name": "Kiwix",
+      "Detect": "^Kiwix",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "LIB",
+          "Path": "{APPDATA}\\kiwix-desktop",
+          "Filter": [
+            "library.xml",
+            "library.bookmarks.xml",
+            "kiwix-desktop.session"
+          ]
+        }
+      ],
+      "Transfer": "Lokale Bibliothek (library.xml), Lesezeichen (library.bookmarks.xml) und Sitzungsdaten (kiwix-desktop.session).",
+      "NotTransfer": "Heruntergeladene ZIM-Dateien liegen standardmäßig im selben Ordner (sehr groß, bewusst nicht kopiert); library.xml verweist darauf – ZIM-Dateien neu laden oder separat kopieren. Portable-Modus (.portable-Datei) nutzt Ordner neben der EXE.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "ZIM-Dateien am neuen PC erneut herunterladen oder in den Kiwix-Ordner kopieren."
+      ],
+      "CloseProcess": [
+        "kiwix-desktop"
+      ],
+      "Confidence": "high",
+      "Sources": [
+        "https://github.com/kiwix/kiwix-desktop/wiki/Data-and-Configuration-Files"
+      ],
+      "Note": "Kein winget-Paket für Kiwix Desktop gefunden (nur KiwixJS/WikiMed). Detect ^Kiwix ohne Gewähr, ob der Installer-Eintrag so heißt."
+    },
+    {
+      "Id": "App_Ardour",
+      "Name": "Ardour",
+      "Detect": "^Ardour",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG8",
+          "Path": "{LOCALAPPDATA}\\Ardour8",
+          "XD": [
+            "tmp"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "CFG9",
+          "Path": "{LOCALAPPDATA}\\Ardour9",
+          "XD": [
+            "tmp"
+          ]
+        }
+      ],
+      "Transfer": "Benutzerkonfigurationsordner (je Hauptversion): Einstellungen, Lua-Skripte, Plug-in-Listen, Tastenkürzel.",
+      "NotTransfer": "Sitzungen/Projekte liegen in frei gewählten Ordnern (meist Dokumente). Plug-ins (VST3/LV2) separat installieren.",
+      "License": "Kauf/Abo (Ardour, 'pay what you want' für Installer)",
+      "After": [
+        "Plug-in-Suche (Plugin Manager) neu ausführen."
+      ],
+      "CloseProcess": [
+        "Ardour8",
+        "Ardour9"
+      ],
+      "Confidence": "medium",
+      "Sources": [
+        "https://manual.ardour.org/appendix/files-and-directories/"
+      ],
+      "Note": "Handbuch nennt %localappdata%\\Ardour<Hauptversion> (Beispiel Ardour5). Ardour8 laut Suchtreffer; Ardour9 nach Versionsschema, nicht ausdrücklich belegt. XD 'tmp' nicht belegt. Kein winget-Paket gefunden; Prozessnamen vermutet."
+    },
+    {
+      "Id": "App_Tenacity",
+      "Name": "Tenacity",
+      "Detect": "^Tenacity",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "PROFILE",
+          "Path": "{APPDATA}\\Tenacity"
+        }
+      ],
+      "Transfer": "Gesamter Benutzerprofilordner: tenacity.cfg, Voreinstellungen, Plug-in-Einstellungen, Tastenkürzel.",
+      "NotTransfer": "Sicherungs-/Temp-Daten werden neu erzeugt; Projekte (.aup3) liegen an frei gewählten Orten.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "tenacity"
+      ],
+      "WingetId": "TenacityTeam.Tenacity",
+      "Confidence": "high",
+      "Sources": [
+        "https://tenacityaudio.org/docs/_content/Preferences.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/TenacityTeam/Tenacity"
+      ]
+    },
+    {
+      "Id": "App_TeXworks",
+      "Name": "TeXworks",
+      "Detect": "^TeXworks",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\TUG\\TeXworks"
+        }
+      ],
+      "Transfer": "Einstellungen (Registry, QSettings): Fensterlayout, Editor-/Vorschau-Optionen, Tools-Konfiguration, zuletzt verwendete Dateien.",
+      "NotTransfer": "Im Portable-Betrieb (Ini-Datei) liegen Einstellungen in einer Ini-Datei statt in der Registry; TeX-Distribution (MiKTeX/TeX Live) separat installieren.",
+      "License": "kostenlos (GPL)",
+      "After": [
+        "Pfade zur TeX-Distribution unter Bearbeiten > Einstellungen > Tools prüfen."
+      ],
+      "CloseProcess": [
+        "texworks"
+      ],
+      "WingetId": "TUG.TeXworks",
+      "Confidence": "medium",
+      "Sources": [
+        "https://raw.githubusercontent.com/TeXworks/texworks/master/src/TWApp.cpp",
+        "https://raw.githubusercontent.com/TeXworks/texworks/master/src/Settings.cpp",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/TUG/TeXworks"
+      ],
+      "Note": "Registry-Schlüssel aus Quellcode abgeleitet (Organisation 'TUG', Anwendung 'TeXworks', QSettings-Standardformat unter Windows = Registry, Settings::isStoredInRegistry); nicht ausdrücklich in der Dokumentation genannt."
+    },
+    {
+      "Id": "App_LosslessCut",
+      "Name": "LosslessCut",
+      "Detect": "^LosslessCut",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\LosslessCut",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "logs"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen und Tastenkürzel (config.json).",
+      "NotTransfer": "Bei Portable-Betrieb mit config.json neben der EXE oder Start mit --config-dir liegt die Konfiguration woanders.",
+      "License": "kostenlos (GPL)",
+      "CloseProcess": [
+        "LosslessCut"
+      ],
+      "WingetId": "ch.LosslessCut",
+      "Confidence": "medium",
+      "Sources": [
+        "https://github.com/mifi/lossless-cut/blob/250622bf/installation.md",
+        "https://raw.githubusercontent.com/mifi/lossless-cut/master/docs/cli.md",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/c/ch/LosslessCut"
+      ],
+      "Note": "XD-Ordner sind übliche Electron-Caches, nicht einzeln belegt."
+    },
+    {
+      "Id": "App_PSPad",
+      "Name": "PSPad",
+      "Detect": "^PSPad",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\PSPad"
+        }
+      ],
+      "Transfer": "Konfiguration im Ordner %APPDATA%\\PSPad: PSPad.ini, Recent.ini (zuletzt geöffnet), Syntax-/Projekt-Einstellungen.",
+      "NotTransfer": "Portable PSPad speichert Ini-Dateien im Programmordner.",
+      "License": "kostenlos (Freeware)",
+      "After": [
+        "Pfad unter Programmeinstellungen > Sicherung prüfen."
+      ],
+      "CloseProcess": [
+        "PSPad"
+      ],
+      "WingetId": "JanFiala.PSPad.x64",
+      "Confidence": "high",
+      "Sources": [
+        "https://www.mail-archive.com/forum@pspad.com/msg49835.html",
+        "https://www.mail-archive.com/forum@pspad.com/msg47330.html",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/j/JanFiala/PSPad/x64"
+      ],
+      "Note": "Quellen: Antworten des Entwicklers (Jan Fiala) im PSPad-Forum, per Mailarchiv gelesen. WingetId: x64-Paket; für x86 JanFiala.PSPad.x86."
+    },
+    {
+      "Id": "App_PodmanDesktop",
+      "Name": "Podman Desktop",
+      "Detect": "^Podman Desktop",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CFG",
+          "Path": "{PROFILE}\\.local\\share\\containers\\podman-desktop\\configuration"
+        }
+      ],
+      "Transfer": "Benutzereinstellungen (settings.json) im Konfigurationsordner.",
+      "NotTransfer": "Podman-Maschinen/WSL-Distributionen, Container, Images und Volumes sind nicht enthalten (neu erstellen/pullen); Registry-Zugangsdaten nicht geprüft.",
+      "License": "kostenlos (Apache 2.0)",
+      "After": [
+        "Podman-Maschine neu anlegen und Images erneut ziehen."
+      ],
+      "CloseProcess": [
+        "Podman Desktop"
+      ],
+      "WingetId": "RedHat.Podman-Desktop",
+      "Confidence": "high",
+      "Sources": [
+        "https://podman-desktop.io/docs/configuration/settings-reference",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/r/RedHat/Podman-Desktop"
+      ]
+    },
+    {
+      "Id": "App_Stremio",
+      "Name": "Stremio",
+      "Detect": "^Stremio",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "SRV",
+          "Path": "{APPDATA}\\stremio\\stremio-server",
+          "Filter": [
+            "server-settings.json"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen der Streaming-Engine (server-settings.json: BitTorrent-Parameter, Cache-Ort).",
+      "NotTransfer": "Konto, Addons und Bibliothek kommen nach der Anmeldung aus dem Stremio-Konto; Cache-Ordner (cacheRoot) wird neu aufgebaut. Dort gespeicherte Oberflächeneinstellungen der App liegen im Webview-Speicher (nicht belegt).",
+      "License": "kostenlos (Konto)",
+      "After": [
+        "Mit Stremio-Konto anmelden."
+      ],
+      "CloseProcess": [
+        "stremio",
+        "stremio-runtime"
+      ],
+      "WingetId": "Stremio.Stremio",
+      "Confidence": "medium",
+      "Sources": [
+        "https://blog.stremio.com/modify-bittorrent-settings/",
+        "https://github.com/Stremio/stremio-shell/blob/master/WINDOWS.md",
+        "https://github.com/microsoft/winget-pkgs/tree/master/manifests/s/Stremio/Stremio"
+      ],
+      "Note": "Quelle ist der offizielle Stremio-Blog; nur die Server-Einstellungsdatei ist belegt. Prozessnamen aus Programmverhalten."
     }
   ]
 }
