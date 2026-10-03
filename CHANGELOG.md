@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.0.79 - 2026-10-03
+### Programm-Katalog
+- rund 100 neue Eintraege (Pfade aus Hersteller-Doku bzw. Quellcode recherchiert, als *ungeprueft* markiert), u. a. Brave, Vivaldi, LibreWolf, Git, GitHub Desktop/CLI, Windows Terminal, PowerToys, Everything, VeraCrypt, KiCad, QGIS, Blender, FreeCAD, PrusaSlicer, Cura, Bambu Studio, Krita, MuseScore, OpenBoard, Wireshark, VirtualBox, JetBrains-IDEs, DBeaver, HeidiSQL, MobaXterm, RustDesk, Citrix Workspace
+- Chrome/Edge: gespeicherte Kennwoerter und Cookies stehen jetzt unter *nicht uebertragbar* (an Windows-Konto und PC gebunden)
+- Citavi (Einstellungen 6/7), GeoGebra Classic 5, Untis (Lizenz in der .gpn), SMART (Produktschluessel zurueckgeben) ergaenzt
+- Geraete-Identitaeten werden absichtlich nicht kopiert (RustDesk-ID, Syncthing-Schluessel, Chrome-Remotedesktop-Host)
+### Behoben
+- Backup loeschen: Backups in einem OneDrive-Ordner liessen sich nicht vollstaendig loeschen (*Zugriff verweigert* bei Unterordnern) - OneDrive-Ordner wurden wie Verknuepfungen behandelt
+
 ## v2.0.78 - 2026-10-03
 ### Geaendert
 - App-Updates: neue Standard-Ausnahmen *Autodesk.Fusion* (aktualisiert sich selbst; WinGet meldet OK, die Version bleibt aber gleich) und *Microsoft.WSL* (ueber WinGet nicht aktualisierbar - als Administrator `wsl --update`). Bestehende Standorte bekommen neue Standard-Ausnahmen einmalig dazu; selbst geloeschte kommen nicht wieder

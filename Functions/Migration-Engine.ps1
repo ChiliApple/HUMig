@@ -360,7 +360,9 @@ namespace HMFs
                     if (n == "." || n == "..") continue;
                     string full = dir + "\\" + n;
                     bool isDir = (fd.dwFileAttributes & 0x10) != 0;
-                    bool reparse = (fd.dwFileAttributes & 0x400) != 0;
+                    // nur echte Verknuepfungen (Junction 0xA0000003, Symlink 0xA000000C) als Link behandeln - OneDrive-/Cloud-Ordner
+                    // tragen ebenfalls das Reparse-Attribut (Tag 0x9000xx1A), sind aber normale Ordner mit Inhalt
+                    bool reparse = (fd.dwFileAttributes & 0x400) != 0 && (fd.r0 == 0xA0000003u || fd.r0 == 0xA000000Cu);
                     if (isDir && !reparse)
                     {
                         Walk(full, rootLen, bad, max, delete);
