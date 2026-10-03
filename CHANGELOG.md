@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.80 - 2026-10-03
+### Behoben
+- Backup loeschen in einem OneDrive-Ordner: der zuletzt geleerte Backup-Ordner meldete *Zugriff verweigert* (OneDrive haelt ihn kurz offen) - HUMig wiederholt das Entfernen bis ca. 5 Sekunden und wertet ein bereits vorgemerktes Loeschen als erfolgreich
+
 ## v2.0.79 - 2026-10-03
 ### Programm-Katalog
 - rund 100 neue Eintraege (Pfade aus Hersteller-Doku bzw. Quellcode recherchiert, als *ungeprueft* markiert), u. a. Brave, Vivaldi, LibreWolf, Git, GitHub Desktop/CLI, Windows Terminal, PowerToys, Everything, VeraCrypt, KiCad, QGIS, Blender, FreeCAD, PrusaSlicer, Cura, Bambu Studio, Krita, MuseScore, OpenBoard, Wireshark, VirtualBox, JetBrains-IDEs, DBeaver, HeidiSQL, MobaXterm, RustDesk, Citrix Workspace

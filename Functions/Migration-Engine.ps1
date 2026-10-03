@@ -342,7 +342,7 @@ namespace HMFs
             root = root.TrimEnd('\\');
             List<string> bad = new List<string>();
             Walk(root, root.Length, bad, max, true);
-            if (bad.Count == 0 && !RemoveDirectoryW(L(root))) bad.Add("(Backup-Ordner) " + Err(Marshal.GetLastWin32Error()));
+            if (bad.Count == 0) { int e = RemoveDir(root); if (e != 0) bad.Add("(Backup-Ordner) " + Err(e)); }
             return bad.ToArray();
         }
 
@@ -369,7 +369,7 @@ namespace HMFs
                         if (delete && bad.Count == 0)
                         {
                             SetFileAttributesW(L(full), 0x10);
-                            if (!RemoveDirectoryW(L(full))) bad.Add(Rel(full, rootLen) + @"\ (" + Err(Marshal.GetLastWin32Error()) + ")");
+                            int e = RemoveDir(full); if (e != 0) bad.Add(Rel(full, rootLen) + @"\ (" + Err(e) + ")");
                         }
                     }
                     else if (delete)
@@ -388,6 +388,23 @@ namespace HMFs
                 } while (FindNextFileW(h, out fd));
             }
             finally { FindClose(h); }
+        }
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern uint GetFileAttributesW(string n);
+        // Ordner entfernen; OneDrive/Virenscanner halten einen gerade geleerten Ordner oft kurz offen (Zugriff verweigert) -> bis ca. 5 s wiederholen.
+        // Ist der Ordner danach weg (Loeschen war nur vorgemerkt), gilt das als Erfolg. Rueckgabe: 0 = OK, sonst Win32-Fehler
+        static int RemoveDir(string full)
+        {
+            int err = 0;
+            for (int i = 0; i < 20; i++)
+            {
+                if (RemoveDirectoryW(L(full))) return 0;
+                err = Marshal.GetLastWin32Error();
+                if (err == 2 || err == 3) return 0;
+                if (err != 5 && err != 32 && err != 145) return err;
+                System.Threading.Thread.Sleep(250);
+            }
+            if (GetFileAttributesW(L(full)) == 0xFFFFFFFFu) return 0;
+            return err;
         }
         static string Rel(string p, int rootLen) { return p.Length > rootLen ? p.Substring(rootLen).TrimStart('\\') : p; }
     }
