@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.89 - 2026-10-03
+### Dokumentation
+- Anleitung: neuer Abschnitt *Ein Programm auf Mitnahme pruefen* (Schritt fuer Schritt: erkennen, nur dieses Modul sichern, Protokoll lesen, am Test-Benutzer/in der Windows-Sandbox zurueckspielen, Rueckmeldung, als Administrator *Geprueft am* setzen)
+- (enthaelt v2.0.88: Rueckmeldung-Knoepfe, E-Mail-Rueckmeldung)
+
 ## v2.0.88 - 2026-10-03
 ### Neu
 - Gelber Knopf **Rueckmeldung** im Reiter *Backup* (ungepruefte Eintraege der erkannten Programme) und **Rueckmeldung zu Programmen** im Reiter *Restore* (ungepruefte Eintraege des markierten Backups): vorausgefuellte Liste je Programm (passt / fehlte / falscher Pfad)
