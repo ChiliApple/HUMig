@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.78 - 2026-10-03
+### Geaendert
+- App-Updates: neue Standard-Ausnahmen *Autodesk.Fusion* (aktualisiert sich selbst; WinGet meldet OK, die Version bleibt aber gleich) und *Microsoft.WSL* (ueber WinGet nicht aktualisierbar - als Administrator `wsl --update`). Bestehende Standorte bekommen neue Standard-Ausnahmen einmalig dazu; selbst geloeschte kommen nicht wieder
+
 ## v2.0.77 - 2026-10-03
 ### Behoben
 - App-Updates: beim zweiten Versuch im Benutzerkonto (v2.0.76) fehlte die Ergebniszeile in der Konsole - das Ergebnis des ersten Versuchs (als SYSTEM) blockierte die Anzeige

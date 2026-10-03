@@ -32,6 +32,14 @@ function Get-HMAuConfig {
     if ($all -and $all.Locations -and $all.Locations.PSObject.Properties[$loc]) { $mine = $all.Locations.$loc }
     $src = if ($mine -and $null -ne $mine.Sources) { @($mine.Sources) } elseif ($def) { @($def.Sources) } else { @('winget') }
     $exc = if ($mine -and $null -ne $mine.Exclude) { @($mine.Exclude) } elseif ($def) { @($def.Exclude) } else { @() }
+    # spaeter hinzugekommene Standard-Ausnahmen einmalig ergaenzen; Defaults = Standard-Muster, die der Standort schon kennt (geloeschte kommen nicht wieder)
+    if ($mine -and $null -ne $mine.Exclude -and $def) {
+        $known = if ($mine.PSObject.Properties['Defaults']) { @($mine.Defaults | ForEach-Object { "$_".Trim() }) } else { @($def.Exclude | Where-Object { $_ -and -not "$($_.Since)".Trim() } | ForEach-Object { "$($_.Pattern)".Trim() }) }
+        foreach ($d in @($def.Exclude | Where-Object { $_ -and "$($_.Pattern)".Trim() })) {
+            $p = "$($d.Pattern)".Trim()
+            if ($known -notcontains $p -and -not @($exc | Where-Object { $_ -and "$($_.Pattern)".Trim() -eq $p }).Count) { $exc = @($exc) + @($d) }
+        }
+    }
     return [pscustomobject]@{
         Location = $loc
         Sources = @($src | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
@@ -43,7 +51,8 @@ function Save-HMAuConfig($Sources, $Exclude) {
     $all = Read-JsonFile $script:AuCfgFile
     $locs = [ordered]@{}
     if ($all -and $all.Locations) { foreach ($p in $all.Locations.PSObject.Properties) { $locs[$p.Name] = $p.Value } }
-    $locs[(Get-HMAuLocation)] = [ordered]@{ Sources = @($Sources); Exclude = @($Exclude | ForEach-Object { [ordered]@{ Pattern = "$($_.Pattern)"; Reason = "$($_.Reason)" } }) }
+    $def = Read-JsonFile $script:AuDefFile
+    $locs[(Get-HMAuLocation)] = [ordered]@{ Sources = @($Sources); Exclude = @($Exclude | ForEach-Object { [ordered]@{ Pattern = "$($_.Pattern)"; Reason = "$($_.Reason)" } }); Defaults = @($(if ($def) { @($def.Exclude | Where-Object { $_ -and "$($_.Pattern)".Trim() } | ForEach-Object { "$($_.Pattern)".Trim() }) })) }
     Write-JsonFile $script:AuCfgFile ([pscustomobject][ordered]@{
             _Info = 'App-Updates: Quellen und Ausnahmen je Standort (vom Reiter App-Updates gepflegt).'
             IncludeUnknown = [bool]$ui.chkAuUnknown.IsChecked
