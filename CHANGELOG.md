@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.83 - 2026-10-03
+### Behoben
+- Update/Pull: liefert der Download-Link von GitHub einen Fehler (z.B. *503 Server nicht verfuegbar*), werden Pruefsummen- und Signaturdatei ueber die GitHub-API geladen (gleiche Datei, Echtheit weiter ueber Signatur geprueft)
+
 ## v2.0.82 - 2026-10-03
 ### Programm-Katalog
 - WinSCP: WinSCP.ini ist eine Datei in AppData (war als Ordner eingetragen und ging nicht mit)
