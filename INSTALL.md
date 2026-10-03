@@ -9,6 +9,12 @@
 4. **Benutzer-Modus** fuer Benutzer ohne Administratorrechte: **HUMig-Benutzer.exe** (wird zusammen mit HUMig.exe erzeugt) oder **Start-Benutzer.cmd**.
    Der Backup-Ordner muss fuer diese Benutzer beschreibbar sein; wer welche Backups sehen darf, regeln die Ordnerrechte.
 
+## Ordnerrechte (wichtig auf Servern und gemeinsam genutzten PCs)
+HUMig laeuft als Administrator. Liegt der Tool-Ordner z. B. unter `C:\Tools`, duerfen normale Benutzer dort standardmaessig Dateien anlegen.
+HUMig prueft das beim Start und bietet an abzusichern: Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen; `Logs` und ein
+Backup-Ordner im Tool-Ordner bleiben fuer den Benutzer-Modus beschreibbar (nur eigene Dateien). Pruefen: `icacls C:\Tools\HUMig`.
+HUMig nicht im persoenlichen Ordner (OneDrive, Desktop) eines Benutzers betreiben, wenn es dort als Administrator gestartet wird.
+
 ## USMT (optional)
 Noetig fuer das Modul *Windows-Einstellungen (USMT)* - und damit auch fuer den **Restore auf einen neuen PC, auf dem der Benutzer noch kein Profil hat**: LoadState legt das Profil an (Domaenenkonten). Ohne USMT muss sich der Benutzer vorher einmal am Ziel-PC anmelden, sonst werden die Benutzer-Module uebersprungen. Einrichten: Werkzeug *USMT einrichten (ADK)* oder siehe `BIN\LIESMICH.txt`.
 
@@ -30,7 +36,14 @@ Kopiert wird bevorzugt ueber die Admin-Freigabe `C$` (Robocopy, deutlich schnell
 
 ## Server-Backup
 Am Hyper-V-Host bzw. Server als Administrator starten; Feature *Windows Server-Sicherung* noetig (installierbar aus dem Reiter).
+Eine USB-Platte, die schon anders genutzt wird, kann ohne Formatieren uebernommen werden (*Platte einrichten* > *Uebernehmen*, aendert nur die Bezeichnung).
 Geplante Sicherungen laufen als Aufgabe unter `\HUMig` in der Aufgabenplanung (SYSTEM) - der Tool-Ordner muss dafuer lokal am Host liegen oder fuer SYSTEM lesbar sein.
+
+## App-Updates (WinGet)
+Reiter *App-Updates*, HUMig als Administrator. Am Ziel-PC noetig: WinGet (App Installer; Windows 10 1809+/11, Server 2025), Internet
+(PowerShell Gallery fuer das Modul `Microsoft.WinGet.Client`, GitHub fuer PowerShell 7 und viele Installer). Andere PCs ueber
+PowerShell-Remoting (WinRM). Ohne angemeldeten Benutzer und fuer den Zeitplan legt HUMig eine eigene PowerShell 7 unter
+`C:\Program Files\HUMig\PowerShell7` ab (offizielles ZIP, Pruefsumme geprueft), sofern kein MSI-PowerShell vorhanden ist.
 
 ## Update
 Button **Update** laedt die neueste Version im Kanal (Pull.ps1): **Stabil** (Standard, freigegebene Versionen) oder **Test** (Einstellungen > Update).
