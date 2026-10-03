@@ -521,6 +521,8 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
         $x = $st.Names["$pc|$($p[1])"]
         if (-not $x) { return }
         if ($p[0] -eq 'START') {
+            # zweiter Versuch desselben Programms (z.B. im Benutzerkonto nach SYSTEM): Ergebnis wieder anzeigen
+            if ($st.Logged.ContainsKey("$pc|$($p[1])")) { $st.Logged.Remove("$pc|$($p[1])"); if ($st.Done -gt 0) { $st.Done-- } }
             $st.Job.Status = "$($st.Done + 1)/$($st.Total): $($x.Name)$(if ($st.Multi) { " ($pc)" })"
             $st.Job.Progress = [int]($st.Done * 100 / $st.Total)
             Write-HMLog $st.Job "  $pre$($x.Name) ($($x.Id))$(if ($x.Installed -or $x.Available) { ": $($x.Installed) -> $($x.Available)" }) ..." 'Info'

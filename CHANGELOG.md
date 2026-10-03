@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.77 - 2026-10-03
+### Behoben
+- App-Updates: beim zweiten Versuch im Benutzerkonto (v2.0.76) fehlte die Ergebniszeile in der Konsole - das Ergebnis des ersten Versuchs (als SYSTEM) blockierte die Anzeige
+
 ## v2.0.76 - 2026-10-03
 ### Behoben
 - App-Updates: meldet WinGet als SYSTEM *kein installiertes Paket gefunden* (0x8A150014, z. B. WSL - Paket ist nur im Benutzerkonto sichtbar), versucht HUMig dasselbe Programm automatisch noch einmal im Konto des angemeldeten Benutzers
