@@ -567,6 +567,41 @@ function Get-HMUserProfiles {
     }
 }
 
+# Vermerk fuer von HUMig geladene Benutzer-Registry (NTUSER.DAT): %ProgramData%\HUMig\HiveMounts\<SID>.txt am Ziel-PC
+# (Rechner|PID|Startzeit des ladenden HUMig, Zeitpunkt). Wird HUMig hart beendet (Task-Manager, Absturz), bleibt der Hive geladen
+# und der Benutzer bekommt bei der Anmeldung ein temporaeres Profil -> beim naechsten Start bzw. vor dem naechsten Laden entladen.
+# Entladen nur, wenn: Vermerk vorhanden, Hive geladen, Benutzer NICHT angemeldet und das ladende HUMig nicht mehr laeuft.
+$script:HMHiveCleanupText = @'
+$md = Join-Path $env:ProgramData 'HUMig\HiveMounts'
+if (-not (Test-Path -LiteralPath $md)) { return }
+$logged = @(foreach ($p in @(Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue)) {
+        try { "$((Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid -ErrorAction Stop).Sid)" } catch { } })
+foreach ($f in @(Get-ChildItem -LiteralPath $md -Filter '*.txt' -File -ErrorAction SilentlyContinue)) {
+    $s = $f.BaseName
+    if ($s -notmatch '^S-1-[0-9-]+$') { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue; continue }
+    if (-not (Test-Path -LiteralPath "Registry::HKEY_USERS\$s")) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue; continue }
+    if ($logged -contains $s) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue; "Benutzer-Registry ${s}: Benutzer angemeldet - bleibt geladen (gehoert jetzt der Anmeldung)"; continue }
+    # laeuft das HUMig noch, das den Hive geladen hat? (Rechner|PID|Startzeit)
+    $m = "$(Get-Content -LiteralPath $f.FullName -TotalCount 1 -ErrorAction SilentlyContinue)".Split('|')
+    if ($m.Count -ge 3 -and $m[0] -ieq $env:COMPUTERNAME) {
+        $pr = Get-Process -Id ([int]$m[1]) -ErrorAction SilentlyContinue
+        if ($pr) { $st = ''; try { $st = $pr.StartTime.ToString('yyyyMMddHHmmss') } catch { }; if ($st -eq $m[2]) { continue } }
+    } else {
+        # von einem anderen PC aus geladen (Fernzugriff): ob dort HUMig noch laeuft, ist hier nicht pruefbar -> erst nach 24 h als verwaist behandeln
+        if (((Get-Date) - $f.LastWriteTime).TotalHours -lt 24) { continue }
+    }
+    [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+    $o = & reg.exe unload "HKU\$s" 2>&1
+    if ($LASTEXITCODE -eq 0) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue; "Benutzer-Registry $s war nach einem Abbruch noch geladen - jetzt entladen" }
+    else { "Benutzer-Registry $s ist noch geladen (von einem abgebrochenen Vorgang), Entladen fehlgeschlagen: $o - Neustart des PCs vor der Anmeldung dieses Benutzers" }
+}
+'@
+function Clear-HMStaleHives([hashtable]$Ctx) {
+    $sb = [scriptblock]::Create($script:HMHiveCleanupText)
+    if ($Ctx) { return @(Invoke-HMTarget $Ctx { param($t) & ([scriptblock]::Create($t)) } @($script:HMHiveCleanupText)) }
+    return @(& $sb)
+}
+
 function Test-HMHiveLoaded([hashtable]$Ctx, [string]$Sid) {
     return [bool](Invoke-HMTarget $Ctx { param($s) Test-Path -LiteralPath "Registry::HKEY_USERS\$s" } @($Sid))
 }
@@ -574,15 +609,24 @@ function Test-HMHiveLoaded([hashtable]$Ctx, [string]$Sid) {
 # Hive des Benutzers unter HKU\<SID> verfuegbar machen (laden, wenn nicht angemeldet)
 function Mount-HMHive {
     param([hashtable]$Ctx, $Job, [string]$Sid, [string]$ProfilePath)
+    # zuerst verwaiste, von einem abgebrochenen HUMig geladene Hives entladen (sonst wuerde ein solcher als 'angemeldet' gelten)
+    try { foreach ($l in @(Clear-HMStaleHives $Ctx | Where-Object { $_ })) { Write-HMLog $Job "$l" 'Warning' } } catch { }
     if (Test-HMHiveLoaded $Ctx $Sid) { Write-HMLog $Job "Benutzer-Registry ist geladen (Benutzer angemeldet)" 'Debug'; return $true }
+    $st0 = ''; try { $st0 = (Get-Process -Id $PID).StartTime.ToString('yyyyMMddHHmmss') } catch { }
+    $mark = "$env:COMPUTERNAME|$PID|$st0|$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
     $r = Invoke-HMTarget $Ctx {
-        param($s, $pp)
+        param($s, $pp, $mk)
         $dat = Join-Path $pp 'NTUSER.DAT'
         if (-not (Test-Path -LiteralPath $dat)) { return "FEHLER: $dat nicht gefunden" }
         $out = & reg.exe load "HKU\$s" "$dat" 2>&1
         if ($LASTEXITCODE -ne 0) { return "FEHLER: reg load: $out" }
+        try {
+            $md = Join-Path $env:ProgramData 'HUMig\HiveMounts'
+            New-Item -ItemType Directory -Path $md -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $md "$s.txt") -Value $mk -Encoding ASCII
+        } catch { }
         return 'OK'
-    } @($Sid, $ProfilePath)
+    } @($Sid, $ProfilePath, $mark)
     if ("$r" -eq 'OK') {
         $Ctx.HiveMountedBy = $Sid
         Write-HMLog $Job "Benutzer-Registry (NTUSER.DAT) geladen: HKU\$Sid" 'Debug'
@@ -601,7 +645,7 @@ function Dismount-HMHive {
         for ($i = 1; $i -le 5; $i++) {
             [GC]::Collect(); [GC]::WaitForPendingFinalizers()
             $out = & reg.exe unload "HKU\$s" 2>&1
-            if ($LASTEXITCODE -eq 0) { return 'OK' }
+            if ($LASTEXITCODE -eq 0) { Remove-Item -LiteralPath (Join-Path $env:ProgramData "HUMig\HiveMounts\$s.txt") -Force -ErrorAction SilentlyContinue; return 'OK' }
             Start-Sleep -Seconds 2
         }
         return "FEHLER: $out"
@@ -2193,6 +2237,8 @@ function Restore-HMFolderItem {
         foreach ($s in $syncs) { $xd += (Join-Path $src $s.Rel) }
     }
     $rc = Invoke-HMRobocopy -Job $Job -Source $src -Dest $dst -Files $files -XD $xd -NoRecurse:$noRec -ExcludeOlder:([bool]$Ctx.Options.KeepNewer) -Threads $Ctx.Threads -LogFile $Ctx.RoboLog
+    # wiederhergestellte Ordner im Profil des Zielbenutzers merken -> danach Besitzer auf den Benutzer setzen (Repair-HMRestoredOwner)
+    if ($null -ne $Ctx.RestoredUserDirs -and $Ctx.ProfilePath -and "$dstLocal".StartsWith("$($Ctx.ProfilePath)".TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { [void]$Ctx.RestoredUserDirs.Add("$dstLocal") }
     $st = switch ($rc.Level) { 'OK' { 'OK' } 'Warning' { 'Warning' } 'Cancel' { 'Cancel' } default { 'Error' } }
     $msg = "{0} Dateien, {1} -> {2}" -f $rc.FilesTotal, (Format-HMSize $rc.BytesTotal), $dstLocal
     if ($Ctx.Options.KeepNewer -and $rc.FilesCopied -lt $rc.FilesTotal) { $msg += " ($($rc.FilesCopied) kopiert, neuere/gleiche am Ziel behalten)" }
@@ -2565,8 +2611,65 @@ function Invoke-HMPostRestore {
 # ----------------------------------------------------------------------------
 # Hauptablauf Restore
 # ----------------------------------------------------------------------------
+# Nach dem Restore: Besitzer der wiederhergestellten Ordner im Profil auf den Zielbenutzer setzen (kopiert hat der Administrator -
+# Besitzer waere sonst 'Administratoren'; stoert z.B. SSH StrictModes, manche Browser-Profile, Lizenzpruefungen). Rechte (ACL) bleiben
+# unveraendert - kein pauschales Grant. Danach Schreibprobe ueber die ACL: Desktop, AppData\Roaming, ein wiederhergestellter Programm-Ordner.
+function Repair-HMRestoredOwner([hashtable]$Ctx, $Job, [hashtable]$TEnv) {
+    if ($Ctx.UserMode -or -not $Ctx.UserSid -or $null -eq $Ctx.RestoredUserDirs -or -not $Ctx.RestoredUserDirs.Count) { return }
+    $dirs = @($Ctx.RestoredUserDirs | Select-Object -Unique | Sort-Object Length)
+    $top = New-Object System.Collections.Generic.List[string]
+    foreach ($d in $dirs) { if (-not @($top | Where-Object { $d.StartsWith($_.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) -or $d -ieq $_ }).Count) { $top.Add($d) } }
+    $app = @($top | Where-Object { $TEnv.APPDATA -and $_.StartsWith("$($TEnv.APPDATA)".TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1)
+    $probe = @((Join-Path $Ctx.ProfilePath 'Desktop'), "$($TEnv.APPDATA)") + $app | Where-Object { $_ } | Select-Object -Unique
+    Write-HMLog $Job "Besitzer der wiederhergestellten Profil-Ordner auf $($Ctx.Account) setzen ($($top.Count) Ordner) ..." 'Info'
+    $r = Invoke-HMTarget $Ctx {
+        param($dirs, $sid, $acct, $probe)
+        $who = if ("$acct".Trim()) { "$acct" } else { "*$sid" }
+        $ok = 0; $bad = @()
+        foreach ($d in @($dirs)) {
+            if (-not (Test-Path -LiteralPath $d)) { continue }
+            $o = & icacls.exe "$d" /setowner "$who" /T /C /Q 2>&1
+            if ($LASTEXITCODE -eq 0) { $ok++ } else { $bad += "${d}: $(@($o | Where-Object { "$_".Trim() }) | Select-Object -First 2)" }
+        }
+        "OWN|$ok|$(@($dirs).Count)"
+        foreach ($b in $bad) { "OWNERR|$b" }
+        # Schreibrecht des Benutzers laut ACL (eigene SID + Jeder, Authentifizierte, Interaktiv, Benutzer, Besitzerrechte); Verweigern hat Vorrang
+        $grp = @($sid, 'S-1-1-0', 'S-1-5-11', 'S-1-5-4', 'S-1-5-32-545', 'S-1-3-4')
+        foreach ($p in @($probe)) {
+            if (-not (Test-Path -LiteralPath $p)) { "PROBE|$p|fehlt"; continue }
+            $allow = $false; $deny = $false; $owner = ''
+            try {
+                $a = Get-Acl -LiteralPath $p
+                try { $owner = (New-Object System.Security.Principal.NTAccount($a.Owner)).Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { }
+                foreach ($e in @($a.Access)) {
+                    $es = ''; try { $es = $e.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $es = "$($e.IdentityReference)" }
+                    if ($grp -notcontains $es) { continue }
+                    if (([int]$e.FileSystemRights -band 2) -eq 0) { continue }   # 2 = WriteData / Dateien erstellen
+                    if ("$($e.AccessControlType)" -eq 'Deny') { $deny = $true } else { $allow = $true }
+                }
+            } catch { "PROBE|$p|nicht lesbar: $($_.Exception.Message)"; continue }
+            "PROBE|$p|$(if ($allow -and -not $deny) { 'ja' } else { 'NEIN' })|$(if ($owner -eq $sid) { 'Besitzer ok' } else { 'Besitzer: ' + $a.Owner })"
+        }
+    } @($top.ToArray(), $Ctx.UserSid, "$($Ctx.Account)", $probe)
+    $warn = $false
+    foreach ($l in @($r | Where-Object { $_ })) {
+        $x = "$l".Split('|')
+        switch ($x[0]) {
+            'OWN' { Write-HMLog $Job "   Besitzer gesetzt: $($x[1]) von $($x[2]) Ordner(n) (Rechte unveraendert)" $(if ([int]$x[1] -lt [int]$x[2]) { 'Warning' } else { 'Success' }) }
+            'OWNERR' { $warn = $true; Write-HMLog $Job "   Besitzer nicht gesetzt: $($x[1..($x.Count - 1)] -join '|')" 'Warning' }
+            'PROBE' {
+                if ($x[2] -eq 'fehlt') { Write-HMLog $Job "   Schreibprobe $(ConvertFrom-HMPath $x[1]): Ordner fehlt" 'Debug'; break }
+                if ($x[2] -eq 'NEIN') { $warn = $true }
+                Write-HMLog $Job "   Schreibrecht des Benutzers $(ConvertFrom-HMPath $x[1]): $($x[2])$(if ($x.Count -gt 3) { " - $($x[3])" })" $(if ($x[2] -eq 'ja') { 'Success' } else { 'Warning' })
+            }
+        }
+    }
+    if ($warn) { Write-HMLog $Job '   Hinweis: Der Benutzer kann evtl. nicht in alle wiederhergestellten Ordner schreiben - Rechte pruefen (Eigenschaften > Sicherheit)' 'Warning' }
+}
+
 function Start-HMRestore {
     param([hashtable]$Ctx, $Job)
+    $Ctx.RestoredUserDirs = New-Object System.Collections.Generic.List[string]
     $start = Get-Date
     $Ctx.IsRemote = -not (Test-HMIsLocal $Ctx.Computer)
     if (-not $Ctx.IsRemote) { $Ctx.Computer = $env:COMPUTERNAME }
@@ -2657,6 +2760,8 @@ function Start-HMRestore {
         if (@($Ctx.DesktopIconLines).Count) {
             Add-HMLogonAction $Ctx ("# Desktop-Symbolpositionen setzen (wartet, bis der Desktop wieder da ist)`r`nStart-Sleep -Seconds 4; if (-not (Get-Process -Name explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }`r`n" + (Get-HMDesktopIconsCode 'Load' '' '' $Ctx.DesktopIconLines))
         }
+        # Besitzer der wiederhergestellten Profil-Ordner = Zielbenutzer (auch nach Abbruch fuer das bereits Kopierte)
+        try { Repair-HMRestoredOwner $Ctx $Job $tenv } catch { Write-HMLog $Job "Besitzer/Rechte: $($_.Exception.Message)" 'Warning' }
         if (-not (Test-HMCancel $Job)) {
             if ($Ctx.HiveReady) { Register-HMLogonTask $Ctx $Job }
             Write-HMLog $Job 'Nacharbeiten' 'Info'

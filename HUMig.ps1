@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.69'
+$script:Version   = '2.0.70'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -1820,6 +1820,11 @@ $script:Window.Add_ContentRendered({
     }
     $script:Window.Activate() | Out-Null
     if (-not $script:AclChecked) { $script:AclChecked = $true; try { Test-HMAppFolderSecurity } catch { } }
+    # Benutzer-Registry, die ein hart beendetes HUMig an diesem PC geladen gelassen hat, entladen (nur wenn der Benutzer nicht angemeldet ist)
+    if ($isAdmin -and -not $script:UserMode -and -not $script:HiveChecked) {
+        $script:HiveChecked = $true
+        try { foreach ($l in @(Clear-HMStaleHives $null | Where-Object { $_ })) { Out-Console "$l" 'Warning' } } catch { }
+    }
 })
 
 Initialize-HMUiScale

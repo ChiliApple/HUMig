@@ -281,6 +281,7 @@ Reiter **App-Updates** (neben *Werkzeuge*, HUMig als Administrator): installiert
 - Taskleisten- und Startmenue-Pins unter Windows 11 nur eingeschraenkt
 - USMT: keine Migration zwischen AD- und Entra-ID-Geraeten (laut Microsoft)
 - OneDrive/SharePoint: Standard = auslassen (Cloud); Nur-Cloud-Dateien werden auch mit Option nie heruntergeladen
+- Restore: Besitzer der wiederhergestellten Profil-Ordner wird auf den Zielbenutzer gesetzt (Rechte unveraendert), Schreibprobe im Protokoll; nach einem harten Abbruch geladen gebliebene Benutzer-Registry wird beim naechsten Start entladen
 - Backup mit nicht gesicherten Dateien = Fehler (rot); Restore daraus nur nach ausdruecklicher Rueckfrage. Weitergefuehrtes Backup: geloeschte Dateien bleiben drin (Bericht zeigt die Anzahl)
 - Pruefsummen-Stichprobe direkt nach dem Backup = Stichprobe; die Vollpruefung macht *Backup pruefen* mit dem Katalog
 - Programm-Katalog: Pfade/Registry-Schluessel nach Herstellerangaben bzw. Erfahrung (best effort, Spalte *Geprueft*) - Lizenzdateien nur bei Programmen mit *(+ Lizenz)*, konto-/hardwaregebundene Lizenzen nie; gespeicherte Kennwoerter (DPAPI) und Store-Apps sind nicht uebertragbar
