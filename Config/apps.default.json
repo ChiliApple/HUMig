@@ -415,12 +415,15 @@
           "Key": "HKCU\\Software\\Martin Prikryl"
         },
         {
-          "Type": "Folder",
+          "Type": "Files",
           "Name": "INI",
-          "Path": "{APPDATA}\\WinSCP"
+          "Path": "{APPDATA}",
+          "Filter": [
+            "WinSCP.ini"
+          ]
         }
       ],
-      "Transfer": "Gespeicherte Verbindungen, Einstellungen",
+      "Transfer": "Gespeicherte Verbindungen, Einstellungen (Registry bzw. WinSCP.ini)",
       "License": "kostenlos",
       "Package": "winscp",
       "WingetId": "WinSCP.WinSCP"
@@ -434,12 +437,18 @@
           "Type": "Folder",
           "Name": "DATA",
           "Path": "{APPDATA}\\mRemoteNG"
+        },
+        {
+          "Type": "Folder",
+          "Name": "LOCAL",
+          "Path": "{LOCALAPPDATA}\\mRemoteNG"
         }
       ],
-      "Transfer": "Verbindungsliste (confCons.xml), Einstellungen",
+      "Transfer": "Verbindungsliste (confCons.xml) mit Sicherungen, Einstellungen (user.config)",
       "License": "kostenlos",
       "Package": "mremote",
-      "WingetId": "mRemoteNG.mRemoteNG"
+      "WingetId": "mRemoteNG.mRemoteNG",
+      "NotTransfer": "confCons.xml kann Kennwoerter enthalten - Backup vertraulich behandeln"
     },
     {
       "Id": "App_AnyDesk",
@@ -577,11 +586,26 @@
       "Id": "App_GeoGebra",
       "Name": "GeoGebra",
       "Detect": "^GeoGebra",
-      "Transfer": "Classic 5: Einstellungen (Classic 6: Materialien am GeoGebra-Konto)",
+      "Transfer": "Einstellungen (Classic 6 und 5); Materialien am GeoGebra-Konto",
       "License": "kostenlos",
       "Package": "geogebra",
       "WingetId": "GeoGebra.Classic",
       "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CLASSIC6",
+          "Path": "{APPDATA}\\GeoGebra",
+          "XD": [
+            "*Cache*",
+            "Crashpad",
+            "logs"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "CLASSIC5",
+          "Path": "{APPDATA}\\GeoGebra 5.0"
+        },
         {
           "Type": "Reg",
           "Name": "PREFS5",
@@ -1163,6 +1187,14 @@
           "Type": "Folder",
           "Name": "PEERS",
           "Path": "{APPDATA}\\RustDesk\\config\\peers"
+        },
+        {
+          "Type": "Files",
+          "Name": "SERVICE",
+          "Path": "{WINDIR}\\ServiceProfiles\\LocalService\\AppData\\Roaming\\RustDesk\\config",
+          "Filter": [
+            "RustDesk2.toml"
+          ]
         }
       ],
       "Transfer": "Server-Einstellungen (ID-/Relay-Server, Schluessel), Oberflaeche, Gegenstellen",
@@ -1170,7 +1202,7 @@
       "License": "kostenlos | Server Pro: eigene Lizenz",
       "After": [
         "RustDesk: neue ID weitergeben, dauerhaftes Kennwort neu setzen",
-        "RustDesk: als Dienst installiert liegt die Konfiguration unter C:\\Windows\\ServiceProfiles\\LocalService\\AppData\\Roaming\\RustDesk"
+        "RustDesk (als Dienst installiert): Server-Einstellungen aus dem Dienst-Profil werden mitgenommen - Restore als Administrator"
       ],
       "CloseProcess": [
         "rustdesk"
@@ -2894,16 +2926,27 @@
           "Type": "Reg",
           "Name": "REG",
           "Key": "HKCU\\Software\\Famatech\\advanced_ip_scanner"
+        },
+        {
+          "Type": "Files",
+          "Name": "FILES",
+          "Path": "{PROFILE}",
+          "Filter": [
+            "advanced_ip_scanner_*.bin"
+          ]
         }
       ],
-      "Transfer": "Einstellungen, zuletzt gescannte Bereiche (Favoriten: Datei > Favoriten speichern)",
+      "Transfer": "Einstellungen, Favoriten, Aliase, Kommentare (Registry + .bin-Dateien im Benutzerordner)",
       "NotTransfer": "gespeicherte Zugangsdaten fuer RDP/Radmin",
       "License": "kostenlos",
       "CloseProcess": [
         "advanced_ip_scanner"
       ],
       "Package": "advanced ?ip",
-      "WingetId": "Famatech.AdvancedIPScanner"
+      "WingetId": "Famatech.AdvancedIPScanner",
+      "After": [
+        "Advanced IP Scanner: Favoriten pruefen (sicherer Weg: Datei > Favoriten speichern/laden)"
+      ]
     },
     {
       "Id": "App_AngryIP",
@@ -2914,6 +2957,11 @@
           "Type": "Reg",
           "Name": "PREFS",
           "Key": "HKCU\\Software\\JavaSoft\\Prefs\\ipscan"
+        },
+        {
+          "Type": "Folder",
+          "Name": "JAVAPREFS",
+          "Path": "{PROFILE}\\.java\\.userPrefs\\ipscan"
         }
       ],
       "Transfer": "Einstellungen, Favoriten, Oeffner",
