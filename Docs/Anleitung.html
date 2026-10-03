@@ -613,8 +613,8 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h3>Konfigurationsdateien</h3>
   <table>
     <tr><th style="width:230px">Datei</th><th>Inhalt</th></tr>
-    <tr><td><code>Config\settings.json</code></td><td>alle Einstellungen inkl. Standorte</td></tr>
-    <tr><td><code>Config\apps.json</code></td><td>eigene Einträge für den Programm-Katalog</td></tr>
+    <tr><td><code>Config\settings.json</code></td><td>alle Einstellungen inkl. Standorte; <code>AclCheckOff: true</code> = Prüfung der Ordnerrechte beim Start aus (setzt <i>Abbrechen</i> in der Rückfrage)</td></tr>
+    <tr><td><code>Config\apps.json</code></td><td>eigene Einträge für den Programm-Katalog; Feld <code>WingetId</code> = WinGet-Paket-ID für <i>Fehlende Programme installieren</i>, wenn kein Paket in der Softwareverteilung liegt</td></tr>
     <tr><td><code>Config\exceptions.json</code></td><td>Ausnahmen Ordner/Dateitypen</td></tr>
     <tr><td><code>Config\modules.json</code></td><td>eigene Module und Vorlagen</td></tr>
     <tr><td><code>Config\appupdates.json</code></td><td>App-Updates: Ausnahmen und Quellen je Standort (Vorlage <code>appupdates.default.json</code>), Verlauf in <code>Config\AppUpdates\history.json</code></td></tr>
@@ -622,6 +622,16 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><code>Config\update.json</code></td><td>Update-Einstellungen: Quelle (<code>Owner</code>, <code>Repo</code>), <code>Channel</code> (<code>Stable</code>/<code>Test</code>), <code>SignerThumbprint</code> (nur eigene Quelle), <code>AllowUnsigned</code> (Signaturprüfung aus – nicht empfohlen), Entwicklung: <code>Branch</code>, <code>UseBranch</code> (nur ohne Signaturpflicht). Daneben <code>installed.json</code>: installierte Version, Kanal und Prüfung.</td></tr>
   </table>
   <p>Die <code>*.default.json</code> kommen mit jedem Update, eigene Dateien bleiben erhalten.</p>
+  <h3>Dateien von HUMig außerhalb des Tool-Ordners</h3>
+  <table>
+    <tr><th style="width:330px">Ort (am jeweiligen PC)</th><th>Inhalt</th></tr>
+    <tr><td><code>%ProgramData%\HUMig\AppUpdates\auto</code></td><td>Zeitplan der App-Updates: Skript, Einstellungen, Verlauf, Fortschritt, Protokoll</td></tr>
+    <tr><td><code>%ProgramData%\HUMig\AppUpdates\run_*</code></td><td>Austausch für einmalige WinGet-Aufgaben (wird danach gelöscht)</td></tr>
+    <tr><td><code>Programme\HUMig\PowerShell7</code></td><td>eigene PowerShell 7 für App-Updates als SYSTEM (nur wenn kein MSI-PowerShell installiert ist)</td></tr>
+    <tr><td><code>%ProgramData%\HUMig\HiveMounts</code></td><td>Vermerk, solange HUMig die Registry eines nicht angemeldeten Benutzers geladen hat (für das Aufräumen nach einem Absturz)</td></tr>
+    <tr><td><code>%LOCALAPPDATA%\HUMig\Zeitplaene</code></td><td>Backup-Zeitpläne des Benutzers</td></tr>
+    <tr><td>Aufgabenplanung <code>\HUMig\</code></td><td>Server-Backup-, Backup- und App-Updates-Zeitpläne</td></tr>
+  </table>
 </section>
 
 <section id="update">
@@ -643,7 +653,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>Eigene Quelle</td><td>Wer HUMig aus einem eigenen Repository verteilt: Fingerabdruck des eigenen Zertifikats unter Einstellungen › Update eintragen. Signieren: Rechtsklick auf <span class="ui">Update</span> › <i>Release signieren (Herausgeber)</i> – erscheint nur auf dem PC, auf dem der private Schlüssel liegt; einmalig wird ein GitHub-Token mit Schreibrecht abgefragt. Alternativ <code>Tools\Sign-HUMigRelease.ps1</code>.</td></tr>
     <tr><td>Ergebnis</td><td>Info-Fenster (Logo / <span class="ui">Info</span>): installierte Version, Kanal und Prüfung. Protokoll im Update-Fenster.</td></tr>
   </table>
-  <div class="note warn"><b class="h">Ordnerrechte</b>HUMig läuft als Administrator. Dürfen im HUMig-Ordner auch normale Benutzer Dateien anlegen (z. B. unter <code>C:\Tools</code> Standard), könnte jemand Einstellungen mit einem Nach-Skript hinterlegen. HUMig prüft das beim Start und bietet an, den Ordner abzusichern: Administratoren und SYSTEM Vollzugriff, Benutzer nur Lesen; <code>Logs</code> und ein Backup-Ordner im HUMig-Ordner bleiben für den Benutzer-Modus beschreibbar (nur eigene Dateien). <i>Abbrechen</i> = nie mehr fragen.</div>
+  <div class="note warn"><b class="h">Ordnerrechte</b>HUMig läuft als Administrator. Dürfen im HUMig-Ordner auch normale Benutzer Dateien anlegen (z. B. unter <code>C:\Tools</code> Standard), könnte jemand Einstellungen mit einem Nach-Skript hinterlegen. HUMig prüft das beim Start und bietet an, den Ordner abzusichern: Administratoren und SYSTEM Vollzugriff, Benutzer nur Lesen; <code>Logs</code> und ein Backup-Ordner im HUMig-Ordner bleiben für den Benutzer-Modus beschreibbar (nur eigene Dateien). <i>Abbrechen</i> = nie mehr fragen. Liegt HUMig im persönlichen Ordner eines Benutzers (z. B. auf seinem OneDrive-Desktop), meldet die Prüfung das zu Recht – absichern würde dort aber die Synchronisierung stören; für Server und gemeinsam genutzte PCs gehört HUMig nach <code>C:\Tools\HUMig</code> o. ä. und abgesichert.</div>
   <div class="note tip"><b class="h">Was schützt was?</b>Die Prüfsumme erkennt beschädigte oder unterwegs veränderte Downloads. Gegen ein manipuliertes Repository (z. B. missbrauchtes GitHub-Konto) hilft die Signatur – der private Schlüssel liegt nur beim Herausgeber, nie auf GitHub. HUMig prüft offline, ohne Domäne oder Internet-Dienst: Signatur gültig und Zertifikat = eingebauter Fingerabdruck.</div>
 </section>
 

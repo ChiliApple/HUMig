@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.71 - 2026-10-03
+### Dokumentation
+- INSTALL: Ordnerrechte, App-Updates (Voraussetzungen, PowerShell 7), Platte uebernehmen
+- Anleitung: Dateien von HUMig ausserhalb des Tool-Ordners, Einstellung `AclCheckOff`, Katalog-Feld `WingetId`, Hinweis zu HUMig im persoenlichen Ordner
+
 ## v2.0.70 - 2026-10-03
 ### Restore / Zuverlaessigkeit
 - Nach dem Restore wird der **Besitzer** der wiederhergestellten Profil-Ordner auf den Zielbenutzer gesetzt (vorher: Administratoren; stoerte z. B. SSH, manche Browser-Profile, Lizenzpruefungen). Rechte bleiben unveraendert (kein pauschales Grant). Danach Schreibprobe ueber die Rechte auf Desktop, AppData\Roaming und einem Programm-Ordner - Ergebnis im Protokoll
