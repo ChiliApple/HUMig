@@ -25,7 +25,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 | | |
 |---|---|
 | **Backup & Restore** | Dateien, Browser, Office, Windows-Einstellungen, Drucker, WLAN, Netzlaufwerke – Robocopy mit bis zu 128 Threads, inkrementell, mit Prüfung, **Zeitplan** (automatisch auf USB/Netz) |
-| **Programm-Katalog** | erkennt 45+ Programme, sichert deren Einstellungen, Plug-ins, Datenbanken und **Lizenzdateien** mit, schliesst Programme vorher, installiert fehlende am neuen PC nach - mit **Katalog-Editor** |
+| **Programm-Katalog** | erkennt rund 140 Programme, sichert deren Einstellungen, Plug-ins, Datenbanken und **Lizenzdateien** mit, schliesst Programme vorher, installiert fehlende am neuen PC nach - mit **Katalog-Editor** |
 | **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
 | **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung |
 | **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |

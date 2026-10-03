@@ -8,13 +8,14 @@
       "Modules": [
         "Firefox"
       ],
-      "Transfer": "Lesezeichen, Kennwoerter, Erweiterungen, Verlauf",
+      "Transfer": "Lesezeichen, Kennwoerter (logins.json + key4.db), Erweiterungen, Verlauf",
       "License": "kostenlos",
       "After": [
         "Firefox: Lesezeichen und Kennwoerter vorhanden, ggf. Firefox-Konto anmelden"
       ],
       "Package": "firefox",
-      "WingetId": "Mozilla.Firefox"
+      "WingetId": "Mozilla.Firefox",
+      "NotTransfer": "mit Hauptpasswort geschuetzte Kennwoerter nur mit diesem Passwort"
     },
     {
       "Id": "App_Chrome",
@@ -23,13 +24,14 @@
       "Modules": [
         "Chrome"
       ],
-      "Transfer": "Lesezeichen, Kennwoerter, Erweiterungen",
+      "Transfer": "Lesezeichen, Einstellungen, Erweiterungen",
       "License": "kostenlos",
       "After": [
-        "Chrome: Profil pruefen, ggf. Google-Konto neu anmelden (Kennwoerter sind an Windows-Konto gebunden)"
+        "Chrome: mit Google-Konto anmelden (Sync) bzw. exportierte Kennwoerter importieren"
       ],
       "Package": "chrome",
-      "WingetId": "Google.Chrome"
+      "WingetId": "Google.Chrome",
+      "NotTransfer": "gespeicherte Kennwoerter, Cookies, Zahlungsdaten (an Windows-Konto und PC gebunden) - vorher Chrome-Sync oder Kennwort-Export"
     },
     {
       "Id": "App_Edge",
@@ -38,11 +40,12 @@
       "Modules": [
         "Edge"
       ],
-      "Transfer": "Favoriten, Kennwoerter, Erweiterungen",
+      "Transfer": "Favoriten, Einstellungen, Erweiterungen",
       "License": "in Windows enthalten",
       "After": [
-        "Edge: mit Organisationskonto anmelden, Favoriten/Kennwoerter pruefen"
-      ]
+        "Edge: mit Organisationskonto anmelden (Sync), Favoriten pruefen"
+      ],
+      "NotTransfer": "gespeicherte Kennwoerter, Cookies (an Windows-Konto und PC gebunden) - Edge-Sync mit dem Organisationskonto verwenden"
     },
     {
       "Id": "App_Office",
@@ -510,12 +513,28 @@
       "Id": "App_Citavi",
       "Name": "Citavi",
       "Detect": "^Citavi",
-      "Transfer": "Projekte liegen in Dokumente bzw. Cloud",
+      "Transfer": "Einstellungen; lokale Projekte, Zitationsstile und Sicherungen liegen in Dokumente\\Citavi 6/7 (gehen mit dem Profil mit)",
       "License": "Lizenz am Citavi-Konto (Campuslizenz)",
       "After": [
         "Citavi: mit Citavi-Konto anmelden, Word-Add-In pruefen"
       ],
-      "Package": "citavi"
+      "Package": "citavi",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "SETTINGS6",
+          "Path": "{APPDATA}\\Swiss Academic Software\\Citavi 6\\Settings"
+        },
+        {
+          "Type": "Folder",
+          "Name": "SETTINGS7",
+          "Path": "{APPDATA}\\Swiss Academic Software\\Citavi 7\\Settings"
+        }
+      ],
+      "NotTransfer": "Cloud-Projekte (kommen per Anmeldung)",
+      "CloseProcess": [
+        "Citavi"
+      ]
     },
     {
       "Id": "App_Obsidian",
@@ -558,10 +577,17 @@
       "Id": "App_GeoGebra",
       "Name": "GeoGebra",
       "Detect": "^GeoGebra",
-      "Transfer": "nichts (Materialien am GeoGebra-Konto)",
+      "Transfer": "Classic 5: Einstellungen (Classic 6: Materialien am GeoGebra-Konto)",
       "License": "kostenlos",
       "Package": "geogebra",
-      "WingetId": "GeoGebra.Classic"
+      "WingetId": "GeoGebra.Classic",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "PREFS5",
+          "Key": "HKCU\\Software\\JavaSoft\\Prefs\\geogebra"
+        }
+      ]
     },
     {
       "Id": "App_SketchUp",
@@ -602,9 +628,11 @@
       "Transfer": "Dateien (.notebook) liegen in Dokumente",
       "License": "Produktschluessel/Abo - am neuen Geraet aktivieren",
       "After": [
-        "SMART: Aktivierung/Abo pruefen, Board-Treiber testen"
+        "SMART: mit Produktschluessel - am Altgeraet unter Hilfe > Software-Aktivierung zurueckgeben, am neuen PC aktivieren; mit SMART-Konto - einfach anmelden",
+        "SMART: Board-Treiber testen"
       ],
-      "Package": "smart"
+      "Package": "smart",
+      "NotTransfer": "Aktivierung - nicht kopieren"
     },
     {
       "Id": "App_ActivInspire",
@@ -621,10 +649,10 @@
       "Id": "App_Untis",
       "Name": "Untis",
       "Detect": "^Untis",
-      "Transfer": "Datendatei/Datenbank (meist am Server)",
+      "Transfer": "Einzelplatz: Lizenz steckt in der Datendatei (.gpn) - die Datei liegt meist in Dokumente oder am Netzlaufwerk | MultiUser: Datenbank am Server",
       "License": "Lizenz der Einrichtung - Datenbankpfad pruefen",
       "After": [
-        "Untis: Datenbank-/Datenpfad und Lizenz pruefen"
+        "Untis: .gpn-Datei oeffnen (Lizenz ist darin) bzw. bei MultiUser ODBC-Verbindung 'Untis' neu anlegen"
       ],
       "Package": "untis"
     },
@@ -781,6 +809,2453 @@
       "License": "Lizenzdatei wird uebertragen",
       "Package": "sublime",
       "WingetId": "SublimeHQ.SublimeText.4"
+    },
+    {
+      "Id": "App_VeraCrypt",
+      "Name": "VeraCrypt",
+      "Detect": "^VeraCrypt",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\VeraCrypt"
+        }
+      ],
+      "Transfer": "Einstellungen, Favoriten, Standard-Schluesseldateien, Verlauf",
+      "NotTransfer": "Favoriten auf Partitionen/Laufwerken (am neuen PC andere Geraete-IDs); Systemverschluesselung",
+      "License": "kostenlos",
+      "After": [
+        "VeraCrypt: Favoriten und Pfade der Schluesseldateien pruefen"
+      ],
+      "CloseProcess": [
+        "VeraCrypt"
+      ],
+      "Package": "veracrypt",
+      "WingetId": "IDRIX.VeraCrypt"
+    },
+    {
+      "Id": "App_PrusaSlicer",
+      "Name": "PrusaSlicer",
+      "Detect": "^PrusaSlicer",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\PrusaSlicer",
+          "XD": [
+            "cache"
+          ],
+          "XF": [
+            "*.log"
+          ]
+        }
+      ],
+      "Transfer": "Drucker-, Filament- und Druckprofile, Einstellungen, Sicherungen",
+      "NotTransfer": "Prusa-Konto (neu anmelden)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "prusa-slicer"
+      ],
+      "Package": "prusa",
+      "WingetId": "Prusa3D.PrusaSlicer"
+    },
+    {
+      "Id": "App_Cura",
+      "Name": "UltiMaker Cura",
+      "Detect": "^Ulti[Mm]aker Cura",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\cura",
+          "XD": [
+            "cache"
+          ],
+          "XF": [
+            "cura.log*"
+          ]
+        }
+      ],
+      "Transfer": "Drucker, Profile, Plugins (Versionsordner - Cura uebernimmt den neuesten selbst)",
+      "NotTransfer": "UltiMaker-Konto (neu anmelden)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "UltiMaker-Cura",
+        "Ultimaker-Cura"
+      ],
+      "Package": "cura",
+      "WingetId": "Ultimaker.Cura"
+    },
+    {
+      "Id": "App_ShareX",
+      "Name": "ShareX",
+      "Detect": "^ShareX",
+      "Transfer": "Einstellungen, Hotkeys, Upload-Ziele und Verlauf liegen in Dokumente\\ShareX (gehen mit dem Profil mit)",
+      "License": "kostenlos",
+      "After": [
+        "ShareX: Upload-Ziele pruefen (UploadersConfig.json enthaelt Zugangsdaten)"
+      ],
+      "CloseProcess": [
+        "ShareX"
+      ],
+      "Package": "sharex",
+      "WingetId": "ShareX.ShareX"
+    },
+    {
+      "Id": "App_MobaXterm",
+      "Name": "MobaXterm",
+      "Detect": "^MobaXterm",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Mobatek\\MobaXterm"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\MobaXterm",
+          "XD": [
+            "slash"
+          ],
+          "XF": [
+            "*.log"
+          ]
+        }
+      ],
+      "Transfer": "Sitzungen, Einstellungen (MobaXterm.ini; liegt je nach Version auch in Dokumente\\MobaXterm)",
+      "NotTransfer": "gespeicherte Kennwoerter (DPAPI - an Windows-Konto und PC gebunden)",
+      "License": "Home Edition kostenlos | Professional: Lizenzdatei neben dem Programm",
+      "After": [
+        "MobaXterm: Kennwoerter neu eingeben"
+      ],
+      "CloseProcess": [
+        "MobaXterm"
+      ],
+      "Package": "mobaxterm",
+      "WingetId": "Mobatek.MobaXterm"
+    },
+    {
+      "Id": "App_HeidiSQL",
+      "Name": "HeidiSQL",
+      "Detect": "^HeidiSQL",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\HeidiSQL"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\HeidiSQL"
+        }
+      ],
+      "Transfer": "Sitzungen inkl. Kennwoerter, Einstellungen, Tab-Sicherungen; Snippets in Dokumente\\HeidiSQL",
+      "NotTransfer": "Pfade zu SSH-Schluesseln/plink (absolut)",
+      "License": "kostenlos",
+      "After": [
+        "HeidiSQL: Kennwoerter sind nur verschleiert gespeichert - Backup vertraulich behandeln"
+      ],
+      "CloseProcess": [
+        "heidisql"
+      ],
+      "Package": "heidi",
+      "WingetId": "HeidiSQL.HeidiSQL"
+    },
+    {
+      "Id": "App_DBeaver",
+      "Name": "DBeaver",
+      "Detect": "^DBeaver",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\DBeaverData",
+          "XD": [
+            "drivers",
+            "install-data"
+          ],
+          "XF": [
+            "*.log"
+          ]
+        }
+      ],
+      "Transfer": "Verbindungen, Skripte, Einstellungen (Treiber werden neu geladen)",
+      "NotTransfer": "Kennwoerter bei Hauptpasswort/Windows-Anmeldespeicher; Treiberpfade (absolut)",
+      "License": "kostenlos",
+      "After": [
+        "DBeaver: Verbindungen testen, ggf. Kennwoerter neu eingeben"
+      ],
+      "CloseProcess": [
+        "dbeaver"
+      ],
+      "Package": "dbeaver",
+      "WingetId": "DBeaver.DBeaver.Community"
+    },
+    {
+      "Id": "App_Git",
+      "Name": "Git",
+      "Detect": "^Git$",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CONFIG",
+          "Path": "{PROFILE}",
+          "Filter": [
+            ".gitconfig",
+            ".bashrc",
+            ".bash_profile",
+            ".inputrc",
+            ".minttyrc"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "CONFIGDIR",
+          "Path": "{PROFILE}\\.config\\git"
+        }
+      ],
+      "Transfer": "Git-Konfiguration (Name, E-Mail, Aliase), Bash-Einstellungen",
+      "NotTransfer": "Anmeldedaten (Git Credential Manager / Windows-Anmeldespeicher); SSH-Schluessel (.ssh) nur bewusst kopieren",
+      "License": "kostenlos",
+      "After": [
+        "Git: bei GitHub/GitLab neu anmelden"
+      ],
+      "Package": "^git(-?for-?windows)?$",
+      "WingetId": "Git.Git"
+    },
+    {
+      "Id": "App_WindowsTerminal",
+      "Name": "Windows Terminal",
+      "Detect": "^Windows Terminal",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "STABLE",
+          "Path": "{LOCALAPPDATA}\\Packages\\Microsoft.WindowsTerminal_8wekyb3d8bbwe\\LocalState"
+        },
+        {
+          "Type": "Folder",
+          "Name": "PREVIEW",
+          "Path": "{LOCALAPPDATA}\\Packages\\Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe\\LocalState"
+        }
+      ],
+      "Transfer": "settings.json (Profile, Farben, Tastenkuerzel)",
+      "NotTransfer": "WSL-Profile nur, wenn die Distributionen am neuen PC installiert sind",
+      "License": "in Windows enthalten",
+      "CloseProcess": [
+        "WindowsTerminal"
+      ],
+      "WingetId": "Microsoft.WindowsTerminal"
+    },
+    {
+      "Id": "App_PowerToys",
+      "Name": "PowerToys",
+      "Detect": "^PowerToys",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\Microsoft\\PowerToys",
+          "XD": [
+            "Logs",
+            "Updates"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen aller Module, Tastatur-Manager, FancyZones-Layouts",
+      "NotTransfer": "Maus ohne Grenzen (Sicherheitsschluessel/PC-Namen), FancyZones-Zuordnung je Monitor",
+      "License": "kostenlos",
+      "After": [
+        "PowerToys: Alternative: Einstellungen > Allgemein > Sichern und Wiederherstellen"
+      ],
+      "CloseProcess": [
+        "PowerToys"
+      ],
+      "Package": "powertoys",
+      "WingetId": "Microsoft.PowerToys"
+    },
+    {
+      "Id": "App_Everything",
+      "Name": "Everything",
+      "Detect": "^Everything \\d",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Everything",
+          "XF": [
+            "Everything.db"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Lesezeichen, Filter, Suchverlauf (Index wird neu aufgebaut)",
+      "NotTransfer": "Indizierte Laufwerke/Netzpfade (PC-abhaengig)",
+      "License": "kostenlos",
+      "After": [
+        "Everything: liegt die Einstellung neben dem Programm (app_data=0), dort Everything.ini kopieren"
+      ],
+      "CloseProcess": [
+        "Everything"
+      ],
+      "Package": "everything",
+      "WingetId": "voidtools.Everything"
+    },
+    {
+      "Id": "App_SumatraPDF",
+      "Name": "SumatraPDF",
+      "Detect": "^SumatraPDF",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "SETTINGS",
+          "Path": "{LOCALAPPDATA}\\SumatraPDF",
+          "Filter": [
+            "SumatraPDF-settings.txt"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, zuletzt geoeffnete Dateien",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "SumatraPDF"
+      ],
+      "Package": "sumatra",
+      "WingetId": "SumatraPDF.SumatraPDF"
+    },
+    {
+      "Id": "App_PDF24",
+      "Name": "PDF24 Creator",
+      "Detect": "^PDF24",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\PDF24"
+        }
+      ],
+      "Transfer": "Einstellungen (Registry)",
+      "NotTransfer": "Drucker und Rechner-Einstellungen (HKLM) - kommen mit der Installation",
+      "License": "kostenlos (auch gewerblich)",
+      "CloseProcess": [
+        "pdf24",
+        "pdf24-Toolbox"
+      ],
+      "Package": "pdf24",
+      "WingetId": "geeksoftwareGmbH.PDF24Creator"
+    },
+    {
+      "Id": "App_RustDesk",
+      "Name": "RustDesk",
+      "Detect": "^RustDesk",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CONFIG",
+          "Path": "{APPDATA}\\RustDesk\\config",
+          "Filter": [
+            "RustDesk2.toml",
+            "RustDesk_local.toml"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "PEERS",
+          "Path": "{APPDATA}\\RustDesk\\config\\peers"
+        }
+      ],
+      "Transfer": "Server-Einstellungen (ID-/Relay-Server, Schluessel), Oberflaeche, Gegenstellen",
+      "NotTransfer": "eigene ID und Schluesselpaar (RustDesk.toml - wird absichtlich nicht kopiert, sonst doppelte ID), dauerhaftes Kennwort und gespeicherte Kennwoerter (an den PC gebunden)",
+      "License": "kostenlos | Server Pro: eigene Lizenz",
+      "After": [
+        "RustDesk: neue ID weitergeben, dauerhaftes Kennwort neu setzen",
+        "RustDesk: als Dienst installiert liegt die Konfiguration unter C:\\Windows\\ServiceProfiles\\LocalService\\AppData\\Roaming\\RustDesk"
+      ],
+      "CloseProcess": [
+        "rustdesk"
+      ],
+      "Package": "rustdesk"
+    },
+    {
+      "Id": "App_Bitwarden",
+      "Name": "Bitwarden",
+      "Detect": "^Bitwarden(?! Directory)",
+      "Transfer": "nichts (Tresor kommt nach der Anmeldung vom Server)",
+      "NotTransfer": "Tresor-Schluessel, Windows Hello/Biometrie",
+      "License": "Konto (kostenlos/Premium)",
+      "After": [
+        "Bitwarden: anmelden (bei eigenem Server zuerst Server-URL setzen)"
+      ],
+      "Package": "bitwarden",
+      "WingetId": "Bitwarden.Bitwarden"
+    },
+    {
+      "Id": "App_Cryptomator",
+      "Name": "Cryptomator",
+      "Detect": "^Cryptomator",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "SETTINGS",
+          "Path": "{APPDATA}\\Cryptomator",
+          "Filter": [
+            "settings.json"
+          ]
+        }
+      ],
+      "Transfer": "Tresorliste, Einbindungs-Optionen (die Tresore selbst sind normale Ordner)",
+      "NotTransfer": "gespeicherte Tresor-Kennwoerter (DPAPI), Windows Hello, Hub-Geraeteschluessel; Tresorpfade sind absolut",
+      "License": "kostenlos",
+      "After": [
+        "Cryptomator: Tresore oeffnen, Kennwort neu eingeben"
+      ],
+      "CloseProcess": [
+        "Cryptomator"
+      ],
+      "Package": "cryptomator",
+      "WingetId": "Cryptomator.Cryptomator"
+    },
+    {
+      "Id": "App_Nextcloud",
+      "Name": "Nextcloud",
+      "Detect": "^Nextcloud$",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\Nextcloud",
+          "Filter": [
+            "nextcloud.cfg",
+            "sync-exclude.lst"
+          ]
+        }
+      ],
+      "Transfer": "Konto, Server, Ordnerpaare (nur sinnvoll bei gleichem Benutzernamen/Pfad)",
+      "NotTransfer": "Anmeldung (Windows-Anmeldespeicher); Sync-Ordner werden ueber den Client neu geladen, nicht doppelt sichern",
+      "License": "kostenlos",
+      "After": [
+        "Nextcloud: anmelden, Sync-Ordner pruefen (bei anderem Pfad Konto neu hinzufuegen)"
+      ],
+      "CloseProcess": [
+        "nextcloud"
+      ],
+      "Package": "nextcloud",
+      "WingetId": "Nextcloud.NextcloudDesktop"
+    },
+    {
+      "Id": "App_MuseScore",
+      "Name": "MuseScore 4",
+      "Detect": "^MuseScore( Studio)? 4",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "ROAMING",
+          "Path": "{APPDATA}\\MuseScore"
+        },
+        {
+          "Type": "Folder",
+          "Name": "LOCAL",
+          "Path": "{LOCALAPPDATA}\\MuseScore\\MuseScore4",
+          "XD": [
+            "logs"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Arbeitsbereiche, Tastenkuerzel; Partituren/Plugins/SoundFonts in Dokumente\\MuseScore4",
+      "NotTransfer": "Muse Sounds (ueber Muse Hub neu laden), MuseScore.com-Anmeldung",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "MuseScore4"
+      ],
+      "Package": "musescore",
+      "WingetId": "Musescore.Musescore"
+    },
+    {
+      "Id": "App_Krita",
+      "Name": "Krita",
+      "Detect": "^Krita",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "RC",
+          "Path": "{LOCALAPPDATA}",
+          "Filter": [
+            "kritarc",
+            "kritadisplayrc",
+            "kritashortcutsrc"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "RESOURCES",
+          "Path": "{APPDATA}\\krita"
+        }
+      ],
+      "Transfer": "Einstellungen, Tastenkuerzel, Pinsel, Paletten, Arbeitsbereiche, Bundles",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "krita"
+      ],
+      "Package": "krita",
+      "WingetId": "KDE.Krita"
+    },
+    {
+      "Id": "App_Blender",
+      "Name": "Blender",
+      "Detect": "(?i)^blender",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Blender Foundation\\Blender"
+        }
+      ],
+      "Transfer": "Einstellungen, Add-ons, Erweiterungen (Versionsordner - neue Version bietet 'Load previous settings')",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "blender"
+      ],
+      "Package": "blender",
+      "WingetId": "BlenderFoundation.Blender"
+    },
+    {
+      "Id": "App_FreeCAD",
+      "Name": "FreeCAD",
+      "Detect": "^FreeCAD",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\FreeCAD",
+          "XD": [
+            "Cache"
+          ],
+          "XF": [
+            "*.log"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (user.cfg), Makros, Addons (ab 1.1 in Unterordnern v1-1 usw.)",
+      "NotTransfer": "Addons mit kompilierten Teilen bei anderer Python-Version",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "FreeCAD"
+      ],
+      "Package": "freecad",
+      "WingetId": "FreeCAD.FreeCAD"
+    },
+    {
+      "Id": "App_Thonny",
+      "Name": "Thonny",
+      "Detect": "^Thonny",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Thonny",
+          "XF": [
+            "*.log"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Plugins",
+      "NotTransfer": "Plugins nur bei gleicher Python-Version; secrets.json enthaelt Zugangsdaten",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "thonny"
+      ],
+      "Package": "thonny",
+      "WingetId": "AivarAnnamaa.Thonny"
+    },
+    {
+      "Id": "App_Stellarium",
+      "Name": "Stellarium",
+      "Detect": "^Stellarium",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Stellarium",
+          "XF": [
+            "log.txt",
+            "output.txt"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (config.ini), eigene Skripte, Landschaften, Himmelskulturen",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "stellarium"
+      ],
+      "Package": "stellarium",
+      "WingetId": "Stellarium.Stellarium"
+    },
+    {
+      "Id": "App_Wireshark",
+      "Name": "Wireshark",
+      "Detect": "^Wireshark",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Wireshark"
+        }
+      ],
+      "Transfer": "Einstellungen, Profile, Filter, Farbregeln, eigene Plugins",
+      "NotTransfer": "Schnittstellen-Namen (PC-abhaengig), Npcap (eigene Installation)",
+      "License": "kostenlos (Npcap: eigene Lizenz)",
+      "CloseProcess": [
+        "Wireshark"
+      ],
+      "Package": "wireshark",
+      "WingetId": "WiresharkFoundation.Wireshark"
+    },
+    {
+      "Id": "App_VirtualBox",
+      "Name": "Oracle VirtualBox",
+      "Detect": "^Oracle (VM )?VirtualBox",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CONFIG",
+          "Path": "{PROFILE}\\.VirtualBox",
+          "XF": [
+            "*.log",
+            "*.log.*"
+          ]
+        }
+      ],
+      "Transfer": "Globale Einstellungen und Liste der VMs (VirtualBox.xml)",
+      "NotTransfer": "VM-Ordner ({PROFILE}\\VirtualBox VMs - gross, nur bewusst ueber Zusaetzliche Ordner); Netzwerkadapter-Zuordnung; Extension Pack neu installieren",
+      "License": "kostenlos | Extension Pack: PUEL (gewerblich lizenzpflichtig)",
+      "After": [
+        "VirtualBox: VMs registrieren (Maschine > Hinzufuegen), Netzwerkadapter pruefen"
+      ],
+      "CloseProcess": [
+        "VirtualBox",
+        "VBoxSVC"
+      ],
+      "Package": "virtualbox",
+      "WingetId": "Oracle.VirtualBox"
+    },
+    {
+      "Id": "App_JetBrains",
+      "Name": "JetBrains IDE (PyCharm, IntelliJ IDEA ...)",
+      "Detect": "^(PyCharm|IntelliJ IDEA|WebStorm|PhpStorm|CLion|Rider|GoLand|DataGrip|RustRover)",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CONFIG",
+          "Path": "{APPDATA}\\JetBrains"
+        }
+      ],
+      "Transfer": "Einstellungen, Tastenbelegung, Farbschemata, Code-Stil, Vorlagen, Plugins (Versionsordner - die IDE bietet den Import an)",
+      "NotTransfer": "Caches/Indizes ({LOCALAPPDATA}\\JetBrains, werden neu gebaut), Lizenz/JetBrains-Konto",
+      "License": "Community kostenlos | Pro/Ultimate: JetBrains-Konto (Bildungslizenz persoenlich)",
+      "After": [
+        "JetBrains: mit JetBrains-Konto anmelden"
+      ],
+      "CloseProcess": [
+        "pycharm64",
+        "idea64"
+      ],
+      "Package": "pycharm|intellij|jetbrains"
+    },
+    {
+      "Id": "App_SEB",
+      "Name": "Safe Exam Browser",
+      "Detect": "^Safe Exam Browser",
+      "Transfer": "nichts - Konfiguration ist pruefungsgebunden und wird zentral verteilt",
+      "NotTransfer": "Benutzer-Konfiguration, Cache und Protokolle",
+      "License": "kostenlos",
+      "After": [
+        "Safe Exam Browser: Konfiguration zentral (ProgramData/Pruefungsserver) bereitstellen"
+      ],
+      "WingetId": "ETHZurich.SafeExamBrowser"
+    },
+    {
+      "Id": "App_OpenBoard",
+      "Name": "OpenBoard",
+      "Detect": "^OpenBoard",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\OpenBoard"
+        }
+      ],
+      "Transfer": "Einstellungen und Tafeln/Dokumente (OpenBoard speichert die Dokumente hier)",
+      "NotTransfer": "eingestellte Ordner fuer Bilder/Videos/Aufnahmen (absolute Pfade)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "OpenBoard"
+      ],
+      "Package": "openboard",
+      "WingetId": "OpenEducationFoundation.OpenBoard"
+    },
+    {
+      "Id": "App_KiCad",
+      "Name": "KiCad",
+      "Detect": "^KiCad \\d",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CONFIG",
+          "Path": "{APPDATA}\\kicad"
+        }
+      ],
+      "Transfer": "Einstellungen, Bibliothekstabellen, Farben (Versionsordner); Plugins/3rdparty in Dokumente\\KiCad",
+      "NotTransfer": "absolute Bibliothekspfade; Cache ({LOCALAPPDATA}\\kicad)",
+      "License": "kostenlos",
+      "After": [
+        "KiCad: beim ersten Start Einstellungen der Vorversion importieren"
+      ],
+      "CloseProcess": [
+        "kicad",
+        "eeschema",
+        "pcbnew"
+      ],
+      "Package": "kicad",
+      "WingetId": "KiCad.KiCad"
+    },
+    {
+      "Id": "App_QGIS",
+      "Name": "QGIS",
+      "Detect": "^QGIS \\d",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "PROFILES",
+          "Path": "{APPDATA}\\QGIS",
+          "XD": [
+            "cache",
+            "__pycache__"
+          ]
+        }
+      ],
+      "Transfer": "Benutzerprofile: Einstellungen, Plugins, Symbole, Vorlagen, Authentifizierung (qgis-auth.db)",
+      "NotTransfer": "Hauptpasswort fuer qgis-auth.db (falls im Windows-Anmeldespeicher abgelegt)",
+      "License": "kostenlos",
+      "After": [
+        "QGIS: Plugins und Hauptpasswort pruefen"
+      ],
+      "CloseProcess": [
+        "qgis-bin",
+        "qgis-ltr-bin"
+      ],
+      "Package": "qgis",
+      "WingetId": "OSGeo.QGIS"
+    },
+    {
+      "Id": "App_Joplin",
+      "Name": "Joplin",
+      "Detect": "^Joplin",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{PROFILE}\\.config\\joplin-desktop",
+          "XD": [
+            "cache",
+            "tmp"
+          ],
+          "XF": [
+            "log*.txt"
+          ]
+        }
+      ],
+      "Transfer": "Notizen (Datenbank), Anhaenge, Einstellungen, Plugins",
+      "NotTransfer": "Sync- und E2EE-Kennwoerter (DPAPI), OAuth-Anmeldung (OneDrive/Dropbox)",
+      "License": "kostenlos",
+      "After": [
+        "Joplin: Sync-Ziel neu anmelden, E2EE-Kennwort eingeben"
+      ],
+      "CloseProcess": [
+        "Joplin"
+      ],
+      "Package": "joplin",
+      "WingetId": "Joplin.Joplin"
+    },
+    {
+      "Id": "App_Logseq",
+      "Name": "Logseq",
+      "Detect": "^Logseq",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CONFIG",
+          "Path": "{PROFILE}\\.logseq",
+          "XD": [
+            "graphs"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Plugins (Graph-Ordner selbst separat - meist in Dokumente)",
+      "NotTransfer": "Logseq-Sync-Anmeldung; Graph-Pfade (absolut)",
+      "License": "kostenlos",
+      "After": [
+        "Logseq: Graph-Ordner neu oeffnen"
+      ],
+      "CloseProcess": [
+        "Logseq"
+      ],
+      "Package": "logseq",
+      "WingetId": "Logseq.Logseq"
+    },
+    {
+      "Id": "App_Typora",
+      "Name": "Typora",
+      "Detect": "^Typora",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Typora",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "DawnCache",
+            "DawnGraphiteCache",
+            "DawnWebGPUCache",
+            "Crashpad",
+            "blob_storage",
+            "logs",
+            "Service Worker"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Themes, Woerterbuecher",
+      "NotTransfer": "Lizenz (geraetegebunden, max. 3 Geraete - neu aktivieren)",
+      "License": "kostenpflichtig",
+      "After": [
+        "Typora: Lizenz neu aktivieren"
+      ],
+      "CloseProcess": [
+        "Typora"
+      ],
+      "Package": "typora",
+      "WingetId": "appmakes.Typora"
+    },
+    {
+      "Id": "App_Drawio",
+      "Name": "draw.io Desktop",
+      "Detect": "^draw\\.io",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\draw.io",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "DawnCache",
+            "DawnGraphiteCache",
+            "DawnWebGPUCache",
+            "Crashpad",
+            "blob_storage",
+            "logs",
+            "Service Worker",
+            "Session Storage"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, eigene Bibliotheken (Diagramme selbst separat)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "draw.io"
+      ],
+      "Package": "draw",
+      "WingetId": "JGraph.Draw"
+    },
+    {
+      "Id": "App_yEd",
+      "Name": "yEd",
+      "Detect": "^yEd",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\yWorks\\yEd"
+        }
+      ],
+      "Transfer": "Einstellungen, Paletten",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "yEd"
+      ],
+      "Package": "yed"
+    },
+    {
+      "Id": "App_OnlyOffice",
+      "Name": "ONLYOFFICE Desktop Editors",
+      "Detect": "^ONLYOFFICE",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\ONLYOFFICE\\DesktopEditors"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\ONLYOFFICE\\DesktopEditors\\data",
+          "XD": [
+            "cache",
+            "recover",
+            "fonts"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Plugins, zuletzt geoeffnet",
+      "NotTransfer": "Cloud-Anmeldungen (Cookies, DPAPI)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "DesktopEditors",
+        "editors"
+      ],
+      "Package": "onlyoffice",
+      "WingetId": "ONLYOFFICE.DesktopEditors"
+    },
+    {
+      "Id": "App_SoftMaker",
+      "Name": "SoftMaker Office / FreeOffice",
+      "Detect": "^SoftMaker (Office|FreeOffice)",
+      "Transfer": "Einstellungen, Woerterbuecher, Textbausteine liegen in Dokumente\\SoftMaker\\Settings (gehen mit dem Profil mit)",
+      "NotTransfer": "Lizenz/Aktivierung (Produktschluessel bzw. Konto)",
+      "License": "FreeOffice kostenlos | Office: Produktschluessel/Abo",
+      "After": [
+        "SoftMaker: Produkt aktivieren bzw. anmelden"
+      ],
+      "CloseProcess": [
+        "TextMaker",
+        "PlanMaker",
+        "Presentations"
+      ],
+      "Package": "softmaker|freeoffice"
+    },
+    {
+      "Id": "App_PDFXChange",
+      "Name": "PDF-XChange Editor",
+      "Detect": "^PDF-XChange Editor",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG11",
+          "Key": "HKCU\\Software\\PDF-XChange\\PDFXEditor"
+        },
+        {
+          "Type": "Reg",
+          "Name": "REG10",
+          "Key": "HKCU\\Software\\Tracker Software\\PDFXEditor"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA11",
+          "Path": "{APPDATA}\\PDF-XChange\\PDFXEditor"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA10",
+          "Path": "{APPDATA}\\Tracker Software\\PDFXEditor"
+        }
+      ],
+      "Transfer": "Einstellungen, Stempel, Werkzeuge (Editor vorher schliessen - speichert beim Beenden)",
+      "NotTransfer": "Lizenzschluessel (Vault) - neu eingeben",
+      "License": "kostenlos mit Einschraenkungen | Pro: Lizenzschluessel",
+      "After": [
+        "PDF-XChange: Lizenzschluessel eingeben"
+      ],
+      "CloseProcess": [
+        "PDFXEdit"
+      ],
+      "Package": "pdf-xchange|pdfx",
+      "WingetId": "TrackerSoftware.PDF-XChangeEditor"
+    },
+    {
+      "Id": "App_XnViewMP",
+      "Name": "XnView MP",
+      "Detect": "^XnView MP",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\XnViewMP",
+          "XF": [
+            "Thumb.db"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Katalog (Bewertungen, Kategorien)",
+      "NotTransfer": "Ordnerpfade im Katalog (absolut)",
+      "License": "kostenlos privat/Bildung",
+      "CloseProcess": [
+        "xnviewmp"
+      ],
+      "Package": "xnview",
+      "WingetId": "XnSoft.XnViewMP"
+    },
+    {
+      "Id": "App_FastStone",
+      "Name": "FastStone Image Viewer",
+      "Detect": "^FastStone Image Viewer",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\FastStone"
+        }
+      ],
+      "Transfer": "Einstellungen",
+      "NotTransfer": "Registrierung der gewerblichen Version",
+      "License": "kostenlos privat/Bildung",
+      "CloseProcess": [
+        "FSViewer"
+      ],
+      "Package": "faststone",
+      "WingetId": "FastStone.Viewer"
+    },
+    {
+      "Id": "App_DoubleCmd",
+      "Name": "Double Commander",
+      "Detect": "^Double Commander",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\doublecmd"
+        }
+      ],
+      "Transfer": "Einstellungen, Tabs, Favoriten, Tastenkuerzel; pwd.ini (mit Hauptpasswort geschuetzt)",
+      "NotTransfer": "Cache ({LOCALAPPDATA}\\doublecmd)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "doublecmd"
+      ],
+      "Package": "doublecmd|double commander",
+      "WingetId": "alexx2000.DoubleCommander"
+    },
+    {
+      "Id": "App_FreeCommander",
+      "Name": "FreeCommander XE",
+      "Detect": "^FreeCommander",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "SETTINGS",
+          "Path": "{LOCALAPPDATA}\\FreeCommanderXE\\Settings"
+        }
+      ],
+      "Transfer": "Einstellungen, Favoriten, Tabs",
+      "NotTransfer": "Ordnerpfade (absolut)",
+      "License": "kostenlos",
+      "After": [
+        "FreeCommander: verweist fcStart.ini im Programmordner auf einen anderen Ordner, diesen sichern"
+      ],
+      "CloseProcess": [
+        "FreeCommander"
+      ],
+      "Package": "freecommander",
+      "WingetId": "MarekJasinski.FreeCommanderXE"
+    },
+    {
+      "Id": "App_QDir",
+      "Name": "Q-Dir",
+      "Detect": "^Q-Dir",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Q-Dir"
+        }
+      ],
+      "Transfer": "Einstellungen, Favoriten (portable Version: Q-Dir.ini neben dem Programm)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "Q-Dir",
+        "Q-Dir_x64"
+      ],
+      "Package": "q-dir",
+      "WingetId": "SoftwareOK.Q-Dir"
+    },
+    {
+      "Id": "App_Ditto",
+      "Name": "Ditto",
+      "Detect": "^Ditto",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Ditto"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Ditto",
+          "XF": [
+            "*.log"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Zwischenablage-Verlauf (Ditto.db)",
+      "NotTransfer": "Verlauf kann Kennwoerter/vertrauliche Inhalte enthalten",
+      "License": "kostenlos",
+      "After": [
+        "Ditto: Datenbankpfad (DBPath) pruefen"
+      ],
+      "CloseProcess": [
+        "Ditto"
+      ],
+      "Package": "ditto",
+      "WingetId": "Ditto.Ditto"
+    },
+    {
+      "Id": "App_FlowLauncher",
+      "Name": "Flow Launcher",
+      "Detect": "^Flow Launcher",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\FlowLauncher",
+          "XD": [
+            "Logs",
+            "Cache",
+            "Environments"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Plugins, Themes",
+      "NotTransfer": "Python/Node-Pfade fuer Plugins (werden neu eingerichtet)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "Flow.Launcher"
+      ],
+      "Package": "flow-?launcher",
+      "WingetId": "Flow-Launcher.Flow-Launcher"
+    },
+    {
+      "Id": "App_OpenShell",
+      "Name": "Open-Shell",
+      "Detect": "^Open-Shell",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\OpenShell"
+        },
+        {
+          "Type": "Folder",
+          "Name": "PINNED",
+          "Path": "{APPDATA}\\OpenShell"
+        }
+      ],
+      "Transfer": "Startmenue- und Explorer-Einstellungen, angeheftete Elemente",
+      "NotTransfer": "Skin-/Bildpfade (absolut)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "StartMenu"
+      ],
+      "Package": "open-shell|openshell",
+      "WingetId": "Open-Shell.Open-Shell-Menu"
+    },
+    {
+      "Id": "App_foobar2000",
+      "Name": "foobar2000",
+      "Detect": "^foobar2000",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "V2",
+          "Path": "{APPDATA}\\foobar2000-v2",
+          "XD": [
+            "crash reports"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "V1",
+          "Path": "{APPDATA}\\foobar2000",
+          "XD": [
+            "crash reports"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Mediathek, Wiedergabelisten, Komponenten",
+      "NotTransfer": "Musikpfade (absolut)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "foobar2000"
+      ],
+      "Package": "foobar",
+      "WingetId": "PeterPawlowski.foobar2000"
+    },
+    {
+      "Id": "App_MusicBee",
+      "Name": "MusicBee",
+      "Detect": "^MusicBee",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\MusicBee",
+          "XD": [
+            "InternalCache"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Skins, Plugins (Mediathek meist in Musik\\MusicBee - geht mit dem Profil mit)",
+      "NotTransfer": "Mediathekspfade (absolut)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "MusicBee"
+      ],
+      "Package": "musicbee"
+    },
+    {
+      "Id": "App_PotPlayer",
+      "Name": "PotPlayer",
+      "Detect": "^PotPlayer",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG64",
+          "Key": "HKCU\\Software\\DAUM\\PotPlayerMini64"
+        },
+        {
+          "Type": "Reg",
+          "Name": "REG32",
+          "Key": "HKCU\\Software\\DAUM\\PotPlayerMini"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\PotPlayerMini64"
+        }
+      ],
+      "Transfer": "Einstellungen, Wiedergabelisten, Skins",
+      "NotTransfer": "Codec-/Filter-Eintraege (PC-abhaengig)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "PotPlayerMini64",
+        "PotPlayerMini"
+      ],
+      "Package": "potplayer",
+      "WingetId": "Daum.PotPlayer"
+    },
+    {
+      "Id": "App_MPCHC",
+      "Name": "MPC-HC",
+      "Detect": "^MPC-HC",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\MPC-HC"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\MPC-HC"
+        }
+      ],
+      "Transfer": "Einstellungen, Verlauf, Shader (portable Version: mpc-hc64.ini neben dem Programm)",
+      "NotTransfer": "Favoriten/Verlauf mit absoluten Pfaden",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "mpc-hc64",
+        "mpc-hc"
+      ],
+      "Package": "mpc-hc",
+      "WingetId": "clsid2.mpc-hc"
+    },
+    {
+      "Id": "App_HandBrake",
+      "Name": "HandBrake",
+      "Detect": "^HandBrake",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\HandBrake",
+          "XD": [
+            "logs"
+          ]
+        }
+      ],
+      "Transfer": "Eigene Voreinstellungen, Einstellungen",
+      "NotTransfer": "Ausgabeordner (absolut)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "HandBrake"
+      ],
+      "Package": "handbrake",
+      "WingetId": "HandBrake.HandBrake"
+    },
+    {
+      "Id": "App_Shotcut",
+      "Name": "Shotcut",
+      "Detect": "^Shotcut",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Meltytech\\Shotcut"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\Meltytech\\Shotcut",
+          "XF": [
+            "shotcut-log.*"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Voreinstellungen, Filtersets",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "shotcut"
+      ],
+      "Package": "shotcut",
+      "WingetId": "Meltytech.Shotcut"
+    },
+    {
+      "Id": "App_Kdenlive",
+      "Name": "Kdenlive",
+      "Detect": "^Kdenlive",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "RC",
+          "Path": "{LOCALAPPDATA}",
+          "Filter": [
+            "kdenliverc"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "UI",
+          "Path": "{LOCALAPPDATA}\\kxmlgui5\\kdenlive"
+        },
+        {
+          "Type": "Folder",
+          "Name": "ROAMING",
+          "Path": "{APPDATA}\\kdenlive"
+        },
+        {
+          "Type": "Folder",
+          "Name": "LOCAL",
+          "Path": "{LOCALAPPDATA}\\kdenlive",
+          "XD": [
+            "venv",
+            "cache",
+            "proxy"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Layouts, Effekte, Profile, Titel-Vorlagen",
+      "NotTransfer": "Python-Umgebung fuer KI-Funktionen (neu einrichten)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "kdenlive"
+      ],
+      "Package": "kdenlive",
+      "WingetId": "KDE.Kdenlive"
+    },
+    {
+      "Id": "App_REAPER",
+      "Name": "REAPER",
+      "Detect": "^REAPER",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\REAPER",
+          "XF": [
+            "reaper-vstplugins*.ini",
+            "reaper-clap-*.ini"
+          ],
+          "License": true
+        }
+      ],
+      "Transfer": "Einstellungen, Skripte, Effekte, Themes, Vorlagen + Lizenzdatei (reaper-license.rk)",
+      "NotTransfer": "Audio-Geraet und VST-Pfade (absolut, neu einstellen)",
+      "License": "Lizenzdatei wird uebertragen (gleicher Schluessel auf mehreren PCs erlaubt, nur nicht gleichzeitig)",
+      "After": [
+        "REAPER: Audio-Geraet und VST-Pfade pruefen, Plugins neu scannen"
+      ],
+      "CloseProcess": [
+        "reaper"
+      ],
+      "Package": "reaper",
+      "WingetId": "Cockos.REAPER"
+    },
+    {
+      "Id": "App_LMMS",
+      "Name": "LMMS",
+      "Detect": "^LMMS",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "RC",
+          "Path": "{PROFILE}",
+          "Filter": [
+            ".lmmsrc.xml"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen; Projekte und Samples in Dokumente\\lmms (gehen mit dem Profil mit)",
+      "NotTransfer": "Audio-Geraet, VST-Pfad (absolut)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "lmms"
+      ],
+      "Package": "lmms",
+      "WingetId": "LMMS.LMMS"
+    },
+    {
+      "Id": "App_MKVToolNix",
+      "Name": "MKVToolNix",
+      "Detect": "^MKVToolNix",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\bunkus.org\\mkvtoolnix-gui",
+          "XD": [
+            "cache"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Auftragsliste",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "mkvtoolnix-gui"
+      ],
+      "Package": "mkvtoolnix",
+      "WingetId": "MoritzBunkus.MKVToolNix"
+    },
+    {
+      "Id": "App_StreamDeck",
+      "Name": "Elgato Stream Deck",
+      "Detect": "^Elgato Stream Deck",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Elgato\\StreamDeck",
+          "XD": [
+            "logs"
+          ]
+        },
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Elgato Systems GmbH\\StreamDeck"
+        }
+      ],
+      "Transfer": "Profile, Plugins, Einstellungen",
+      "NotTransfer": "Elgato-Konto; Plugin-Tokens im Klartext",
+      "License": "kostenlos",
+      "After": [
+        "Stream Deck: Plugins aus dem Marketplace pruefen"
+      ],
+      "CloseProcess": [
+        "StreamDeck"
+      ],
+      "Package": "stream ?deck",
+      "WingetId": "Elgato.StreamDeck"
+    },
+    {
+      "Id": "App_darktable",
+      "Name": "darktable",
+      "Detect": "^darktable",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\darktable",
+          "XF": [
+            "*.lock"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Bibliothek, Stile, Tastenkuerzel",
+      "NotTransfer": "Bildpfade in library.db (absolut - Bilder an gleiche Stelle legen)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "darktable"
+      ],
+      "Package": "darktable",
+      "WingetId": "darktable.darktable"
+    },
+    {
+      "Id": "App_Affinity",
+      "Name": "Affinity",
+      "Detect": "^Affinity (Photo|Designer|Publisher)",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Affinity"
+        }
+      ],
+      "Transfer": "Einstellungen, Arbeitsbereiche, Pinsel, Stile, Assets",
+      "NotTransfer": "Lizenz/Aktivierung (Serif- bzw. Canva-Konto)",
+      "License": "kostenpflichtig (v2) | Canva-Konto (v3)",
+      "After": [
+        "Affinity: anmelden bzw. aktivieren"
+      ],
+      "CloseProcess": [
+        "Photo",
+        "Designer",
+        "Publisher",
+        "Affinity"
+      ],
+      "Package": "affinity"
+    },
+    {
+      "Id": "App_OpenSCAD",
+      "Name": "OpenSCAD",
+      "Detect": "^OpenSCAD",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\OpenSCAD"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\OpenSCAD"
+        }
+      ],
+      "Transfer": "Einstellungen; Bibliotheken in Dokumente\\OpenSCAD (gehen mit dem Profil mit)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "openscad"
+      ],
+      "Package": "openscad",
+      "WingetId": "OpenSCAD.OpenSCAD"
+    },
+    {
+      "Id": "App_Fritzing",
+      "Name": "Fritzing",
+      "Detect": "^Fritzing",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Fritzing"
+        },
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Fritzing",
+          "XD": [
+            "partfactory"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Bauteile; eigene Teile/Sketche in Dokumente\\Fritzing",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "Fritzing"
+      ],
+      "Package": "fritzing"
+    },
+    {
+      "Id": "App_SweetHome3D",
+      "Name": "Sweet Home 3D",
+      "Detect": "^Sweet Home 3D",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\eTeks\\Sweet Home 3D"
+        }
+      ],
+      "Transfer": "Einstellungen, importierte Moebel und Texturen, Plugins",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "SweetHome3D"
+      ],
+      "Package": "sweet ?home",
+      "WingetId": "eTeks.SweetHome3D"
+    },
+    {
+      "Id": "App_GNS3",
+      "Name": "GNS3",
+      "Detect": "^GNS3",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CONFIG",
+          "Path": "{APPDATA}\\GNS3",
+          "XF": [
+            "*.pid"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (Versionsordner); Projekte/Images in {PROFILE}\\GNS3 (gehen mit dem Profil mit)",
+      "NotTransfer": "VM-/Image-Pfade (absolut); Server-Kennwoerter im Klartext",
+      "License": "kostenlos",
+      "After": [
+        "GNS3: VMs/Images und lokalen Server pruefen"
+      ],
+      "CloseProcess": [
+        "gns3"
+      ],
+      "Package": "gns3"
+    },
+    {
+      "Id": "App_RStudio",
+      "Name": "RStudio",
+      "Detect": "^RStudio",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\RStudio"
+        }
+      ],
+      "Transfer": "Einstellungen, Tastenkuerzel, Snippets, Themes",
+      "NotTransfer": "R-Pakete ({LOCALAPPDATA}\\R\\win-library - je R-Version neu installieren)",
+      "License": "kostenlos",
+      "After": [
+        "RStudio: R-Pakete neu installieren"
+      ],
+      "CloseProcess": [
+        "rstudio"
+      ],
+      "Package": "rstudio",
+      "WingetId": "Posit.RStudio"
+    },
+    {
+      "Id": "App_RPiImager",
+      "Name": "Raspberry Pi Imager",
+      "Detect": "^Raspberry Pi Imager",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Raspberry Pi"
+        }
+      ],
+      "Transfer": "Einstellungen und Voreinstellungen fuer Images",
+      "NotTransfer": "gespeichertes WLAN-Kennwort/Kennwort-Hash/SSH-Schluessel (Klartext) - Backup vertraulich behandeln",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "rpi-imager"
+      ],
+      "Package": "raspberry",
+      "WingetId": "RaspberryPiFoundation.RaspberryPiImager"
+    },
+    {
+      "Id": "App_Cursor",
+      "Name": "Cursor",
+      "Detect": "^Cursor",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "USER",
+          "Path": "{APPDATA}\\Cursor\\User",
+          "XD": [
+            "globalStorage",
+            "workspaceStorage",
+            "History"
+          ]
+        },
+        {
+          "Type": "Folder",
+          "Name": "EXT",
+          "Path": "{PROFILE}\\.cursor"
+        }
+      ],
+      "Transfer": "Einstellungen, Tastenkuerzel, Snippets, Erweiterungen, MCP-Konfiguration",
+      "NotTransfer": "Anmeldung (DPAPI)",
+      "License": "Konto (kostenlos/Abo)",
+      "After": [
+        "Cursor: anmelden"
+      ],
+      "CloseProcess": [
+        "Cursor"
+      ],
+      "Package": "cursor",
+      "WingetId": "Anysphere.Cursor"
+    },
+    {
+      "Id": "App_GitHubDesktop",
+      "Name": "GitHub Desktop",
+      "Detect": "^GitHub Desktop$",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\GitHub Desktop",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "DawnCache",
+            "DawnGraphiteCache",
+            "DawnWebGPUCache",
+            "Crashpad",
+            "blob_storage",
+            "logs",
+            "Service Worker"
+          ]
+        }
+      ],
+      "Transfer": "Repository-Liste, Einstellungen",
+      "NotTransfer": "Anmeldung (Windows-Anmeldespeicher)",
+      "License": "kostenlos",
+      "After": [
+        "GitHub Desktop: anmelden, Repository-Pfade pruefen"
+      ],
+      "CloseProcess": [
+        "GitHubDesktop"
+      ],
+      "Package": "github desktop",
+      "WingetId": "GitHub.GitHubDesktop"
+    },
+    {
+      "Id": "App_Postman",
+      "Name": "Postman",
+      "Detect": "^Postman(?! Agent)",
+      "Transfer": "nichts (Collections/Umgebungen kommen ueber das Postman-Konto)",
+      "NotTransfer": "lokaler Tresor, Sitzung",
+      "License": "Konto (kostenlos/Abo)",
+      "After": [
+        "Postman: anmelden"
+      ],
+      "Package": "postman",
+      "WingetId": "Postman.Postman"
+    },
+    {
+      "Id": "App_Bruno",
+      "Name": "Bruno",
+      "Detect": "^Bruno",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\bruno",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "DawnCache",
+            "DawnGraphiteCache",
+            "DawnWebGPUCache",
+            "Crashpad",
+            "blob_storage",
+            "logs",
+            "Service Worker"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Collection-Liste (Collections selbst sind Ordner, Standard Dokumente\\bruno)",
+      "NotTransfer": "geheime Umgebungsvariablen (verschluesselt, neu eingeben)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "Bruno"
+      ],
+      "Package": "bruno",
+      "WingetId": "Bruno.Bruno"
+    },
+    {
+      "Id": "App_Tabby",
+      "Name": "Tabby",
+      "Detect": "^Tabby",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\tabby",
+          "XD": [
+            "Cache",
+            "Code Cache",
+            "GPUCache",
+            "DawnCache",
+            "DawnGraphiteCache",
+            "DawnWebGPUCache",
+            "Crashpad",
+            "blob_storage",
+            "logs",
+            "Service Worker"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Profile, Plugins; Tresor (nur mit Tresor-Passphrase nutzbar)",
+      "NotTransfer": "Kennwoerter ausserhalb des Tresors (Windows-Anmeldespeicher)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "Tabby"
+      ],
+      "Package": "tabby",
+      "WingetId": "Eugeny.Tabby"
+    },
+    {
+      "Id": "App_ConEmu",
+      "Name": "ConEmu",
+      "Detect": "^ConEmu",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "XMLROAM",
+          "Path": "{APPDATA}",
+          "Filter": [
+            "ConEmu.xml"
+          ]
+        },
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\ConEmu"
+        }
+      ],
+      "Transfer": "Einstellungen (Registry bzw. ConEmu.xml; liegt die Datei im Programmordner, dort kopieren)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "ConEmu64",
+        "ConEmu"
+      ],
+      "Package": "conemu",
+      "WingetId": "Maximus5.ConEmu"
+    },
+    {
+      "Id": "App_RoyalTS",
+      "Name": "Royal TS",
+      "Detect": "^Royal TS",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\code4ward"
+        }
+      ],
+      "Transfer": "Einstellungen, zuletzt geoeffnete Dokumente, Lizenz (Benutzereinstellungen); Dokumente (.rtsz) selbst separat",
+      "NotTransfer": "Kennwoerter in Dokumenten nur mit Dokument-Kennwort",
+      "License": "Shareware | Lizenz in den Benutzereinstellungen",
+      "CloseProcess": [
+        "RoyalTS"
+      ],
+      "Package": "royal",
+      "WingetId": "RoyalApps.RoyalTS.7"
+    },
+    {
+      "Id": "App_RDM",
+      "Name": "Devolutions Remote Desktop Manager",
+      "Detect": "^Remote Desktop Manager",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\Devolutions\\RemoteDesktopManager",
+          "XF": [
+            "*.log"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, lokale Datenquelle, Favoriten",
+      "NotTransfer": "Zugangsdaten der Datenquellen (empfohlen: Datei > Einstellungen exportieren/importieren)",
+      "License": "Free | Team: Lizenz",
+      "After": [
+        "RDM: Datenquellen pruefen"
+      ],
+      "CloseProcess": [
+        "RemoteDesktopManager"
+      ],
+      "Package": "remote ?desktop ?manager",
+      "WingetId": "Devolutions.RemoteDesktopManager"
+    },
+    {
+      "Id": "App_TeraTerm",
+      "Name": "Tera Term",
+      "Detect": "^Tera Term",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "V5",
+          "Path": "{APPDATA}\\teraterm5"
+        },
+        {
+          "Type": "Files",
+          "Name": "V4",
+          "Path": "{PROFILE}\\Documents\\teraterm",
+          "Filter": [
+            "TERATERM.INI"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen (TERATERM.INI), Tastatur, bekannte SSH-Hosts",
+      "NotTransfer": "SSH-Schluessel (separat, nur bewusst)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "ttermpro"
+      ],
+      "Package": "tera ?term",
+      "WingetId": "TeraTermProject.teraterm5"
+    },
+    {
+      "Id": "App_Brave",
+      "Name": "Brave",
+      "Detect": "^Brave",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\BraveSoftware\\Brave-Browser\\User Data",
+          "XD": [
+            "*Cache*",
+            "Crashpad",
+            "component_crx_cache",
+            "optimization_guide_model_store",
+            "Safe Browsing"
+          ]
+        }
+      ],
+      "Transfer": "Lesezeichen, Einstellungen, Erweiterungen",
+      "NotTransfer": "gespeicherte Kennwoerter, Cookies (an Windows-Konto und PC gebunden) - Brave-Sync oder Kennwort-Export; Wallet nur ueber Wiederherstellungsphrase",
+      "License": "kostenlos",
+      "After": [
+        "Brave: Sync einrichten bzw. Kennwoerter importieren"
+      ],
+      "CloseProcess": [
+        "brave"
+      ],
+      "Package": "brave",
+      "WingetId": "Brave.Brave"
+    },
+    {
+      "Id": "App_Vivaldi",
+      "Name": "Vivaldi",
+      "Detect": "^Vivaldi",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\Vivaldi\\User Data",
+          "XD": [
+            "*Cache*",
+            "Crashpad",
+            "component_crx_cache",
+            "optimization_guide_model_store",
+            "Safe Browsing"
+          ]
+        }
+      ],
+      "Transfer": "Lesezeichen, Notizen, Sitzungen, Einstellungen, Erweiterungen (Mail-Daten im Profil)",
+      "NotTransfer": "gespeicherte Kennwoerter, Cookies (an Windows-Konto gebunden) - Vivaldi-Sync verwenden",
+      "License": "kostenlos",
+      "After": [
+        "Vivaldi: Sync einrichten"
+      ],
+      "CloseProcess": [
+        "vivaldi"
+      ],
+      "Package": "vivaldi",
+      "WingetId": "Vivaldi.Vivaldi"
+    },
+    {
+      "Id": "App_LibreWolf",
+      "Name": "LibreWolf",
+      "Detect": "^LibreWolf",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "ROAMING",
+          "Path": "{APPDATA}\\librewolf"
+        },
+        {
+          "Type": "Folder",
+          "Name": "OVERRIDES",
+          "Path": "{PROFILE}\\.librewolf"
+        }
+      ],
+      "Transfer": "Profil: Lesezeichen, Kennwoerter, Erweiterungen, Einstellungen",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "librewolf"
+      ],
+      "Package": "librewolf",
+      "WingetId": "LibreWolf.LibreWolf"
+    },
+    {
+      "Id": "App_ownCloud",
+      "Name": "ownCloud",
+      "Detect": "^ownCloud$",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CFG",
+          "Path": "{APPDATA}\\ownCloud",
+          "Filter": [
+            "owncloud.cfg"
+          ]
+        }
+      ],
+      "Transfer": "Konto, Server, Ordnerpaare (nur bei gleichem Benutzernamen/Pfad)",
+      "NotTransfer": "Anmeldung (Windows-Anmeldespeicher); Sync-Ordner nicht doppelt sichern",
+      "License": "kostenlos",
+      "After": [
+        "ownCloud: anmelden, Sync-Ordner pruefen"
+      ],
+      "CloseProcess": [
+        "owncloud"
+      ],
+      "Package": "owncloud",
+      "WingetId": "ownCloud.ownCloudDesktop"
+    },
+    {
+      "Id": "App_Syncthing",
+      "Name": "Syncthing / SyncTrayzor",
+      "Detect": "^SyncTrayzor",
+      "Transfer": "nichts - neues Geraet koppeln",
+      "NotTransfer": "Geraeteschluessel (cert.pem/key.pem = Geraete-ID) - nie auf zwei laufende PCs kopieren",
+      "License": "kostenlos",
+      "After": [
+        "Syncthing: am neuen PC neu einrichten und mit den Gegenstellen koppeln"
+      ],
+      "Package": "syncthing|synctrayzor",
+      "WingetId": "GermanCoding.SyncTrayzor"
+    },
+    {
+      "Id": "App_FreeFileSync",
+      "Name": "FreeFileSync",
+      "Detect": "^FreeFileSync",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\FreeFileSync",
+          "XD": [
+            "Logs"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, letzte Konfiguration (eigene .ffs_gui/.ffs_batch liegen meist in Dokumente)",
+      "NotTransfer": "Donation-Edition-Lizenz",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "FreeFileSync",
+        "RealTimeSync"
+      ],
+      "Package": "freefilesync"
+    },
+    {
+      "Id": "App_PeaZip",
+      "Name": "PeaZip",
+      "Detect": "^PeaZip",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\PeaZip"
+        }
+      ],
+      "Transfer": "Einstellungen, Lesezeichen",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "peazip"
+      ],
+      "Package": "peazip",
+      "WingetId": "Giorgiotani.Peazip"
+    },
+    {
+      "Id": "App_HWiNFO",
+      "Name": "HWiNFO",
+      "Detect": "^HWiNFO",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\HWiNFO64"
+        }
+      ],
+      "Transfer": "Einstellungen (Sensor-Layout ist hardwareabhaengig)",
+      "NotTransfer": "Pro-Lizenz",
+      "License": "kostenlos privat | Pro gewerblich",
+      "CloseProcess": [
+        "HWiNFO64"
+      ],
+      "Package": "hwinfo",
+      "WingetId": "REALiX.HWiNFO"
+    },
+    {
+      "Id": "App_AdvIPScanner",
+      "Name": "Advanced IP Scanner",
+      "Detect": "^Advanced IP Scanner",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "REG",
+          "Key": "HKCU\\Software\\Famatech\\advanced_ip_scanner"
+        }
+      ],
+      "Transfer": "Einstellungen, zuletzt gescannte Bereiche (Favoriten: Datei > Favoriten speichern)",
+      "NotTransfer": "gespeicherte Zugangsdaten fuer RDP/Radmin",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "advanced_ip_scanner"
+      ],
+      "Package": "advanced ?ip",
+      "WingetId": "Famatech.AdvancedIPScanner"
+    },
+    {
+      "Id": "App_AngryIP",
+      "Name": "Angry IP Scanner",
+      "Detect": "^Angry IP Scanner",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "PREFS",
+          "Key": "HKCU\\Software\\JavaSoft\\Prefs\\ipscan"
+        }
+      ],
+      "Transfer": "Einstellungen, Favoriten, Oeffner",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "ipscan"
+      ],
+      "Package": "angry",
+      "WingetId": "angryziber.AngryIPScanner"
+    },
+    {
+      "Id": "App_BambuStudio",
+      "Name": "Bambu Studio",
+      "Detect": "^Bambu Studio",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\BambuStudio",
+          "XD": [
+            "log",
+            "cache",
+            "ota",
+            "plugins",
+            "system",
+            "tmp"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, eigene Drucker-/Filament-/Prozessprofile",
+      "NotTransfer": "Bambu-Konto (neu anmelden); Systemprofile und Netzwerk-Plugin werden neu geladen",
+      "License": "kostenlos",
+      "After": [
+        "Bambu Studio: anmelden, Drucker neu verbinden"
+      ],
+      "CloseProcess": [
+        "bambu-studio"
+      ],
+      "Package": "bambu",
+      "WingetId": "Bambulab.Bambustudio"
+    },
+    {
+      "Id": "App_GitHubCLI",
+      "Name": "GitHub CLI",
+      "Detect": "^GitHub CLI$",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "CONFIG",
+          "Path": "{APPDATA}\\GitHub CLI",
+          "Filter": [
+            "config.yml"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Aliase",
+      "NotTransfer": "Anmeldung (hosts.yml/Windows-Anmeldespeicher - wird absichtlich nicht kopiert); Erweiterungen neu installieren",
+      "License": "kostenlos",
+      "After": [
+        "GitHub CLI: gh auth login"
+      ],
+      "Package": "github-?cli",
+      "WingetId": "GitHub.cli"
+    },
+    {
+      "Id": "App_NodeJS",
+      "Name": "Node.js",
+      "Detect": "^Node\\.js$",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "NPMRC",
+          "Path": "{PROFILE}",
+          "Filter": [
+            ".npmrc"
+          ]
+        }
+      ],
+      "Transfer": "npm-Einstellungen (.npmrc)",
+      "NotTransfer": "globale Pakete ({APPDATA}\\npm - mit npm install -g neu installieren); Tokens in .npmrc sind Klartext",
+      "License": "kostenlos",
+      "After": [
+        "Node.js: globale Pakete neu installieren (Liste: npm ls -g --depth=0 am Altgeraet)"
+      ],
+      "Package": "node",
+      "WingetId": "OpenJS.NodeJS.LTS"
+    },
+    {
+      "Id": "App_Python",
+      "Name": "Python",
+      "Detect": "^Python 3\\.\\d+\\.\\d+ \\(",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "PIP",
+          "Path": "{APPDATA}\\pip"
+        },
+        {
+          "Type": "Files",
+          "Name": "RC",
+          "Path": "{PROFILE}",
+          "Filter": [
+            ".pypirc"
+          ]
+        }
+      ],
+      "Transfer": "pip-Einstellungen",
+      "NotTransfer": "Pakete (je Version neu installieren: pip freeze am Altgeraet); .pypirc enthaelt Zugangsdaten im Klartext",
+      "License": "kostenlos",
+      "After": [
+        "Python: Pakete neu installieren (pip install -r)"
+      ],
+      "Package": "python"
+    },
+    {
+      "Id": "App_Scribus",
+      "Name": "Scribus",
+      "Detect": "^Scribus \\d",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\Scribus",
+          "XD": [
+            "cache",
+            "temp",
+            "downloads"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Sammelalbum, Paletten, Seitenvorlagen",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "Scribus"
+      ],
+      "Package": "scribus",
+      "WingetId": "Scribus.Scribus"
+    },
+    {
+      "Id": "App_JDownloader",
+      "Name": "JDownloader 2",
+      "Detect": "^JDownloader 2",
+      "Transfer": "nichts automatisch - Einstellungen liegen im Programmordner (cfg)",
+      "NotTransfer": "Hoster-Konten und MyJDownloader-Anmeldung",
+      "License": "kostenlos",
+      "After": [
+        "JDownloader: am Altgeraet Datei > Sicherung erstellen (.jd2backup), am neuen PC wiederherstellen"
+      ],
+      "Package": "jdownloader",
+      "WingetId": "AppWork.JDownloader"
+    },
+    {
+      "Id": "App_LogiOptions",
+      "Name": "Logi Options+",
+      "Detect": "^Logi Options\\+",
+      "Transfer": "nichts - Geraeteprofile ueber das Logi-Konto (Sicherung) wiederherstellen",
+      "NotTransfer": "Logi-Konto, Geraete-Kopplung",
+      "License": "kostenlos",
+      "After": [
+        "Logi Options+: anmelden, Einstellungen aus Sicherung wiederherstellen"
+      ],
+      "Package": "logi-?options",
+      "WingetId": "Logitech.OptionsPlus"
+    },
+    {
+      "Id": "App_AndroidStudio",
+      "Name": "Android Studio",
+      "Detect": "^Android Studio$",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "CONFIG",
+          "Path": "{APPDATA}\\Google",
+          "XD": [
+            "Chrome"
+          ]
+        },
+        {
+          "Type": "Files",
+          "Name": "GRADLE",
+          "Path": "{PROFILE}\\.gradle",
+          "Filter": [
+            "gradle.properties"
+          ]
+        }
+      ],
+      "Transfer": "IDE-Einstellungen (Versionsordner AndroidStudio*), gradle.properties",
+      "NotTransfer": "SDK, Gradle-Cache, Emulator-Images (neu laden); adbkey/debug.keystore; Kennwoerter in gradle.properties sind Klartext",
+      "License": "kostenlos",
+      "After": [
+        "Android Studio: SDK installieren, Einstellungen der Vorversion importieren"
+      ],
+      "CloseProcess": [
+        "studio64"
+      ],
+      "Package": "android studio",
+      "WingetId": "Google.AndroidStudio"
+    },
+    {
+      "Id": "App_Enpass",
+      "Name": "Enpass",
+      "Detect": "^Enpass",
+      "Transfer": "Tresore liegen in Dokumente\\Enpass (gehen mit dem Profil mit) - empfohlen: Sicherung/Sync von Enpass",
+      "NotTransfer": "Windows Hello/Schnellentsperrung; Lizenz am Enpass-Konto",
+      "License": "Konto/Lizenz",
+      "After": [
+        "Enpass: Tresor mit Hauptpasswort oeffnen bzw. aus Sicherung/Sync wiederherstellen"
+      ],
+      "Package": "enpass",
+      "WingetId": "Sinew.Enpass"
+    },
+    {
+      "Id": "App_CitrixWorkspace",
+      "Name": "Citrix Workspace",
+      "Detect": "^Citrix Workspace",
+      "Items": [
+        {
+          "Type": "Reg",
+          "Name": "ICA",
+          "Key": "HKCU\\Software\\Citrix\\ICA Client"
+        },
+        {
+          "Type": "Reg",
+          "Name": "DAZZLE",
+          "Key": "HKCU\\Software\\Citrix\\Dazzle"
+        },
+        {
+          "Type": "Folder",
+          "Name": "ICACLIENT",
+          "Path": "{APPDATA}\\ICAClient"
+        }
+      ],
+      "Transfer": "Client-Einstellungen, Store/abonnierte Apps",
+      "NotTransfer": "Anmeldung (AuthManager), Richtlinien",
+      "License": "kostenlos (Server-Lizenz der Organisation)",
+      "After": [
+        "Citrix Workspace: Store hinzufuegen bzw. anmelden"
+      ],
+      "CloseProcess": [
+        "SelfService",
+        "Receiver",
+        "wfcrun32"
+      ],
+      "Package": "citrix",
+      "WingetId": "Citrix.Workspace"
+    },
+    {
+      "Id": "App_UniGetUI",
+      "Name": "UniGetUI",
+      "Detect": "^(UniGetUI|WingetUI)",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{LOCALAPPDATA}\\UniGetUI",
+          "XD": [
+            "CachedMetadata",
+            "CachedMedia",
+            "CachedLanguageFiles"
+          ]
+        }
+      ],
+      "Transfer": "Einstellungen, Paketquellen, Installationsoptionen",
+      "NotTransfer": "GitHub-Token fuer Cloud-Sicherung (Windows-Anmeldespeicher)",
+      "License": "kostenlos",
+      "CloseProcess": [
+        "UniGetUI"
+      ],
+      "Package": "unigetui|wingetui",
+      "WingetId": "Devolutions.UniGetUI"
+    },
+    {
+      "Id": "App_PSStudio",
+      "Name": "SAPIEN PowerShell Studio",
+      "Detect": "^PowerShell Studio 20\\d\\d",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "DATA",
+          "Path": "{APPDATA}\\SAPIEN"
+        }
+      ],
+      "Transfer": "Layouts, Optionen, Vorlagen, Snippets",
+      "NotTransfer": "Aktivierung (geraetegebunden - am Altgeraet deaktivieren)",
+      "License": "kostenpflichtig",
+      "After": [
+        "PowerShell Studio: am Altgeraet deaktivieren, am neuen PC aktivieren"
+      ],
+      "CloseProcess": [
+        "PowerShell Studio"
+      ],
+      "Package": "powershell studio|sapien"
+    },
+    {
+      "Id": "App_Reolink",
+      "Name": "Reolink",
+      "Detect": "^Reolink",
+      "Transfer": "nichts - Kameras/Rekorder im Client neu hinzufuegen",
+      "NotTransfer": "Geraete-Kennwoerter, Reolink-Konto",
+      "License": "kostenlos",
+      "After": [
+        "Reolink: Kameras/Rekorder neu hinzufuegen"
+      ],
+      "Package": "reolink",
+      "WingetId": "Reolink.Reolink"
+    },
+    {
+      "Id": "App_ChromeRD",
+      "Name": "Chrome Remote Desktop",
+      "Detect": "^Chrome Remote Desktop Host$",
+      "Transfer": "nichts - Host am neuen PC neu einrichten",
+      "NotTransfer": "Host-Identitaet und Schluessel (darf nicht kopiert werden)",
+      "License": "kostenlos (Google-Konto)",
+      "After": [
+        "Chrome Remote Desktop: Fernzugriff am neuen PC neu einrichten, alten Host im Google-Konto entfernen"
+      ],
+      "WingetId": "Google.ChromeRemoteDesktopHost"
+    },
+    {
+      "Id": "App_Claude",
+      "Name": "Claude",
+      "Detect": "^Claude$",
+      "Items": [
+        {
+          "Type": "Files",
+          "Name": "MCP",
+          "Path": "{APPDATA}\\Claude",
+          "Filter": [
+            "claude_desktop_config.json"
+          ]
+        }
+      ],
+      "Transfer": "MCP-Server-Konfiguration (claude_desktop_config.json)",
+      "NotTransfer": "Anmeldung (DPAPI); API-Schluessel in der Konfiguration sind Klartext",
+      "License": "Konto",
+      "After": [
+        "Claude: anmelden"
+      ],
+      "CloseProcess": [
+        "claude"
+      ],
+      "WingetId": "Anthropic.Claude"
     }
   ]
 }
