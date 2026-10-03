@@ -1,9 +1,11 @@
 # Changelog
 
-## v2.0.71 - 2026-10-03
+## v2.0.72 - 2026-10-03 (enthaelt v2.0.71, nicht freigegeben)
 ### Dokumentation
 - INSTALL: Ordnerrechte, App-Updates (Voraussetzungen, PowerShell 7), Platte uebernehmen
 - Anleitung: Dateien von HUMig ausserhalb des Tool-Ordners, Einstellung `AclCheckOff`, Katalog-Feld `WingetId`, Hinweis zu HUMig im persoenlichen Ordner
+### Behoben
+- Werkzeug *Netzwerk / IP-Adresse*: brach auf manchen PCs mit *Exception setting NetAdapter* ab (Windows-Fehler in Get-NetIPConfiguration, z. B. bei Hyper-V-Adaptern) - Werte werden jetzt einzeln gelesen
 
 ## v2.0.70 - 2026-10-03
 ### Restore / Zuverlaessigkeit
