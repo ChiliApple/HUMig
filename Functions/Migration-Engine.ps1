@@ -1060,6 +1060,72 @@ function Import-HMReg {
 # ============================================================================
 # MANIFEST / BACKUP-LISTE (auch von der Oberflaeche genutzt)
 # ============================================================================
+# ---------------------------------------------------------------------------
+# Katalog-Statistik: je Katalog-Programm und PC/Benutzer, ob die Pfade des Eintrags beim Backup Daten hatten.
+# Liegt NUR lokal im Backup-Ordner (Katalog-Statistik.json) - es wird nichts gesendet. Belegt in der Praxis,
+# ob ein (ungepruefter) Eintrag stimmt: "an 12 PCs gefunden" vs. "3x nicht vorhanden".
+# ---------------------------------------------------------------------------
+function Read-HMCatalogStats([string]$Root) {
+    $data = @{}
+    $f = Join-Path $Root 'Katalog-Statistik.json'
+    if (-not $Root -or -not (Test-Path -LiteralPath $f)) { return $data }
+    try {
+        $j = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($p in @($j.Apps.PSObject.Properties)) {
+            $h = @{}; foreach ($q in @($p.Value.PSObject.Properties)) { $h[$q.Name] = $q.Value }
+            $data[$p.Name] = $h
+        }
+    } catch { }
+    return $data
+}
+function Get-HMCatalogStatsSummary($Entries) {
+    $v = @($Entries.Values)
+    $o = [ordered]@{
+        Found = @($v | Where-Object { "$($_.Result)" -eq 'gefunden' }).Count
+        Partial = @($v | Where-Object { "$($_.Result)" -eq 'teilweise' }).Count
+        Missing = @($v | Where-Object { "$($_.Result)" -eq 'nicht vorhanden' }).Count
+        Last = "$(@($v | ForEach-Object { "$($_.Date)" } | Sort-Object -Descending)[0])"
+    }
+    $o.Text = if (-not $v.Count) { '' } else { "an $($o.Found) PC(s) gefunden$(if ($o.Partial) { ", $($o.Partial)x teilweise" })$(if ($o.Missing) { ", $($o.Missing)x nicht vorhanden" })" }
+    return [pscustomobject]$o
+}
+function Update-HMCatalogStats([string]$Root, $Manifest) {
+    if (-not $Root -or -not $Manifest) { return 0 }
+    $mods = @($Manifest.Modules | Where-Object { $_ -and "$($_.Id)" -like 'App_*' -and -not $_.FromPrevious })
+    if (-not $mods.Count) { return 0 }
+    $data = Read-HMCatalogStats $Root
+    $key = ("{0}|{1}" -f "$($Manifest.SourceComputer)", "$($Manifest.UserName)").ToUpperInvariant()
+    $date = "$(if ($Manifest.Finished) { $Manifest.Finished } else { $Manifest.Created })"
+    foreach ($m in $mods) {
+        $items = @($m.Items | Where-Object { $_ -and "$($_.Name)" -ne 'Hinweis' })
+        $found = @($items | Where-Object { "$($_.Status)" -in @('OK', 'Warning') }).Count
+        $miss = @($items | Where-Object { "$($_.Status)" -eq 'Skip' -and "$($_.Msg)" -match 'nicht vorhanden' }).Count
+        $res = if ($found -and -not $miss) { 'gefunden' } elseif ($found) { 'teilweise' } elseif ($miss) { 'nicht vorhanden' } else { 'unklar' }
+        if (-not $data.ContainsKey("$($m.Id)")) { $data["$($m.Id)"] = @{} }
+        $data["$($m.Id)"][$key] = [ordered]@{ Date = $date; Result = $res; Items = @($items | ForEach-Object { "$($_.Name)=$($_.Status)" }) }
+    }
+    $out = [ordered]@{}
+    foreach ($k in @($data.Keys | Sort-Object)) { $e = [ordered]@{}; foreach ($k2 in @($data[$k].Keys | Sort-Object)) { $e[$k2] = $data[$k][$k2] }; $out[$k] = $e }
+    $obj = [ordered]@{ _Info = 'HUMig Katalog-Statistik: je Katalog-Programm und PC|Benutzer das Ergebnis des letzten Backups (gefunden / teilweise / nicht vorhanden). Nur lokal, wird nicht gesendet.'; Updated = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Apps = $out }
+    $f = Join-Path $Root 'Katalog-Statistik.json'
+    $tmp = "$f.tmp"
+    [System.IO.File]::WriteAllText($tmp, ($obj | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($true)))
+    Move-Item -LiteralPath $tmp -Destination $f -Force
+    return $mods.Count
+}
+# Statistik aus allen vorhandenen Backups im Ordner neu einlesen (z.B. fuer Backups vor dieser Funktion)
+function Import-HMCatalogStatsFromBackups([string]$Root) {
+    $n = 0
+    foreach ($d in @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        $mf = Join-Path $d.FullName 'manifest.json'
+        if (-not (Test-Path -LiteralPath $mf)) { continue }
+        try { $m = Get-Content -LiteralPath $mf -Raw -Encoding UTF8 | ConvertFrom-Json } catch { continue }
+        if ("$($m.Status)" -in @('Running', 'Cancelled')) { continue }
+        if ((Update-HMCatalogStats $Root $m) -gt 0) { $n++ }
+    }
+    return $n
+}
+
 function Save-HMManifest([hashtable]$Manifest, [string]$BackupPath) {
     $Manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $BackupPath 'manifest.json') -Encoding UTF8 -Force
 }
@@ -2141,6 +2207,7 @@ function Start-HMBackup {
     $Job.Progress = 100
     $sumLvl = switch ($Ctx.Manifest.Status) { 'OK' { 'Success' } 'Warning' { 'Warning' } default { 'Error' } }
     Write-HMLog $Job ("BACKUP {0}: {1} in {2} - Fehler: {3}, Warnungen: {4}" -f $Ctx.Manifest.Status, (Format-HMSize $allBytes), $Ctx.Manifest.Duration, $errs, $warns) $sumLvl
+    if (-not (Test-HMCancel $Job)) { try { Update-HMCatalogStats (Split-Path $Ctx.BackupPath -Parent) $Ctx.Manifest } catch { Write-HMLog $Job "Katalog-Statistik nicht aktualisiert: $($_.Exception.Message)" 'Debug' } }
 
     # ---- Protokoll ----
     $m = $Ctx.Manifest

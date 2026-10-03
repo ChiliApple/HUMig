@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.90 - 2026-10-03
+### Neu: Katalog-Statistik
+- Nach jedem Backup vermerkt HUMig je Katalog-Programm und PC/Benutzer, ob die Pfade des Eintrags Daten hatten (gefunden / teilweise / nicht vorhanden) - `Katalog-Statistik.json` im Backup-Ordner, nur lokal, nichts wird gesendet
+- Fenster *Programme*: Spalte *Praxis (Backups)*; Knopf *Katalog-Statistik ...* mit allen Programmen (verdaechtige oben), *Aus vorhandenen Backups einlesen* und - als Administrator - *Markierte als geprueft ...* (speichert in Config\apps.json)
+- Rueckmeldung (GitHub-Issue/E-Mail) enthaelt die Zahlen je Programm
+
 ## v2.0.89 - 2026-10-03
 ### Dokumentation
 - Anleitung: neuer Abschnitt *Ein Programm auf Mitnahme pruefen* (Schritt fuer Schritt: erkennen, nur dieses Modul sichern, Protokoll lesen, am Test-Benutzer/in der Windows-Sandbox zurueckspielen, Rueckmeldung, als Administrator *Geprueft am* setzen)
