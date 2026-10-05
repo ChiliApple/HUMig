@@ -121,13 +121,18 @@ function Start-HMAppDetect([switch]$Show) {
         $newOnes = @($ids | Where-Object { $script:DetectedModuleIds -notcontains $_ })
         $gone = @(@($script:DetectedModuleIds) | Where-Object { $ids -notcontains $_ })
         $script:DetectedModuleIds = $ids
-        if ($newOnes.Count -or $gone.Count) { Update-BackupPanelKeepChecks -Check @($newOnes | Where-Object { $_ -like 'App_*' }) }
+        # Neu erkannte Programme nur anhaken, wenn die gewaehlte Vorlage sie enthaelt (Komplett = alle, eigene Vorlage = gespeicherte);
+        # Standard enthaelt keine Programme - dann von Hand anhaken
+        $pre = $null; try { $pre = Get-HMPreset "$($ui.cmbPreset.SelectedItem)" } catch { }
+        $preMods = @(if ($pre) { @($pre.Modules) })
+        $auto = @($newOnes | Where-Object { $_ -like 'App_*' -and (($preMods -contains '*') -or ($preMods -contains $_)) })
+        if ($newOnes.Count -or $gone.Count) { Update-BackupPanelKeepChecks -Check $auto }
         if ($found.Count) {
             $tr = @{}; foreach ($a in $script:AppCatalog) { if (Test-HMAppTrial $a) { $tr[$a.Id] = $true } }
             Out-Console ("Programme erkannt ({0}): {1}" -f $found.Count, (@($found | ForEach-Object { "$($_.Name)$(if ($tr[$_.Id]) { '*' })" }) -join ', ')) 'Info'
             if (@($found | Where-Object { $tr[$_.Id] }).Count) { Out-Console "   * = $script:HMAppTrialText" 'Warning' }
-            $auto = @($newOnes | Where-Object { $_ -like 'App_*' })
-            if ($auto.Count) { Out-Console "   Einstellungen dieser Programme werden mitgesichert (Gruppe PROGRAMME, abwaehlbar) - Details: Knopf 'Programme'" 'Info' }
+            if ($auto.Count) { Out-Console "   Einstellungen von $($auto.Count) Programm(en) werden laut Vorlage mitgesichert (Gruppe PROGRAMME, abwaehlbar) - Details: Knopf 'Programme'" 'Info' }
+            elseif (@($newOnes | Where-Object { $_ -like 'App_*' }).Count) { Out-Console "   Zum Mitsichern in der Gruppe PROGRAMME anhaken (Vorlage Komplett hakt alle an) - Details: Knopf 'Programme'" 'Info' }
         } elseif ($script:AppDetectShow) { Out-Console 'Keine Programme aus dem Katalog gefunden.' 'Info' }
         if ($script:AppDetectShow) { Show-HMAppCatalog }
     }

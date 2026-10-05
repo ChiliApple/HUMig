@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.94 - 2026-10-05
+### Geaendert
+- Erkannte Programme (Gruppe *Programme*) werden nur noch angehakt, wenn die gewaehlte Vorlage sie enthaelt: *Standard* = keine (von Hand anhaken), *Komplett* = alle, eigene Vorlage = die gespeicherten. Vorher waren beim Start alle erkannten Programme angehakt, nach einem Vorlagenwechsel nicht mehr
+
 ## v2.0.93 - 2026-10-05
 ### Behoben
 - Gerade signiertes Release wurde bis zu einer Minute als *nicht signiert* angezeigt (Update / *Andere Version* verweigerte die Installation, erst nach erneutem Signieren ging es): GitHub liefert die Release-Liste mit 60 Sekunden Zwischenspeicher - HUMig und Pull.ps1 fragen die Liste jetzt immer frisch ab
