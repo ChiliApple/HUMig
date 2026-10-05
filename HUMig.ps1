@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.91'
+$script:Version   = '2.0.92'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -791,7 +791,6 @@ function Set-JobUi([bool]$Running) {
     $ui.btnCancelRestore.IsEnabled = $Running
     $ui.cmbComputer.IsEnabled = -not $Running -and -not $script:UserMode
     $ui.cmbUser.IsEnabled = -not $Running -and -not $script:UserMode
-    if ($script:UserMode) { $ui.btnUpdate.IsEnabled = $false }
     foreach ($b in @($script:SbButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
     if ($ui.btnSbCancel) { $ui.btnSbCancel.IsEnabled = $Running }
     foreach ($b in @($script:AuButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
@@ -1684,6 +1683,27 @@ function Start-HMPull([string]$Version = '') {
     if (-not (Confirm-Action "HUMig schliessen, $what von GitHub laden$(if ($Version -or -not $cfg.UseBranch) { ', pruefen' }) und neu starten?`n`nEigene Daten und Einstellungen bleiben erhalten.")) { return }
     $pa = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$pull`"", '-WaitPid', $PID)
     if ($Version) { $pa += @('-Version', $Version) }
+    if ($script:UserMode) {
+        # Benutzer-Modus: Update braucht Administratorrechte (Tool-Ordner ist fuer Benutzer nur lesbar).
+        # Ein Hilfsprozess im Benutzerkonto startet Pull.ps1 erhoeht (UAC, Admin-Anmeldung) ohne Neustart
+        # und startet danach HUMig wieder im Benutzer-Modus - auch wenn die UAC-Abfrage abgelehnt wird.
+        if (-not (Confirm-Action "Das Update braucht Administratorrechte - Windows fragt gleich nach der Anmeldung eines Administrators.`n`nDanach startet HUMig wieder im Benutzer-Modus. Fortfahren?")) { return }
+        $pa += '-NoStart'
+        $argList = ($pa | ForEach-Object { "'" + ("$_" -replace "'", "''") + "'" }) -join ','
+        $uexe = Join-Path $script:AppRoot 'HUMig-Benutzer.exe'
+        $ucmd = Join-Path $script:AppRoot 'Start-Benutzer.cmd'
+        $helper = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+try { Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList @($argList) -WorkingDirectory '$($script:AppRoot -replace "'", "''")' -ErrorAction Stop } catch { }
+Wait-Process -Id $PID -Timeout 60
+if (Test-Path -LiteralPath '$($uexe -replace "'", "''")') { Start-Process -FilePath '$($uexe -replace "'", "''")' -WorkingDirectory '$($script:AppRoot -replace "'", "''")' }
+elseif (Test-Path -LiteralPath '$($ucmd -replace "'", "''")') { Start-Process -FilePath '$($ucmd -replace "'", "''")' -WorkingDirectory '$($script:AppRoot -replace "'", "''")' -WindowStyle Hidden }
+"@
+        $enc = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($helper))
+        Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) -WorkingDirectory $script:AppRoot -WindowStyle Hidden
+        $script:Window.Close()
+        return
+    }
     Start-Process powershell.exe -ArgumentList $pa -WorkingDirectory $script:AppRoot
     $script:Window.Close()
 }
@@ -1805,7 +1825,10 @@ $ui.btnUpdate.ContextMenu = $cmUpd
 function Set-HMUserModeUi {
     $hide = { param($c) if ($c) { $c.Visibility = 'Collapsed' } }
     # Kopfzeile / Ziel: fest dieser PC und der angemeldete Benutzer
-    foreach ($c in @($ui.btnUpdate, $ui.btnSettings, $ui.btnConnect, $ui.btnLocal, $ui.btnADDevices, $ui.btnBitLocker, $ui.btnDeleteBackup)) { & $hide $c }
+    foreach ($c in @($ui.btnSettings, $ui.btnConnect, $ui.btnLocal, $ui.btnADDevices, $ui.btnBitLocker, $ui.btnDeleteBackup)) { & $hide $c }
+    # Update bleibt sichtbar (wird gelb bei neuer Version) - Installation mit Admin-Anmeldung (UAC), kein Rechtsklick-Menue
+    $ui.btnUpdate.ContextMenu = $null
+    $ui.btnUpdate.ToolTip = 'Neue Version installieren - braucht die Anmeldung eines Administrators (Windows fragt nach). Danach startet HUMig wieder im Benutzer-Modus.'
     $ui.cmbComputer.IsEnabled = $false; $ui.cmbUser.IsEnabled = $false
     # Backup / Restore: Funktionen mit Systemzugriff ausblenden
     foreach ($c in @($ui.btnEditExceptions, $ui.chkMinSystemExc, $ui.chkNoSystemFileExc, $ui.btnCleanupBackups, $ui.btnReinstall,
@@ -1932,7 +1955,7 @@ Initialize-HMAppUpdatesTab -IsAdmin $isAdmin
 try { Update-HMBsLabel } catch { }
 Update-BackupList
 Connect-Target
-if (-not $script:UserMode) { Invoke-UpdateCheck }
+Invoke-UpdateCheck
 if (-not (Test-Path -LiteralPath (Join-Path $script:AppRoot 'HUMig-Benutzer.exe'))) { [void](New-HMLauncher -Name 'HUMig-Benutzer.exe') }
 if (-not $script:UserMode -and -not (Test-Path -LiteralPath (Join-Path $script:AppRoot 'HUMig.exe'))) {
     if (New-HMLauncher) { Out-Console 'Starter HUMig.exe mit Logo erstellt - in Zukunft damit starten (kein Konsolenfenster, an Taskleiste anheftbar).' 'Success' }
