@@ -153,7 +153,7 @@ Knopf **Zeitplan ...** im Reiter Backup: das **eigene Profil** an diesem PC auto
 - Windows-Meldung nach jedem Lauf oder nur bei Problemen; Rechtsklick auf *Zeitplan ...* = verwalten (jetzt starten, Protokoll, Bericht, loeschen)
 - Dateien: `%LOCALAPPDATA%\HUMig\Zeitplaene\` (Definition + `Logs\`), Aufgabe *HUMig Backup - Benutzer - Name* in der Aufgabenplanung
 
-Vorlagen: Standard, Komplett, Nur Browser + Office, Neuer PC (mit USMT), **Notebook** (ohne C:\\), **Buero-PC** (mit Druckertreibern, Schriftarten), **Minimal** - eigene in `Config\modules.json`.
+Vorlagen: **Standard** (Profil, Daten auf C:\\, Browser, Office inkl. Registry, Taskleiste/Desktop/Startmenue/Schnellzugriff, WLAN, Freigaben, Netzlaufwerke, Drucker, USMT, Aufgaben, Info) und **Komplett** (alle Module). Eigene Vorlagen: Module anhaken -> **Als Vorlage speichern ...**; Rechtsklick auf die Vorlagen-Liste = umbenennen, mit aktueller Auswahl ueberschreiben, loeschen (gespeichert in `Config\modules.json`, bleibt bei Updates erhalten).
 
 ## Restore und Backups verwalten
 

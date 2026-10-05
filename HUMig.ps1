@@ -27,7 +27,7 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.90'
+$script:Version   = '2.0.91'
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -201,8 +201,10 @@ function Import-AppConfig {
     $script:Groups  = @($modDef.Groups)
     if ($modLoc -and $modLoc.Groups) { foreach ($g in @($modLoc.Groups)) { if ($script:Groups -notcontains $g) { $script:Groups += $g } } }
     foreach ($m in $script:Modules) { if ($script:Groups -notcontains $m.Group) { $script:Groups += $m.Group } }
-    $script:Presets = @($modDef.Presets)
-    if ($modLoc -and $modLoc.Presets) { $script:Presets = @($modLoc.Presets) + $script:Presets }
+    # Vorlagen: eingebaute (modules.default.json) + eigene (modules.json, "Als Vorlage speichern")
+    $script:BuiltinPresets = @($modDef.Presets | Where-Object { $_ -and "$($_.Name)".Trim() })
+    $script:OwnPresets = @($modLoc.Presets | Where-Object { $_ -and "$($_.Name)".Trim() })
+    $script:Presets = @($script:OwnPresets) + @($script:BuiltinPresets)
     $script:UpdateCfg = Get-HMUpdateConfig $script:ConfigDir
     $script:UpdateOwner = $script:UpdateCfg.Owner; $script:UpdateRepo = $script:UpdateCfg.Repo; $script:UpdateBranch = $script:UpdateCfg.Branch
 }
@@ -234,7 +236,7 @@ if ($script:AppIcon) { $script:Window.Icon = $script:AppIcon }
 function Get-UI([string]$n) { $e = $script:Window.FindName($n); if (-not $e) { Write-Host "[WARN] UI '$n' fehlt" -ForegroundColor Yellow }; return $e }
 $ui = @{}
 foreach ($n in @('imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
-    'txtBackupRoot', 'btnBrowseRoot', 'btnOpenRoot', 'lblFree', 'tabMain', 'cmbPreset', 'btnAllOn', 'btnAllOff', 'pnlBackupModules', 'lstExtra', 'btnExtraAdd',
+    'txtBackupRoot', 'btnBrowseRoot', 'btnOpenRoot', 'lblFree', 'tabMain', 'cmbPreset', 'btnAllOn', 'btnAllOff', 'btnPresetSave', 'pnlBackupModules', 'lstExtra', 'btnExtraAdd',
     'btnExtraDel', 'chkMinProfileExc', 'chkNoProfileFileExc', 'chkMinSystemExc', 'chkNoSystemFileExc', 'btnEditExceptions', 'cmbThreads', 'btnPrecheck',
     'btnProfileSize', 'btnBackup', 'btnCancel', 'btnRefreshBackups', 'btnOpenBackup', 'btnDeleteBackup', 'btnCleanupBackups', 'dgBackups', 'lblRestoreInfo',
     'pnlRestoreModules', 'lblRestoreTarget', 'chkGpUpdate', 'chkWUDrivers', 'chkNumLock', 'chkFavorites', 'chkFastBoot', 'txtPostScript', 'btnPostScript',
@@ -438,17 +440,89 @@ $script:RestoreExtraIds = @()
 Build-ModulePanel $ui.pnlBackupModules $script:BackupChecks
 Build-ModulePanel $ui.pnlRestoreModules $script:RestoreChecks -Restore
 
-# Vorlagen (zuletzt gewaehlte wird gemerkt)
+# Vorlagen (zuletzt gewaehlte wird gemerkt, sonst Standard)
+# Reihenfolge: eingebaute (Standard, Komplett), dann eigene alphabetisch
 function Update-PresetList {
     $script:SuppressPresetSave = $true
     $ui.cmbPreset.Items.Clear()
-    foreach ($p in $script:Presets) { [void]$ui.cmbPreset.Items.Add($p.Name) }
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($p in @($script:BuiltinPresets) + @($script:OwnPresets | Sort-Object { "$($_.Name)" })) {
+        $n = "$($p.Name)".Trim()
+        if ($n -and -not ($names -contains $n)) { $names.Add($n); [void]$ui.cmbPreset.Items.Add($n) }
+    }
     $last = "$($script:Settings.LastPreset)"
-    # umbenannte Vorlagen (ab v2.0.4)
-    $renamed = @{ 'Lehrer-Notebook' = 'Notebook'; 'Verwaltungs-PC' = 'Buero-PC (mit Druckertreibern)'; 'Schueler-Geraet (Geraeteinitiative)' = 'Minimal' }
-    if ($renamed.ContainsKey($last)) { $last = $renamed[$last] }
-    if ($last -and @($script:Presets | Where-Object { $_.Name -eq $last }).Count) { $ui.cmbPreset.SelectedItem = $last }
+    if (-not ($last -and $names -contains $last)) { $last = 'Standard' }
+    if ($names -contains $last) { $ui.cmbPreset.SelectedItem = $last }
     $script:SuppressPresetSave = $false
+}
+function Get-HMPreset([string]$Name) { return (@($script:Presets | Where-Object { "$($_.Name)".Trim() -eq $Name }) | Select-Object -First 1) }
+function Test-HMOwnPreset([string]$Name) { return [bool](@($script:OwnPresets | Where-Object { "$($_.Name)".Trim() -eq $Name }).Count) }
+function Test-HMBuiltinPreset([string]$Name) { return [bool](@($script:BuiltinPresets | Where-Object { "$($_.Name)".Trim() -ieq $Name }).Count) }
+# Eigene Vorlagen in Config\modules.json schreiben (andere Inhalte der Datei bleiben erhalten)
+function Save-HMOwnPresets([object[]]$Presets) {
+    $mp = Join-Path $script:ConfigDir 'modules.json'
+    $cur = Read-JsonFile $mp
+    $h = [ordered]@{}
+    if ($cur) { foreach ($x in $cur.PSObject.Properties) { $h[$x.Name] = $x.Value } }
+    if (-not $h.Contains('_Info')) { $h['_Info'] = 'Eigene Module/Vorlagen. Gleiche Id wie in modules.default.json ueberschreibt das Standardmodul. Beispiele siehe modules.default.json.' }
+    if (-not $h.Contains('Modules')) { $h['Modules'] = @() }
+    $h['Presets'] = @($Presets | Where-Object { $_ })
+    Write-JsonFile $mp ([pscustomobject]$h) 8
+}
+function Get-HMCheckedBackupIds { return @($script:BackupChecks.Keys | Where-Object { $script:BackupChecks[$_].IsChecked -eq $true } | ForEach-Object { "$_" } | Sort-Object) }
+# Vorlage speichern/umbenennen/loeschen, danach neu laden und $Select waehlen
+function Complete-HMPresetChange([object[]]$Own, [string]$Select) {
+    Save-HMOwnPresets $Own
+    Save-LocalSetting 'LastPreset' $Select
+    Update-PresetList
+}
+function Read-HMPresetName([string]$Title, [string]$Text) {
+    $n = Show-TextInputDialog -Title $Title -Label 'Name der Vorlage (z. B. Notebook, Verwaltung):' -Text $Text
+    if ($null -eq $n) { return $null }
+    $n = ($n -replace '[\x00-\x1F]', '').Trim()
+    if (-not $n) { Out-Console 'Kein Name eingegeben - nichts gespeichert.' 'Warning'; return $null }
+    if ($n.Length -gt 60) { $n = $n.Substring(0, 60).Trim() }
+    if (Test-HMBuiltinPreset $n) { Out-Console "'$n' ist eine eingebaute Vorlage - bitte einen anderen Namen waehlen." 'Warning'; return $null }
+    return $n
+}
+function Save-HMPresetAs {
+    $ids = Get-HMCheckedBackupIds
+    if (-not $ids.Count) { Out-Console 'Keine Module angehakt - nichts zu speichern.' 'Warning'; return }
+    $cur = "$($ui.cmbPreset.SelectedItem)"
+    $n = Read-HMPresetName 'Als Vorlage speichern' $(if (Test-HMOwnPreset $cur) { $cur } else { '' })
+    if (-not $n) { return }
+    if ((Test-HMOwnPreset $n) -and -not (Confirm-Action "Vorlage '$n' gibt es schon.`n`nMit der aktuellen Auswahl ($($ids.Count) Module) ueberschreiben?")) { return }
+    $own = @($script:OwnPresets | Where-Object { "$($_.Name)".Trim() -ne $n }) + [pscustomobject][ordered]@{ Name = $n; Modules = @($ids) }
+    Complete-HMPresetChange $own $n
+    Out-Console "Vorlage '$n' gespeichert ($($ids.Count) Module)" 'Success'
+}
+function Update-HMPresetFromSelection {
+    $n = "$($ui.cmbPreset.SelectedItem)"
+    if (-not (Test-HMOwnPreset $n)) { return }
+    $ids = Get-HMCheckedBackupIds
+    if (-not $ids.Count) { Out-Console 'Keine Module angehakt - nichts zu speichern.' 'Warning'; return }
+    if (-not (Confirm-Action "Vorlage '$n' mit der aktuellen Auswahl ($($ids.Count) Module) ueberschreiben?")) { return }
+    $own = @($script:OwnPresets | ForEach-Object { if ("$($_.Name)".Trim() -eq $n) { [pscustomobject][ordered]@{ Name = $n; Modules = @($ids) } } else { $_ } })
+    Complete-HMPresetChange $own $n
+    Out-Console "Vorlage '$n' aktualisiert ($($ids.Count) Module)" 'Success'
+}
+function Rename-HMPreset {
+    $old = "$($ui.cmbPreset.SelectedItem)"
+    if (-not (Test-HMOwnPreset $old)) { return }
+    $n = Read-HMPresetName 'Vorlage umbenennen' $old
+    if (-not $n -or $n -ceq $old) { return }
+    if (($n -ne $old) -and (Test-HMOwnPreset $n)) { Out-Console "Vorlage '$n' gibt es schon - bitte anderen Namen waehlen." 'Warning'; return }
+    $own = @($script:OwnPresets | ForEach-Object { if ("$($_.Name)".Trim() -eq $old) { $c = $_.PSObject.Copy(); $c.Name = $n; $c } else { $_ } })
+    Complete-HMPresetChange $own $n
+    Out-Console "Vorlage '$old' umbenannt in '$n'" 'Success'
+}
+function Remove-HMPreset {
+    $n = "$($ui.cmbPreset.SelectedItem)"
+    if (-not (Test-HMOwnPreset $n)) { return }
+    if (-not (Confirm-Action "Vorlage '$n' loeschen?`n`n(Die Module selbst bleiben unveraendert.)")) { return }
+    $own = @($script:OwnPresets | Where-Object { "$($_.Name)".Trim() -ne $n })
+    Complete-HMPresetChange $own 'Standard'
+    Out-Console "Vorlage '$n' geloescht - Standard gewaehlt" 'Success'
 }
 # Eingetragene Zusaetzliche Ordner -> Modul 'Zusaetzliche Ordner' bleibt angehakt (auch nach 'Keine' oder Vorlagenwechsel)
 function Sync-ExtraFoldersCheck {
@@ -468,7 +542,7 @@ function Get-BackupModules {
     return $mods
 }
 $ui.cmbPreset.Add_SelectionChanged({
-    $p = @($script:Presets | Where-Object { $_.Name -eq $ui.cmbPreset.SelectedItem }) | Select-Object -First 1
+    $p = Get-HMPreset "$($ui.cmbPreset.SelectedItem)"
     if (-not $p) { return }
     $all = @($p.Modules) -contains '*'
     foreach ($k in $script:BackupChecks.Keys) { $script:BackupChecks[$k].IsChecked = ($all -or (@($p.Modules) -contains $k)) }
@@ -477,6 +551,21 @@ $ui.cmbPreset.Add_SelectionChanged({
     if (-not $script:SuppressPresetSave) { Save-LocalSetting 'LastPreset' "$($p.Name)" }
 })
 Update-PresetList
+$ui.btnPresetSave.Add_Click({ try { Save-HMPresetAs } catch { Out-Console "Vorlage: $($_.Exception.Message)" 'Error' } })
+# Rechtsklick auf die Vorlagen-Liste: eigene Vorlagen verwalten (eingebaute sind fest)
+$cmPre = New-Object System.Windows.Controls.ContextMenu
+$miPreInfo = New-Object System.Windows.Controls.MenuItem; $miPreInfo.IsEnabled = $false
+$miPreRen = New-Object System.Windows.Controls.MenuItem; $miPreRen.Header = 'Umbenennen ...'; $miPreRen.Add_Click({ try { Rename-HMPreset } catch { Out-Console "Vorlage: $($_.Exception.Message)" 'Error' } })
+$miPreUpd = New-Object System.Windows.Controls.MenuItem; $miPreUpd.Header = 'Mit aktueller Auswahl ueberschreiben'; $miPreUpd.Add_Click({ try { Update-HMPresetFromSelection } catch { Out-Console "Vorlage: $($_.Exception.Message)" 'Error' } })
+$miPreDel = New-Object System.Windows.Controls.MenuItem; $miPreDel.Header = 'Loeschen ...'; $miPreDel.Add_Click({ try { Remove-HMPreset } catch { Out-Console "Vorlage: $($_.Exception.Message)" 'Error' } })
+$miPreNew = New-Object System.Windows.Controls.MenuItem; $miPreNew.Header = 'Neue Vorlage aus aktueller Auswahl ...'; $miPreNew.Add_Click({ try { Save-HMPresetAs } catch { Out-Console "Vorlage: $($_.Exception.Message)" 'Error' } })
+foreach ($m in @($miPreInfo, (New-Object System.Windows.Controls.Separator), $miPreRen, $miPreUpd, $miPreDel, (New-Object System.Windows.Controls.Separator), $miPreNew)) { [void]$cmPre.Items.Add($m) }
+$cmPre.Add_Opened({
+    $n = "$($ui.cmbPreset.SelectedItem)"; $own = Test-HMOwnPreset $n
+    $miPreInfo.Header = $(if (-not $n) { 'Keine Vorlage gewaehlt' } elseif ($own) { "Eigene Vorlage: $n" } else { "$n (eingebaut, nicht aenderbar)" })
+    foreach ($m in @($miPreRen, $miPreUpd, $miPreDel)) { $m.IsEnabled = $own }
+})
+$ui.cmbPreset.ContextMenu = $cmPre
 $ui.btnAllOn.Add_Click({ foreach ($c in $script:BackupChecks.Values) { $c.IsChecked = $true } })
 $ui.btnAllOff.Add_Click({ foreach ($c in $script:BackupChecks.Values) { $c.IsChecked = $false }; Sync-ExtraFoldersCheck })
 

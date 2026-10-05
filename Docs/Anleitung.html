@@ -111,7 +111,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h3>Profil umziehen (alter PC → neuer PC)</h3>
   <ol class="steps">
     <li><b>Alter PC:</b> Computer wählen (<span class="ui">Lokal</span> oder Name eintippen + <span class="ui">Verbinden</span>), Benutzer wählen.</li>
-    <li>Reiter <b>Backup</b>: Vorlage wählen (z. B. <i>Standard</i>), optional <span class="ui">Programme</span> – erkannte Programme werden als Module ergänzt.</li>
+    <li>Reiter <b>Backup</b>: Vorlage wählen (<i>Standard</i>, <i>Komplett</i> oder eine eigene), optional <span class="ui">Programme</span> – erkannte Programme werden als Module ergänzt.</li>
     <li><span class="ui">Vorab-Pruefung</span> – zeigt Anmeldestatus, Cloud-Ordner, Größe und freien Platz. Dann <span class="ui g">Backup starten</span>.</li>
     <li><b>Neuer PC:</b> Computer + Benutzer wählen, Reiter <b>Restore</b>, Backup markieren, optional <span class="ui">Vorschau: was wird ueberschrieben?</span></li>
     <li><span class="ui g">Restore starten</span>, danach <span class="ui">Fehlende Programme installieren …</span> und <span class="ui">Checkliste</span>.</li>
@@ -162,18 +162,15 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>System</td><td>Windows-Einstellungen (USMT) · Aufgabenplanung · Treiber (Export) · Info-Export (Software, Admins, IP …)</td></tr>
     <tr><td>Programme</td><td>iPhone/iPad-Backups, KeePass, Autodesk, SAP GUI u. a. – dazu alle Programme, die der <a href="#programme">Programm-Katalog</a> erkennt</td></tr>
   </table>
-  <p><b>Vorlagen</b> haken nur Module vor – danach frei änderbar. Erkannte Programme kommen immer dazu.</p>
+  <p><b>Vorlagen</b> haken nur Module vor – danach frei änderbar. Erkannte Programme kommen immer dazu. Beim ersten Start ist <i>Standard</i> gewählt, danach die zuletzt gewählte Vorlage.</p>
   <table>
-    <tr><th style="width:230px">Vorlage</th><th>Enthält</th><th style="width:30%">Wofür</th></tr>
-    <tr><td>Standard</td><td>Profil, Daten auf C:\, Edge, Chrome, Office, Taskleiste, Desktop-Symbole, Schnellzugriff, Netzlaufwerke, Drucker, ODBC, Info</td><td>normaler Arbeitsplatz</td></tr>
-    <tr><td>Komplett</td><td>alle Module</td><td>sicher alles</td></tr>
-    <tr><td>Nur Browser + Office</td><td>Edge, Chrome, Firefox, Office, Info</td><td>schnelle Kleinigkeiten</td></tr>
-    <tr><td>Neuer PC (mit Windows-Einstellungen)</td><td>wie Standard + WLAN, Schriftarten, <b>USMT</b></td><td>Benutzer war am Ziel-PC noch nie angemeldet – USMT legt das Profil an</td></tr>
-    <tr><td>Notebook</td><td>wie Standard + Firefox, WLAN – ohne Daten auf C:\ und ODBC</td><td>Notebooks</td></tr>
-    <tr><td>Büro-PC (mit Druckertreibern)</td><td>wie Standard + Office-Registry, Drucker mit Treibern, Schriftarten</td><td>Arbeitsplatz mit lokalen Druckern/Spezialschriften</td></tr>
-    <tr><td>Minimal</td><td>Profil, Edge, Chrome, WLAN, Info</td><td>schnell, nur das Nötigste</td></tr>
+    <tr><th style="width:230px">Vorlage</th><th>Enthält</th></tr>
+    <tr><td>Standard</td><td>Profil, Daten auf C:\, Edge, Chrome, Firefox, Office, Office-Registry, Taskleiste, Desktop-Symbole, Startmenü-Pins, Schnellzugriff, WLAN, Ordnerfreigaben, Netzlaufwerke, Netzwerkdrucker, <b>USMT</b>, Aufgabenplanung, Info</td></tr>
+    <tr><td>Komplett</td><td>alle Module</td></tr>
+    <tr><td><i>eigene Vorlagen</i></td><td>mit <span class="ui b">Als Vorlage speichern ...</span> angelegt</td></tr>
   </table>
-  <p>Eigene Vorlagen: <code>Config\modules.json</code> bzw. Einstellungen › Module.</p>
+  <p><b>Eigene Vorlage anlegen:</b> Module anhaken, <span class="ui b">Als Vorlage speichern ...</span>, Namen eingeben (z. B. <i>Notebook</i> oder <i>Verwaltung</i>). <b>Verwalten:</b> eigene Vorlage in der Liste wählen, dann <b>Rechtsklick auf die Liste</b> → <i>Umbenennen</i>, <i>Mit aktueller Auswahl überschreiben</i> oder <i>Löschen</i>. Die eingebauten Vorlagen <i>Standard</i> und <i>Komplett</i> sind fest. Eigene Vorlagen liegen in <code>Config\modules.json</code> und bleiben bei Updates erhalten.</p>
+  <p class="note">Standard enthält USMT: Das braucht Administratorrechte und USMT unter <span class="ui">Werkzeuge › USMT einrichten (ADK)</span>. Fehlt USMT, meldet das Modul einen Fehler – dann einrichten oder den Haken entfernen.</p>
 
   <h3>Zusätzliche Ordner und Ausnahmen</h3>
   <ul>
