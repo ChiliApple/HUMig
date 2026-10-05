@@ -91,6 +91,10 @@
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Margin" Value="0,0,0,4"/>
         </Style>
+        <Style x:Key="ToolSectionLabel" TargetType="TextBlock" BasedOn="{StaticResource SectionLabel}">
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+        </Style>
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="{StaticResource CatText}"/>
             <Setter Property="Margin" Value="0,2,12,2"/>
@@ -280,9 +284,10 @@
                         <DockPanel Grid.Column="0">
                             <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                                 <TextBlock Text="Vorlage:" Style="{StaticResource Lbl}"/>
-                                <ComboBox x:Name="cmbPreset" Width="250" Margin="0,0,6,4"/>
+                                <ComboBox x:Name="cmbPreset" Width="250" Margin="0,0,6,4" ToolTip="Rechtsklick: eigene Vorlage umbenennen, mit aktueller Auswahl ueberschreiben oder loeschen"/>
                                 <Button x:Name="btnAllOn" Content="Alle" Style="{StaticResource BtnDefault}"/>
                                 <Button x:Name="btnAllOff" Content="Keine" Style="{StaticResource BtnDefault}"/>
+                                <Button x:Name="btnPresetSave" Content="Als Vorlage speichern ..." Style="{StaticResource BtnBlue}" ToolTip="Angehakte Module unter einem eigenen Namen als Vorlage speichern (Rechtsklick auf die Vorlagen-Liste: verwalten)"/>
                                 <TextBlock x:Name="lblSizeTotal" Text="" Foreground="{StaticResource CatSubtext}" VerticalAlignment="Center" Margin="10,0,0,4" ToolTip="Summe der gemessenen, angehakten Module (Groesse ermitteln)"/>
                             </WrapPanel>
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -407,25 +412,25 @@
                         <StackPanel x:Name="pnlTools">
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="COMPUTER (GEWAEHLTER PC - LOKAL ODER REMOTE)" Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock Text="COMPUTER (GEWAEHLTER PC - LOKAL ODER REMOTE)" Style="{StaticResource ToolSectionLabel}"/>
                                     <WrapPanel x:Name="pnlToolsComputer"/>
                                 </StackPanel>
                             </Border>
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="BENUTZERPROFIL (GEWAEHLTER BENUTZER)" Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock Text="BENUTZERPROFIL (GEWAEHLTER BENUTZER)" Style="{StaticResource ToolSectionLabel}"/>
                                     <WrapPanel x:Name="pnlToolsProfile"/>
                                 </StackPanel>
                             </Border>
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="DIAGNOSE / WARTUNG (GEWAEHLTER PC)" Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock Text="DIAGNOSE / WARTUNG (GEWAEHLTER PC)" Style="{StaticResource ToolSectionLabel}"/>
                                     <WrapPanel x:Name="pnlToolsDiag"/>
                                 </StackPanel>
                             </Border>
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="ANMELDEDATEN / ORDNER" Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock Text="ANMELDEDATEN / ORDNER" Style="{StaticResource ToolSectionLabel}"/>
                                     <WrapPanel>
                                         <Button x:Name="btnToolCredWiz" Content="Anmeldedaten sichern/wiederherstellen" Style="{StaticResource BtnMauve}" ToolTip="Windows-Assistent (credwiz) fuer die Anmeldeinformationsverwaltung des ANGEMELDETEN Benutzers. Datei am besten in den Backup-Ordner speichern."/>
                                         <Button x:Name="btnToolCredList" Content="Gespeicherte Anmeldedaten (anzeigen/loeschen)" Style="{StaticResource BtnDefault}" ToolTip="Anmeldeinformationsverwaltung DIESES Kontos (das HUMig ausfuehrt): Liste ohne Kennwoerter, markierte loeschen"/>
@@ -437,7 +442,7 @@
                             </Border>
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="SOFTWARE + TREIBER (GEWAEHLTER COMPUTER)" Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock Text="SOFTWARE + TREIBER (GEWAEHLTER COMPUTER)" Style="{StaticResource ToolSectionLabel}"/>
                                     <WrapPanel>
                                         <Button x:Name="btnToolSoftDeploy" Content="Software installieren (Softwareverteilung)" Style="{StaticResource BtnGreen}" ToolTip="Pakete (MSI/EXE/MSP oder Ordner) silent installieren - auf dem gewaehlten Computer oder mehreren PCs. Parameter werden aus dem Installer gelesen und vorgeschlagen, bereits installierte Software wird erkannt."/>
                                         <Button x:Name="btnToolDrvDeploy" Content="Treiber installieren (Treiberverteilung)" Style="{StaticResource BtnGreen}" ToolTip="Treiber aus einem eigenen Ordner (INF-Ordner per pnputil oder Hersteller-Setup) auf den gewaehlten Computer oder mehrere PCs - mit Hardware-Pruefung und Versionsvergleich, auf Wunsch erzwungen (auch aeltere Version)."/>
@@ -447,13 +452,13 @@
                             </Border>
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="SYSTEM (DIESER PC)" Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock Text="SYSTEM (DIESER PC)" Style="{StaticResource ToolSectionLabel}"/>
                                     <WrapPanel x:Name="pnlSysTools"/>
                                 </StackPanel>
                             </Border>
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="LINKS" Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock Text="LINKS" Style="{StaticResource ToolSectionLabel}"/>
                                     <WrapPanel x:Name="pnlLinks"/>
                                 </StackPanel>
                             </Border>

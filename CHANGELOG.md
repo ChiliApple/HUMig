@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.0.91 - 2026-10-05
+### Vorlagen
+- Eingebaut sind nur noch **Standard** und **Komplett**. Standard hakt jetzt an: Profil, Daten auf C:\, Edge, Chrome, Firefox, Office, Office-Registry, Taskleiste, Desktop-Symbole, Startmenue-Pins, Schnellzugriff, WLAN, Ordnerfreigaben, Netzlaufwerke, Netzwerkdrucker, USMT, Aufgabenplanung, Info (ODBC nicht mehr)
+- Ohne gemerkte Vorlage (erster Start, oder die gemerkte gibt es nicht mehr) wird Standard gewaehlt
+- Neu: Knopf **Als Vorlage speichern ...** neben *Alle*/*Keine* - angehakte Module unter eigenem Namen speichern. Rechtsklick auf die Vorlagen-Liste: *Umbenennen*, *Mit aktueller Auswahl ueberschreiben*, *Loeschen* (nur eigene Vorlagen). Gespeichert in Config\modules.json, bleibt bei Updates erhalten
+- Die Vorlagen Nur Browser + Office, Neuer PC, Notebook, Buero-PC und Minimal sind entfallen - bei Bedarf als eigene Vorlage anlegen
+### Oberflaeche
+- Reiter *Werkzeuge*: Abschnitts-Ueberschriften groesser
+
 ## v2.0.90 - 2026-10-03
 ### Neu: Katalog-Statistik
 - Nach jedem Backup vermerkt HUMig je Katalog-Programm und PC/Benutzer, ob die Pfade des Eintrags Daten hatten (gefunden / teilweise / nicht vorhanden) - `Katalog-Statistik.json` im Backup-Ordner, nur lokal, nichts wird gesendet
