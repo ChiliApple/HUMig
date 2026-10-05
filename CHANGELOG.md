@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.93 - 2026-10-05
+### Behoben
+- Gerade signiertes Release wurde bis zu einer Minute als *nicht signiert* angezeigt (Update / *Andere Version* verweigerte die Installation, erst nach erneutem Signieren ging es): GitHub liefert die Release-Liste mit 60 Sekunden Zwischenspeicher - HUMig und Pull.ps1 fragen die Liste jetzt immer frisch ab
+- (enthaelt v2.0.92: Update im Benutzer-Modus, README neu gegliedert, Anleitung USMT-Hinweis)
+
 ## v2.0.92 - 2026-10-05
 ### Benutzer-Modus
 - Der Knopf *Update* ist jetzt auch im Benutzer-Modus sichtbar und wird bei einer neuen Version gelb. Installieren fragt nach der Anmeldung eines Administrators (UAC); danach startet HUMig wieder im Benutzer-Modus (auch wenn die Abfrage abgelehnt wird)
