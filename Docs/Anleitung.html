@@ -111,7 +111,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h3>Profil umziehen (alter PC → neuer PC)</h3>
   <ol class="steps">
     <li><b>Alter PC:</b> Computer wählen (<span class="ui">Lokal</span> oder Name eintippen + <span class="ui">Verbinden</span>), Benutzer wählen.</li>
-    <li>Reiter <b>Backup</b>: Vorlage wählen (<i>Standard</i>, <i>Komplett</i> oder eine eigene), optional <span class="ui">Programme</span> – erkannte Programme werden als Module ergänzt.</li>
+    <li>Reiter <b>Backup</b>: Vorlage wählen (<i>Standard</i>, <i>Komplett</i> oder eine eigene – ohne USMT siehe <a href="#vorlagen">Vorlagen</a>), optional <span class="ui">Programme</span> – erkannte Programme werden als Module ergänzt.</li>
     <li><span class="ui">Vorab-Pruefung</span> – zeigt Anmeldestatus, Cloud-Ordner, Größe und freien Platz. Dann <span class="ui g">Backup starten</span>.</li>
     <li><b>Neuer PC:</b> Computer + Benutzer wählen, Reiter <b>Restore</b>, Backup markieren, optional <span class="ui">Vorschau: was wird ueberschrieben?</span></li>
     <li><span class="ui g">Restore starten</span>, danach <span class="ui">Fehlende Programme installieren …</span> und <span class="ui">Checkliste</span>.</li>
@@ -162,6 +162,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>System</td><td>Windows-Einstellungen (USMT) · Aufgabenplanung · Treiber (Export) · Info-Export (Software, Admins, IP …)</td></tr>
     <tr><td>Programme</td><td>iPhone/iPad-Backups, KeePass, Autodesk, SAP GUI u. a. – dazu alle Programme, die der <a href="#programme">Programm-Katalog</a> erkennt</td></tr>
   </table>
+  <h3 id="vorlagen">Vorlagen</h3>
   <p><b>Vorlagen</b> haken nur Module vor – danach frei änderbar. Erkannte Programme kommen immer dazu. Beim ersten Start ist <i>Standard</i> gewählt, danach die zuletzt gewählte Vorlage.</p>
   <table>
     <tr><th style="width:230px">Vorlage</th><th>Enthält</th></tr>
@@ -170,7 +171,13 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><i>eigene Vorlagen</i></td><td>mit <span class="ui b">Als Vorlage speichern ...</span> angelegt</td></tr>
   </table>
   <p><b>Eigene Vorlage anlegen:</b> Module anhaken, <span class="ui b">Als Vorlage speichern ...</span>, Namen eingeben (z. B. <i>Notebook</i> oder <i>Verwaltung</i>). <b>Verwalten:</b> eigene Vorlage in der Liste wählen, dann <b>Rechtsklick auf die Liste</b> → <i>Umbenennen</i>, <i>Mit aktueller Auswahl überschreiben</i> oder <i>Löschen</i>. Die eingebauten Vorlagen <i>Standard</i> und <i>Komplett</i> sind fest. Eigene Vorlagen liegen in <code>Config\modules.json</code> und bleiben bei Updates erhalten.</p>
-  <p class="note">Standard enthält USMT: Das braucht Administratorrechte und USMT unter <span class="ui">Werkzeuge › USMT einrichten (ADK)</span>. Fehlt USMT, meldet das Modul einen Fehler – dann einrichten oder den Haken entfernen.</p>
+  <div class="note warn"><b class="h">USMT nicht eingerichtet? Eigene Vorlage speichern</b>Die Vorlage <i>Standard</i> enthält <b>Windows-Einstellungen (USMT)</b>. USMT braucht Administratorrechte und muss auf dem PC mit HUMig einmal eingerichtet sein (<span class="ui">Werkzeuge › USMT einrichten (ADK)</span>). Fehlt es, endet jedes Backup mit einem Fehler beim Modul USMT. Wer USMT nicht nutzen will:
+    <ol>
+      <li>Vorlage <i>Standard</i> wählen.</li>
+      <li>Haken bei <i>Windows-Einstellungen (USMT)</i> entfernen.</li>
+      <li><span class="ui b">Als Vorlage speichern ...</span> – Name z. B. <i>Standard ohne USMT</i>.</li>
+    </ol>
+    HUMig merkt sich die zuletzt gewählte Vorlage und startet ab dann mit ihr.<br><b>Ohne Administratorrechte</b> läuft HUMig im <a href="#benutzermodus">Benutzer-Modus</a>: USMT und alle Module, die Adminrechte brauchen (Daten auf C:\, WLAN, Freigaben, Aufgabenplanung, Info-Export), sind dort ausgeblendet und werden nicht gesichert – eine eigene Vorlage ist dafür nicht nötig.</div>
 
   <h3>Zusätzliche Ordner und Ausnahmen</h3>
   <ul>
@@ -308,6 +315,17 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h3>Eigene Programme</h3>
   <p>Am einfachsten mit dem <a href="#programm-hinzufuegen">Assistenten</a> oder im Editor. Von Hand in <code>Config\apps.json</code> (Aufbau wie <code>apps.default.json</code>, Felder siehe <code>_Info</code> dort), z. B. mit Lizenzdatei:</p>
   <p><code>{ "Apps": [ { "Id": "App_MeinTool", "Name": "Mein Tool", "Detect": "^Mein Tool", "Items": [ { "Type": "Files", "Name": "LIC", "Path": "{PROGRAMFILES}\\MeinTool", "Filter": [ "*.lic" ], "License": true } ] } ] }</code></p>
+  <table>
+    <tr><th style="width:230px">Feld</th><th>Bedeutung</th></tr>
+    <tr><td><code>Id</code>, <code>Name</code>, <code>Detect</code></td><td><code>App_…</code>, Anzeigename, regulärer Ausdruck auf den Programmnamen in <i>Apps &amp; Features</i></td></tr>
+    <tr><td><code>Items</code></td><td><code>Type</code> Folder/Files/Reg, <code>Name</code> (Ordner im Backup), <code>Path</code> mit Platzhaltern <code>{APPDATA}</code> <code>{LOCALAPPDATA}</code> <code>{PROFILE}</code> <code>{PROGRAMFILES}</code> <code>{PROGRAMFILESX86}</code> <code>{PROGRAMDATA}</code> <code>{SYSTEMDRIVE}</code> <code>{WINDIR}</code> <code>{PUBLIC}</code> oder <code>Key</code> (HKCU/HKLM), dazu <code>Filter</code>, <code>XD</code>, <code>XF</code>, <code>NoHidden</code>, <code>License</code></td></tr>
+    <tr><td><code>Role</code>, <code>DbKind</code> (je Item)</td><td>Settings / Plugins / Data / Database / License / Template; bei Database <code>File</code> (SQLite, Access, KeePass – <code>-wal</code>/<code>-shm</code>/<code>-journal</code> werden mitkopiert) oder <code>Service</code></td></tr>
+    <tr><td><code>CloseProcess</code></td><td>Prozessnamen ohne .exe – läuft das Programm, fragt HUMig vor Backup/Restore (schließen, notfalls beenden, überspringen, trotzdem kopieren). Geplante Backups beenden nie ein Programm.</td></tr>
+    <tr><td><code>StopService</code></td><td>Dienste, die vor dem Kopieren gestoppt und danach immer wieder gestartet werden (nur als Administrator)</td></tr>
+    <tr><td><code>Transfer</code>, <code>NotTransfer</code>, <code>License</code>, <code>Version</code>, <code>After</code></td><td>Hinweise; <code>NotTransfer</code>, <code>Version</code> und <code>After</code> landen in der Checkliste</td></tr>
+    <tr><td><code>Package</code>, <code>WingetId</code></td><td>Paket der Softwareverteilung (regulärer Ausdruck) bzw. WinGet-ID für <i>Fehlende Programme installieren</i></td></tr>
+    <tr><td><code>Verified</code></td><td><code>{ "Date": "JJJJ-MM-TT", "Sources": [ … ], "Note": "…" }</code> – fehlt = ungeprüft</td></tr>
+  </table>
 </section>
 
 <section id="restore">
@@ -366,10 +384,12 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <div class="card t"><b>Ohne Adminrechte gestartet?</b>HUMig fragt: <i>Ja</i> = als Administrator neu starten, <i>Nein</i> = Benutzer-Modus</div>
   </div>
   <h3>Was geht – was nicht</h3>
+  <p><b>Update:</b> Der Knopf <span class="ui">Update</span> wird auch im Benutzer-Modus gelb, wenn eine neue Version da ist. Installieren braucht die Anmeldung eines Administrators – Windows fragt danach; anschließend startet HUMig wieder im Benutzer-Modus.</p>
+  <p>Vorlagen funktionieren auch hier: Module, die Administratorrechte brauchen (z. B. USMT), sind ausgeblendet und werden auch mit <i>Standard</i> oder <i>Komplett</i> nicht gesichert.</p>
   <table>
     <tr><th style="width:50%">Möglich</th><th>Ausgeblendet (braucht Administratorrechte)</th></tr>
     <tr><td>Benutzerprofil (Dateien), Zusätzliche Ordner<br>Edge, Chrome, Firefox<br>Office-Signaturen, Vorlagen, PST, Office-Einstellungen<br>Taskleiste, Hintergrund, Desktop-Symbole, Schnellzugriff<br>Netzlaufwerke, Netzwerkdrucker, VPN-Verbindungen<br>Programme aus dem Katalog (Einstellungen im Profil)<br>Restore-Vorschau, Checkliste, Backup prüfen, Vergleichen<br><a href="#zeitplan-backup">Zeitplan</a> (automatisches Backup des eigenen Profils)<br>Werkzeuge: <span class="ui t">Im Backup suchen</span>, <span class="ui p">Wichtige Dateien suchen</span>, <span class="ui p">Datenbanken suchen</span>, Anmeldedaten, Profilordner</td>
-        <td>andere Computer und Benutzer, Active Directory<br>Daten auf Systemlaufwerk, WLAN, Schriftarten, ODBC<br>Drucker mit Treibern, Treiber, Freigaben, Aufgaben, USMT<br>Einträge in Programme/Windows/HKLM (werden beim Restore übersprungen)<br>Fehlende Programme installieren, Software- und Treiberverteilung<br>Nacharbeiten mit Systemzugriff, Einstellungen, Update<br>alle übrigen Werkzeuge</td></tr>
+        <td>andere Computer und Benutzer, Active Directory<br>Daten auf Systemlaufwerk, WLAN, Schriftarten, ODBC<br>Drucker mit Treibern, Treiber, Freigaben, Aufgaben, USMT<br>Einträge in Programme/Windows/HKLM (werden beim Restore übersprungen)<br>Fehlende Programme installieren, Software- und Treiberverteilung<br>Nacharbeiten mit Systemzugriff, Einstellungen<br>alle übrigen Werkzeuge</td></tr>
   </table>
   <ul>
     <li>Die Backup-Liste zeigt nur <b>eigene Backups</b>. Den eigentlichen Zugriffsschutz regeln die Ordnerrechte des Backup-Ordners (z. B. Freigabe mit „Ersteller-Besitzer“-Rechten).</li>

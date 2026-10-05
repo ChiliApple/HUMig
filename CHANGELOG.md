@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.0.92 - 2026-10-05
+### Benutzer-Modus
+- Der Knopf *Update* ist jetzt auch im Benutzer-Modus sichtbar und wird bei einer neuen Version gelb. Installieren fragt nach der Anmeldung eines Administrators (UAC); danach startet HUMig wieder im Benutzer-Modus (auch wenn die Abfrage abgelehnt wird)
+### Dokumentation
+- Anleitung: Hinweis bei *Vorlagen* - ist USMT nicht eingerichtet, Haken entfernen und als eigene Vorlage speichern; ohne Adminrechte (Benutzer-Modus) ist das nicht noetig
+- Anleitung: Feld-Referenz fuer eigene Katalog-Eintraege (aus dem README hierher verschoben)
+- README neu gegliedert und deutlich gekuerzt (Schnellstart, Inhalt, kurze Kapitel; Details in der Anleitung)
+
 ## v2.0.91 - 2026-10-05
 ### Vorlagen
 - Eingebaut sind nur noch **Standard** und **Komplett**. Standard hakt jetzt an: Profil, Daten auf C:\, Edge, Chrome, Firefox, Office, Office-Registry, Taskleiste, Desktop-Symbole, Startmenue-Pins, Schnellzugriff, WLAN, Ordnerfreigaben, Netzlaufwerke, Netzwerkdrucker, USMT, Aufgabenplanung, Info (ODBC nicht mehr)
