@@ -91,7 +91,7 @@ Details: [INSTALL.md](INSTALL.md) und die [Anleitung](Docs/Anleitung.html) (im T
 | System | Windows-Einstellungen (USMT), Aufgabenplanung, Treiber-Export, Info-Export |
 | Programme | iPhone-Backups, KeePass, Autodesk und alle erkannten Programme aus dem [Katalog](#programm-katalog) |
 
-**Vorlagen:** *Standard* und *Komplett* sind eingebaut. Eigene Vorlage: Module anhaken → **Als Vorlage speichern …**. Rechtsklick auf die Vorlagen-Liste = umbenennen, überschreiben, löschen.
+**Vorlagen:** *Standard* und *Komplett* sind eingebaut – erkannte Programme hakt *Standard* nicht an (von Hand wählen), *Komplett* alle. Eigene Vorlage: Module anhaken → **Als Vorlage speichern …**. Rechtsklick auf die Vorlagen-Liste = umbenennen, überschreiben, löschen.
 
 > **Hinweis:** *Standard* enthält USMT – das braucht Administratorrechte und *Werkzeuge › USMT einrichten (ADK)*. Ist USMT nicht eingerichtet: Haken entfernen und als eigene Vorlage speichern (z. B. *Standard ohne USMT*). Im Benutzer-Modus ist USMT ohnehin ausgeblendet.
 
