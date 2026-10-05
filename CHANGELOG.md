@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.95 - 2026-10-05
+### Lizenz
+- LICENSE: englische Fassung ergaenzt (Uebersetzung, im Zweifel gilt die deutsche Fassung) - Inhalt unveraendert
+
 ## v2.0.94 - 2026-10-05
 ### Geaendert
 - Erkannte Programme (Gruppe *Programme*) werden nur noch angehakt, wenn die gewaehlte Vorlage sie enthaelt: *Standard* = keine (von Hand anhaken), *Komplett* = alle, eigene Vorlage = die gespeicherten. Vorher waren beim Start alle erkannten Programme angehakt, nach einem Vorlagenwechsel nicht mehr

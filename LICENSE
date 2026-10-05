@@ -38,3 +38,50 @@ Copyright (c) 2026 Die Urheber von HUMig. Alle Rechte vorbehalten.
 6. Schlussbestimmungen
    Es gilt oesterreichisches Recht. Ist eine Bestimmung unwirksam, bleiben
    die uebrigen Bestimmungen gueltig.
+
+
+------------------------------------------------------------------------------
+ENGLISH VERSION (convenience translation - in case of doubt the German
+version above prevails)
+------------------------------------------------------------------------------
+
+HUMig v2 - License for Use
+
+Copyright (c) 2026 The authors of HUMig. All rights reserved.
+
+1. Permitted use
+   The software "HUMig" (program code, user interface, documentation,
+   graphics) may be downloaded, installed and run free of charge - by
+   private individuals, schools, public authorities, associations and
+   companies. Copies for your own use (e.g. on USB drives, servers or
+   shares of your own organization) are permitted.
+
+2. Own settings
+   Adjusting the configuration files in the "Config" folder (e.g.
+   settings.json, apps.json, modules.json, exceptions.json, update.json)
+   through the program or a text editor is expressly permitted.
+
+3. Not permitted (without prior written consent of the authors)
+   a) to modify, adapt or translate the program code or the documentation,
+      or to incorporate any part of it into other software,
+   b) to use or distribute modified versions,
+   c) to sell or rent the software, or to offer it for a fee as part of a
+      product or service,
+   d) to publish the software outside the official repository
+      (distribution within your own organization is permitted),
+   e) to remove or alter copyright, license or version notices.
+
+4. GitHub
+   Viewing and forking the repository within the GitHub Terms of Service
+   remains unaffected. A fork does not grant any of the rights listed
+   under section 3.
+
+5. Warranty and liability
+   The software is provided "as is", without warranty of any kind. To the
+   extent permitted by law, the authors are not liable for any damage,
+   data loss or consequential damage arising from its use. Before every
+   migration, a backup must be created and verified.
+
+6. Final provisions
+   This license is governed by Austrian law. Should any provision be
+   invalid, the remaining provisions shall remain in effect.
