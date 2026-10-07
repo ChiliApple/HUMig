@@ -14,7 +14,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 </p>
 
 <p align="center">
-  <a href="Docs/Anleitung.html"><b>Anleitung</b></a> ·
+  <a href="https://chiliapple.github.io/HUMig/Docs/Anleitung.html"><b>Anleitung</b></a> ·
   <a href="INSTALL.md">Installation</a> ·
   <a href="CHANGELOG.md">Änderungen</a> ·
   <a href="LICENSE">Lizenz</a>
@@ -48,7 +48,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 2. **Start.cmd** starten – dabei entstehen **HUMig.exe** (Administrator) und **HUMig-Benutzer.exe** (Benutzer-Modus)
 3. Computer und Benutzer wählen → Reiter **Backup** → **Backup starten**
 
-Details: [INSTALL.md](INSTALL.md) und die [Anleitung](Docs/Anleitung.html) (im Tool mit **F1**).
+Details: [INSTALL.md](INSTALL.md) und die [Anleitung](https://chiliapple.github.io/HUMig/Docs/Anleitung.html) (im Tool mit **F1**).
 
 **Inhalt:** [Bedienung](#bedienung) · [Module und Vorlagen](#module-und-vorlagen) · [Programm-Katalog](#programm-katalog) · [Restore](#restore) · [Software- und Treiberverteilung](#software--und-treiberverteilung) · [Werkzeuge](#werkzeuge) · [Server-Backup](#server-backup) · [App-Updates](#app-updates) · [Update und Sicherheit](#update-und-sicherheit) · [Grenzen](#grenzen) · [Konfiguration](#konfiguration)
 
