@@ -2,7 +2,7 @@
 # - bei jedem Push/Pull-Request: Pruefungen (Syntax, XAML, Steuerelemente, PSScriptAnalyzer, Pester) + Selbsttest
 # - Signatur: haengt der Herausgeber danach an (HUMig: Rechtsklick auf Update > Release signieren), erst dann wird das Release angeboten
 # - bei einem neuen Release: zusaetzlich HUMig-files.sha256 erstellen und an das Release haengen (nur wenn die Pruefungen bestanden sind)
-#   und den Update-Weg testen (Pull.ps1 laedt genau dieses Release und prueft alle Pruefsummen)
+#   und den Update-Weg testen (Pull.ps1 laedt genau dieses Release und prueft alle Pruefsummen; zweiter Lauf = Update mit Journal/Aufraeumen)
 name: CI
 
 on:
@@ -57,6 +57,7 @@ jobs:
     if: github.event_name == 'release'
     needs: manifest
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,3 +79,30 @@ jobs:
           if ("$($i.Version)" -ne $v) { throw "installiert: $($i.Version), erwartet $v" }
           if ("$($i.Check)" -notlike 'Pruefsumme*') { throw "nicht geprueft: $($i.Check)" }
           "Pull OK: $($i.Version) - $($i.Check) - $($i.Files) Dateien"
+          # zweiter Lauf = Update ueber bestehende Installation:
+          #   veraltete Programmdatei muss weg, Config und eigene Dateien bleiben, Pfade ausserhalb werden ignoriert,
+          #   ein abgebrochenes Update (Journal) wird zuerst zurueckgestellt, danach keine Reste
+          $old = Join-Path $t 'Functions\Alt-Entfernt.ps1'; 'alt' | Set-Content -LiteralPath $old -Encoding UTF8
+          $keep = Join-Path $t 'Config\behalten.txt'; 'bleibt' | Set-Content -LiteralPath $keep -Encoding UTF8
+          $own = Join-Path $t 'Functions\Eigene.ps1'; 'eigen' | Set-Content -LiteralPath $own -Encoding UTF8
+          $outside = Join-Path $env:RUNNER_TEMP 'ausserhalb.txt'; 'aussen' | Set-Content -LiteralPath $outside -Encoding UTF8
+          $i.FileList = @($i.FileList) + @('Functions/Alt-Entfernt.ps1', 'Config/behalten.txt', '../ausserhalb.txt')
+          $i | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $t 'Config\installed.json') -Encoding UTF8
+          $main = Join-Path $t 'HUMig.ps1'
+          Move-Item -LiteralPath $main -Destination "$main.pullold"; 'kaputt' | Set-Content -LiteralPath $main -Encoding UTF8
+          ConvertTo-Json -InputObject @("$main") | Set-Content -LiteralPath (Join-Path $t 'Config\pull-journal.json') -Encoding UTF8
+          $out = powershell -NoProfile -ExecutionPolicy Bypass -File .\Pull.ps1 -Target $t -Version $v -NoStart -NonInteractive -Owner $env:GITHUB_REPOSITORY_OWNER -Repo ($env:GITHUB_REPOSITORY -split '/')[1] 2>&1 | Out-String
+          $c = $LASTEXITCODE
+          $out
+          if ($c -ne 0) { throw "Pull.ps1 (Update) Exitcode $c" }
+          if ($out -notmatch 'abgebrochen') { throw 'Journal wurde nicht ausgewertet' }
+          if ((Get-Content -LiteralPath $main -Raw) -match 'kaputt') { throw 'HUMig.ps1 nicht erneuert' }
+          if (Test-Path -LiteralPath $old) { throw 'veraltete Datei nicht entfernt' }
+          if (-not (Test-Path -LiteralPath $keep)) { throw 'Datei in Config wurde entfernt' }
+          if (-not (Test-Path -LiteralPath $own)) { throw 'eigene Datei wurde entfernt' }
+          if (-not (Test-Path -LiteralPath $outside)) { throw 'Datei ausserhalb wurde entfernt' }
+          $rest = @(Get-ChildItem -LiteralPath $t -Recurse -File -Force | Where-Object { $_.Name -match '\.(pullold|pulltmp)$' -or $_.Name -eq 'pull-journal.json' })
+          if ($rest.Count) { throw "Reste: $(($rest | ForEach-Object Name) -join ', ')" }
+          $i = Get-Content (Join-Path $t 'Config\installed.json') -Raw | ConvertFrom-Json
+          if ("$($i.Version)" -ne $v -or -not @($i.FileList).Count) { throw "installed.json nach Update falsch: $($i.Version)" }
+          "Update OK: Journal zurueckgestellt, veraltete Datei entfernt, Config/eigene Dateien unberuehrt, keine Reste"

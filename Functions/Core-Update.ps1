@@ -14,6 +14,7 @@ $script:HMSignatureName = 'HUMig-files.sha256.p7s'
 $script:HMDefaultOwner  = 'ChiliApple'
 $script:HMDefaultRepo   = 'HUMig'
 $script:HMDefaultSigner = '1B669AE240DA1A91043C4576763D9F8E0BF762FA'
+$script:HMUserAgent     = 'HUMig'
 
 function Get-HMDefaultSigner([string]$Owner, [string]$Repo) {
     if ($Owner -eq $script:HMDefaultOwner -and $Repo -eq $script:HMDefaultRepo) { return $script:HMDefaultSigner }
@@ -71,7 +72,7 @@ function ConvertTo-HMReleaseList($Raw) {
 }
 function Get-HMReleases([string]$Owner, [string]$Repo, [string]$Token) {
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
-    $h = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'HUMig' }
+    $h = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = $script:HMUserAgent }
     if ($Token) { $h.Authorization = "token $Token" }
     # GitHub liefert die Liste mit "Cache-Control: max-age=60" - Proxys/Zwischenspeicher wuerden z.B. eine gerade
     # angehaengte Signatur bis zu 1 Minute nicht zeigen. Darum: no-cache + eindeutige Adresse je Abfrage
@@ -92,9 +93,9 @@ function Select-HMRelease($Releases, [string]$Channel, [switch]$SignedOnly) {
 # (gleicher Inhalt; die Echtheit sichert ohnehin die Signatur/Pruefsumme)
 function Get-HMReleaseAsset([string]$Url, [string]$ApiUrl, [string]$Token) {
     $tries = @()
-    if ($Token -and $ApiUrl) { $tries += , @($ApiUrl, @{ Accept = 'application/octet-stream'; 'User-Agent' = 'HUMig'; Authorization = "token $Token" }) }
-    if ($Url) { $tries += , @($Url, @{ 'User-Agent' = 'HUMig' }) }
-    if ($ApiUrl) { $tries += , @($ApiUrl, @{ Accept = 'application/octet-stream'; 'User-Agent' = 'HUMig' }) }
+    if ($Token -and $ApiUrl) { $tries += , @($ApiUrl, @{ Accept = 'application/octet-stream'; 'User-Agent' = $script:HMUserAgent; Authorization = "token $Token" }) }
+    if ($Url) { $tries += , @($Url, @{ 'User-Agent' = $script:HMUserAgent }) }
+    if ($ApiUrl) { $tries += , @($ApiUrl, @{ Accept = 'application/octet-stream'; 'User-Agent' = $script:HMUserAgent }) }
     $last = $null
     foreach ($t in $tries) {
         $tmp = [System.IO.Path]::GetTempFileName()
