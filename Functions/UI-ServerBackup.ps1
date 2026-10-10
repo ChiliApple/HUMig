@@ -778,6 +778,7 @@ function Show-HMSbDiskSetup {
         param($r)
         if ($r -is [string]) { Out-Console "Datentraeger nicht lesbar: $r" 'Error'; return }
         $disks = @($r | Where-Object { $_ })
+        $script:SbDiskRows = $disks
         if (-not $disks.Count) { Out-Console 'Kein USB-Datentraeger gefunden (System-/Startplatten und Platten mit VM-Dateien werden nie angezeigt).' 'Warning'; return }
         $rows = New-Object System.Collections.Generic.List[object]
         foreach ($d in $disks) { $rows.Add(@([int]$d.Number, $d.Model, $d.Serial, (Format-HMSize $d.SizeBytes), $d.Style, $d.Volumes, $(if ($d.Offline) { 'offline' } else { '' }))) }
@@ -806,6 +807,8 @@ function Invoke-HMSbDiskSetup($Sel, $Win) {
     $row = @($Sel)[0]
     if (-not $row) { return }
     $num = [int]$row.Nr
+    $disk = @($script:SbDiskRows | Where-Object { [int]$_.Number -eq $num })[0]
+    if (-not $disk -or -not "$($disk.Id)") { Out-Console 'Platte einrichten: Platte nicht eindeutig bestimmbar - Liste neu oeffnen.' 'Warning'; return }
     $p = Get-HMSbProfile
     $label = Show-TextInputDialog -Title 'Platte einrichten' -Label "Bezeichnung fuer Datentraeger $num ($($row.Modell), $($row.Groesse)):" -Text (Get-HMSbNextLabel $p) -Owner $Win
     if ($null -eq $label) { return }
@@ -816,7 +819,7 @@ function Invoke-HMSbDiskSetup($Sel, $Win) {
     try { $Win.Close() } catch { }
     Out-Console "Datentraeger $num wird eingerichtet ($label) ..." 'Warning'
     Set-Status "Platte $label wird eingerichtet ..." '#FFF9E2AF'
-    Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $l, $pn) . $eng; Initialize-HMSbDisk -Number $n -Label $l -Profile $pn } -ArgumentList @($script:SbEngine, $num, $label, $(if ($p) { $p.Name } else { '' })) -TimeoutSec 900 -BusyTag 'Sb' -BusyText 'Platte wird eingerichtet ...' -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $l, $pn, $id) . $eng; Initialize-HMSbDisk -Number $n -Label $l -Profile $pn -ExpectId $id } -ArgumentList @($script:SbEngine, $num, $label, $(if ($p) { $p.Name } else { '' }), "$($disk.Id)") -TimeoutSec 900 -BusyTag 'Sb' -BusyText 'Platte wird eingerichtet ...' -OnComplete {
         param($r)
         if ($r -is [string]) { Out-Console "Platte einrichten FEHLGESCHLAGEN: $r" 'Error'; Set-Status 'Platte einrichten fehlgeschlagen' '#FFF38BA8' }
         else { Out-Console "Platte eingerichtet: $($r.Letter): $($r.Label) ($(Format-HMSize $r.SizeBytes), NTFS 64K)" 'Success'; Set-Status 'Platte eingerichtet' '#FFA6E3A1' }

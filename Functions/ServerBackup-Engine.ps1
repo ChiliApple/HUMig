@@ -179,16 +179,36 @@ function Get-HMSbDriveList([switch]$KeepHumigOffline) {
     return [pscustomobject]@{ Drives = $out; Messages = $msgs }
 }
 
-# USB-Datentraeger fuer "Platte einrichten" (nie System/Start, nie Platten mit VM-Dateien)
-function Get-HMSbDiskList {
-    $vmLetters = @()
+# Datentraeger-Nummern, auf denen Dateien von Hyper-V-VMs liegen (Konfiguration, Snapshots, Smart Paging, virtuelle Platten).
+# Zuordnung ueber die Zugriffspfade der Partitionen (Laufwerksbuchstabe, Bereitstellungspunkt, \\?\Volume{...}\) - laengster passender Pfad.
+# Ist Hyper-V installiert, aber die VM-Liste nicht lesbar: Fehler (nie "keine VMs" annehmen). Ohne Hyper-V: leere Liste.
+function Get-HMSbVmDiskNumbers {
+    if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return }
+    $paths = @()
     try {
         foreach ($vm in @(Get-VM -ErrorAction Stop)) {
-            foreach ($p in @("$($vm.Path)", "$($vm.ConfigurationLocation)") + @(Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Path)" })) {
-                if ($p -match '^([A-Za-z]):') { $vmLetters += $Matches[1].ToUpper() }
-            }
+            $paths += @("$($vm.Path)", "$($vm.ConfigurationLocation)", "$($vm.SnapshotFileLocation)", "$($vm.SmartPagingFilePath)")
+            $paths += @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop | ForEach-Object { "$($_.Path)" })
         }
-    } catch { }
+    } catch { throw "VM-Liste nicht lesbar ($($_.Exception.Message)) - zur Sicherheit abgebrochen (Platten mit VM-Dateien waeren nicht erkennbar)" }
+    $map = @()
+    foreach ($p in @(Get-Partition -ErrorAction Stop)) {
+        foreach ($ap in @($p.AccessPaths)) { if ("$ap") { $map += [pscustomobject]@{ Path = "$ap".TrimEnd('\') + '\'; Disk = [int]$p.DiskNumber } } }
+    }
+    $nums = @()
+    foreach ($x in @($paths | Where-Object { "$_".Trim() } | Select-Object -Unique)) {
+        $f = "$x".TrimEnd('\') + '\'
+        $hit = @($map | Where-Object { $f.StartsWith($_.Path, [StringComparison]::OrdinalIgnoreCase) } | Sort-Object { $_.Path.Length } -Descending)[0]
+        if ($hit -and $nums -notcontains $hit.Disk) { $nums += $hit.Disk }
+    }
+    return $nums
+}
+# Merkmale einer Platte zum Wiedererkennen (Nummern koennen nach dem Umstecken wechseln)
+function Get-HMSbDiskIdentity($d) { return ('{0}|{1}|{2}|{3}' -f "$($d.UniqueId)".Trim(), "$($d.SerialNumber)".Trim(), [long]$d.Size, "$($d.FriendlyName)".Trim()) }
+
+# USB-Datentraeger fuer "Platte einrichten" (nie System/Start, nie Platten mit VM-Dateien)
+function Get-HMSbDiskList {
+    $vmDisks = @(Get-HMSbVmDiskNumbers)
     $out = @()
     foreach ($d in @(Get-Disk -ErrorAction Stop | Sort-Object Number)) {
         if ($d.IsBoot -or $d.IsSystem) { continue }
@@ -200,9 +220,9 @@ function Get-HMSbDiskList {
                 try { $v = $p | Get-Volume -ErrorAction Stop; if ($v) { $labels += ('{0}{1}' -f $(if ($v.DriveLetter) { "$($v.DriveLetter): " } else { '' }), "$($v.FileSystemLabel)") } } catch { }
             }
         } catch { }
-        if (@($letters | Where-Object { $vmLetters -contains $_ }).Count) { continue }
+        if ($vmDisks -contains [int]$d.Number) { continue }
         $out += [pscustomobject]@{
-            Number = [int]$d.Number; Model = "$($d.FriendlyName)".Trim(); Serial = "$($d.SerialNumber)".Trim(); Bus = "$($d.BusType)"
+            Id = (Get-HMSbDiskIdentity $d); Number = [int]$d.Number; Model = "$($d.FriendlyName)".Trim(); Serial = "$($d.SerialNumber)".Trim(); Bus = "$($d.BusType)"
             SizeBytes = [long]$d.Size; Style = (ConvertTo-HMSbPartStyle $d.PartitionStyle); Offline = [bool]$d.IsOffline; Volumes = ($labels -join ', ')
         }
     }
@@ -210,14 +230,24 @@ function Get-HMSbDiskList {
 }
 
 # USB-Platte neu einrichten: ALLE Daten loeschen, GPT, NTFS 64K, Bezeichnung
-function Initialize-HMSbDisk([int]$Number, [string]$Label, [string]$Profile = '') {
+# -ExpectId: Merkmale aus der angezeigten Liste (Get-HMSbDiskList). Direkt vor dem Loeschen wird erneut geprueft, dass unter der
+# Nummer noch genau diese Platte steckt und keine VM-Dateien auf ihr liegen - sonst Abbruch.
+function Initialize-HMSbDisk([int]$Number, [string]$Label, [string]$Profile = '', [string]$ExpectId = '') {
     if ($Label -notmatch '^[A-Za-z0-9_\-]{1,32}$') { throw "Ungueltige Bezeichnung '$Label' (max. 32 Zeichen: A-Z, 0-9, - und _)" }
-    $d = Get-Disk -Number $Number -ErrorAction Stop
-    if ($d.IsBoot -or $d.IsSystem) { throw "Datentraeger $Number ist System-/Startdatentraeger - abgebrochen" }
-    if ("$($d.BusType)" -notmatch '^(USB|7)$') { throw "Datentraeger $Number ist kein USB-Datentraeger ($($d.BusType)) - abgebrochen" }
+    if (-not "$ExpectId".Trim()) { throw 'Platte nicht eindeutig bestimmt (Merkmale fehlen) - abgebrochen' }
+    $check = {
+        $x = Get-Disk -Number $Number -ErrorAction Stop
+        if ($x.IsBoot -or $x.IsSystem) { throw "Datentraeger $Number ist System-/Startdatentraeger - abgebrochen" }
+        if ("$($x.BusType)" -notmatch '^(USB|7)$') { throw "Datentraeger $Number ist kein USB-Datentraeger ($($x.BusType)) - abgebrochen" }
+        if ((Get-HMSbDiskIdentity $x) -ne $ExpectId) { throw "Unter Nummer $Number steckt inzwischen eine andere Platte ($("$($x.FriendlyName)".Trim()), SN $("$($x.SerialNumber)".Trim())) - abgebrochen, nichts geloescht. Liste neu oeffnen." }
+        if (@(Get-HMSbVmDiskNumbers) -contains $Number) { throw "Auf Datentraeger $Number liegen Dateien von Hyper-V-VMs - abgebrochen, nichts geloescht" }
+        return $x
+    }
+    $d = & $check
     if ($d.IsOffline) { Set-Disk -Number $Number -IsOffline $false -ErrorAction Stop }
     if ($d.IsReadOnly) { Set-Disk -Number $Number -IsReadOnly $false -ErrorAction Stop }
-    $d = Get-Disk -Number $Number -ErrorAction Stop
+    # nach dem Online-Schalten sind Volumes sichtbar: unmittelbar vor dem Loeschen nochmals pruefen (Platte + VM-Dateien)
+    $d = & $check
     if ((ConvertTo-HMSbPartStyle $d.PartitionStyle) -ne 'RAW') { Clear-Disk -Number $Number -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop }
     $d = Get-Disk -Number $Number -ErrorAction Stop
     if ((ConvertTo-HMSbPartStyle $d.PartitionStyle) -eq 'RAW') { Initialize-Disk -Number $Number -PartitionStyle GPT -ErrorAction Stop }

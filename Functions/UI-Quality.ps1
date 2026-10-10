@@ -210,18 +210,32 @@ function Get-HMRetentionCandidates {
         if (-not $groups.ContainsKey($k)) { $groups[$k] = New-Object System.Collections.Generic.List[object] }
         $groups[$k].Add($b)
     }
+    # Gezaehlt werden nur brauchbare Backups (OK/Warnung, alte Ordnerstruktur). Das neueste brauchbare je Gruppe bleibt immer.
+    # Abgebrochene/fehlgeschlagene werden nur vorgeschlagen, wenn es ein neueres brauchbares gibt; laufende ('Running') nie.
+    if ($Keep -le 0 -and $Days -le 0) { return @() }
     foreach ($k in $groups.Keys) {
         $rank = 0
         foreach ($b in @($groups[$k] | Sort-Object { Get-HMBackupDate $_ } -Descending)) {
-            $rank++
             $age = [int]($now - (Get-HMBackupDate $b)).TotalDays
-            if ($Keep -gt 0 -and $rank -le $Keep) { continue }
+            $good = (Test-HMBackupUsable $b)
+            if ($good) {
+                $rank++
+                if ($rank -eq 1) { continue }
+                if ($Keep -gt 0 -and $rank -le $Keep) { continue }
+            } else {
+                if ("$($b.Status)" -eq 'Running' -or $rank -eq 0) { continue }
+            }
             if ($Days -gt 0 -and $age -le $Days) { continue }
-            if ($Keep -le 0 -and $Days -le 0) { continue }
-            $out.Add([pscustomobject]@{ Backup = $b; Rank = $rank; Age = $age })
+            $out.Add([pscustomobject]@{ Backup = $b; Rank = $(if ($good) { $rank } else { 0 }); Age = $age; Usable = $good })
         }
     }
     return $out.ToArray()
+}
+# Brauchbares Backup: abgeschlossen mit OK oder Warnung (oder alte Ordnerstruktur ohne Manifest)
+function Test-HMBackupUsable($b) { return ([bool]$b.Legacy -or "$($b.Status)" -in @('OK', 'Warning')) }
+function Format-HMBackupStatus($b) {
+    if ($b.Legacy) { return 'alt (ohne Manifest)' }
+    switch ("$($b.Status)") { 'OK' { 'OK' } 'Warning' { 'Warnung' } 'Error' { 'FEHLER' } 'Cancelled' { 'abgebrochen' } 'Running' { 'laeuft/unvollstaendig' } default { "unbekannt ($($b.Status))" } }
 }
 function Start-HMRetentionCleanup {
     Update-BackupList
@@ -232,8 +246,9 @@ function Start-HMRetentionCleanup {
     $rule = "Regel: je PC + Benutzer die neuesten $keep behalten$(if ($days -gt 0) { ", aeltere loeschen, wenn aelter als $days Tage" } else { ', aeltere loeschen' })"
     if (-not $cand.Count) { Out-Console "Nichts zu loeschen. $rule" 'Success'; return }
     $rows = New-Object System.Collections.Generic.List[object]
-    foreach ($c in $cand) { $b = $c.Backup; $rows.Add(@((Get-HMBackupDate $b).ToString('yyyy-MM-dd HH:mm'), "$($b.Computer)", "$(if ($b.Account) { $b.Account } else { $b.User })", [int]$c.Rank, [int]$c.Age, $(if ($b.SizeBytes) { [math]::Round($b.SizeBytes / 1GB, 2) } else { $null }), "$($b.Name)")) }
-    Show-DataGridWindow -Title 'Alte Backups (Aufbewahrung)' -Columns @('Datum', 'Computer', 'Benutzer', 'Nr. (neueste = 1)', 'Alter (Tage)', 'GB', 'Ordner') `
+    foreach ($c in $cand) { $b = $c.Backup; $rows.Add(@((Get-HMBackupDate $b).ToString('yyyy-MM-dd HH:mm'), "$($b.Computer)", "$(if ($b.Account) { $b.Account } else { $b.User })", (Format-HMBackupStatus $b), [int]$c.Rank, [int]$c.Age, $(if ($b.SizeBytes) { [math]::Round($b.SizeBytes / 1GB, 2) } else { $null }), "$($b.Name)")) }
+    $rule += ' (gezaehlt werden nur brauchbare Backups - OK/Warnung; das neueste brauchbare bleibt immer; abgebrochene/fehlerhafte nur, wenn es ein neueres brauchbares gibt; Nr. 0 = nicht brauchbar)'
+    Show-DataGridWindow -Title 'Alte Backups (Aufbewahrung)' -Columns @('Datum', 'Computer', 'Benutzer', 'Status', 'Nr. (neueste = 1)', 'Alter (Tage)', 'GB', 'Ordner') `
         -ColumnTypes @{ 'Nr. (neueste = 1)' = [int]; 'Alter (Tage)' = [int]; GB = [double] } -Rows $rows.ToArray() -Sort 'Computer ASC, Benutzer ASC, Datum DESC' -Width 1100 -Height 520 `
         -CountText "$($rows.Count) Backups zum Loeschen vorgeschlagen - $rule" -ActionContext @{ Root = (Get-BackupRoot) } -Actions @(
             @{ Text = 'Alle vorgeschlagenen loeschen'; Color = '#FFF38BA8'; NoSelection = $true; Handler = { param($rows, $win, $ctx) Remove-HMBackupFolders $win $ctx.Root $null } }
@@ -247,8 +262,18 @@ function Remove-HMBackupFolders($Win, [string]$Root, [string[]]$Names) {
     }
     $Names = @($Names | Where-Object { $_ -and $_ -notmatch '[\\/]' -and $_ -ne '..' })
     if (-not $Names.Count) { return }
-    # Loeschen ist endgueltig -> immer nachfragen
-    $list = (($Names | Select-Object -First 15) -join "`n") + $(if ($Names.Count -gt 15) { "`n..." } else { '' })
+    # Loeschen ist endgueltig -> immer nachfragen, mit Status je Backup
+    $info = @{}; foreach ($b in @($script:BackupInfos)) { if ($b) { $info["$($b.Name)"] = $b } }
+    $lines = @($Names | ForEach-Object { if ($info.ContainsKey($_)) { "$_  ($(Format-HMBackupStatus $info[$_]))" } else { $_ } })
+    $list = (($lines | Select-Object -First 15) -join "`n") + $(if ($lines.Count -gt 15) { "`n..." } else { '' })
+    # Schutz: ist darunter das neueste brauchbare Backup eines PCs/Benutzers, extra warnen
+    $newest = @{}
+    foreach ($b in @($script:BackupInfos | Where-Object { $_ -and (Test-HMBackupUsable $_) })) {
+        $k = ("{0}|{1}" -f $b.Computer, $(if ($b.Sid) { $b.Sid } else { $b.User })).ToUpperInvariant()
+        if (-not $newest.ContainsKey($k) -or (Get-HMBackupDate $b) -gt (Get-HMBackupDate $newest[$k])) { $newest[$k] = $b }
+    }
+    $last = @($newest.Values | Where-Object { $Names -contains "$($_.Name)" } | ForEach-Object { "$($_.Name)" })
+    if ($last.Count) { $list += "`n`nACHTUNG - das ist das NEUESTE brauchbare Backup dieses PCs/Benutzers:`n$($last -join "`n")" }
     if ("$([System.Windows.MessageBox]::Show($Win, "$($Names.Count) Backup(s) endgueltig loeschen?`n`n$list", 'Backups loeschen', 'YesNo', 'Warning'))" -ne 'Yes') { return }
     $Win.Close()
     $paths = @($Names | ForEach-Object { Join-Path $Root $_ })

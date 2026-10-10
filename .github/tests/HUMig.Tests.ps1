@@ -378,3 +378,73 @@ Describe 'Schutz von ProgramData\HUMig (Core-Protect.ps1)' {
         }
     }
 }
+
+Describe 'Aufbewahrung, Backup-Ordner und Platte einrichten (Code-Pruefung H1, H2, M1, N1)' {
+    BeforeAll {
+        # einzelne Funktionen aus Dateien laden, die sonst die Oberflaeche brauchen (direkt hier, damit sie in den Tests sichtbar sind)
+        $want = @(
+            @('Functions\UI-Quality.ps1', @('Get-HMBackupDate', 'Get-HMRetentionCandidates', 'Test-HMBackupUsable', 'Format-HMBackupStatus')),
+            @('Functions\Migration-Engine.ps1', @('Remove-HMBackupFolder', 'Get-HMBackupList'))
+        )
+        foreach ($w in $want) {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root $w[0]), [ref]$null, [ref]$null)
+            foreach ($n in $w[1]) {
+                $f = @($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true))[0]
+                if (-not $f) { throw "Funktion $n fehlt in $($w[0])" }
+                . ([scriptblock]::Create($f.Extent.Text))
+            }
+        }
+        function New-HMTestBk([int]$DaysAgo, [string]$Status) {
+            [pscustomobject]@{ Name = "B$DaysAgo"; Computer = 'PC1'; Sid = 'S-1-5-21-1-2-3-1001'; User = 'max'; Legacy = $false; Status = $Status; Path = "X:\B$DaysAgo"
+                Created = (Get-Date).AddDays(-$DaysAgo).ToString('yyyy-MM-dd HH:mm:ss') }
+        }
+    }
+    It 'H2: defekte neue Backups verdraengen das einzige gute nicht' {
+        $l = @((New-HMTestBk 1 'Error'), (New-HMTestBk 2 'Running'), (New-HMTestBk 3 'Cancelled'), (New-HMTestBk 9 'OK'))
+        @(Get-HMRetentionCandidates -Backups $l -Days 0 -Keep 2).Count | Should -Be 0
+    }
+    It 'M1: neueste N brauchbare bleiben, defekte nur mit neuerem brauchbaren, laufende nie' {
+        $l = @((New-HMTestBk 1 'OK'), (New-HMTestBk 2 'Error'), (New-HMTestBk 3 'Cancelled'), (New-HMTestBk 4 'Running'), (New-HMTestBk 5 'OK'), (New-HMTestBk 6 'Warning'), (New-HMTestBk 7 'OK'))
+        $c = @(Get-HMRetentionCandidates -Backups $l -Days 0 -Keep 3)
+        @($c | ForEach-Object { $_.Backup.Name }) | Sort-Object | Should -Be @('B2', 'B3', 'B7')
+        @($c | Where-Object { $_.Backup.Name -eq 'B7' })[0].Rank | Should -Be 4
+    }
+    It 'das neueste brauchbare Backup wird nie vorgeschlagen (auch Keep 0 + Tage)' {
+        $l = @((New-HMTestBk 40 'OK'), (New-HMTestBk 50 'OK'))
+        @(Get-HMRetentionCandidates -Backups $l -Days 30 -Keep 0 | ForEach-Object { $_.Backup.Name }) | Should -Be @('B50')
+    }
+    It 'N1: Backup-Ordner als Junction - nur der Link wird entfernt, Ziel bleibt; Liste ignoriert ihn' {
+        $root = Join-Path $TestDrive 'BACKUPS'; New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $target = Join-Path $TestDrive 'Fremd'; New-Item -ItemType Directory -Path $target -Force | Out-Null
+        '{ "Status": "OK" }' | Set-Content (Join-Path $target 'manifest.json'); 'wichtig' | Set-Content (Join-Path $target 'daten.txt')
+        $link = Join-Path $root 'PC1_max_20260101_120000'
+        cmd /c mklink /J "$link" "$target" | Out-Null
+        Test-Path -LiteralPath $link | Should -BeTrue
+        @(Get-HMBackupList -Root $root -Modules @()).Count | Should -Be 0
+        Remove-HMBackupFolder $link | Should -Be 'OK'
+        Test-Path -LiteralPath $link | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $target 'daten.txt') | Should -BeTrue
+    }
+    Context 'H1: Platte einrichten prueft direkt vor dem Loeschen' {
+        BeforeAll {
+            $script:Disk = [pscustomobject]@{ Number = 3; UniqueId = 'USBSTOR\A1'; SerialNumber = 'SN-A'; Size = 1000GB; FriendlyName = 'Platte A'; BusType = 'USB'; IsBoot = $false; IsSystem = $false; IsOffline = $false; IsReadOnly = $false; PartitionStyle = 'GPT' }
+            $script:Id = Get-HMSbDiskIdentity $script:Disk
+        }
+        It 'ohne Merkmale: Abbruch' {
+            { Initialize-HMSbDisk -Number 3 -Label 'TEST-1' } | Should -Throw '*nicht eindeutig*'
+        }
+        It 'andere Platte unter derselben Nummer: Abbruch, nichts geloescht' {
+            Mock Get-Disk { [pscustomobject]@{ Number = 3; UniqueId = 'USBSTOR\B2'; SerialNumber = 'SN-B'; Size = 2000GB; FriendlyName = 'Platte B'; BusType = 'USB'; IsBoot = $false; IsSystem = $false; IsOffline = $false; IsReadOnly = $false; PartitionStyle = 'GPT' } }
+            Mock Clear-Disk { }
+            { Initialize-HMSbDisk -Number 3 -Label 'TEST-1' -ExpectId $script:Id } | Should -Throw '*andere Platte*'
+            Should -Invoke Clear-Disk -Times 0
+        }
+        It 'VM-Dateien auf der Platte: Abbruch, nichts geloescht' {
+            Mock Get-Disk { $script:Disk }
+            Mock Get-HMSbVmDiskNumbers { 3 }
+            Mock Clear-Disk { }
+            { Initialize-HMSbDisk -Number 3 -Label 'TEST-1' -ExpectId $script:Id } | Should -Throw '*Hyper-V*'
+            Should -Invoke Clear-Disk -Times 0
+        }
+    }
+}
