@@ -662,9 +662,12 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><code>%ProgramData%\HUMig\AppUpdates\run_*</code></td><td>Austausch für einmalige WinGet-Aufgaben (wird danach gelöscht)</td></tr>
     <tr><td><code>Programme\HUMig\PowerShell7</code></td><td>eigene PowerShell 7 für App-Updates als SYSTEM (nur wenn kein MSI-PowerShell installiert ist)</td></tr>
     <tr><td><code>%ProgramData%\HUMig\HiveMounts</code></td><td>Vermerk, solange HUMig die Registry eines nicht angemeldeten Benutzers geladen hat (für das Aufräumen nach einem Absturz)</td></tr>
+    <tr><td><code>%ProgramData%\HUMig\ProfilSicherung</code>, <code>ProfilZuweisung</code></td><td>Sicherungen der Werkzeuge <i>Profil erneuern</i> und <i>Profil zuweisen</i> (ProfileList-Eintrag als .reg, Dateirechte)</td></tr>
+    <tr><td><code>%ProgramData%\HUMig\FirstLogon</code></td><td>Anmelde-Aktionen nach einem Restore (Drucker, Explorer) – ein Ordner je Lauf, nur für den Zielbenutzer lesbar, nach 31 Tagen entfernt</td></tr>
     <tr><td><code>%LOCALAPPDATA%\HUMig\Zeitplaene</code></td><td>Backup-Zeitpläne des Benutzers</td></tr>
     <tr><td>Aufgabenplanung <code>\HUMig\</code></td><td>Server-Backup-, Backup- und App-Updates-Zeitpläne</td></tr>
   </table>
+  <div class="note"><b class="h">Ordner %ProgramData%\HUMig ist geschützt</b>Dort liegen Skripte, die als SYSTEM laufen (App-Update-Zeitplan), und Sicherungen, die HUMig mit Administratorrechten zurückspielt. HUMig sichert den Ordner vor jeder Nutzung am jeweiligen PC ab: Besitzer Administratoren, schreiben dürfen nur SYSTEM und Administratoren, Benutzer nur lesen. Verknüpfungen (Junctions/Symlinks) im Ordner werden entfernt, ohne ihr Ziel anzurühren. Gelingt das Absichern nicht, bricht das betroffene Werkzeug mit einer Meldung ab. <i>Profil zurückholen</i> bietet nur Sicherungen an, die genau so aussehen, wie <i>Profil erneuern</i> sie anlegt.</div>
 </section>
 
 <section id="update">

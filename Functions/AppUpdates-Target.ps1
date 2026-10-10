@@ -182,6 +182,16 @@ function Get-TUserSid {
 }
 
 try {
+    # %ProgramData%\HUMig absichern: nur SYSTEM/Administratoren duerfen schreiben (hier liegen Skripte, die als SYSTEM laufen).
+    # Protect-HMDataDir fuegt HUMig vor dem Start ein (Functions\Core-Protect.ps1)
+    if (Get-Command Protect-HMDataDir -ErrorAction SilentlyContinue) {
+        try { [void](Protect-HMDataDir) } catch { throw "ProgramData\HUMig nicht absicherbar - abgebrochen: $($_.Exception.Message)" }
+    }
+    # Zeitplan-Skript immer auf dem Stand dieser HUMig-Version halten (ersetzt auch ein veraendertes auto.ps1)
+    $autoFile = Join-Path $Base 'auto\auto.ps1'
+    if ($AutoText -and (Test-Path -LiteralPath $autoFile)) {
+        if ([System.IO.File]::ReadAllText($autoFile) -cne $AutoText) { [System.IO.File]::WriteAllText($autoFile, $AutoText, (New-Object System.Text.UTF8Encoding($true))); Out-L 'Zeitplan-Skript auf den aktuellen Stand gebracht' }
+    }
     switch ($Op) {
         'Search' {
             Install-TModule

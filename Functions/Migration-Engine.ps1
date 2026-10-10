@@ -265,7 +265,7 @@ function Read-HMDesktopIconPositions([hashtable]$Ctx) {
             Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
-    return (Invoke-HMTarget $Ctx $code @($Ctx.Account, (Get-HMDesktopIconsCode 'Save' '%DATA%' '%RESULT%')))
+    return (Invoke-HMTargetProtected $Ctx $code @($Ctx.Account, (Get-HMDesktopIconsCode 'Save' '%DATA%' '%RESULT%')) -Soft)
 }
 
 # Positionen aus einem Backup lesen: positions.tsv (HUMig v2) oder IconLayouts.ini (Vorgaengerversion, ReIcon)
@@ -494,6 +494,20 @@ function Test-HMIsLocal([string]$Computer) {
 }
 
 # Scriptblock am Ziel-PC ausfuehren (lokal direkt, remote per Invoke-Command)
+# Schutz von %ProgramData%\HUMig am Ziel-PC (Functions\Core-Protect.ps1) - als Text, damit er auch per Invoke-Command laeuft
+$script:HMProtectText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Core-Protect.ps1')) -replace '(?m)^#Requires.*$', ''
+. ([scriptblock]::Create($script:HMProtectText))
+# Wie Invoke-HMTarget, sichert aber vorher %ProgramData%\HUMig am Ziel ab. Gelingt das nicht: Fehler (Standard) bzw. mit -Soft
+# weiterlaufen - das Skript sieht dann $HMProtected = $false und darf dort nichts Sicherheitsrelevantes ablegen oder lesen.
+# Benutzer-Modus: ohne Absicherung (keine Adminrechte; dort wird ProgramData\HUMig nicht beschrieben)
+function Invoke-HMTargetProtected {
+    param([hashtable]$Ctx, [scriptblock]$Script, [object[]]$ArgumentList = @(), [switch]$Soft)
+    if ($Ctx -and $Ctx.UserMode) { return (Invoke-HMTarget $Ctx $Script $ArgumentList) }
+    $pre = if ($Soft) { "try { [void](Protect-HMDataDir); `$HMProtected = `$true } catch { `$HMProtected = `$false; `$HMProtectError = `$_.Exception.Message }" } else { "[void](Protect-HMDataDir); `$HMProtected = `$true" }
+    $sb = [scriptblock]::Create($script:HMProtectText + "`r`n" + $pre + "`r`n& {" + $Script.ToString() + "`r`n} @args")
+    return (Invoke-HMTarget $Ctx $sb $ArgumentList)
+}
+
 function Invoke-HMTarget {
     param([hashtable]$Ctx, [scriptblock]$Script, [object[]]$ArgumentList = @())
     if (-not $Ctx.IsRemote) { return (& $Script @ArgumentList) }
@@ -618,7 +632,12 @@ foreach ($f in @(Get-ChildItem -LiteralPath $md -Filter '*.txt' -File -ErrorActi
 '@
 function Clear-HMStaleHives([hashtable]$Ctx) {
     $sb = [scriptblock]::Create($script:HMHiveCleanupText)
-    if ($Ctx) { return @(Invoke-HMTarget $Ctx { param($t) & ([scriptblock]::Create($t)) } @($script:HMHiveCleanupText)) }
+    if ($Ctx) {
+        return @(Invoke-HMTargetProtected $Ctx { param($t)
+                if (-not $HMProtected) { "ProgramData\HUMig nicht absicherbar ($HMProtectError) - verwaiste Benutzer-Registry wird nicht geprueft"; return }
+                & ([scriptblock]::Create($t)) } @($script:HMHiveCleanupText) -Soft)
+    }
+    try { [void](Protect-HMDataDir) } catch { return @("ProgramData\HUMig nicht absicherbar ($($_.Exception.Message)) - verwaiste Benutzer-Registry wird nicht geprueft") }
     return @(& $sb)
 }
 
@@ -634,17 +653,17 @@ function Mount-HMHive {
     if (Test-HMHiveLoaded $Ctx $Sid) { Write-HMLog $Job "Benutzer-Registry ist geladen (Benutzer angemeldet)" 'Debug'; return $true }
     $st0 = ''; try { $st0 = (Get-Process -Id $PID).StartTime.ToString('yyyyMMddHHmmss') } catch { }
     $mark = "$env:COMPUTERNAME|$PID|$st0|$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
-    $r = Invoke-HMTarget $Ctx {
+    $r = Invoke-HMTargetProtected -Soft $Ctx {
         param($s, $pp, $mk)
         $dat = Join-Path $pp 'NTUSER.DAT'
         if (-not (Test-Path -LiteralPath $dat)) { return "FEHLER: $dat nicht gefunden" }
         $out = & reg.exe load "HKU\$s" "$dat" 2>&1
         if ($LASTEXITCODE -ne 0) { return "FEHLER: reg load: $out" }
-        try {
+        if ($HMProtected) { try {
             $md = Join-Path $env:ProgramData 'HUMig\HiveMounts'
             New-Item -ItemType Directory -Path $md -Force | Out-Null
             Set-Content -LiteralPath (Join-Path $md "$s.txt") -Value $mk -Encoding ASCII
-        } catch { }
+        } catch { } }
         return 'OK'
     } @($Sid, $ProfilePath, $mark)
     if ("$r" -eq 'OK') {
@@ -2382,14 +2401,20 @@ function Register-HMLogonTask {
     $body = "`$ErrorActionPreference = 'Continue'`r`n`$marker = Join-Path `$env:LOCALAPPDATA 'HUMig_FirstLogon_$runId.done'`r`nif (Test-Path -LiteralPath `$marker) { Remove-Item -LiteralPath `$MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue; return }`r`nSet-Content -LiteralPath `$marker -Value (Get-Date) -ErrorAction SilentlyContinue`r`n`$log = Join-Path `$env:TEMP 'HUMig_FirstLogon.log'`r`nStart-Transcript -Path `$log -Append | Out-Null`r`n" +
         ($Ctx.LogonActions -join "`r`n") +
         "`r`nStop-Transcript | Out-Null`r`nUnregister-ScheduledTask -TaskName '$name' -Confirm:`$false -ErrorAction SilentlyContinue`r`nRemove-Item -LiteralPath `$MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue"
-    $r = Invoke-HMTarget $Ctx {
-        param($n, $acct, $code)
-        $dir = Join-Path $env:ProgramData 'HUMig'
+    try {
+    $r = Invoke-HMTargetProtected $Ctx {
+        param($n, $acct, $code, $rid)
+        # eigener Ordner je Lauf: nur SYSTEM/Administratoren schreiben, nur dieses Konto darf lesen und ausfuehren
+        $base = Join-Path $env:ProgramData 'HUMig\FirstLogon'
+        New-Item -ItemType Directory -Path $base -Force | Out-Null
+        # alte Laeufe (Aufgabe laeuft hoechstens 30 Tage) aufraeumen
+        foreach ($o in @(Get-ChildItem -LiteralPath $base -Directory -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-31) })) { Remove-Item -LiteralPath $o.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+        $dir = Join-Path $base $rid
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $ic = & icacls.exe "$dir" /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "${acct}:(OI)(CI)RX" 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Rechte fuer $dir nicht setzbar: $ic" }
         $f = Join-Path $dir "$n.ps1"
         Set-Content -LiteralPath $f -Value $code -Encoding UTF8
-        # Benutzer darf das Skript lesen/ausfuehren
-        try { $acl = Get-Acl $dir; $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($acct, 'ReadAndExecute,Delete', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))); Set-Acl $dir $acl } catch { }
         $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$f`""
         $t = New-ScheduledTaskTrigger -AtLogOn -User $acct
         # Aufgabe laeuft max. 30 Tage und wird danach von Windows geloescht
@@ -2401,7 +2426,8 @@ function Register-HMLogonTask {
         $logged = @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue | ForEach-Object { $o = Invoke-CimMethod -InputObject $_ -MethodName GetOwner; "$($o.Domain)\$($o.User)" })
         if ($logged -contains $acct) { Start-ScheduledTask -TaskName $n; return 'STARTED' }
         'OK'
-    } @($name, $Ctx.Account, $body)
+    } @($name, $Ctx.Account, $body, $runId)
+    } catch { Write-HMLog $Job "Anmelde-Aktionen nicht eingerichtet: $($_.Exception.Message)" 'Warning'; return }
     if ("$r" -eq 'STARTED') { Write-HMLog $Job "Anmelde-Aktionen ausgefuehrt (Benutzer ist angemeldet)" 'Success' }
     else { Write-HMLog $Job "Anmelde-Aktionen werden bei der naechsten Anmeldung von $($Ctx.Account) ausgefuehrt (Aufgabe $name)" 'Info' }
 }

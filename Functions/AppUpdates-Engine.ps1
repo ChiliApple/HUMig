@@ -172,6 +172,9 @@ function Remove-HMAuSource([string]$Name) {
 # WinGet als angemeldeter Benutzer / als SYSTEM (einmalige geplante Aufgabe, Austausch-Ordner in ProgramData)
 # ----------------------------------------------------------------------------
 $script:HMAuWorker = Join-Path $PSScriptRoot 'AppUpdates-Worker.ps1'
+# Schutz von %ProgramData%\HUMig (Functions\Core-Protect.ps1) - lokal geladen und als Text fuer die Ziel-PCs
+$script:HMAuProtectText = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Core-Protect.ps1')) -replace '(?m)^#Requires.*$', ''
+. ([scriptblock]::Create($script:HMAuProtectText))
 
 # Ist der Benutzer (SID) gerade angemeldet? (Besitzer eines explorer.exe-Prozesses)
 function Test-HMAuUserLoggedOn([string]$Sid) {
@@ -183,6 +186,7 @@ function Test-HMAuUserLoggedOn([string]$Sid) {
 }
 # Aufgabe anlegen und starten. $Account = 'SYSTEM' oder Benutzer (DOMAENE\Name) mit $Sid
 function Start-HMAuTask([string]$Account, [string]$Sid, $Request) {
+    [void](Protect-HMDataDir)
     $id = [guid]::NewGuid().ToString('N')
     $dir = Join-Path $env:ProgramData "HUMig\AppUpdates\run_$id"
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -276,6 +280,11 @@ function Test-HMAuLocal([string]$Computer) {
 }
 function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payload, $Credential = $null, [scriptblock]$OnLine = $null, $Job = $null, [scriptblock]$OnResult = $null, [int]$Throttle = 16) {
     $txt = [System.IO.File]::ReadAllText($script:HMAuTargetFile) -replace '(?m)^#Requires.*$', ''
+    # Schutz-Funktion direkt nach dem param()-Block einfuegen (param muss am Anfang stehen)
+    $pi = $txt.IndexOf('param([string]$Op')
+    if ($pi -lt 0) { throw 'AppUpdates-Target.ps1: param-Block nicht gefunden' }
+    $pe = $txt.IndexOf("`n", $pi)
+    $txt = $txt.Substring(0, $pe + 1) + $script:HMAuProtectText + "`r`n" + $txt.Substring($pe + 1)
     $sb = [scriptblock]::Create($txt)
     $wt = [System.IO.File]::ReadAllText($script:HMAuWorker)
     $at = [System.IO.File]::ReadAllText($script:HMAuAutoFile)
