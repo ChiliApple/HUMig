@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.0.97 - 2026-10-10
+### Update (Pull.ps1)
+- Ersetzen mit Ruecksicherung: jede bisherige Datei wird erst zu `*.pullold` umbenannt, die Liste steht in `Config\pull-journal.json`. Ist eine Datei gesperrt, wird alles zurueckgestellt (bisher konnte ein Teil schon ersetzt sein). Bricht ein Update hart ab, stellt der naechste Start von Pull.ps1 die bisherigen Dateien wieder her
+- Dateien, die es in der neuen Version nicht mehr gibt, werden entfernt - nur solche, die frueher per Update installiert wurden (neue Liste `FileList` in `installed.json`). Config, Logs, BACKUPS, BIN, Software-/Treiberverteilung und eigene Dateien bleiben immer unberuehrt
+- Gespeicherter Token wird abgelehnt (HTTP 401): einmal ohne Token versuchen, bevor nach einem neuen gefragt wird
+- Hinweis: ein Update laeuft immer mit dem Pull.ps1 der bereits installierten Version - die Ruecksicherung gilt ab dem Update nach v2.0.97, das Entfernen alter Dateien ab dem Update danach (erst dann gibt es die Liste)
+### Automatische Tests
+- Update-Weg: zweiter Lauf als Update ueber die bestehende Installation (abgebrochenes Update wird zurueckgestellt, veraltete Datei entfernt, Config/eigene Dateien/Pfade ausserhalb unberuehrt, keine Reste)
+- (enthaelt v2.0.96: Absicherung von `%ProgramData%\HUMig`, Pruefung der Profil-Sicherungen)
+
 ## v2.0.96 - 2026-10-10
 ### Sicherheit (aus einer externen Code-Pruefung)
 - `%ProgramData%\HUMig` wird am jeweiligen PC vor jeder Nutzung abgesichert: Besitzer Administratoren, schreiben nur SYSTEM und Administratoren, Benutzer nur lesen; Verknuepfungen (Junction/Symlink) darin werden entfernt, ohne ihr Ziel anzuruehren. Bisher erbte der Ordner die ProgramData-Rechte - Standardbenutzer konnten dort Dateien anlegen und z. B. das Skript des App-Update-Zeitplans austauschen, das als SYSTEM laeuft

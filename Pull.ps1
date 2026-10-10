@@ -48,6 +48,7 @@ $script:HMSignatureName = 'HUMig-files.sha256.p7s'
 $script:HMDefaultOwner  = 'ChiliApple'
 $script:HMDefaultRepo   = 'HUMig'
 $script:HMDefaultSigner = '1B669AE240DA1A91043C4576763D9F8E0BF762FA'
+$script:HMUserAgent     = 'HUMig'
 
 function Get-HMDefaultSigner([string]$Owner, [string]$Repo) {
     if ($Owner -eq $script:HMDefaultOwner -and $Repo -eq $script:HMDefaultRepo) { return $script:HMDefaultSigner }
@@ -105,7 +106,7 @@ function ConvertTo-HMReleaseList($Raw) {
 }
 function Get-HMReleases([string]$Owner, [string]$Repo, [string]$Token) {
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
-    $h = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'HUMig' }
+    $h = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = $script:HMUserAgent }
     if ($Token) { $h.Authorization = "token $Token" }
     # GitHub liefert die Liste mit "Cache-Control: max-age=60" - Proxys/Zwischenspeicher wuerden z.B. eine gerade
     # angehaengte Signatur bis zu 1 Minute nicht zeigen. Darum: no-cache + eindeutige Adresse je Abfrage
@@ -126,9 +127,9 @@ function Select-HMRelease($Releases, [string]$Channel, [switch]$SignedOnly) {
 # (gleicher Inhalt; die Echtheit sichert ohnehin die Signatur/Pruefsumme)
 function Get-HMReleaseAsset([string]$Url, [string]$ApiUrl, [string]$Token) {
     $tries = @()
-    if ($Token -and $ApiUrl) { $tries += , @($ApiUrl, @{ Accept = 'application/octet-stream'; 'User-Agent' = 'HUMig'; Authorization = "token $Token" }) }
-    if ($Url) { $tries += , @($Url, @{ 'User-Agent' = 'HUMig' }) }
-    if ($ApiUrl) { $tries += , @($ApiUrl, @{ Accept = 'application/octet-stream'; 'User-Agent' = 'HUMig' }) }
+    if ($Token -and $ApiUrl) { $tries += , @($ApiUrl, @{ Accept = 'application/octet-stream'; 'User-Agent' = $script:HMUserAgent; Authorization = "token $Token" }) }
+    if ($Url) { $tries += , @($Url, @{ 'User-Agent' = $script:HMUserAgent }) }
+    if ($ApiUrl) { $tries += , @($ApiUrl, @{ Accept = 'application/octet-stream'; 'User-Agent' = $script:HMUserAgent }) }
     $last = $null
     foreach ($t in $tries) {
         $tmp = [System.IO.Path]::GetTempFileName()
@@ -188,6 +189,20 @@ if (-not $Target) {
 $Target = $Target.TrimEnd('\')
 
 $cfgDir = Join-Path $Target 'Config'
+# abgebrochenes Update (Journal vorhanden): bisherige Dateien aus *.pullold zuruecksetzen
+$jr = Join-Path $cfgDir 'pull-journal.json'
+if (Test-Path -LiteralPath $jr) {
+    Write-Host '[WARN] Letztes Update wurde abgebrochen - stelle bisherige Dateien wieder her...' -ForegroundColor Yellow
+    try {
+        foreach ($jp in @(Get-Content -LiteralPath $jr -Raw -Encoding UTF8 | ConvertFrom-Json)) {
+            if (-not $jp) { continue }
+            $jo = "$jp.pullold"
+            if (Test-Path -LiteralPath $jo) { try { Move-Item -LiteralPath $jo -Destination "$jp" -Force } catch { Write-Host "  [WARN] $($jp): $($_.Exception.Message)" -ForegroundColor Yellow } }
+            Remove-Item -LiteralPath "$jp.pulltmp" -Force -ErrorAction SilentlyContinue
+        }
+        Remove-Item -LiteralPath $jr -Force -ErrorAction SilentlyContinue
+    } catch { Write-Host "  [WARN] Journal nicht lesbar: $($_.Exception.Message)" -ForegroundColor Yellow }
+}
 $cfg = Get-HMUpdateConfig $cfgDir
 if (-not $Owner) { $Owner = $cfg.Owner }
 if (-not $Repo)  { $Repo = $cfg.Repo }
@@ -238,8 +253,8 @@ function New-GHHeaders([string]$Accept) {
 $ProgressPreference = 'SilentlyContinue'
 
 # --- 1. Version waehlen (Release) bzw. Branch
-$ref = $null; $rel = $null; $manifest = $null; $verified = 'ohne Pruefsumme'; $newCred = $null
-for ($attempt = 1; $attempt -le 2 -and -not $ref; $attempt++) {
+$ref = $null; $rel = $null; $manifest = $null; $verified = 'ohne Pruefsumme'; $newCred = $null; $triedNoToken = $false
+for ($attempt = 1; $attempt -le 3 -and -not $ref; $attempt++) {
     try {
         if ($useBranch) {
             $r = Invoke-RestMethod "https://api.github.com/repos/$Owner/$Repo/git/refs/heads/$Branch" -Headers (New-GHHeaders 'application/vnd.github.v3+json') -UseBasicParsing
@@ -260,8 +275,14 @@ for ($attempt = 1; $attempt -le 2 -and -not $ref; $attempt++) {
         }
     } catch {
         $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+        # Gespeicherter Token abgelaufen/widerrufen, Repo oeffentlich -> einmal ohne Token versuchen
+        if ($Token -and -not $newCred -and -not $triedNoToken -and $code -eq 401) {
+            Write-Host '[INFO] Token wird abgelehnt (HTTP 401) - versuche ohne Token...' -ForegroundColor Yellow
+            $Token = ''; $triedNoToken = $true
+            continue
+        }
         if (-not $newCred -and -not $NonInteractive -and $code -in 401, 403, 404) {
-            Write-Host "[INFO] $Owner/$Repo nicht erreichbar (HTTP $code) - privates Repo?" -ForegroundColor Yellow
+            Write-Host "[INFO] $Owner/$Repo ist $(if ($Token) { 'mit dem Token' } else { 'ohne Token' }) nicht erreichbar (HTTP $code) - privates Repo?" -ForegroundColor Yellow
             Write-Host 'Read-only GitHub-Token eingeben (Fine-grained PAT, Contents: Read) - leer = Abbruch:' -ForegroundColor Yellow
             $sec = Read-Host -AsSecureString
             if ($sec -and $sec.Length -gt 0) {
@@ -348,24 +369,76 @@ if ($fail) {
     Stop-HMPull "$fail Datei(en) nicht geladen oder Pruefsumme falsch - es wurde NICHTS veraendert, HUMig bleibt auf der bisherigen Version."
 }
 
-# --- 5. ersetzen
-$ok = 0; $repl = 0
+# --- 5. ersetzen - mit Ruecksicherung: jede bisherige Datei wird erst zu *.pullold umbenannt;
+#        scheitert ein Schritt, wird alles zurueckgestellt (nie halb aktualisiert).
+#        Bricht Pull mittendrin ab (Absturz, Strom), stellt der naechste Start anhand des Journals zurueck.
+$journal = Join-Path $cfgDir 'pull-journal.json'
+$moved = New-Object System.Collections.Generic.List[object]   # @(Ziel, Sicherung oder '')
+$repl = 0; $lastErr = ''
+try { if (-not (Test-Path -LiteralPath $cfgDir)) { New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null } } catch { }
+try { ConvertTo-Json -InputObject @($staged | ForEach-Object { "$($_[1])" }) | Set-Content -LiteralPath $journal -Encoding UTF8 -ErrorAction Stop }
+catch {
+    foreach ($s in $staged) { Remove-Item -LiteralPath $s[0] -Force -ErrorAction SilentlyContinue }
+    Stop-HMPull "Journal nicht schreibbar ($($_.Exception.Message)) - es wurde NICHTS veraendert."
+}
 foreach ($s in $staged) {
-    $done = $false; $lastErr = ''
+    $old = "$($s[1]).pullold"
+    $done = $false
     for ($try = 1; $try -le 5 -and -not $done; $try++) {
-        try { Move-Item -LiteralPath $s[0] -Destination $s[1] -Force; $done = $true } catch { $lastErr = $_.Exception.Message; Start-Sleep -Seconds 1 }
+        try {
+            $had = Test-Path -LiteralPath $s[1]
+            if ($had) { Move-Item -LiteralPath $s[1] -Destination $old -Force }
+            try { Move-Item -LiteralPath $s[0] -Destination $s[1] -Force }
+            catch { if ($had) { Move-Item -LiteralPath $old -Destination $s[1] -Force }; throw }
+            $moved.Add(@($s[1], $(if ($had) { $old } else { '' })))
+            $done = $true
+        } catch { $lastErr = $_.Exception.Message; Start-Sleep -Seconds 1 }
     }
-    if ($done) { try { Unblock-File -LiteralPath $s[1] -ErrorAction SilentlyContinue } catch { }; $ok++ }
-    else { Remove-Item -LiteralPath $s[0] -Force -ErrorAction SilentlyContinue; Write-Host "  $($s[1]): nicht ersetzbar ($lastErr)" -ForegroundColor Red; $repl++ }
+    if (-not $done) { Write-Host "  $($s[1]): nicht ersetzbar ($lastErr)" -ForegroundColor Red; $repl++; break }
+}
+if ($repl) {
+    # zurueckstellen (umgekehrte Reihenfolge): neue Dateien entfernen, Sicherungen zurueck
+    for ($k = $moved.Count - 1; $k -ge 0; $k--) {
+        $m = $moved[$k]
+        try { if ($m[1]) { Move-Item -LiteralPath $m[1] -Destination $m[0] -Force } else { Remove-Item -LiteralPath $m[0] -Force } }
+        catch { Write-Host "  [WARN] $($m[0]): nicht zurueckgestellt ($($_.Exception.Message))" -ForegroundColor Yellow }
+    }
+    foreach ($s in $staged) { Remove-Item -LiteralPath $s[0] -Force -ErrorAction SilentlyContinue }
+    Remove-Item -LiteralPath $journal -Force -ErrorAction SilentlyContinue
+    Stop-HMPull "Eine Datei war gesperrt ($lastErr) - alles wurde zurueckgestellt, HUMig bleibt auf der bisherigen Version. HUMig schliessen und erneut versuchen."
+}
+# Abschluss: zuerst das Journal loeschen (ab hier gilt der neue Stand), dann die Sicherungen.
+# Umgekehrt koennte ein Abbruch beim Aufraeumen einen Mischstand aus alt und neu herstellen.
+Remove-Item -LiteralPath $journal -Force -ErrorAction SilentlyContinue
+foreach ($m in $moved) {
+    try { Unblock-File -LiteralPath $m[0] -ErrorAction SilentlyContinue } catch { }
+    if ($m[1]) { Remove-Item -LiteralPath $m[1] -Force -ErrorAction SilentlyContinue }
+}
+$ok = $moved.Count
+
+# --- 6. Dateien entfernen, die es im neuen Stand nicht mehr gibt - nur solche, die frueher per Pull installiert wurden
+#        (Liste in installed.json). Eigene Dateien und Arbeitsordner bleiben immer unberuehrt.
+$newFiles = @($files | ForEach-Object { "$($_.path)" })
+$instFile = Join-Path $cfgDir 'installed.json'
+$prevFiles = @()
+try { if (Test-Path -LiteralPath $instFile) { $pi = Get-Content -LiteralPath $instFile -Raw -Encoding UTF8 | ConvertFrom-Json; if ($pi.PSObject.Properties['FileList']) { $prevFiles = @($pi.FileList) } } } catch { }
+$removedOld = 0
+$keepDirs = '^(Config|Logs|BACKUPS|BIN|Softwareverteilung|Treiberverteilung)/'
+$rootFull = [IO.Path]::GetFullPath($Target).TrimEnd('\') + '\'
+foreach ($oldPath in @($prevFiles | ForEach-Object { "$_" } | Where-Object { $_ -and $newFiles -notcontains $_ -and $_ -notmatch $keepDirs -and $_ -notmatch '(^|/)\.\.(/|$)' -and $_ -notmatch '^[\\/]|:' })) {
+    $p = [IO.Path]::GetFullPath((Join-Path $Target ($oldPath -replace '/', '\')))
+    if (-not $p.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) { continue }
+    if (Test-Path -LiteralPath $p -PathType Leaf) {
+        try { Remove-Item -LiteralPath $p -Force; $removedOld++; Write-Host "  entfernt (nicht mehr im Programm): $oldPath" -ForegroundColor DarkGray } catch { }
+    }
 }
 try {
-    if (-not (Test-Path -LiteralPath $cfgDir)) { New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null }
     [pscustomobject][ordered]@{
         Version = $(if ($useBranch) { "Branch $Branch" } else { "$($rel.Version)" }); Ref = "$ref"; Channel = $(if ($useBranch) { 'Branch' } elseif ($rel.Prerelease) { 'Test' } else { 'Stable' })
-        Check = $verified; Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Files = $ok
-    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $cfgDir 'installed.json') -Encoding UTF8
+        Check = $verified; Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Files = $ok; FileList = $newFiles
+    } | ConvertTo-Json | Set-Content -LiteralPath $instFile -Encoding UTF8
 } catch { }
-Write-Host "`n=== Pull fertig === $ok Dateien ($verified)$(if ($repl) { " | $repl NICHT ersetzt" })" -ForegroundColor Cyan
+Write-Host "`n=== Pull fertig === $ok Dateien ($verified)$(if ($removedOld) { " | $removedOld alte entfernt" })" -ForegroundColor Cyan
 if ($NoStart) { if ($repl) { exit 1 } else { exit 0 } }
 if ($repl -eq 0) {
     $exe = Join-Path $Target 'HUMig.exe'
