@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.100 - 2026-10-10
+### Update (Pull.ps1)
+- Wiederherstellung nach einem abgebrochenen Update funktionierte unter Windows PowerShell 5.1 nicht, sobald mehr als eine Datei im Journal stand (`ConvertFrom-Json` gibt ein Array als ein einziges Objekt aus - die Schleife lief einmal mit allen Pfaden zusammen und stellte nichts zurueck, das Journal wurde trotzdem geloescht). Jetzt wird jede Datei einzeln zurueckgestellt; das Journal wird nur geloescht, wenn das gelungen ist.
+- Wiederholungen beim Ersetzen sichern die bisherige Datei nicht mehr doppelt; scheitert eine Datei endgueltig, wird ihre Sicherung sofort zurueckgestellt.
+- Automatischer Test des Update-Wegs jetzt mit zwei Dateien im Journal.
+- **Wirkt verzoegert:** Ein Update laeuft immer mit dem bisher installierten Pull.ps1 - die Korrektur greift ab dem naechsten Update nach 2.0.100.
+
 ## v2.0.99 - 2026-10-10
 ### Sicherheit und Datenverlust (aus der externen Code-Pruefung)
 - Server-Backup *Platte einrichten*: unmittelbar vor dem Loeschen wird geprueft, dass unter der Nummer noch dieselbe Platte steckt (ID, Seriennummer, Groesse, Modell) und keine VM-Dateien auf ihr liegen - sonst Abbruch ohne Loeschen. VM-Dateien werden jetzt auch ueber Bereitstellungspunkte und Volumes ohne Laufwerksbuchstaben erkannt (inkl. Snapshot- und Smart-Paging-Ordner); ist die VM-Liste nicht lesbar, bricht HUMig ab statt die Platte anzubieten
