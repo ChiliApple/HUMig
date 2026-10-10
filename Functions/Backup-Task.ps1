@@ -137,7 +137,8 @@ function Complete-Task([string]$Status, [string]$Msg, [string]$BackupPath = '') 
 $script:Def = $null
 try { $script:Def = Get-Content -LiteralPath $defFile -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { }
 $version = ''
-try { if ((Get-Content -LiteralPath (Join-Path $root 'HUMig.ps1') -Raw -Encoding UTF8) -match "\`$script:Version\s*=\s*'([0-9\.]+)'") { $version = $Matches[1] } } catch { }
+try { $version = "$((Get-Content -LiteralPath (Join-Path $root 'Config\version.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version)".Trim() } catch { }
+if (-not $version) { try { if ((Get-Content -LiteralPath (Join-Path $root 'HUMig.ps1') -Raw -Encoding UTF8) -match "\`$script:Version\s*=\s*'([0-9\.]+)'") { $version = $Matches[1] } } catch { } }
 $me = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $elevated = ([Security.Principal.WindowsPrincipal]$me).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 Write-TaskLog "Geplantes Backup '$(if ($script:Def) { $script:Def.Name } else { $Id })' - $($me.Name) an $env:COMPUTERNAME - HUMig $version - $(if ($elevated) { 'mit Administratorrechten' } else { 'Benutzer-Modus (ohne Administratorrechte)' })" 'Header'

@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.0.98 - 2026-10-10
+### Update und Releases
+- Versionsnummer steht nur noch in `Config\version.json` (HUMig, Backup- und Server-Backup-Zeitplan lesen sie dort)
+- Neue Versionen legen die automatischen Tests selbst als Vorab-Release (Kanal Test) an - Text aus diesem CHANGELOG, Pruefsummen-Datei angehaengt, Update-Weg getestet, nur die letzten 10 Releases bleiben
+- Herausgeber: Rechtsklick auf *Update* > *Release freigeben* - neuestes signiertes Vorab-Release wird nach erneuter Signaturpruefung in den Kanal Stabil gestellt
+### Start
+- HUMig laeuft je Programmordner nur einmal (Admin- und Benutzer-Modus zusammen); ein zweiter Start meldet das
+- Liegt ein Update-Journal (Update laeuft oder wurde abgebrochen), startet HUMig nicht, sondern bietet an, das Update neu auszufuehren
+### Automatische Tests
+- Pruefung: `Config\version.json` gueltig und im CHANGELOG ein Abschnitt dazu
+
 ## v2.0.97 - 2026-10-10
 ### Update (Pull.ps1)
 - Ersetzen mit Ruecksicherung: jede bisherige Datei wird erst zu `*.pullold` umbenannt, die Liste steht in `Config\pull-journal.json`. Ist eine Datei gesperrt, wird alles zurueckgestellt (bisher konnte ein Teil schon ersetzt sein). Bricht ein Update hart ab, stellt der naechste Start von Pull.ps1 die bisherigen Dateien wieder her
