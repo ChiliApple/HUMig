@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.0.96 - 2026-10-10
+### Sicherheit (aus einer externen Code-Pruefung)
+- `%ProgramData%\HUMig` wird am jeweiligen PC vor jeder Nutzung abgesichert: Besitzer Administratoren, schreiben nur SYSTEM und Administratoren, Benutzer nur lesen; Verknuepfungen (Junction/Symlink) darin werden entfernt, ohne ihr Ziel anzuruehren. Bisher erbte der Ordner die ProgramData-Rechte - Standardbenutzer konnten dort Dateien anlegen und z. B. das Skript des App-Update-Zeitplans austauschen, das als SYSTEM laeuft
+- App-Updates: das Zeitplan-Skript `auto.ps1` wird bei jedem Zugriff auf den Stand der HUMig-Version gebracht (ersetzt auch ein veraendertes Skript)
+- Anmelde-Aktionen nach dem Restore: eigener Ordner je Lauf (`ProgramData\HUMig\FirstLogon`), nur fuer den Zielbenutzer lesbar; das bisher vergebene Loeschrecht auf den ganzen Ordner entfaellt
+- *Profil zurueckholen* bietet nur noch Sicherungen an, die *Profil erneuern* selbst so anlegt (SID, Profilordner direkt im Profilverzeichnis, .reg nur mit dem ProfileList-Eintrag dieser SID); die Rueckfrage zeigt die SID
+- Vermerke geladener Benutzer-Registry (`HiveMounts`) werden nur im abgesicherten Ordner geschrieben und ausgewertet
+- Neue automatische Tests fuer die Absicherung und die Pruefung der Profil-Sicherungen
+
 ## v2.0.95 - 2026-10-05
 ### Lizenz
 - LICENSE: englische Fassung ergaenzt (Uebersetzung, im Zweifel gilt die deutsche Fassung) - Inhalt unveraendert

@@ -15,9 +15,12 @@
 function Invoke-HMTool {
     param(
         [string]$Title, [scriptblock]$Script, [object[]]$ArgumentList = @(), [string]$Computer = '',
-        [int]$TimeoutSec = 180, [scriptblock]$OnResult, [object]$State = $null
+        [int]$TimeoutSec = 180, [scriptblock]$OnResult, [object]$State = $null, [switch]$ProtectData
     )
     if (-not $Computer) { $Computer = Get-TargetComputer }
+    # -ProtectData: am Ziel vorher %ProgramData%\HUMig absichern (Functions\Core-Protect.ps1); schlaegt das fehl, laeuft das Werkzeug nicht
+    $text = $Script.ToString()
+    if ($ProtectData) { $text = $script:HMProtectText + "`r`n[void](Protect-HMDataDir)`r`n& {" + $text + "`r`n} @args" }
     Out-Console "$Title - $Computer ..." 'Info'
     Invoke-AsyncCommand -ScriptBlock {
         param($h, $cred, $text, $argList)
@@ -31,7 +34,7 @@ function Invoke-HMTool {
                 Invoke-Command @p
             }
         } catch { "FEHLER: $($_.Exception.Message)" }
-    } -ArgumentList @($Computer, $script:RemoteCred, $Script.ToString(), @($ArgumentList)) -TimeoutSec $TimeoutSec -State @{ Title = $Title; Computer = $Computer; On = $OnResult; State = $State } -OnComplete {
+    } -ArgumentList @($Computer, $script:RemoteCred, $text, @($ArgumentList)) -TimeoutSec $TimeoutSec -State @{ Title = $Title; Computer = $Computer; On = $OnResult; State = $State } -OnComplete {
         param($r, $st)
         if ("$r" -match '^FEHLER: ' -and -not ($r -is [System.Array])) { Out-Console (Format-RemoteError "$r") 'Error'; return }
         if ($st.On) { & $st.On $r $st.Computer $st.State; return }
@@ -520,14 +523,24 @@ $script:RS_ProfileOp = {
     param($action, $sid, $newName)
     try {
         $bdir = Join-Path $env:ProgramData 'HUMig\ProfilSicherung'
+        # Profilverzeichnis (meist C:\Users) - gesicherte Profile muessen direkt darunter liegen
+        $pdir = [Environment]::ExpandEnvironmentVariables("$((Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList').ProfilesDirectory)")
         if ($action -eq 'List') {
             foreach ($f in @(Get-ChildItem -LiteralPath $bdir -Filter 'Profil_*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
-                try { $m = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json; $m | Add-Member -NotePropertyName File -NotePropertyValue $f.FullName -Force; $m | Add-Member -NotePropertyName AltExists -NotePropertyValue (Test-Path -LiteralPath $m.AltPath) -Force; $m } catch { }
+                try {
+                    $m = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json
+                    $why = Test-HMProfileBackup $m $f.FullName $bdir $pdir
+                    if ($why) { "WARN Profil-Sicherung $($f.Name) wird nicht angeboten: $why"; continue }
+                    $m | Add-Member -NotePropertyName File -NotePropertyValue $f.FullName -Force; $m | Add-Member -NotePropertyName AltExists -NotePropertyValue (Test-Path -LiteralPath $m.AltPath) -Force; $m
+                } catch { "WARN Profil-Sicherung $($f.Name) nicht lesbar: $($_.Exception.Message)" }
             }
             return
         }
         if ($action -eq 'Undo') {
+            if ((Split-Path $newName -Parent).TrimEnd('\') -ne $bdir.TrimEnd('\')) { return "FEHLER: Profil-Sicherung liegt nicht in $bdir - nichts geaendert" }
             $m = Get-Content -LiteralPath $newName -Raw | ConvertFrom-Json
+            $why = Test-HMProfileBackup $m $newName $bdir $pdir
+            if ($why) { return "FEHLER: Profil-Sicherung ungueltig ($why) - nichts geaendert" }
             $sid = $m.Sid
             if (Test-Path -LiteralPath "Registry::HKEY_USERS\$sid") { return 'FEHLER: Benutzer ist angemeldet (oder Registry geladen) - erst abmelden bzw. PC neu starten' }
             if (-not (Test-Path -LiteralPath $m.AltPath)) { return "FEHLER: gesicherter Profilordner fehlt: $($m.AltPath)" }
@@ -591,22 +604,25 @@ function Start-HMProfileRenew {
     if ($p.Loaded) { Out-Console "$($p.Folder) ist angemeldet - erst abmelden." 'Warning'; return }
     $c = Get-TargetComputer
     if (-not (Confirm-Action "Profil von $($p.Account) auf $c ERNEUERN?`n`n  Ordner $($p.LocalPath) wird umbenannt (.alt_Datum),`n  der Profil-Eintrag entfernt (Sicherung als .reg unter ProgramData\HUMig).`n`nBei der naechsten Anmeldung entsteht ein leeres Profil - Daten danach z.B. per Restore zurueckholen.`n`nFortfahren?")) { return }
-    Invoke-HMTool -Title "Profil erneuern ($($p.Folder))" -Computer $c -ArgumentList @('Renew', $p.SID, '') -Script $script:RS_ProfileOp -OnResult { param($r) Write-HMToolResult $r; Connect-Target }
+    Invoke-HMTool -Title "Profil erneuern ($($p.Folder))" -Computer $c -ArgumentList @('Renew', $p.SID, '') -Script $script:RS_ProfileOp -ProtectData -OnResult { param($r) Write-HMToolResult $r; Connect-Target }
 }
 function Show-HMProfileRestore {
     $c = Get-TargetComputer
-    Invoke-HMTool -Title 'Gesicherte Profile lesen' -Computer $c -ArgumentList @('List', '', '') -Script $script:RS_ProfileOp -OnResult {
+    Invoke-HMTool -Title 'Gesicherte Profile lesen' -Computer $c -ArgumentList @('List', '', '') -Script $script:RS_ProfileOp -ProtectData -OnResult {
         param($r, $comp)
         $rows = New-Object System.Collections.Generic.List[object]
-        foreach ($m in @($r)) { if ($m -and $m.Sid) { $rows.Add(@("$($m.Created)", "$($m.Account)", "$($m.Path)", "$($m.AltPath)", $(if ($m.AltExists) { 'ja' } else { 'FEHLT' }), "$($m.File)")) } }
+        foreach ($m in @($r)) {
+            if ($m -is [string]) { Write-HMToolResult $m; continue }
+            if ($m -and $m.Sid) { $rows.Add(@("$($m.Created)", "$($m.Account)", "$($m.Sid)", "$($m.Path)", "$($m.AltPath)", $(if ($m.AltExists) { 'ja' } else { 'FEHLT' }), "$($m.File)")) }
+        }
         if (-not $rows.Count) { Out-Console "Keine erneuerten Profile auf $comp gefunden (ProgramData\HUMig\ProfilSicherung)." 'Info'; return }
-        Show-DataGridWindow -Title "Erneuerte Profile - $comp" -Columns @('Erneuert', 'Konto', 'Profilpfad', 'Gesicherter Ordner', 'Vorhanden', 'Datei') -Rows $rows.ToArray() -Sort 'Erneuert DESC' -Width 1200 -Height 420 `
+        Show-DataGridWindow -Title "Erneuerte Profile - $comp" -Columns @('Erneuert', 'Konto', 'SID', 'Profilpfad', 'Gesicherter Ordner', 'Vorhanden', 'Datei') -Rows $rows.ToArray() -Sort 'Erneuert DESC' -Width 1200 -Height 420 `
             -ActionContext @{ Computer = $comp } -Actions @(@{ Text = 'Altes Profil zurueckholen (markiertes)'; Color = '#FFA6E3A1'; Handler = {
                 param($rows, $win, $ctx)
                 $r = @($rows)[0]
-                if ("$([System.Windows.MessageBox]::Show($win, "Altes Profil von $($r.Konto) auf $($ctx.Computer) zurueckholen?`n`n  $($r.'Gesicherter Ordner')  ->  $($r.Profilpfad)`n`nDas Test-Profil wird umbenannt (.test_Datum), nicht geloescht. Der Benutzer muss abgemeldet sein.", 'Profil zurueckholen', 'YesNo', 'Question'))" -ne 'Yes') { return }
+                if ("$([System.Windows.MessageBox]::Show($win, "Altes Profil von $($r.Konto) auf $($ctx.Computer) zurueckholen?`n`n  SID: $($r.SID)`n  $($r.'Gesicherter Ordner')  ->  $($r.Profilpfad)`n`nDas Test-Profil wird umbenannt (.test_Datum), nicht geloescht. Der Benutzer muss abgemeldet sein.", 'Profil zurueckholen', 'YesNo', 'Question'))" -ne 'Yes') { return }
                 $win.Close()
-                Invoke-HMTool -Title 'Profil zurueckholen' -Computer $ctx.Computer -ArgumentList @('Undo', '', "$($r.Datei)") -Script $script:RS_ProfileOp -OnResult { param($x) Write-HMToolResult $x; Connect-Target }
+                Invoke-HMTool -Title 'Profil zurueckholen' -Computer $ctx.Computer -ArgumentList @('Undo', '', "$($r.Datei)") -Script $script:RS_ProfileOp -ProtectData -OnResult { param($x) Write-HMToolResult $x; Connect-Target }
             } })
     }
 }
@@ -623,7 +639,7 @@ function Start-HMProfileRename {
     $n = "$($f.New)".Trim()
     if (-not $n -or $n -match '[\\/:*?"<>|]' -or $n -eq $p.Folder) { Out-Console "Ungueltiger oder unveraenderter Name '$n'" 'Warning'; return }
     if (-not (Confirm-Action "Profilordner $($p.LocalPath) in '$n' umbenennen und ProfileList anpassen?")) { return }
-    Invoke-HMTool -Title "Profilordner umbenennen ($($p.Folder) -> $n)" -Computer $c -ArgumentList @('Rename', $p.SID, $n) -Script $script:RS_ProfileOp -OnResult { param($r) Write-HMToolResult $r; Connect-Target }
+    Invoke-HMTool -Title "Profilordner umbenennen ($($p.Folder) -> $n)" -Computer $c -ArgumentList @('Rename', $p.SID, $n) -Script $script:RS_ProfileOp -ProtectData -OnResult { param($r) Write-HMToolResult $r; Connect-Target }
 }
 
 # ============================================================================
@@ -994,7 +1010,7 @@ function Start-HMProfileAssign {
         $cred = New-Object System.Management.Automation.PSCredential ('x', $f.Pw)
     }
     if (-not (Confirm-Action "Profil $($p.LocalPath)`nvon $($p.Account)`nan $t uebergeben (auf $c)?`n`nDer Profil-Eintrag des alten Kontos wird entfernt (Sicherung unter ProgramData\HUMig\ProfilZuweisung).`nDauer: je nach Profilgroesse einige Minuten.`n`nFortfahren?")) { return }
-    Invoke-HMTool -Title "Profil zuweisen ($($p.Folder) -> $t)" -Computer $c -TimeoutSec 3600 -ArgumentList @($p.SID, $t, [bool]$f.Create, $cred, [bool]$f.Admin, [bool]$f.Owner) -Script $script:RS_ProfileAssign -OnResult { param($r) Write-HMToolResult $r; Connect-Target }
+    Invoke-HMTool -Title "Profil zuweisen ($($p.Folder) -> $t)" -Computer $c -TimeoutSec 3600 -ArgumentList @($p.SID, $t, [bool]$f.Create, $cred, [bool]$f.Admin, [bool]$f.Owner) -Script $script:RS_ProfileAssign -ProtectData -OnResult { param($r) Write-HMToolResult $r; Connect-Target }
 }
 
 # ============================================================================

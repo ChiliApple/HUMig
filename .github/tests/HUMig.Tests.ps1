@@ -259,3 +259,122 @@ Describe 'Migration: Robocopy-Auswertung' {
         $s.FilesExtra | Should -Be 0
     }
 }
+
+Describe 'Schutz von ProgramData\HUMig (Core-Protect.ps1)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        $script:IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        $script:OldPD = $env:ProgramData
+        function Get-HMTestAcl([string]$Path) {
+            $a = [System.IO.Directory]::GetAccessControl($Path)
+            [pscustomobject]@{
+                Protected = $a.AreAccessRulesProtected
+                Owner = $a.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+                Rules = @($a.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { "$($_.IdentityReference.Value)=$($_.FileSystemRights)" } | Sort-Object)
+            }
+        }
+    }
+    AfterEach { $env:ProgramData = $script:OldPD }
+    It 'legt den Ordner an: Besitzer Administratoren, Vererbung aus, nur SYSTEM/Admins schreiben, Benutzer lesen' {
+        if (-not $script:IsAdmin) { Set-ItResult -Skipped -Because 'braucht Administratorrechte'; return }
+        $env:ProgramData = Join-Path $TestDrive 'pd1'; New-Item -ItemType Directory -Path $env:ProgramData -Force | Out-Null
+        Protect-HMDataDir | Should -Match 'abgesichert'
+        $a = Get-HMTestAcl (Join-Path $env:ProgramData 'HUMig')
+        $a.Protected | Should -BeTrue
+        $a.Owner | Should -Be 'S-1-5-32-544'
+        ($a.Rules -join ';') | Should -Be 'S-1-5-18=FullControl;S-1-5-32-544=FullControl;S-1-5-32-545=ReadAndExecute, Synchronize'
+        Protect-HMDataDir | Should -BeNullOrEmpty   # zweiter Aufruf: schon geschuetzt, nichts zu tun
+    }
+    It 'entfernt Verknuepfungen nur als Link (Ziel bleibt) und setzt Rechte im Inhalt zurueck' {
+        if (-not $script:IsAdmin) { Set-ItResult -Skipped -Because 'braucht Administratorrechte'; return }
+        $env:ProgramData = Join-Path $TestDrive 'pd2'
+        $root = Join-Path $env:ProgramData 'HUMig'
+        $outside = Join-Path $TestDrive 'aussen'; New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $outside 'wichtig.txt') -Value 'bleibt'
+        New-Item -ItemType Directory -Path (Join-Path $root 'AppUpdates\auto') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root 'AppUpdates\auto\auto.ps1') -Value 'x'
+        New-Item -ItemType Junction -Path (Join-Path $root 'Link') -Target $outside | Out-Null
+        # wie ein Benutzer-Eintrag aus alten Versionen: Schreib-/Loeschrecht fuer Benutzer
+        $null = & icacls.exe (Join-Path $root 'AppUpdates') /grant '*S-1-5-32-545:(OI)(CI)M'
+        $null = & icacls.exe $root /grant '*S-1-5-32-545:(OI)(CI)(RX,D)'
+        Protect-HMDataDir | Should -Match 'abgesichert'
+        Test-Path -LiteralPath (Join-Path $root 'Link') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $outside 'wichtig.txt') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $root 'AppUpdates\auto\auto.ps1') | Should -BeTrue
+        $s = Get-HMTestAcl (Join-Path $root 'AppUpdates')
+        $s.Protected | Should -BeFalse
+        @($s.Rules).Count | Should -Be 0          # keine eigenen Eintraege mehr, nur geerbte
+        $s.Owner | Should -Be 'S-1-5-32-544'
+        (Get-HMTestAcl $root).Rules -join ';' | Should -Not -Match 'S-1-5-32-545=.*(Modify|Delete)'
+    }
+    It 'ist die Wurzel selbst eine Verknuepfung, wird nur der Link entfernt' {
+        if (-not $script:IsAdmin) { Set-ItResult -Skipped -Because 'braucht Administratorrechte'; return }
+        $env:ProgramData = Join-Path $TestDrive 'pd3'; New-Item -ItemType Directory -Path $env:ProgramData -Force | Out-Null
+        $tgt = Join-Path $TestDrive 'ziel3'; New-Item -ItemType Directory -Path $tgt -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $tgt 'daten.txt') -Value 'bleibt'
+        New-Item -ItemType Junction -Path (Join-Path $env:ProgramData 'HUMig') -Target $tgt | Out-Null
+        Protect-HMDataDir | Should -Match 'abgesichert'
+        ((Get-Item -LiteralPath (Join-Path $env:ProgramData 'HUMig') -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $tgt 'daten.txt') | Should -BeTrue
+        (Get-HMTestAcl $tgt).Protected | Should -BeFalse   # Ziel unveraendert
+    }
+    It 'Invoke-HMTargetProtected: Absicherung vor dem Skript, Argumente kommen an' {
+        if (-not $script:IsAdmin) { Set-ItResult -Skipped -Because 'braucht Administratorrechte'; return }
+        $env:ProgramData = Join-Path $TestDrive 'pd4'; New-Item -ItemType Directory -Path $env:ProgramData -Force | Out-Null
+        $r = Invoke-HMTargetProtected @{ IsRemote = $false } { param($a, $b) "$a|$b|$HMProtected" } @('x', 'y z')
+        $r | Should -Be 'x|y z|True'
+        (Get-HMTestAcl (Join-Path $env:ProgramData 'HUMig')).Protected | Should -BeTrue
+        Invoke-HMTargetProtected @{ IsRemote = $false; UserMode = $true } { param($a) "um:$a" } @('1') | Should -Be 'um:1'
+    }
+    Context 'Profil-Sicherung pruefen (Test-HMProfileBackup)' {
+        BeforeAll {
+            $script:Bd = Join-Path $TestDrive 'ProfilSicherung'; New-Item -ItemType Directory -Path $script:Bd -Force | Out-Null
+            $script:Sid = 'S-1-5-21-111-222-333-1001'
+            function New-HMTestReg([string]$Sid, [string]$Img, [string]$Key = '') {
+                if (-not $Key) { $Key = "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$Sid" }
+                $hex = (@([System.Text.Encoding]::Unicode.GetBytes($Img + [char]0)) | ForEach-Object { '{0:x2}' -f $_ }) -join ','
+                $f = Join-Path $script:Bd "ProfileList_$($Sid)_20261010_120000.reg"
+                $txt = "Windows Registry Editor Version 5.00`r`n`r`n[$Key]`r`n`"ProfileImagePath`"=hex(2):$($hex.Substring(0, 30))\`r`n  $($hex.Substring(30))`r`n`"Flags`"=dword:00000000`r`n"
+                Set-Content -LiteralPath $f -Value $txt -Encoding Unicode
+                return $f
+            }
+            function New-HMTestBackup([string]$Sid, [string]$Path, [string]$Reg) {
+                [pscustomobject]@{ Sid = $Sid; Path = $Path; AltPath = "$Path.alt_20261010_120000"; Reg = $Reg }
+            }
+            $script:Json = Join-Path $script:Bd "Profil_$($script:Sid)_20261010_120000.json"
+        }
+        It 'echte Sicherung (wie von Profil erneuern angelegt) ist gueltig' {
+            $reg = New-HMTestReg $script:Sid '%SystemDrive%\Users\max'
+            $b = New-HMTestBackup $script:Sid "$env:SystemDrive\Users\max" $reg
+            Test-HMProfileBackup $b $script:Json $script:Bd "$env:SystemDrive\Users" | Should -BeNullOrEmpty
+        }
+        It 'Entra-ID-SID ist gueltig' {
+            $sid = 'S-1-12-1-111-222-333-444'
+            $reg = New-HMTestReg $sid "$env:SystemDrive\Users\eva"
+            $b = New-HMTestBackup $sid "$env:SystemDrive\Users\eva" $reg
+            Test-HMProfileBackup $b (Join-Path $script:Bd "Profil_$($sid)_20261010_120000.json") $script:Bd "$env:SystemDrive\Users" | Should -BeNullOrEmpty
+        }
+        It 'lehnt Faelschungen ab' {
+            $reg = New-HMTestReg $script:Sid "$env:SystemDrive\Users\max"
+            $ok = New-HMTestBackup $script:Sid "$env:SystemDrive\Users\max" $reg
+            $pd = "$env:SystemDrive\Users"
+            # SID-Format
+            Test-HMProfileBackup ([pscustomobject]@{ Sid = '..\..\x'; Path = $ok.Path; AltPath = $ok.AltPath; Reg = $reg }) $script:Json $script:Bd $pd | Should -Match 'SID'
+            # Dateiname passt nicht zur SID
+            Test-HMProfileBackup $ok (Join-Path $script:Bd 'Profil_S-1-5-21-9-9-9-9_20261010_120000.json') $script:Bd $pd | Should -Match 'Dateiname'
+            # Profil ausserhalb des Profilverzeichnisses
+            Test-HMProfileBackup ([pscustomobject]@{ Sid = $script:Sid; Path = "$env:ProgramData\boese"; AltPath = "$env:ProgramData\boese.alt_20261010_120000"; Reg = $reg }) $script:Json $script:Bd $pd | Should -Match 'nicht direkt unter'
+            # gesicherter Ordner frei gewaehlt
+            Test-HMProfileBackup ([pscustomobject]@{ Sid = $script:Sid; Path = $ok.Path; AltPath = "$env:SystemDrive\Temp\x"; Reg = $reg }) $script:Json $script:Bd $pd | Should -Match 'gesicherter Ordner'
+            # .reg von woanders
+            $fremd = Join-Path $TestDrive "ProfileList_$($script:Sid)_20261010_120000.reg"; Copy-Item $reg $fremd
+            Test-HMProfileBackup ([pscustomobject]@{ Sid = $script:Sid; Path = $ok.Path; AltPath = $ok.AltPath; Reg = $fremd }) $script:Json $script:Bd $pd | Should -Match 'stammt nicht'
+            # .reg mit fremdem Schluessel
+            $reg2 = New-HMTestReg $script:Sid "$env:SystemDrive\Users\max" 'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+            Test-HMProfileBackup $ok $script:Json $script:Bd $pd | Should -Match 'andere Registry'
+            # .reg zeigt auf einen anderen Ordner
+            $reg3 = New-HMTestReg $script:Sid "$env:SystemDrive\Users\angreifer"
+            Test-HMProfileBackup $ok $script:Json $script:Bd $pd | Should -Match 'anderen Ordner'
+        }
+    }
+}
