@@ -36,7 +36,8 @@ function Write-HMSbLog([string]$Msg, [string]$Lvl = 'Info') {
 
 $localHist = Join-Path $cfgDir 'ServerBackup\history.json'
 $version = ''
-try { if ((Get-Content -LiteralPath (Join-Path $root 'HUMig.ps1') -Raw -Encoding UTF8) -match "\`$script:Version\s*=\s*'([0-9\.]+)'") { $version = $Matches[1] } } catch { }
+try { $version = "$((Get-Content -LiteralPath (Join-Path $root 'Config\version.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version)".Trim() } catch { }
+if (-not $version) { try { if ((Get-Content -LiteralPath (Join-Path $root 'HUMig.ps1') -Raw -Encoding UTF8) -match "\`$script:Version\s*=\s*'([0-9\.]+)'") { $version = $Matches[1] } } catch { } }
 
 function Add-HMSbTaskError([string]$Note, [string]$Disk = '') {
     Write-HMSbLog $Note 'Error'

@@ -170,7 +170,7 @@ function New-HMManifestSignature([byte[]]$Manifest, $Cert) {
 }
 # Signatur-Datei an ein Release haengen (eine vorhandene wird ersetzt) - Token mit Schreibrecht noetig
 function Publish-HMReleaseSignature([string]$Owner, [string]$Repo, [string]$Tag, [byte[]]$Signature, [string]$Token) {
-    $h = @{ Authorization = "token $Token"; Accept = 'application/vnd.github+json'; 'User-Agent' = 'HUMig' }
+    $h = @{ Authorization = "token $Token"; Accept = 'application/vnd.github+json'; 'User-Agent' = $script:HMUserAgent }
     $rel = Invoke-RestMethod "https://api.github.com/repos/$Owner/$Repo/releases/tags/$Tag" -Headers $h -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
     foreach ($a in @($rel.assets | Where-Object { "$($_.name)" -eq $script:HMSignatureName })) {
         Invoke-RestMethod "https://api.github.com/repos/$Owner/$Repo/releases/assets/$($a.id)" -Method Delete -Headers $h -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop | Out-Null
@@ -203,4 +203,21 @@ function Invoke-HMReleaseSigning([string]$Owner, [string]$Repo, [string]$Thumbpr
         }
     }
     return $out
+}
+# Release freigeben: Vorab-Release (Kanal Test) -> freigegeben (Kanal Stabil, "Latest").
+# Nur wenn Pruefsummen-Datei UND gueltige Signatur des eingestellten Zertifikats vorhanden sind (wird vorher geprueft).
+function Publish-HMRelease([string]$Owner, [string]$Repo, [string]$Tag, [string]$Thumbprint, [string]$Token) {
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+    $h = @{ Authorization = "token $Token"; Accept = 'application/vnd.github+json'; 'User-Agent' = $script:HMUserAgent }
+    $r = @(Get-HMReleases $Owner $Repo $Token | Where-Object { $_.Tag -eq $Tag })[0]
+    if (-not $r) { throw "Release $Tag nicht gefunden" }
+    if (-not $r.ManifestUrl) { throw "$Tag hat keine Pruefsummen-Datei - nicht freigegeben" }
+    if (-not $r.SignatureUrl) { throw "$Tag ist nicht signiert - zuerst 'Release signieren'" }
+    $man = Get-HMReleaseAsset $r.ManifestUrl $r.ManifestApi $Token
+    $sig = Get-HMReleaseAsset $r.SignatureUrl $r.SignatureApi $Token
+    $why = Test-HMManifestSignature $man $sig $Thumbprint
+    if ($why) { throw "Signatur von $Tag ungueltig ($why) - nicht freigegeben" }
+    $rel = Invoke-RestMethod "https://api.github.com/repos/$Owner/$Repo/releases/tags/$Tag" -Headers $h -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+    $body = @{ prerelease = $false; make_latest = 'true' } | ConvertTo-Json -Compress
+    Invoke-RestMethod "https://api.github.com/repos/$Owner/$Repo/releases/$($rel.id)" -Method Patch -Headers $h -ContentType 'application/json' -Body $body -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop | Out-Null
 }

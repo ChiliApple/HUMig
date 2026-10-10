@@ -27,7 +27,9 @@ try {
 # ============================================================================
 # GLOBALE VARIABLEN
 # ============================================================================
-$script:Version   = '2.0.97'
+# Version: einzige Quelle ist Config\version.json (daraus legen die automatischen Tests das Release an)
+$script:Version   = '0.0.0'
+try { $v = "$((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Config\version.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version)".Trim(); if ($v -match '^\d+\.\d+\.\d+$') { $script:Version = $v } } catch { }
 $script:AppName   = 'HUMig'
 $script:AppRoot   = $PSScriptRoot
 $script:ConfigDir = Join-Path $script:AppRoot 'Config'
@@ -61,6 +63,41 @@ if (-not $isAdmin -and -not $script:UserMode) {
         exit
     }
     if ($a -ne 'No') { exit }
+}
+
+# ============================================================================
+# NUR EINE INSTANZ JE PROGRAMMORDNER, KEIN START WAEHREND EINES UPDATES
+# ============================================================================
+# Zwei Instanzen aus demselben Ordner wuerden sich Einstellungen und Vorlagen gegenseitig ueberschreiben.
+# Gilt fuer Admin- und Benutzer-Modus gemeinsam (gleiche Windows-Sitzung). 8 s warten: nach einem Update startet
+# Pull.ps1 HUMig neu, waehrend sich die alte Instanz eventuell noch beendet.
+$script:InstanceMutex = $null
+try {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $hid = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes("$($script:AppRoot)".TrimEnd('\').ToLowerInvariant()))) -replace '-', '').Substring(0, 16)
+    $sha.Dispose()
+    $got = $false
+    try {
+        $script:InstanceMutex = New-Object System.Threading.Mutex($false, "Local\HUMig_$hid")
+        try { $got = $script:InstanceMutex.WaitOne(8000) } catch [System.Threading.AbandonedMutexException] { $got = $true }
+    } catch [System.UnauthorizedAccessException] { $script:InstanceMutex = $null; $got = $false }   # gehoert einer Instanz mit Adminrechten
+    if (-not $got) {
+        [void][System.Windows.MessageBox]::Show("HUMig laeuft bereits (aus diesem Ordner).`n`nBitte das offene Fenster verwenden - zwei gleichzeitig wuerden sich Einstellungen und Vorlagen gegenseitig ueberschreiben.", 'HUMig', 'OK', 'Information')
+        exit 0
+    }
+} catch { $script:InstanceMutex = $null }
+# Update laeuft gerade oder wurde abgebrochen (Pull.ps1 schreibt das Journal waehrend des Ersetzens)
+if (Test-Path -LiteralPath (Join-Path $script:AppRoot 'Config\pull-journal.json')) {
+    $a = [System.Windows.MessageBox]::Show("Ein Update laeuft gerade oder wurde abgebrochen - HUMig startet so nicht (die Dateien koennten halb ersetzt sein).`n`nJa = Update jetzt neu ausfuehren (Pull.ps1 stellt zuerst die bisherigen Dateien wieder her, laedt dann neu und startet HUMig)`nNein = beenden (z. B. wenn das Update gerade noch laeuft)", 'HUMig', 'YesNo', 'Warning')
+    if ($a -eq 'Yes') {
+        $pa = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $script:AppRoot 'Pull.ps1')`"", '-Target', "`"$($script:AppRoot)`"")
+        try {
+            if ($isAdmin) { Start-Process powershell.exe -ArgumentList $pa -WorkingDirectory $script:AppRoot }
+            else { Start-Process powershell.exe -Verb RunAs -ArgumentList $pa -WorkingDirectory $script:AppRoot }
+        } catch { [void][System.Windows.MessageBox]::Show("Pull.ps1 nicht gestartet: $($_.Exception.Message)`n`nIn einer Administrator-PowerShell im HUMig-Ordner ausfuehren: .\Pull.ps1", 'HUMig', 'OK', 'Error') }
+    }
+    if ($script:InstanceMutex) { try { $script:InstanceMutex.ReleaseMutex() } catch { } }
+    exit 0
 }
 
 # ============================================================================
@@ -1749,19 +1786,24 @@ function Read-HMSignToken {
     return ''
 }
 function Test-HMCanSign { return [bool](Get-HMSigningCert (Get-HMUpdateConfig $script:ConfigDir).SignerThumbprint) }
+# Schreib-Token (Signieren/Freigeben): gespeicherten nehmen oder abfragen und verschluesselt speichern (DPAPI, nur dieser Benutzer)
+function Get-HMSignTokenOrPrompt($Cfg) {
+    $tok = Read-HMSignToken
+    if ($tok) { return $tok }
+    $c = Get-Credential -UserName 'github' -Message "GitHub-Token mit Schreibrecht fuer $($Cfg.Owner)/$($Cfg.Repo) als Kennwort eingeben (Fine-grained PAT, 'Contents: Read and write'). Wird verschluesselt nur fuer deinen Windows-Benutzer gespeichert."
+    if (-not $c) { return '' }
+    $tok = $c.GetNetworkCredential().Password.Trim()
+    if (-not $tok) { return '' }
+    $f = Get-HMSignTokenFile
+    try { New-Item -ItemType Directory -Path (Split-Path $f -Parent) -Force | Out-Null; $c | Export-Clixml -Path $f -Force } catch { Out-Console "Token nicht gespeichert: $($_.Exception.Message)" 'Warning' }
+    return $tok
+}
 function Start-HMReleaseSigning {
     if ($script:JobRunning) { Out-Console 'Waehrend eines Backups/Restores nicht moeglich.' 'Warning'; return }
     $cfg = Get-HMUpdateConfig $script:ConfigDir
     if (-not (Get-HMSigningCert $cfg.SignerThumbprint)) { Out-Console "Signatur-Zertifikat $($cfg.SignerThumbprint) mit privatem Schluessel ist auf diesem PC nicht vorhanden." 'Error'; return }
-    $tok = Read-HMSignToken
-    if (-not $tok) {
-        $c = Get-Credential -UserName 'github' -Message "GitHub-Token mit Schreibrecht fuer $($cfg.Owner)/$($cfg.Repo) als Kennwort eingeben (Fine-grained PAT, 'Contents: Read and write'). Wird verschluesselt nur fuer deinen Windows-Benutzer gespeichert."
-        if (-not $c) { return }
-        $tok = $c.GetNetworkCredential().Password.Trim()
-        if (-not $tok) { return }
-        $f = Get-HMSignTokenFile
-        try { New-Item -ItemType Directory -Path (Split-Path $f -Parent) -Force | Out-Null; $c | Export-Clixml -Path $f -Force } catch { Out-Console "Token nicht gespeichert: $($_.Exception.Message)" 'Warning' }
-    }
+    $tok = Get-HMSignTokenOrPrompt $cfg
+    if (-not $tok) { return }
     $script:SignCtx = [pscustomobject]@{ Owner = $cfg.Owner; Repo = $cfg.Repo; Thumb = $cfg.SignerThumbprint; Token = $tok }
     Out-Console 'Releases ohne Signatur werden gesucht ...' 'Info'
     Invoke-AsyncCommand -ScriptBlock {
@@ -1794,7 +1836,64 @@ function Start-HMReleaseSigning {
                 Remove-Item -LiteralPath (Get-HMSignTokenFile) -Force -ErrorAction SilentlyContinue
                 Out-Console 'Gespeicherter Schreib-Token geloescht - beim naechsten Signieren neu eingeben.' 'Warning'
             }
+            if (@($items | Where-Object { $_.Ok }).Count) { Out-Console 'Naechster Schritt: testen, dann Rechtsklick auf Update > Release freigeben.' 'Info' }
             Invoke-UpdateCheck
+        }
+    }
+}
+# Release freigeben: neuestes signiertes Vorab-Release (Kanal Test), das neuer als die freigegebene Version ist -> Kanal Stabil
+function Start-HMReleasePublish {
+    if ($script:JobRunning) { Out-Console 'Waehrend eines Backups/Restores nicht moeglich.' 'Warning'; return }
+    $cfg = Get-HMUpdateConfig $script:ConfigDir
+    if (-not (Get-HMSigningCert $cfg.SignerThumbprint)) { Out-Console "Signatur-Zertifikat $($cfg.SignerThumbprint) mit privatem Schluessel ist auf diesem PC nicht vorhanden." 'Error'; return }
+    $tok = Get-HMSignTokenOrPrompt $cfg
+    if (-not $tok) { return }
+    $script:PubCtx = [pscustomobject]@{ Owner = $cfg.Owner; Repo = $cfg.Repo; Thumb = $cfg.SignerThumbprint; Token = $tok }
+    Out-Console 'Signierte Vorab-Releases werden gesucht ...' 'Info'
+    Invoke-AsyncCommand -ScriptBlock {
+        param($lib, $tok, $owner, $repo)
+        try {
+            . $lib
+            try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+            $l = @(Get-HMReleases $owner $repo $tok)
+            $stable = @($l | Where-Object { -not $_.Prerelease } | Select-Object -First 1)[0]
+            $cand = @($l | Where-Object { $_.Prerelease -and $_.ManifestUrl -and $_.SignatureUrl -and (-not $stable -or $_.Version -gt $stable.Version) } | Select-Object -First 1)[0]
+            $uns = @($l | Where-Object { $_.Prerelease -and -not $_.SignatureUrl -and (-not $stable -or $_.Version -gt $stable.Version) } | ForEach-Object { "$($_.Tag)" })
+            return [pscustomobject]@{ Tag = $(if ($cand) { "$($cand.Tag)" } else { '' }); Stable = $(if ($stable) { "$($stable.Tag)" } else { '' }); Unsigned = $uns; Err = '' }
+        } catch { return [pscustomobject]@{ Tag = ''; Stable = ''; Unsigned = @(); Err = "$($_.Exception.Message)" } }
+    } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $tok, $cfg.Owner, $cfg.Repo) -TimeoutSec 40 -OnComplete {
+        param($r)
+        if (-not $r -or $r -is [string] -or $r.Err) { Out-Console "Releases nicht lesbar: $(if ($r -is [string]) { $r } else { $r.Err })" 'Error'; $script:PubCtx = $null; return }
+        $stable = if ($r.Stable) { $r.Stable } else { '-' }
+        $uns = @($r.Unsigned | Where-Object { $_ })
+        if (-not $r.Tag) {
+            Out-Console "Kein signiertes Vorab-Release neuer als $stable.$(if ($uns.Count) { " Noch nicht signiert: $($uns -join ', ') - zuerst 'Release signieren'." })" 'Warning'
+            $script:PubCtx = $null; return
+        }
+        $tag = $r.Tag
+        if (-not (Confirm-Action "$tag jetzt freigeben?`n`nDanach ist es im Kanal Stabil die neueste Version und wird ALLEN HUMig-Installationen als Update angeboten.`nBisher freigegeben: $stable" 'Release freigeben')) { $script:PubCtx = $null; return }
+        Out-Console "Gebe $tag frei ... (Signatur wird vorher erneut geprueft)" 'Info'
+        $script:PubCtx | Add-Member -NotePropertyName Tag -NotePropertyValue $tag -Force
+        $pc = $script:PubCtx
+        Invoke-AsyncCommand -ScriptBlock {
+            param($lib, $owner, $repo, $tag, $tp, $tok)
+            try { . $lib; Publish-HMRelease $owner $repo $tag $tp $tok; return [pscustomobject]@{ Ok = $true; Auth = $false; Err = '' } }
+            catch {
+                $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+                if ($code -in 401, 403, 404) { return [pscustomobject]@{ Ok = $false; Auth = $true; Err = "kein Schreibrecht (HTTP $code) - Token pruefen" } }
+                return [pscustomobject]@{ Ok = $false; Auth = $false; Err = "$($_.Exception.Message)" }
+            }
+        } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $pc.Owner, $pc.Repo, $tag, $pc.Thumb, $pc.Token) -TimeoutSec 60 -OnComplete {
+            param($res)
+            $tag = if ($script:PubCtx) { "$($script:PubCtx.Tag)" } else { '' }
+            $script:PubCtx = $null
+            if ($res -and $res -isnot [string] -and $res.Ok) { Out-Console "$tag ist freigegeben (Kanal Stabil) und wird allen Installationen als Update angeboten." 'Success'; Invoke-UpdateCheck; return }
+            $msg = if ($res -is [string]) { $res } elseif ($res) { $res.Err } else { 'keine Antwort' }
+            Out-Console "Freigabe fehlgeschlagen: $msg" 'Error'
+            if ($res -and $res -isnot [string] -and $res.Auth) {
+                Remove-Item -LiteralPath (Get-HMSignTokenFile) -Force -ErrorAction SilentlyContinue
+                Out-Console 'Gespeicherter Schreib-Token geloescht - beim naechsten Versuch neu eingeben.' 'Warning'
+            }
         }
     }
 }
@@ -1814,9 +1913,10 @@ $miT.Add_Click({
 })
 $miSep2 = New-Object System.Windows.Controls.Separator
 $miSign = New-Object System.Windows.Controls.MenuItem; $miSign.Header = 'Release signieren (Herausgeber) ...'; $miSign.Add_Click({ Start-HMReleaseSigning })
-foreach ($m in @($miV, $miS, (New-Object System.Windows.Controls.Separator), $miT, $miSep2, $miSign)) { [void]$cmUpd.Items.Add($m) }
-# "Release signieren" nur zeigen, wenn auf diesem PC der private Schluessel des Signatur-Zertifikats liegt
-$cmUpd.Add_Opened({ $v = $(if (Test-HMCanSign) { 'Visible' } else { 'Collapsed' }); $miSign.Visibility = $v; $miSep2.Visibility = $v })
+$miPub = New-Object System.Windows.Controls.MenuItem; $miPub.Header = 'Release freigeben (Herausgeber) ...'; $miPub.Add_Click({ Start-HMReleasePublish })
+foreach ($m in @($miV, $miS, (New-Object System.Windows.Controls.Separator), $miT, $miSep2, $miSign, $miPub)) { [void]$cmUpd.Items.Add($m) }
+# "Release signieren/freigeben" nur zeigen, wenn auf diesem PC der private Schluessel des Signatur-Zertifikats liegt
+$cmUpd.Add_Opened({ $v = $(if (Test-HMCanSign) { 'Visible' } else { 'Collapsed' }); $miSign.Visibility = $v; $miPub.Visibility = $v; $miSep2.Visibility = $v })
 $ui.btnUpdate.ContextMenu = $cmUpd
 
 # ============================================================================
@@ -1963,3 +2063,4 @@ if (-not $script:UserMode -and -not (Test-Path -LiteralPath (Join-Path $script:A
 }
 
 [void]$script:Window.ShowDialog()
+if ($script:InstanceMutex) { try { $script:InstanceMutex.ReleaseMutex() } catch { }; try { $script:InstanceMutex.Dispose() } catch { } }
