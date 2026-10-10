@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.0.99 - 2026-10-10
+### Sicherheit und Datenverlust (aus der externen Code-Pruefung)
+- Server-Backup *Platte einrichten*: unmittelbar vor dem Loeschen wird geprueft, dass unter der Nummer noch dieselbe Platte steckt (ID, Seriennummer, Groesse, Modell) und keine VM-Dateien auf ihr liegen - sonst Abbruch ohne Loeschen. VM-Dateien werden jetzt auch ueber Bereitstellungspunkte und Volumes ohne Laufwerksbuchstaben erkannt (inkl. Snapshot- und Smart-Paging-Ordner); ist die VM-Liste nicht lesbar, bricht HUMig ab statt die Platte anzubieten
+- *Alte Backups* / Aufbewahrung im Zeitplan: gezaehlt werden nur brauchbare Backups (OK/Warnung). Das neueste brauchbare je PC und Benutzer wird nie vorgeschlagen, abgebrochene/fehlerhafte nur, wenn es ein neueres brauchbares gibt, unvollstaendige nie. Liste und Rueckfrage zeigen den Status, die Rueckfrage warnt extra vor dem neuesten brauchbaren Backup
+- Restore *Zusaetzliche Ordner*: Pfade im Profil des Quell-Benutzers werden ins Profil des Zielbenutzers umgeschrieben; Ziele im Profil eines anderen Benutzers gehen nach `Profil\Zusaetzliche Ordner`; Ziele im OneDrive-/SharePoint-Ordner des Zielbenutzers nach `Profil\OneDrive-Wiederherstellung` (neuere Cloud-Versionen werden nicht mehr ueberschrieben). Cloud-Unterordner, die beim Backup erkannt wurden, werden jetzt auch hier ausgelassen
+- Backup-Ordner, die selbst eine Verknuepfung (Junction/Symlink) sind, erscheinen nicht mehr in der Backup-Liste; Loeschen entfernt nur den Link
+### Automatische Tests
+- Neue Tests fuer Aufbewahrung, Verknuepfung als Backup-Ordner und die Pruefung vor dem Loeschen einer Platte
+
 ## v2.0.98 - 2026-10-10
 ### Update und Releases
 - Versionsnummer steht nur noch in `Config\version.json` (HUMig, Backup- und Server-Backup-Zeitplan lesen sie dort)

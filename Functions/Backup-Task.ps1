@@ -286,6 +286,8 @@ if ($ret -and [bool]$ret.Enabled -and $st -in @('OK', 'Warning')) {
     try {
         $all = Get-HMBackupList -Root $targetRoot -Modules $script:Modules
         $mine = @(@($all) | Where-Object { $_ -and -not $_.Legacy -and "$($_.Sid)" -eq $sid -and ("$($_.Computer)" -ieq $env:COMPUTERNAME -or "$($_.Computer)".Split('.')[0] -ieq $env:COMPUTERNAME) })
+        $bad = @($mine | Where-Object { "$($_.Status)" -notin @('OK', 'Warning') }).Count
+        if ($bad) { Write-TaskLog "Aufbewahrung: $bad unvollstaendige/fehlerhafte Backup(s) zaehlen nicht mit (werden nur entfernt, wenn ein neueres brauchbares existiert)" 'Info' }
         $cand = @(Get-HMRetentionCandidates -Backups $mine -Days 0 -Keep $keep)
         $cur = "$($ctx.BackupPath)".TrimEnd('\')
         $del = 0
@@ -296,7 +298,7 @@ if ($ret -and [bool]$ret.Enabled -and $st -in @('OK', 'Warning')) {
             if ($r -eq 'OK') { $del++; Write-TaskLog "Aufbewahrung: altes Backup geloescht: $($c.Backup.Name)" 'Info' }
             else { Write-TaskLog "Aufbewahrung: $($c.Backup.Name): $r" 'Warning' }
         }
-        Write-TaskLog "Aufbewahrung: neueste $keep behalten, $del geloescht" 'Info'
+        Write-TaskLog "Aufbewahrung: neueste $keep brauchbare behalten, $del geloescht" 'Info'
         if ($del) { $msg += " - $del alte(s) Backup(s) geloescht" }
     } catch { Write-TaskLog "Aufbewahrung fehlgeschlagen: $($_.Exception.Message)" 'Warning' }
 }

@@ -417,6 +417,14 @@ function Initialize-HMFs { if (-not ('HMFs.Tree' -as [type])) { Add-Type -TypeDe
 # (Loeschrecht, nicht geoeffnet). Sonst bleibt ein halb geloeschtes, unbrauchbares Backup zurueck. Lange Pfade und schreibgeschuetzte Dateien werden unterstuetzt.
 function Remove-HMBackupFolder([string]$Path) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return 'OK' }
+    # Backup-Ordner selbst ist eine Verknuepfung (Junction/Symlink): nur den Link entfernen, nie das Ziel durchlaufen
+    try {
+        $ra = [System.IO.File]::GetAttributes($Path)
+        if (($ra -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            [System.IO.Directory]::Delete($Path, $false)
+            return 'OK'
+        }
+    } catch { return "FEHLER: nichts geloescht - Verknuepfung nicht pruefbar/entfernbar: $($_.Exception.Message)" }
     try { Initialize-HMFs } catch { return "FEHLER: nichts geloescht - Pruefung nicht moeglich: $($_.Exception.Message)" }
     $bad = @([HMFs.Tree]::CheckDeletable($Path, 5))
     if ($bad.Count) {
@@ -1191,6 +1199,7 @@ function Get-HMBackupList {
     param([string]$Root, [object[]]$Modules)
     if (-not (Test-Path -LiteralPath $Root)) { return @() }
     $list = foreach ($d in @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue)) {
+        if (($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }   # Verknuepfungen nie als Backup behandeln
         $i = Read-HMBackupInfo -Path $d.FullName -Modules $Modules
         if ($i) { $i }
     }
@@ -2339,7 +2348,7 @@ function Restore-HMFolderItem {
     # Cloud-Ordner (OneDrive/SharePoint) aus dem Backup nie direkt in den Sync-Ordner schreiben (wuerde neuere Cloud-Versionen ueberschreiben)
     $xd = @(); $syncs = @()
     $mf = if ($Ctx.Backup) { $Ctx.Backup.Manifest } else { $null }
-    if (-not $SourceOverride -and $mf -and $mf.SyncRoots) {
+    if ($mf -and $mf.SyncRoots) {
         $syncs = @($mf.SyncRoots | Where-Object { $_ -and $_.Rel -and $_.Item -eq "$($Module.Id)/$($Item.Name)" })
         foreach ($s in $syncs) { $xd += (Join-Path $src $s.Rel) }
     }
@@ -2450,21 +2459,42 @@ function Restore-HMBuiltin {
             if ($Ctx.Backup.Legacy) {
                 foreach ($i in 1, 2) {
                     $sp = Join-Path $Ctx.Backup.Path "FOLDER$i"; $tf = Join-Path $Ctx.Backup.Path "FOLDER$i.txt"
-                    if ((Test-Path -LiteralPath $sp) -and (Test-Path -LiteralPath $tf)) { $entries += [pscustomobject]@{ Src = $sp; Path = ((Get-Content -LiteralPath $tf | Where-Object { $_ })[-1]).Trim() } }
+                    if ((Test-Path -LiteralPath $sp) -and (Test-Path -LiteralPath $tf)) { $entries += [pscustomobject]@{ Src = $sp; Path = ((Get-Content -LiteralPath $tf | Where-Object { $_ })[-1]).Trim(); Key = '' } }
                 }
             } else {
                 $jf = Join-Path $dir 'folders.json'
                 if (Test-Path -LiteralPath $jf) {
-                    foreach ($e in @(Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json)) { $entries += [pscustomobject]@{ Src = (Join-Path $dir "FOLDER$($e.Index)"); Path = $e.Path } }
+                    foreach ($e in @(Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json)) { $entries += [pscustomobject]@{ Src = (Join-Path $dir "FOLDER$($e.Index)"); Path = $e.Path; Key = "FOLDER$($e.Index)" } }
                 }
             }
             if (-not $entries.Count) { return (& $res 'Skip' 'keine Ordner im Backup') }
             $worst = 'OK'
+            # Sync-Ordner (OneDrive/SharePoint) des ZIELbenutzers am Ziel-PC - dorthin nie direkt schreiben
+            $tRoots = @()
+            try { $tRoots = @(Get-HMSyncRoots $Ctx $Ctx.UserSid $Ctx.ProfilePath | Where-Object { $_ }) } catch { Write-HMLog $Job "   OneDrive-Ordner am Ziel nicht ermittelbar: $($_.Exception.Message)" 'Debug' }
+            $under = { param($p, $root) $r0 = "$root".TrimEnd('\'); return ($r0 -and ("$p".TrimEnd('\') -ieq $r0 -or "$p".StartsWith($r0 + '\', [StringComparison]::OrdinalIgnoreCase))) }
+            $usersRoot = if ($Ctx.ProfilePath) { Split-Path "$($Ctx.ProfilePath)".TrimEnd('\') -Parent } else { '' }
             foreach ($e in $entries) {
-                $fake = [pscustomobject]@{ Name = (Split-Path $e.Path -Leaf); Type = 'Folder'; Path = $e.Path }
-                $r = Restore-HMFolderItem $Ctx $Job $Module $fake $TEnv -SourceOverride $e.Src -DestOverride $e.Path
-                Write-HMLog $Job "   $($e.Path): $($r.Msg)" $(if ($r.Status -eq 'OK') { 'Debug' } else { 'Warning' })
-                if ($r.Status -ne 'OK' -and $worst -eq 'OK') { $worst = $r.Status }
+                $dest = "$($e.Path)".TrimEnd('\'); $note = ''; $leaf = Split-Path $dest -Leaf
+                # Pfad im Profil des Quell-Benutzers -> ins Profil des Zielbenutzers umschreiben (anderer Profilname/Benutzer)
+                $srcProf = "$($Ctx.Backup.ProfilePath)".TrimEnd('\')
+                if ($srcProf -and $Ctx.ProfilePath -and (& $under $dest $srcProf)) { $dest = "$($Ctx.ProfilePath)".TrimEnd('\') + $dest.Substring($srcProf.Length) }
+                # liegt sonst im Profil EINES ANDEREN Benutzers -> nicht dorthin, sondern in das Profil des Zielbenutzers
+                elseif ($usersRoot -and (& $under $dest $usersRoot) -and -not (& $under $dest $Ctx.ProfilePath)) {
+                    $dest = Join-Path $Ctx.ProfilePath (Join-Path 'Zusaetzliche Ordner' $leaf)
+                    $note = " (Originalpfad $($e.Path) liegt im Profil eines anderen Benutzers - stattdessen hierher)"
+                }
+                # liegt im OneDrive-/SharePoint-Ordner des Zielbenutzers -> eigener Ordner, sonst wuerden neuere Cloud-Versionen ueberschrieben
+                $hitRoot = @($tRoots | Where-Object { & $under $dest $_ })[0]
+                if ($hitRoot -and $Ctx.ProfilePath) {
+                    $dest = Join-Path $Ctx.ProfilePath (Join-Path 'OneDrive-Wiederherstellung' $leaf)
+                    $note += " (Ziel liegt im Cloud-Ordner $hitRoot - nicht direkt hineingeschrieben, damit neuere Cloud-Versionen nicht ueberschrieben werden; bei Bedarf von Hand uebernehmen)"
+                }
+                $fake = [pscustomobject]@{ Name = $(if ($e.Key) { $e.Key } else { $leaf }); Type = 'Folder'; Path = $dest }
+                $r = Restore-HMFolderItem $Ctx $Job $Module $fake $TEnv -SourceOverride $e.Src -DestOverride $dest
+                if ($note -and $r.Status -eq 'OK') { $r.Status = 'Warning' }
+                Write-HMLog $Job "   $($e.Path): $($r.Msg)$note" $(if ($r.Status -eq 'OK') { 'Debug' } else { 'Warning' })
+                if ($r.Status -in @('Error', 'Cancel')) { $worst = $r.Status } elseif ($r.Status -ne 'OK' -and $worst -eq 'OK') { $worst = $r.Status }
             }
             return (& $res $worst "$($entries.Count) Ordner")
         }
