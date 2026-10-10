@@ -72,6 +72,15 @@ Step 'Konfigurationsdateien (JSON)' {
     "$n Dateien"
 }
 
+Step 'Version (Config\version.json) und CHANGELOG-Abschnitt' {
+    $v = "$((Get-Content (Join-Path $root 'Config\version.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version)".Trim()
+    if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "Version ungueltig: '$v'" }
+    $cl = Get-Content (Join-Path $root 'CHANGELOG.md') -Raw -Encoding UTF8
+    if ($cl -notmatch ('(?m)^## v' + [regex]::Escape($v) + '\b')) { throw "CHANGELOG.md ohne Abschnitt '## v$v'" }
+    if ((Get-Content (Join-Path $root 'HUMig.ps1') -Raw -Encoding UTF8) -match "(?m)^\`$script:Version\s*=\s*'\d+\.\d+\.\d+'\s*$" -and $Matches[0] -notmatch "'0\.0\.0'") { throw 'HUMig.ps1 enthaelt eine feste Versionsnummer - nur Config\version.json pflegen' }
+    "v$v"
+}
+
 # 4. Update-Bibliothek identisch
 Step 'Update-Bibliothek Pull.ps1 = Functions\Core-Update.ps1' {
     $re = '(?s)#region HMUpdateLib.*?#endregion HMUpdateLib'

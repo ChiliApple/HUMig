@@ -1,8 +1,12 @@
-# Automatische Tests fuer HUMig (Windows PowerShell 5.1) und Pruefsummen-Datei fuer Releases.
-# - bei jedem Push/Pull-Request: Pruefungen (Syntax, XAML, Steuerelemente, PSScriptAnalyzer, Pester) + Selbsttest
-# - Signatur: haengt der Herausgeber danach an (HUMig: Rechtsklick auf Update > Release signieren), erst dann wird das Release angeboten
-# - bei einem neuen Release: zusaetzlich HUMig-files.sha256 erstellen und an das Release haengen (nur wenn die Pruefungen bestanden sind)
-#   und den Update-Weg testen (Pull.ps1 laedt genau dieses Release und prueft alle Pruefsummen; zweiter Lauf = Update mit Journal/Aufraeumen)
+# Automatische Tests fuer HUMig (Windows PowerShell 5.1) und Releases.
+# - bei jedem Push/Pull-Request: Pruefungen (Syntax, XAML, Steuerelemente, Version, PSScriptAnalyzer, Pester) + Selbsttest
+# - Push auf main mit neuer Version (Config/version.json, Tag existiert noch nicht):
+#   Vorab-Release v<Version> (Kanal Test) automatisch anlegen, Text aus CHANGELOG.md, HUMig-files.sha256 anhaengen,
+#   nur die letzten 10 Releases behalten (die freigegebene Version bleibt immer)
+# - von Hand veroeffentlichtes Release: HUMig-files.sha256 anhaengen
+# - danach jeweils den Update-Weg testen (Pull.ps1 laedt genau dieses Release und prueft alle Pruefsummen; zweiter Lauf = Update mit Journal/Aufraeumen)
+# - Signatur + Freigabe macht der Herausgeber in HUMig (Rechtsklick auf Update > Release signieren / Release freigeben),
+#   erst dann wird das Release den Installationen angeboten
 name: CI
 
 on:
@@ -15,6 +19,11 @@ on:
 
 permissions:
   contents: write
+
+# neuer Push bricht einen noch laufenden Lauf desselben Branches ab
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -35,38 +44,83 @@ jobs:
           if (Test-Path .\Test-HUMig.result.txt) { Get-Content .\Test-HUMig.result.txt | Add-Content $env:GITHUB_STEP_SUMMARY }
           exit $c
 
-  manifest:
-    name: Pruefsummen-Datei zum Release
-    if: github.event_name == 'release'
+  release:
+    name: Release + Pruefsummen-Datei
+    if: github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.rel.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
-      - name: HUMig-files.sha256 erstellen
-        run: python3 .github/scripts/manifest.py HUMig-files.sha256
-      - name: An das Release haengen
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+      - name: Release bestimmen bzw. als Vorab-Release anlegen
+        id: rel
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$TAG" HUMig-files.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          V=$(python3 -c "import json;print(json.load(open('Config/version.json',encoding='utf-8-sig'))['version'])")
+          if [ -z "$V" ]; then echo "Version in Config/version.json nicht gefunden"; exit 1; fi
+          T="v$V"
+          if gh release view "$T" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $T gibt es schon - nichts anzulegen"; echo "tag=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Abschnitt "## v<Version>" aus CHANGELOG.md als Release-Text
+          python3 - "$V" > notes.md <<'PY'
+          import re, sys
+          v = sys.argv[1]
+          t = open('CHANGELOG.md', encoding='utf-8').read()
+          m = re.search(r'^## v' + re.escape(v) + r'\b[^\n]*\n(.*?)(?=^## v|\Z)', t, re.S | re.M)
+          print(m.group(1).strip() if m else 'Version ' + v)
+          PY
+          gh release create "$T" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false --title "$T" --notes-file notes.md
+          echo "Vorab-Release $T angelegt" >> "$GITHUB_STEP_SUMMARY"
+          echo "tag=$T" >> "$GITHUB_OUTPUT"
+      - name: HUMig-files.sha256 erstellen und anhaengen
+        if: steps.rel.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.rel.outputs.tag }}
+        run: |
+          python3 .github/scripts/manifest.py HUMig-files.sha256
+          gh release upload "$TAG" HUMig-files.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Alte Releases entfernen (nur die letzten 10 behalten, Tags bleiben)
+        if: github.event_name == 'push' && steps.rel.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: 10
+        run: |
+          # neueste zuerst; die aktuelle freigegebene Version (Latest) bleibt immer erhalten
+          LATEST=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" -q .tag_name 2>/dev/null || true)
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate -q '.[] | "\(.created_at) \(.tag_name)"' | sort -r | awk '{print $2}' > all.txt
+          n=0
+          while read -r T; do
+            n=$((n+1))
+            [ "$n" -le "$KEEP" ] && continue
+            [ "$T" = "$LATEST" ] && { echo "behalte $T (Latest)"; continue; }
+            gh release delete "$T" --repo "$GITHUB_REPOSITORY" --yes && echo "- geloescht: $T" >> "$GITHUB_STEP_SUMMARY"
+          done < all.txt
 
   pull:
     name: Update-Weg testen (Pull.ps1)
-    if: github.event_name == 'release'
-    needs: manifest
+    needs: release
+    if: needs.release.outputs.tag != ''
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ needs.release.outputs.tag }}
       - name: Pull.ps1 laedt das Release und prueft alle Pruefsummen
         shell: powershell
         env:
           HUMIG_GITHUB_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ needs.release.outputs.tag }}
         run: |
           $t = Join-Path $env:RUNNER_TEMP 'HUMig'
           $v = $env:TAG -replace '^v', ''
