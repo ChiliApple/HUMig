@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.111 - 2026-10-11
+### Start
+- HUMig kommt beim Start immer in den Vordergrund (auch nach UAC-Abfrage, ueber den Starter oder nach einem Update-Neustart) - bisher blieb das Fenster oft hinter anderen Fenstern
+
 ## v2.0.110 - 2026-10-11
 ### Behoben
 - *Zusaetzliche Ordner* und *Pfade ausschliessen*: die Ordnerauswahl zeigte die Ordner (Desktop, Downloads ...) des Kontos, unter dem HUMig laeuft - bei eigenem Admin-Konto also die falschen. Sie startet jetzt im Profil des gewaehlten Benutzers mit dem Baum ab *Dieser PC*; bei einem anderen PC ueber die Admin-Freigabe, uebernommen wird der Pfad am Quell-PC (C:\...)
