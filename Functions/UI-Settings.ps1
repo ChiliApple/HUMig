@@ -7,6 +7,13 @@
     Wird im UI-Thread geladen (dot-source aus HUMig.ps1). Gibt $true zurueck, wenn gespeichert wurde.
 #>
 
+# Haken der Teams-Kategorien im Einstellungsfenster -> Hashtable Name -> bool
+function Get-HMSetTeamsCats {
+    $c = @{}
+    if ($script:SetDlg -and $script:SetDlg.TeamsChk) { foreach ($n in $script:SetDlg.TeamsChk.Keys) { $c[$n] = [bool]$script:SetDlg.TeamsChk[$n].IsChecked } }
+    return $c
+}
+
 function ConvertTo-HMLines($Arr) { return ((@($Arr) | Where-Object { "$_".Trim() }) -join "`r`n") }
 function ConvertFrom-HMLines([string]$Text) { return @($Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique) }
 
@@ -32,7 +39,7 @@ function Show-SettingsDialog {
     $w.Owner = $script:Window; Set-HMWindowScale $w
     $f = @{}
     foreach ($n in @('lblPath', 'btnOpenConfig', 'btnSave', 'btnCancel', 'tabs', 'txtRoot', 'btnRoot', 'cmbThreads', 'txtRetention', 'txtRetentionKeep', 'txtDeletedKeep', 'txtDeletedMass', 'txtFeedbackMail', 'cmbUiScale', 'chkOverviewAuto', 'chkStatusPage', 'txtChecklist', 'chkChecklistAuto', 'tabSchools', 'dgSchools', 'btnSchoolAdd', 'btnSchoolDel', 'txtUsmt', 'btnUsmt', 'btnUsmtAdk', 'lblUsmt',
-        'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtDrvDir', 'btnDrvDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript', 'chkROfferApps', 'chkRVerify', 'pwdTeams', 'btnTeamsTest', 'btnTeamsDel', 'lblTeams', 'chkTeamsOk',
+        'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtDrvDir', 'btnDrvDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript', 'chkROfferApps', 'chkRVerify', 'pwdTeams', 'btnTeamsTest', 'btnTeamsDel', 'lblTeams', 'pnlTeamsCats',
         'tabExceptions', 'btnExcDefault', 'txtExPF', 'txtExPFi', 'txtExPMin', 'txtExSF', 'txtExSFi', 'txtExSMin', 'tabModules', 'txtNmName', 'cmbNmGroup',
         'cmbNmType', 'txtNmFilter', 'txtNmPath', 'btnNmAdd', 'btnModDel', 'btnModJson', 'btnAppEditor', 'dgModules', 'btnLinkAdd', 'btnLinkDel', 'dgLinks',
         'txtOwner', 'txtRepo', 'txtBranch', 'lblToken', 'btnTokenSet', 'btnTokenDel', 'tabUpdate', 'cmbChannel', 'lblInstalled', 'btnVersions', 'chkRequireSig', 'txtSignerThumb', 'chkUseBranch')) { $f[$n] = $w.FindName($n) }
@@ -96,9 +103,18 @@ function Show-SettingsDialog {
     })
     # Teams-Benachrichtigung (Adresse nur auf diesem PC, verschluesselt in HKLM - nie in settings.json)
     $st.TeamsCfg = Get-HMNotifyConfig
-    $f.chkTeamsOk.IsChecked = [bool]$st.TeamsCfg.OnSuccess
+    # Kategorien als Haken (einzeln ein-/ausschaltbar)
+    $st.TeamsChk = [ordered]@{}
+    foreach ($n in $script:HMNotifyCats.Keys) {
+        $cb = New-Object System.Windows.Controls.CheckBox
+        $cb.Content = "$($script:HMNotifyCats[$n][0])"
+        $cb.IsChecked = [bool](Test-HMNotifyCat $st.TeamsCfg $n)
+        $cb.Margin = [System.Windows.Thickness]::new(0, 2, 0, 0)
+        [void]$f.pnlTeamsCats.Children.Add($cb)
+        $st.TeamsChk[$n] = $cb
+    }
     $f.lblTeams.Text = if ($st.TeamsCfg.Configured) { 'Auf diesem PC ist eine Webhook-Adresse gespeichert - zum Aendern neue Adresse eintragen.' } else { 'Keine Webhook-Adresse gespeichert (Benachrichtigung aus).' }
-    if (-not $isAdmin) { foreach ($c in @($f.pwdTeams, $f.btnTeamsTest, $f.btnTeamsDel, $f.chkTeamsOk)) { $c.IsEnabled = $false }; $f.lblTeams.Text = 'Nur als Administrator einstellbar.' }
+    if (-not $isAdmin) { foreach ($c in @(@($f.pwdTeams, $f.btnTeamsTest, $f.btnTeamsDel) + @($st.TeamsChk.Values))) { $c.IsEnabled = $false }; $f.lblTeams.Text = 'Nur als Administrator einstellbar.' }
     $f.btnTeamsTest.Add_Click({
         $F = $script:SetDlg.F
         $u = "$($F.pwdTeams.Password)".Trim()
@@ -112,7 +128,7 @@ function Show-SettingsDialog {
     })
     $f.btnTeamsDel.Add_Click({
         if ("$([System.Windows.MessageBox]::Show($script:SetDlg.Win, 'Webhook-Adresse auf diesem PC loeschen (sofort)?', 'Teams', 'YesNo', 'Question'))" -ne 'Yes') { return }
-        try { Set-HMNotifyConfig -Url '' -OnSuccess ([bool]$script:SetDlg.F.chkTeamsOk.IsChecked); $script:SetDlg.TeamsCfg = Get-HMNotifyConfig; $script:SetDlg.F.pwdTeams.Password = ''; $script:SetDlg.F.lblTeams.Text = 'Keine Webhook-Adresse gespeichert (Benachrichtigung aus).'; Out-Console 'Teams-Benachrichtigung: Adresse geloescht.' 'Info' }
+        try { Set-HMNotifyConfig -Url '' -Cats (Get-HMSetTeamsCats); $script:SetDlg.TeamsCfg = Get-HMNotifyConfig; $script:SetDlg.F.pwdTeams.Password = ''; $script:SetDlg.F.lblTeams.Text = 'Keine Webhook-Adresse gespeichert (Benachrichtigung aus).'; Out-Console 'Teams-Benachrichtigung: Adresse geloescht.' 'Info' }
         catch { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "Loeschen fehlgeschlagen: $($_.Exception.Message)", 'Teams', 'OK', 'Error') }
     })
     $f.btnShortcut.Add_Click({
@@ -338,8 +354,10 @@ function Show-SettingsDialog {
         $rs.OfferApps = [bool]$F.chkROfferApps.IsChecked; $rs.VerifyAfter = [bool]$F.chkRVerify.IsChecked
         $h.Restore = $rs
         # Teams: nur speichern, wenn etwas geaendert wurde (Adresse eingetragen oder Haken anders)
-        if ($isAdmin -and ($tu -or [bool]$F.chkTeamsOk.IsChecked -ne [bool]$script:SetDlg.TeamsCfg.OnSuccess)) {
-            try { Set-HMNotifyConfig -Url $(if ($tu) { $tu } else { $null }) -OnSuccess ([bool]$F.chkTeamsOk.IsChecked); if ($tu) { Out-Console 'Teams-Benachrichtigung: Webhook-Adresse auf diesem PC gespeichert (verschluesselt).' 'Success' } }
+        $tc = Get-HMSetTeamsCats
+        $tcChanged = @($tc.Keys | Where-Object { [bool]$tc[$_] -ne [bool](Test-HMNotifyCat $script:SetDlg.TeamsCfg $_) }).Count -gt 0
+        if ($isAdmin -and ($tu -or $tcChanged)) {
+            try { Set-HMNotifyConfig -Url $(if ($tu) { $tu } else { $null }) -Cats $tc; if ($tu) { Out-Console 'Teams-Benachrichtigung: Webhook-Adresse auf diesem PC gespeichert (verschluesselt).' 'Success' } }
             catch { [void][System.Windows.MessageBox]::Show($W, "Teams-Webhook nicht gespeichert: $($_.Exception.Message)", 'Einstellungen', 'OK', 'Error'); return }
         }
         $F.dgLinks.CommitEdit(); $F.dgLinks.CommitEdit()

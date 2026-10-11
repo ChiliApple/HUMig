@@ -52,7 +52,7 @@ function Add-HMSbTaskError([string]$Note, [string]$Disk = '') {
             HostVersionId = ''; Note = "Geplante Aufgabe: $Note"; Tool = "HUMig $version"
         })
     } catch { }
-    $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME FEHLGESCHLAGEN" -Lines @($Note, "Protokoll: $($script:TaskLog)") -Level 'Error'
+    $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME FEHLGESCHLAGEN" -Lines @($Note, "Protokoll: $($script:TaskLog)") -Level 'Error' -Category 'SbError'
     if ($n) { Write-HMSbLog $n 'Info' }
 }
 
@@ -116,14 +116,15 @@ try {
         $sd = Get-HMStatusData -SbProfiles @($prof) -SbHistory @($hh)
         $rem = @(@($sd.Warnings) | Where-Object { "$($_.Area)" -eq 'Server-Backup' -and "$($_.Text)" -notmatch 'letzter Lauf fehlgeschlagen|keine erfolgreiche Sicherung|letzte erfolgreiche Sicherung vor' } | ForEach-Object { "$($_.Text)" })
     } catch { }
-    $lvl = if ($st -eq 'Error') { 'Error' } elseif ($st -eq 'Warning' -or $rem.Count) { 'Warning' } else { 'OK' }
-    $stTxt = switch ($st) { 'OK' { 'erfolgreich' } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }
-    $lines = @("Platte: $($d.Label)") + @(@($Job.Result.Notes) | Where-Object { "$_" } | ForEach-Object { "Hinweis: $_" })
-    if ("$($Job.Result.HealthText)") { $lines += "Plattenzustand: $($Job.Result.HealthText)" }
-    $lines += @($rem | ForEach-Object { "Erinnerung: $_" })
-    if ("$($Job.Result.Report)") { $lines += "Bericht: $(Join-Path "$($Job.Result.Report)" 'Bericht.html')" }
-    $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME $stTxt" -Lines $lines -Level $lvl
-    if ($n) { Write-HMSbLog $n 'Info' }
+    # eine Karte je Lauf aus den eingeschalteten Kategorien (Einstellungen > Allgemein > Teams-Benachrichtigung)
+    $nc = Get-HMNotifyConfig
+    if ($nc.Configured) {
+        $msg = New-HMSbNotifyMessage -Result $Job.Result -ProfileName $ProfileName -Disk "$($d.Label)" -Reminders $rem -Cats $nc.Cats
+        if ($msg) {
+            $r = Send-HMTeamsMessage -Title $msg.Title -Lines $msg.Lines -Level $msg.Level -Url $nc.Url
+            Write-HMSbLog $(if ($r) { "Teams-Benachrichtigung: $r" } else { 'Teams-Benachrichtigung gesendet' }) 'Info'
+        } else { Write-HMSbLog 'Teams-Benachrichtigung: nichts zu melden (Kategorien ausgeschaltet)' 'Info' }
+    } elseif ($nc.Error) { Write-HMSbLog "Teams-Benachrichtigung: Webhook nicht lesbar: $($nc.Error)" 'Warning' }
 } catch { Write-HMSbLog "Benachrichtigung: $($_.Exception.Message)" 'Warning' }
 Write-HMSbLog "Ende - Status $st" $(if ($st -eq 'OK') { 'Success' } elseif ($st -eq 'Warning') { 'Warning' } else { 'Error' })
 if ($st -eq 'OK') { exit 0 } elseif ($st -eq 'Warning') { exit 1 } else { exit 2 }

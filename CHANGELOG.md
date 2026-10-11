@@ -1,4 +1,14 @@
-# Changelog
+﻿# Changelog
+
+## v2.0.115 - 2026-10-11
+### Teams-Benachrichtigung: Kategorien
+- Einstellungen > Allgemein > Teams-Benachrichtigung: jede Kategorie einzeln ein-/ausschaltbar - Server-Backup fehlgeschlagen, mit Warnungen, erfolgreich, Plattenzustand (SMART), Erinnerungen Plattenwechsel/Archiv, Speicherplatz knapp, Massenloeschung, Details
+- Geplante Server-Backups: eine Nachricht je Lauf mit allen eingeschalteten Punkten; Details zeigen, was gesichert wurde, Dauer, Datenmenge, freien Platz der Backup-Platte und die Versionen auf der Platte (Anzahl, aelteste, neueste)
+- Neu: Warnung "Speicherplatz knapp", wenn weniger frei ist als die naechste Sicherung braucht oder unter 10 % (die Windows Server-Sicherung loescht dann bald die aeltesten Versionen)
+- Der bisherige Haken "auch erfolgreiche melden" wird als Kategorie *Server-Backup erfolgreich* uebernommen
+- Anleitung: Einrichtung mit den aktuellen Workflow-Vorlagen (Chat/Kanal), private Kanaele gehen nicht, App im Teams Admin Center freigeben
+### Automatische Tests
+- Kategorien, Meldung je Lauf (Erfolg/Fehler/Plattenzustand/Erinnerung/Speicherplatz, Details ein/aus)
 
 ## v2.0.114 - 2026-10-11
 ### Neu: Umzugs-Assistent
