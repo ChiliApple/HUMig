@@ -219,7 +219,7 @@ function Start-HMAppFeedback([object[]]$Rows = @(), [ValidateSet('', 'Detected',
             Out-Console "Rueckmeldung: E-Mail an $mail im Mailprogramm geoeffnet - bitte ergaenzen und senden." 'Info'
         } else {
             $url = "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)/issues/new?title=$([uri]::EscapeDataString($title))&body=$([uri]::EscapeDataString($body))"
-            Start-Process -FilePath explorer.exe -ArgumentList "`"$url`""
+            Open-HMUrl $url
             Out-Console 'Rueckmeldung: GitHub-Issue im Browser geoeffnet - bitte ergaenzen und absenden (GitHub-Konto noetig).' 'Info'
         }
     } catch { Out-Console "Rueckmeldung: konnte nicht geoeffnet werden ($($_.Exception.Message))." 'Warning' }

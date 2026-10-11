@@ -1533,7 +1533,7 @@ function Get-LocalSerial { try { return "$((Get-CimInstance Win32_BIOS).SerialNu
 # Link oeffnen: {SERIAL}/{COMPUTER} vom GEWAEHLTEN Computer (remote: WinRM, sonst WMI/DCOM)
 function Open-HMLinkNow([string]$Url, [bool]$CopySerial, [string]$Serial, [string]$Computer) {
     if ($CopySerial -and $Serial) { Set-Clipboard -Value $Serial; Out-Console "Seriennummer $Serial ($Computer) in die Zwischenablage kopiert" 'Info' }
-    Start-Process ($Url.Replace('{SERIAL}', [uri]::EscapeDataString($Serial)).Replace('{COMPUTER}', $Computer))
+    Open-HMUrl ($Url.Replace('{SERIAL}', [uri]::EscapeDataString($Serial)).Replace('{COMPUTER}', $Computer))
 }
 function Open-HMLink([string]$Url, [bool]$CopySerial) {
     $comp = Get-TargetComputer
@@ -1717,10 +1717,10 @@ function Show-About {
     $w.FindName('ver').Text = "Version $($script:Version)  |  PowerShell $($PSVersionTable.PSVersion)`nKanal $(if ($uc.UseBranch) { "Branch $($uc.Branch)" } else { Format-HMChannel $uc.Channel })$(if ($uc.RequireSignature) { ', nur signierte Updates' })" + $(if ($chk) { "`ninstalliert $($inst.Date), geprueft: $chk" } else { '' })
     $w.FindName('src').Text = "github.com/$($script:UpdateOwner)/$($script:UpdateRepo)"
     # ueber den Explorer oeffnen -> Browser laeuft als angemeldeter Benutzer, nicht erhoeht
-    $w.FindName('src').Add_MouseLeftButtonUp({ try { Start-Process -FilePath explorer.exe -ArgumentList "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)" } catch { } })
+    $w.FindName('src').Add_MouseLeftButtonUp({ try { Open-HMUrl "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)" } catch { } })
     $w.FindName('lic').Add_MouseLeftButtonUp({
         $lf = Join-Path $script:AppRoot 'LICENSE'
-        try { if (Test-Path -LiteralPath $lf) { Start-Process -FilePath notepad.exe -ArgumentList "`"$lf`"" } else { Start-Process -FilePath explorer.exe -ArgumentList "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)/blob/main/LICENSE" } } catch { }
+        try { if (Test-Path -LiteralPath $lf) { Start-Process -FilePath notepad.exe -ArgumentList "`"$lf`"" } else { Open-HMUrl "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)/blob/main/LICENSE" } } catch { }
     })
     $w.Owner = $script:Window; Set-HMWindowScale $w
     [void]$w.ShowDialog()

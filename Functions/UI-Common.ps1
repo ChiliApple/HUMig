@@ -333,3 +333,15 @@ function Open-HMFile([string]$Path) {
     if (Start-HMCommandWithFile (Get-HMAssocCommand $ext $uRoot) $Path) { return }
     Start-Process -FilePath $Path
 }
+
+# Webseite im Standard-Browser oeffnen (wie Open-HMFile: Browser des Desktop-Benutzers, Adresse unveraendert uebergeben -
+# ueber explorer.exe wurden lange Adressen mit ?-Teil teils verfaelscht, GitHub zeigte dann "Seite nicht gefunden")
+function Open-HMUrl([string]$Url) {
+    if ("$Url" -notmatch '^https?://') { return }
+    $cmds = @()
+    $us = Get-HMDesktopUserSid
+    if ($us -and (Test-Path -LiteralPath "Registry::HKEY_USERS\$us")) { $cmds += Get-HMBrowserCommand "Registry::HKEY_USERS\$us" }
+    $cmds += Get-HMBrowserCommand 'HKCU:'
+    foreach ($c in @($cmds | Where-Object { $_ })) { if (Start-HMCommandWithFile $c $Url) { return } }
+    try { Start-Process -FilePath $Url } catch { }
+}
