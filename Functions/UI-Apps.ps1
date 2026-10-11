@@ -313,6 +313,44 @@ function Get-HMBackupSoftware($Backup) {
     if (Test-Path -LiteralPath $csv) { try { return @(Import-Csv -LiteralPath $csv -Delimiter ';' -Encoding UTF8 | ForEach-Object { [pscustomobject]@{ Name = "$($_.Name)"; Version = "$($_.Version)" } }) } catch { } }
     return @()
 }
+# Fehlende Programme: Programmliste des Backups mit dem Ziel vergleichen (ohne Oberflaeche, testbar).
+# $Have = Anzeigenamen am Ziel. Rueckgabe: Rows (Status, Programm, Version, Paket, Zuordnung, Lizenz), Packages (Id -> Paket),
+# Winget ('winget:<Id>' -> Id/Name), NoPkg (Anzahl ohne Paket), Installable (Anzahl mit Paket/WinGet)
+function Get-HMMissingAppPlan {
+    param([object[]]$Src = @(), [string[]]$Have = @(), [object[]]$Packages = @(), [object[]]$Catalog = @())
+    $rows = New-Object System.Collections.Generic.List[object]
+    $pkgs = @{}; $wgs = @{}; $noPkg = 0
+    foreach ($s in @($Src | Where-Object { $_ -and "$($_.Name)" } | Sort-Object Name -Unique)) {
+        if ($Have -contains $s.Name) { continue }
+        # schon installiert in anderer Version? (gleicher Name ohne Versionsnummer)
+        $base = ("$($s.Name)" -replace '[\s\-_(]*(x64|x86|64-bit|32-bit)?[\s\-_(]*v?\d+([\.\d]+)*.*$', '').Trim()
+        if ($base.Length -ge 4 -and @($Have | Where-Object { "$_".StartsWith($base, [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
+        $pkg = $null; $how = ''
+        $app = @($Catalog | Where-Object { "$($_.Detect)" -and $s.Name -match "$($_.Detect)" })[0]
+        if ($app) { $pkg = Find-HMAppPackage $app $Packages; $how = 'Katalog' }
+        if (-not $pkg) { foreach ($p in @($Packages)) { if ("$($p.Settings.DetectName)" -and $s.Name -like "$($p.Settings.DetectName)") { $pkg = $p; $how = 'Paket-Erkennung'; break } } }
+        # sonst WinGet (Katalog-Eintrag mit WingetId) - Softwareverteilung hat Vorrang
+        $wg = ''
+        if (-not $pkg -and $app -and "$($app.WingetId)".Trim()) { $wg = "$($app.WingetId)".Trim(); $wgs["winget:$wg"] = [pscustomobject]@{ Id = $wg; Name = "$($app.Name)" }; $how = 'Katalog (WinGet)' }
+        if ($pkg) { $pkgs["$($pkg.Id)"] = $pkg } elseif (-not $wg) { $noPkg++ }
+        $rows.Add(@($(if ($pkg) { 'Paket vorhanden' } elseif ($wg) { 'WinGet' } else { 'kein Paket' }), "$($s.Name)", "$($s.Version)", $(if ($pkg) { "$($pkg.Id)" } elseif ($wg) { "winget:$wg" } else { '' }), $how, $(if ($app) { "$($app.License)" } else { '' })))
+    }
+    return [pscustomobject]@{ Rows = $rows.ToArray(); Packages = $pkgs; Winget = $wgs; NoPkg = $noPkg; Installable = ($pkgs.Count + $wgs.Count) }
+}
+
+# Programm-Module (eigene Katalog-Module) im Restore, deren Programm am Ziel NICHT installiert ist.
+# Einstellungen vor der Installation zurueckzuspielen ist sinnlos (Installer ueberschreibt sie) - diese Module werden ausgelassen.
+function Get-HMRestoreAppGap {
+    param([object[]]$Modules = @(), [object[]]$Software = @(), [object[]]$Catalog = @())
+    $inst = @(Find-HMCatalogApps $Software $Catalog | ForEach-Object { "$($_.Id)" })
+    return @(foreach ($m in @($Modules | Where-Object { $_ -and $_.Catalog -and "$($_.AppId)" })) {
+        if ($inst -contains "$($m.AppId)") { continue }
+        $a = @($Catalog | Where-Object { "$($_.Id)" -eq "$($m.AppId)" })[0]
+        if (-not $a -or -not "$($a.Detect)") { continue }   # ohne Erkennung nicht pruefbar -> nicht auslassen
+        [pscustomobject]@{ Id = "$($m.Id)"; Name = "$($a.Name)" }
+    })
+}
+
 function Start-HMAppReinstall {
     $b = $script:SelectedBackup
     if (-not $b) { Out-Console 'Bitte im Reiter Restore zuerst das Backup markieren.' 'Warning'; return }
@@ -324,36 +362,20 @@ function Start-HMAppReinstall {
         param($sw, $st)
         if ($null -eq $sw) { Out-Console "$($st.Computer) nicht erreichbar (WinRM?) - 'Fernwartung aktivieren' hilft." 'Error'; return }
         $b = $st.State.Backup
-        $have = @($sw | ForEach-Object { "$($_.Name)" })
         $pk = @(); try { $pk = @(Get-SwPackages) } catch { }
-        $rows = New-Object System.Collections.Generic.List[object]
-        $script:ReinstallPackages = @{}
-        $script:ReinstallWinget = @{}
-        $noPkg = 0
-        foreach ($s in @($st.State.Src | Sort-Object Name -Unique)) {
-            if ($have -contains $s.Name) { continue }
-            # schon installiert in anderer Version? (gleicher Name ohne Versionsnummer)
-            $base = ($s.Name -replace '[\s\-_(]*(x64|x86|64-bit|32-bit)?[\s\-_(]*v?\d+([\.\d]+)*.*$', '').Trim()
-            if ($base.Length -ge 4 -and @($have | Where-Object { $_.StartsWith($base, [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
-            $pkg = $null; $how = ''
-            $app = @($script:AppCatalog | Where-Object { "$($_.Detect)" -and $s.Name -match "$($_.Detect)" })[0]
-            if ($app) { $pkg = Find-HMAppPackage $app $pk; $how = 'Katalog' }
-            if (-not $pkg) { foreach ($p in $pk) { if ("$($p.Settings.DetectName)" -and $s.Name -like "$($p.Settings.DetectName)") { $pkg = $p; $how = 'Paket-Erkennung'; break } } }
-            # sonst WinGet (Katalog-Eintrag mit WingetId) - Softwareverteilung hat Vorrang
-            $wg = ''
-            if (-not $pkg -and $app -and "$($app.WingetId)".Trim()) { $wg = "$($app.WingetId)".Trim(); $script:ReinstallWinget["winget:$wg"] = [pscustomobject]@{ Id = $wg; Name = "$($app.Name)" }; $how = 'Katalog (WinGet)' }
-            if ($pkg) { $script:ReinstallPackages["$($pkg.Id)"] = $pkg } elseif (-not $wg) { $noPkg++ }
-            $rows.Add(@($(if ($pkg) { 'Paket vorhanden' } elseif ($wg) { 'WinGet' } else { 'kein Paket' }), $s.Name, "$($s.Version)", $(if ($pkg) { "$($pkg.Id)" } elseif ($wg) { "winget:$wg" } else { '' }), $how, $(if ($app) { "$($app.License)" } else { '' })))
-        }
+        $plan = Get-HMMissingAppPlan -Src $st.State.Src -Have @($sw | ForEach-Object { "$($_.Name)" }) -Packages $pk -Catalog $script:AppCatalog
+        $script:ReinstallPackages = $plan.Packages
+        $script:ReinstallWinget = $plan.Winget
+        $rows = @($plan.Rows)
         if (-not $rows.Count) { Out-Console "Alle Programme aus dem Backup sind an $($st.Computer) installiert." 'Success'; return }
-        $nWg = $script:ReinstallWinget.Count
-        $withPkg = $rows.Count - $noPkg - $nWg
+        $nWg = $plan.Winget.Count
+        $withPkg = $plan.Packages.Count
         Out-Console "$($rows.Count) Programme fehlen an $($st.Computer) - $withPkg mit Paket in der Softwareverteilung$(if ($nWg) { ", $nWg ueber WinGet" })" $(if ($withPkg + $nWg) { 'Info' } else { 'Warning' })
-        Show-DataGridWindow -Title "Fehlende Programme - $($st.Computer)  (Backup $($b.Name))" -Columns @('Status', 'Programm', 'Version (Backup)', 'Paket', 'Zuordnung', 'Lizenz') -Rows $rows.ToArray() `
+        Show-DataGridWindow -Title "Fehlende Programme - $($st.Computer)  (Backup $($b.Name))" -Columns @('Status', 'Programm', 'Version (Backup)', 'Paket', 'Zuordnung', 'Lizenz') -Rows $rows `
             -Sort 'Status DESC, Programm ASC' -CountText "$($rows.Count) fehlen, $withPkg mit Paket, $nWg ueber WinGet (aktuelle Version, fuer alle Benutzer) - Pakete ablegen: Softwareverteilung-Ordner" -Width 1400 -Height 620 `
             -ActionContext @{ Computer = $st.Computer } -Actions @(
-                @{ Text = 'Markierte installieren'; Color = '#FFA6E3A1'; Handler = { param($rows, $win, $ctx) Start-HMReinstallQueue $win $ctx.Computer @($rows | Where-Object { $_.Paket } | ForEach-Object { "$($_.Paket)" }) } }
-                @{ Text = 'Alle mit Paket / WinGet installieren'; Color = '#FF89B4FA'; NoSelection = $true; Handler = { param($rows, $win, $ctx) Start-HMReinstallQueue $win $ctx.Computer (@($script:ReinstallPackages.Keys) + @($script:ReinstallWinget.Keys)) } }
+                @{ Text = 'Markierte installieren'; Color = '#FFA6E3A1'; Handler = { param($rows, $win, $ctx) [void](Start-HMReinstallQueue $win $ctx.Computer @($rows | Where-Object { $_.Paket } | ForEach-Object { "$($_.Paket)" })) } }
+                @{ Text = 'Alle mit Paket / WinGet installieren'; Color = '#FF89B4FA'; NoSelection = $true; Handler = { param($rows, $win, $ctx) [void](Start-HMReinstallQueue $win $ctx.Computer (@($script:ReinstallPackages.Keys) + @($script:ReinstallWinget.Keys))) } }
             )
     }
 }
@@ -362,32 +384,135 @@ $script:SwQueue = $null
 # Paket-IDs: Softwareverteilung, 'winget:<Id>' = WinGet (danach, als ein Hintergrundvorgang - Installer stoeren sich sonst)
 $script:ReinstallWinget = @{}
 $script:SwQueueThen = $null
-function Start-HMReinstallQueue($Win, [string]$Computer, [string[]]$PackageIds) {
+# Nach der ganzen Installation (Pakete + WinGet) einmal aufrufen: param([bool]$Cancelled) - z.B. Restore danach starten
+$script:SwQueueDone = $null
+# Rueckgabe: $true = Installation gestartet
+function Start-HMReinstallQueue($Win, [string]$Computer, [string[]]$PackageIds, [switch]$NoConfirm) {
     $all = @($PackageIds | Where-Object { $_ } | Select-Object -Unique)
     $wgs = @($all | Where-Object { "$_".StartsWith('winget:') -and $script:ReinstallWinget.ContainsKey("$_") } | ForEach-Object { $script:ReinstallWinget["$_"] })
     $ids = @($all | Where-Object { -not "$_".StartsWith('winget:') -and $script:ReinstallPackages.ContainsKey("$_") })
-    if (-not ($ids.Count + $wgs.Count)) { [void][System.Windows.MessageBox]::Show($Win, 'Keine Zeile mit Paket markiert.', 'Installieren', 'OK', 'Information'); return }
-    if ($script:SwQueue -and $script:SwQueue.Count) { [void][System.Windows.MessageBox]::Show($Win, 'Es laeuft bereits eine Installations-Warteschlange.', 'Installieren', 'OK', 'Information'); return }
-    if ($wgs.Count -and $script:JobRunning) { [void][System.Windows.MessageBox]::Show($Win, 'Es laeuft bereits ein Vorgang - WinGet-Installation danach erneut starten.', 'Installieren', 'OK', 'Information'); return }
+    $own = if ($Win) { $Win } else { $script:Window }
+    if (-not ($ids.Count + $wgs.Count)) { [void][System.Windows.MessageBox]::Show($own, 'Keine Zeile mit Paket markiert.', 'Installieren', 'OK', 'Information'); return $false }
+    if (($script:SwQueue -and $script:SwQueue.Count) -or $script:SwQueueThen) { [void][System.Windows.MessageBox]::Show($own, 'Es laeuft bereits eine Installations-Warteschlange.', 'Installieren', 'OK', 'Information'); return $false }
+    if ($wgs.Count -and $script:JobRunning) { [void][System.Windows.MessageBox]::Show($own, 'Es laeuft bereits ein Vorgang - WinGet-Installation danach erneut starten.', 'Installieren', 'OK', 'Information'); return $false }
     $names = @($ids | ForEach-Object { "$($script:ReinstallPackages[$_].Settings.Name)" }) + @($wgs | ForEach-Object { "$($_.Name) (WinGet $($_.Id))" })
-    if ("$([System.Windows.MessageBox]::Show($Win, "$($names.Count) Programm(e) nacheinander an $Computer installieren?$(if ($wgs.Count) { "`nWinGet: aktuelle Version fuer alle Benutzer, nach den Paketen der Softwareverteilung." })`n`n$(($names | Select-Object -First 20) -join "`n")", 'Programme installieren', 'YesNo', 'Question'))" -ne 'Yes') { return }
+    if (-not $NoConfirm -and "$([System.Windows.MessageBox]::Show($own, "$($names.Count) Programm(e) nacheinander an $Computer installieren?$(if ($wgs.Count) { "`nWinGet: aktuelle Version fuer alle Benutzer, nach den Paketen der Softwareverteilung." })`n`n$(($names | Select-Object -First 20) -join "`n")", 'Programme installieren', 'YesNo', 'Question'))" -ne 'Yes') { return $false }
     $script:SwQueueThen = $null
     if ($wgs.Count) { $script:SwQueueThen = @{ Computer = $Computer; Items = @($wgs) } }
-    if (-not $ids.Count) { $t = $script:SwQueueThen; $script:SwQueueThen = $null; Start-HMAuInstall $t.Computer $t.Items; return }
+    if (-not $ids.Count) { $t = $script:SwQueueThen; $script:SwQueueThen = $null; Start-HMAuInstall $t.Computer $t.Items; return $true }
     $script:SwQueue = New-Object System.Collections.Generic.Queue[object]
     foreach ($id in $ids) { $script:SwQueue.Enqueue(@{ Host = $Computer; Package = $script:ReinstallPackages[$id] }) }
     $script:SwQueueTotal = $ids.Count
     Invoke-HMSwQueueNext
+    return $true
 }
 function Invoke-HMSwQueueNext {
     if (-not $script:SwQueue) { return }
     if ($script:SwQueue.Count -eq 0) {
         $script:SwQueue = $null; Out-Console 'Installations-Warteschlange fertig.' 'Success'
         if ($script:SwQueueThen) { $t = $script:SwQueueThen; $script:SwQueueThen = $null; Start-HMAuInstall $t.Computer $t.Items }
+        else { Complete-HMInstallQueue $false }
         return
     }
     $n = $script:SwQueue.Dequeue()
     Start-SoftwareDeploy -Hosts @($n.Host) -Package $n.Package -Label ("{0}/{1}" -f ($script:SwQueueTotal - $script:SwQueue.Count), $script:SwQueueTotal)
+}
+# Ende der ganzen Installation (auch nach WinGet): wartende Folgeaktion ausserhalb des laufenden Ereignisses starten
+function Complete-HMInstallQueue([bool]$Cancelled) {
+    $d = $script:SwQueueDone
+    $script:SwQueueDone = $null
+    if (-not $d) { return }
+    $script:SwQueueDoneArgs = @{ Action = $d; Cancelled = $Cancelled }
+    $script:Window.Dispatcher.BeginInvoke([action]{ $a = $script:SwQueueDoneArgs; $script:SwQueueDoneArgs = $null; if ($a) { & $a.Action $a.Cancelled } }, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null
+}
+
+# ----------------------------------------------------------------------------
+# Restore: zuerst fehlende Programme installieren (Empfehlung Microsoft: Programme vor dem Zurueckspielen der Einstellungen),
+# Programm-Module ohne installiertes Programm auslassen (2. Lauf nach der Installation nur mit diesen Modulen).
+# ----------------------------------------------------------------------------
+$script:RestoreAfterInstall = $null
+function Start-HMRestorePrep([hashtable]$Ctx) {
+    $b = $Ctx.Backup
+    $offer = (-not $Ctx.UserMode) -and ($script:Settings.Restore.OfferApps -ne $false)
+    $src = @(); if ($offer) { $src = @(Get-HMBackupSoftware $b) }
+    $hasAppMods = @($Ctx.Modules | Where-Object { $_.Catalog -and "$($_.AppId)" }).Count -gt 0
+    if (-not $src.Count -and -not $hasAppMods) { Invoke-HMProcCheck -Ctx $Ctx -Kind 'Restore'; return }
+    Out-Console "Programme am Ziel pruefen ($($Ctx.Computer)) ..." 'Info'
+    Get-HMSoftwareAsync -Computer $Ctx.Computer -Sid "$($Ctx.UserSid)" -State @{ Ctx = $Ctx; Src = $src } -OnDone {
+        param($sw, $st)
+        $c = $st.State.Ctx
+        if ($null -eq $sw) { Out-Console "Programme am Ziel nicht lesbar (WinRM?) - Restore ohne Programm-Pruefung." 'Warning'; Invoke-HMProcCheck -Ctx $c -Kind 'Restore'; return }
+        $plan = $null
+        if (@($st.State.Src).Count) {
+            $pk = @(); try { $pk = @(Get-SwPackages) } catch { }
+            $plan = Get-HMMissingAppPlan -Src $st.State.Src -Have @($sw | ForEach-Object { "$($_.Name)" }) -Packages $pk -Catalog $script:AppCatalog
+        }
+        if ($plan -and $plan.Installable -gt 0) {
+            $script:ReinstallPackages = $plan.Packages
+            $script:ReinstallWinget = $plan.Winget
+            $names = @(@($plan.Rows) | Where-Object { $_[3] } | ForEach-Object { "  $($_[1])$(if ("$($_[3])".StartsWith('winget:')) { ' (WinGet)' })" })
+            $miss = @($plan.Rows).Count
+            $msg = "An $($c.Computer) fehlen $miss Programm(e) aus dem Backup, $($plan.Installable) davon installierbar (Softwareverteilung/WinGet):`n`n$(($names | Select-Object -First 15) -join "`n")$(if ($names.Count -gt 15) { "`n  ..." })`n`n" +
+                "Microsoft empfiehlt, Programme VOR dem Zurueckspielen der Einstellungen zu installieren.`n`n" +
+                "Ja = zuerst installieren, danach startet der Restore automatisch`nNein = nur Restore (Programm-Module fehlender Programme werden ausgelassen)`nAbbrechen = nichts tun"
+            $a = "$([System.Windows.MessageBox]::Show($script:Window, $msg, 'Restore - fehlende Programme', 'YesNoCancel', 'Question', 'Yes'))"
+            if ($a -eq 'Cancel') { Out-Console 'Restore abgebrochen.' 'Warning'; return }
+            if ($a -eq 'Yes') {
+                $script:RestoreAfterInstall = $c
+                $script:SwQueueDone = {
+                    param($cancelled)
+                    $rc = $script:RestoreAfterInstall
+                    $script:RestoreAfterInstall = $null
+                    if (-not $rc) { return }
+                    if ($cancelled) { Out-Console "Installation abgebrochen - Restore wird NICHT gestartet (bei Bedarf 'Restore starten')." 'Warning'; return }
+                    Out-Console 'Installation fertig - Programme am Ziel neu pruefen, dann Restore ...' 'Info'
+                    Start-HMRestoreAfterApps $rc
+                }
+                $ok = Start-HMReinstallQueue $script:Window $c.Computer (@($plan.Packages.Keys) + @($plan.Winget.Keys)) -NoConfirm
+                if (-not $ok) { $script:SwQueueDone = $null; $script:RestoreAfterInstall = $null; Out-Console 'Installation nicht gestartet - Restore abgebrochen.' 'Warning' }
+                else { Out-Console "Zuerst werden $($plan.Installable) Programm(e) installiert - der Restore startet danach automatisch." 'Info' }
+                return
+            }
+        } elseif ($plan -and @($plan.Rows).Count) {
+            Out-Console "$(@($plan.Rows).Count) Programm(e) aus dem Backup fehlen an $($c.Computer) (kein Paket/WinGet) - Liste: Knopf 'Fehlende Programme installieren ...'" 'Warning'
+        }
+        Resume-HMRestoreWithApps $c $sw
+    }
+}
+# Nach der Installation: Software neu lesen, dann wie ohne Installation weiter
+function Start-HMRestoreAfterApps([hashtable]$Ctx) {
+    Get-HMSoftwareAsync -Computer $Ctx.Computer -Sid "$($Ctx.UserSid)" -State @{ Ctx = $Ctx } -OnDone {
+        param($sw, $st)
+        if ($null -eq $sw) { Out-Console 'Programme am Ziel nicht lesbar - Restore ohne Programm-Pruefung.' 'Warning'; Invoke-HMProcCheck -Ctx $st.State.Ctx -Kind 'Restore'; return }
+        Resume-HMRestoreWithApps $st.State.Ctx $sw
+    }
+}
+# Programm-Module ohne installiertes Programm auslassen und fuer einen 2. Lauf merken, dann Restore
+function Resume-HMRestoreWithApps([hashtable]$Ctx, $Software) {
+    $gap = @(Get-HMRestoreAppGap -Modules $Ctx.Modules -Software $Software -Catalog $script:AppCatalog)
+    $Ctx.SkippedApps = @()
+    if ($gap.Count) {
+        $ids = @($gap | ForEach-Object { $_.Id })
+        $Ctx.Modules = @($Ctx.Modules | Where-Object { $ids -notcontains $_.Id })
+        $Ctx.SkippedApps = $gap
+        Out-Console "Programm nicht installiert - Einstellungen werden diesmal NICHT zurueckgespielt: $(@($gap | ForEach-Object { $_.Name }) -join ', ')" 'Warning'
+        if (-not @($Ctx.Modules).Count) {
+            Out-Console 'Nichts zurueckzuspielen: alle gewaehlten Programm-Module gehoeren zu Programmen, die am Ziel fehlen. Erst installieren, dann erneut Restore starten.' 'Warning'
+            return
+        }
+        Out-Console "   Nach der Installation erneut 'Restore starten' - dann sind nur diese Programm-Module angehakt." 'Info'
+    }
+    $script:RestoreSkippedApps = @($Ctx.SkippedApps)
+    Invoke-HMProcCheck -Ctx $Ctx -Kind 'Restore'
+}
+# Nach dem Restore: fuer den 2. Lauf nur die ausgelassenen Programm-Module anhaken
+function Set-HMRestoreChecksForSkippedApps {
+    $sk = @($script:RestoreSkippedApps)
+    $script:RestoreSkippedApps = @()
+    if (-not $sk.Count) { return }
+    $ids = @($sk | ForEach-Object { $_.Id })
+    foreach ($k in @($script:RestoreChecks.Keys)) { $script:RestoreChecks[$k].IsChecked = ($ids -contains $k -and $script:RestoreChecks[$k].IsEnabled) }
+    Out-Console "Fuer den 2. Lauf angehakt (nur Programm-Einstellungen): $(@($sk | ForEach-Object { $_.Name }) -join ', ') - Programme installieren, dann 'Restore starten'." 'Info'
 }
 
 # ----------------------------------------------------------------------------

@@ -229,6 +229,106 @@ function Get-HMSbDiskList {
     return ,$out
 }
 
+# ----------------------------------------------------------------------------
+# Plattenzustand (SMART): Windows-Gesundheitsstatus + Zuverlaessigkeitszaehler (Get-StorageReliabilityCounter).
+# Viele USB-Gehaeuse/-Adapter reichen SMART nicht durch - dann gibt es keine Zaehler (Anzeige "keine Detailwerte"),
+# das ist kein Fehler. Braucht Administratorrechte. Zielmaschine: Server/PC mit den angesteckten Platten.
+# ----------------------------------------------------------------------------
+function ConvertTo-HMSbHealthText($v) {
+    switch ("$v") { '0' { 'Healthy' } '1' { 'Warning' } '2' { 'Unhealthy' } '5' { 'Unknown' } '' { 'Unknown' } default { "$v" } }
+}
+function Get-HMSbDiskHealth([int]$Number) {
+    $r = [ordered]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Number = $Number; Model = ''; Serial = ''; Health = 'Unknown'; Operational = ''
+        Counters = $false; Temperature = $null; TemperatureMax = $null; PowerOnHours = $null; ReadErrorsUncorrected = $null; WriteErrorsUncorrected = $null
+        ReadErrorsTotal = $null; WriteErrorsTotal = $null; Wear = $null; StartStopCycleCount = $null; MediaType = ''; Error = '' }
+    try {
+        $pd = @(Get-PhysicalDisk -ErrorAction Stop | Where-Object { "$($_.DeviceId)" -eq "$Number" })[0]
+        if (-not $pd) { $r.Error = "Datentraeger $Number nicht als physische Platte gefunden"; return [pscustomobject]$r }
+        $r.Model = "$($pd.FriendlyName)".Trim(); $r.Serial = "$($pd.SerialNumber)".Trim()
+        $r.Health = ConvertTo-HMSbHealthText $pd.HealthStatus
+        $r.Operational = (@($pd.OperationalStatus) | ForEach-Object { "$_" } | Where-Object { $_ }) -join ', '
+        $r.MediaType = "$($pd.MediaType)"
+        try {
+            $c = $pd | Get-StorageReliabilityCounter -ErrorAction Stop
+            if ($c) {
+                foreach ($n in @('Temperature', 'TemperatureMax', 'PowerOnHours', 'ReadErrorsUncorrected', 'WriteErrorsUncorrected', 'ReadErrorsTotal', 'WriteErrorsTotal', 'Wear', 'StartStopCycleCount')) {
+                    $v = $c.$n
+                    if ($null -ne $v -and "$v" -ne '') { $r[$n] = [long]$v }
+                }
+                # Bridge ohne SMART liefert ein leeres Objekt bzw. nur Nullen - erst echte Werte zaehlen als "Zaehler vorhanden"
+                $r.Counters = (([long]$r.Temperature) -gt 0 -or ([long]$r.PowerOnHours) -gt 0 -or ([long]$r.StartStopCycleCount) -gt 0)
+            }
+        } catch { $r.Error = "Zaehler nicht lesbar: $($_.Exception.Message)" }
+    } catch { $r.Error = "$($_.Exception.Message)" }
+    return [pscustomobject]$r
+}
+# Bewertung (ohne Oberflaeche, testbar). $Prev = vorherige Messung derselben Platte (oder $null)
+# Rueckgabe: Level OK | Warning | Error | Unknown, Text (kurz), Detail (Werte)
+function Get-HMSbHealthVerdict($H, $Prev = $null) {
+    if (-not $H) { return [pscustomobject]@{ Level = 'Unknown'; Text = 'Zustand unbekannt'; Detail = '' } }
+    $lvl = 'OK'; $why = New-Object System.Collections.Generic.List[string]
+    $det = New-Object System.Collections.Generic.List[string]
+    switch ("$($H.Health)") {
+        'Unhealthy' { $lvl = 'Error'; $why.Add('Windows meldet die Platte als DEFEKT - sofort ersetzen') }
+        'Warning'   { $lvl = 'Warning'; $why.Add('Windows meldet eine Warnung zur Platte') }
+        'Healthy'   { }
+        default     { $lvl = 'Unknown' }
+    }
+    $ru = [long]$H.ReadErrorsUncorrected; $wu = [long]$H.WriteErrorsUncorrected
+    if ($ru -gt 0 -or $wu -gt 0) {
+        $up = $false
+        if ($Prev -and (([long]$Prev.ReadErrorsUncorrected) -lt $ru -or ([long]$Prev.WriteErrorsUncorrected) -lt $wu)) { $up = $true }
+        if ($up) { $lvl = 'Error'; $why.Add("nicht behebbare Lese-/Schreibfehler steigen ($($ru + $wu))") }
+        else { if ($lvl -in @('OK', 'Unknown')) { $lvl = 'Warning' }; $why.Add("$($ru + $wu) nicht behebbare Lese-/Schreibfehler") }
+    }
+    # Grenze fest 60 Grad C (TemperatureMax ist je nach Platte Grenzwert oder hoechster gemessener Wert - nicht vergleichbar)
+    $t = [long]$H.Temperature
+    if ($t -ge 60) { if ($lvl -in @('OK', 'Unknown')) { $lvl = 'Warning' }; $why.Add("zu warm ($t Grad C)") }
+    if ($null -ne $H.Wear -and [long]$H.Wear -ge 90) { if ($lvl -in @('OK', 'Unknown')) { $lvl = 'Warning' }; $why.Add("Abnutzung $([long]$H.Wear) %") }
+    if ($t -gt 0) { $det.Add("$t Grad C") }
+    if ([long]$H.PowerOnHours -gt 0) { $det.Add(('{0:N0} Betriebsstunden' -f [long]$H.PowerOnHours)) }
+    if ($null -ne $H.Wear -and [long]$H.Wear -gt 0) { $det.Add("Abnutzung $([long]$H.Wear) %") }
+    $txt = switch ($lvl) {
+        'OK' { if ($H.Counters) { 'Zustand gut' } else { 'Zustand laut Windows gut (Gehaeuse liefert keine Detailwerte)' } }
+        'Unknown' { if ("$($H.Error)") { 'Zustand nicht lesbar' } else { 'Zustand unbekannt (Gehaeuse/Adapter reicht SMART nicht durch)' } }
+        default { $why -join ', ' }
+    }
+    return [pscustomobject]@{ Level = $lvl; Text = $txt; Detail = ($det -join ', ') }
+}
+# Messwerte je Platte (Bezeichnung) merken: Config\ServerBackup\disk-health.json - letzte 30 Messungen je Platte
+function Read-HMSbHealthStore([string]$Path) {
+    $h = @{}
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $h }
+    try {
+        $j = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($p in @($j.PSObject.Properties)) { $v = $p.Value; $h[$p.Name] = @($v) }
+    } catch { }
+    return $h
+}
+function Add-HMSbHealthStore([string]$Path, [string]$Label, $H) {
+    if (-not $Path -or -not "$Label".Trim() -or -not $H) { return }
+    $store = Read-HMSbHealthStore $Path
+    $list = @(@($store[$Label]) | Where-Object { $_ })
+    $list = @($list + @($H) | Select-Object -Last 30)
+    $store[$Label] = $list
+    $o = [ordered]@{}; foreach ($k in @($store.Keys | Sort-Object)) { $o[$k] = @($store[$k]) }
+    $dir = Split-Path $Path -Parent
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    ([pscustomobject]$o | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $Path -Encoding UTF8 -Force
+}
+# Letzte Messung + Bewertung je Bezeichnung (fuer Anzeige): @{ Label = @{ Last; Verdict } }
+function Get-HMSbHealthSummary([hashtable]$Store) {
+    $out = @{}
+    foreach ($k in @($Store.Keys)) {
+        $l = @(@($Store[$k]) | Where-Object { $_ })
+        if (-not $l.Count) { continue }
+        $last = $l[$l.Count - 1]
+        $prev = if ($l.Count -ge 2) { $l[$l.Count - 2] } else { $null }
+        $out[$k] = [pscustomobject]@{ Last = $last; Verdict = (Get-HMSbHealthVerdict $last $prev) }
+    }
+    return $out
+}
+
 # USB-Platte neu einrichten: ALLE Daten loeschen, GPT, NTFS 64K, Bezeichnung
 # -ExpectId: Merkmale aus der angezeigten Liste (Get-HMSbDiskList). Direkt vor dem Loeschen wird erneut geprueft, dass unter der
 # Nummer noch genau diese Platte steckt und keine VM-Dateien auf ihr liegen - sonst Abbruch.
@@ -1029,7 +1129,7 @@ function Start-HMServerBackup {
     $target = "${L}:"
     $vms = @($Ctx.VMs | Where-Object { "$_".Trim() })
     $vols = @($Ctx.Volumes | Where-Object { "$_".Trim() } | ForEach-Object { ("$_".Trim().TrimEnd('\', ':')).ToUpper() + ':' } | Select-Object -Unique)
-    $res = [ordered]@{ Status = 'Error'; SizeBytes = [long]0; Report = ''; VersionId = ''; HostVersionId = ''; VolVersionId = '' }
+    $res = [ordered]@{ Status = 'Error'; SizeBytes = [long]0; Report = ''; VersionId = ''; HostVersionId = ''; VolVersionId = ''; Notes = @(); Health = ''; HealthText = '' }
     $Job.Result = [pscustomobject]$res
 
     Write-HMSbLog "SERVER-BACKUP $($Ctx.Profile) - Host $env:COMPUTERNAME - Ziel $target $($Ctx.DiskLabel)" 'Header'
@@ -1232,6 +1332,25 @@ function Start-HMServerBackup {
         else { $notes += "Fehler: $msg"; Write-HMSbLog "Server-Backup FEHLER: $msg" 'Error'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die Sicherung ist mit einem Fehler abgebrochen: $msg"; Fix = 'Protokoll im Berichtsordner pruefen und erneut starten.' } }
     }
 
+    # --- Plattenzustand (SMART) der Ziel-Platte merken und bewerten
+    $healthTxt = ''; $healthLvl = ''
+    try {
+        $Job.Status = 'Plattenzustand'
+        $dn = [int](Get-Partition -DriveLetter $L -ErrorAction Stop | Get-Disk -ErrorAction Stop).Number
+        $hh = Get-HMSbDiskHealth $dn
+        $prevH = $null
+        if ($Ctx.LocalHealth) { $st0 = Read-HMSbHealthStore "$($Ctx.LocalHealth)"; $pl = @(@($st0["$($Ctx.DiskLabel)"]) | Where-Object { $_ }); if ($pl.Count) { $prevH = $pl[$pl.Count - 1] } }
+        $hv = Get-HMSbHealthVerdict $hh $prevH
+        $healthLvl = $hv.Level; $healthTxt = "$($hv.Text)$(if ($hv.Detail) { " ($($hv.Detail))" })"
+        if ($Ctx.LocalHealth) { try { Add-HMSbHealthStore "$($Ctx.LocalHealth)" "$($Ctx.DiskLabel)" $hh } catch { } }
+        Write-HMSbLog "Plattenzustand $($Ctx.DiskLabel): $healthTxt" $(switch ($hv.Level) { 'OK' { 'Success' } 'Error' { 'Error' } 'Warning' { 'Warning' } default { 'Info' } })
+        if ($hv.Level -in @('Warning', 'Error')) {
+            if ($status -eq 'OK') { $status = 'Warning' }
+            $notes += "Platte: $($hv.Text)"
+            $hints += [pscustomobject]@{ Lvl = $(if ($hv.Level -eq 'Error') { 'Error' } else { 'Warning' }); Text = "Plattenzustand $($Ctx.DiskLabel): $($hv.Text)."; Fix = 'Daten dieser Platte nicht mehr allein vertrauen: Platte ersetzen (neue Platte einrichten, gleiche Bezeichnung) und die naechste Sicherung auf eine andere Platte der Rotation machen.' }
+        }
+    } catch { Write-HMSbLog "Plattenzustand nicht lesbar: $($_.Exception.Message)" 'Info' }
+
     # --- Verlauf, Bericht
     $Job.Status = 'Bericht'
     $dur = [math]::Round(((Get-Date) - $t0).TotalMinutes, 1)
@@ -1240,6 +1359,7 @@ function Start-HMServerBackup {
         Date = $t0.ToString('yyyy-MM-dd HH:mm'); Profile = "$($Ctx.Profile)"; Host = $env:COMPUTERNAME; Disk = "$($Ctx.DiskLabel)"; DiskSerial = "$($Ctx.DiskSerial)"
         VMs = ($vms -join ', '); Volumes = ($vols -join ', '); VolVersionId = "$($res.VolVersionId)"; Status = $status; Minutes = $dur; SizeGB = [math]::Round($res.SizeBytes / 1GB, 1); VersionId = $verId
         HostConfig = $hostCfgOk; HostSystem = $hostSysOk; HostVersionId = "$($res.HostVersionId)"; Note = ($notes -join '; '); Tool = "HUMig $($Ctx.Version)"; Report = (Split-Path $rep -Leaf)
+        Health = $healthLvl; HealthText = $healthTxt
     }
     try { Add-HMSbHistory (Join-Path "$target\$($script:SbDirName)" 'history.json') $entry } catch { Write-HMSbLog "Verlauf auf der Platte nicht gespeichert: $($_.Exception.Message)" 'Warning' }
     if ($Ctx.LocalHistory) { try { Add-HMSbHistory "$($Ctx.LocalHistory)" $entry } catch { Write-HMSbLog "Verlauf im Tool-Ordner nicht gespeichert: $($_.Exception.Message)" 'Warning' } }
@@ -1256,6 +1376,7 @@ function Start-HMServerBackup {
     try { Write-VolumeCache -DriveLetter $L -ErrorAction Stop } catch { }
 
     $res.Status = $status
+    $res.Notes = @($notes); $res.Health = $healthLvl; $res.HealthText = $healthTxt
     $Job.Result = [pscustomobject]$res
     $Job.Progress = 100
     $lvl = switch ($status) { 'OK' { 'Success' } 'Warning' { 'Warning' } default { 'Error' } }

@@ -12,9 +12,11 @@
 #>
 
 # Alle Werte fuer die Startseite. Eingaben sind schon gelesene Daten (Zeitplaene, Backups, Server-Backup-Profile + Verlauf,
-# App-Update-Verlauf); $Now und $StaleDays fuer Tests. Rueckgabe: Warnings (Text, Level), Schedules, Backups, Server, Apps
+# App-Update-Verlauf, Plattenzustand je Bezeichnung = Get-HMSbHealthSummary); $Now und $StaleDays fuer Tests.
+# Rueckgabe: Warnings (Text, Level), Schedules, Backups, Server, Apps
 function Get-HMStatusData {
-    param($BsRows = @(), $Backups = @(), $SbProfiles = @(), $SbHistory = @(), $AuHistory = @(), [datetime]$Now = (Get-Date), [int]$StaleDays = 8)
+    param($BsRows = @(), $Backups = @(), $SbProfiles = @(), $SbHistory = @(), $AuHistory = @(), [datetime]$Now = (Get-Date), [int]$StaleDays = 8, $SbHealth = @{})
+    if ($null -eq $SbHealth) { $SbHealth = @{} }
     $warn = New-Object System.Collections.Generic.List[object]
     $parse = {
         param($s)
@@ -78,11 +80,18 @@ function Get-HMStatusData {
         $okAge = if ($lastOk) { & $days (& $parse "$($lastOk.Date)") } else { $null }
         $disks = @()
         $labels = @(1..[Math]::Max(1, [int]$p.Disks) | ForEach-Object { "$($p.DiskPrefix)-$_" })
+        if ([int]$p.ArchiveDisks -gt 0) { $labels += @(1..[int]$p.ArchiveDisks | ForEach-Object { "$($p.DiskPrefix)-A$_" }) }
         foreach ($lb in $labels) {
+            $isArc = $lb -match '-A\d+$'
             $e = @($mine | Where-Object { "$($_.Disk)" -eq $lb -and "$($_.Status)" -ne 'Error' })[0]
             $a = if ($e) { & $days (& $parse "$($e.Date)") } else { $null }
-            $disks += [pscustomobject]@{ Label = $lb; Age = $a; Level = $(if ($null -eq $a -or $a -gt $wd) { 'Warning' } else { 'OK' }) }
-            if ($mine.Count -and $null -ne $a -and $a -gt $wd) { $warn.Add([pscustomobject]@{ Level = 'Warning'; Area = 'Server-Backup'; Text = "Server-Backup '$($p.Name)': Platte $lb seit $a Tagen nicht gesichert - Platte wechseln (Rotation)" }) }
+            # Plattenzustand (letzte Messung)
+            $hl = ''; $ht = ''
+            if ($SbHealth.ContainsKey($lb) -and $SbHealth[$lb].Verdict) { $hl = "$($SbHealth[$lb].Verdict.Level)"; $ht = "$($SbHealth[$lb].Verdict.Text)" }
+            if (-not $isArc) { $disks += [pscustomobject]@{ Label = $lb; Age = $a; Level = $(if ($null -eq $a -or $a -gt $wd) { 'Warning' } else { 'OK' }); Health = $hl; HealthText = $ht } }
+            elseif ($hl) { $disks += [pscustomobject]@{ Label = $lb; Age = $a; Level = 'OK'; Health = $hl; HealthText = $ht; Archive = $true } }
+            if (-not $isArc -and $mine.Count -and $null -ne $a -and $a -gt $wd) { $warn.Add([pscustomobject]@{ Level = 'Warning'; Area = 'Server-Backup'; Text = "Server-Backup '$($p.Name)': Platte $lb seit $a Tagen nicht gesichert - Platte wechseln (Rotation)" }) }
+            if ($hl -in @('Warning', 'Error')) { $warn.Add([pscustomobject]@{ Level = $hl; Area = 'Server-Backup'; Text = "Server-Backup '$($p.Name)': Platte $lb - $ht" }) }
         }
         $arcDue = $false; $arcAge = $null
         if ([int]$p.ArchiveDisks -gt 0) {
@@ -100,6 +109,9 @@ function Get-HMStatusData {
             $t = if (-not $lastOk) { 'noch keine erfolgreiche Sicherung' } elseif ($okAge -gt $wd) { "letzte erfolgreiche Sicherung vor $okAge Tagen" } else { 'letzter Lauf fehlgeschlagen' }
             $warn.Add([pscustomobject]@{ Level = 'Error'; Area = 'Server-Backup'; Text = "Server-Backup '$($p.Name)': $t" })
         }
+        # Plattenzustand hebt die Stufe (Hinweis steht schon oben je Platte)
+        if (@($disks | Where-Object { "$($_.Health)" -eq 'Error' }).Count) { $level = 'Error' }
+        elseif ($level -eq 'OK' -and @($disks | Where-Object { "$($_.Health)" -eq 'Warning' }).Count) { $level = 'Warning' }
         $sb += [pscustomobject]@{ Name = "$($p.Name)"; LastOk = $(if ($lastOk) { "$($lastOk.Date)" } else { '' }); OkAge = $okAge; LastDisk = $(if ($lastOk) { "$($lastOk.Disk)" } else { '' }); Disks = $disks; ArchiveDue = $arcDue; ArchiveAge = $arcAge; Level = $level; Runs = $mine.Count }
     }
 
@@ -134,6 +146,7 @@ function New-HMStatusLine([string]$Level, [string]$Text, [string]$Sub = '') {
 }
 function New-HMStatusHeader([string]$Text, $Tab) {
     $dp = New-Object System.Windows.Controls.DockPanel
+    $dp.LastChildFill = $false   # sonst fuellt der Knopf die ganze Breite
     $dp.Margin = [System.Windows.Thickness]::new(0, 14, 0, 4)
     $tb = New-Object System.Windows.Controls.TextBlock
     $tb.Text = $Text
@@ -144,6 +157,8 @@ function New-HMStatusHeader([string]$Text, $Tab) {
         $b.Content = 'Oeffnen'
         try { $b.Style = $script:Window.FindResource('BtnDefault') } catch { }
         $b.Margin = [System.Windows.Thickness]::new(10, 0, 0, 0)
+        $b.Padding = [System.Windows.Thickness]::new(10, 1, 10, 1)
+        $b.HorizontalAlignment = 'Left'
         $b.Tag = $Tab
         $b.Add_Click({ param($s) $ui.tabMain.SelectedItem = $s.Tag })
         [System.Windows.Controls.DockPanel]::SetDock($b, 'Left')
@@ -157,14 +172,15 @@ function Get-HMStatusTab([string]$Header) { return @($ui.tabMain.Items | Where-O
 function Update-HMStatusPage([switch]$StartUp) {
     $sd = 8
     try { if ($null -ne $script:Settings.StatusStaleDays -and [int]$script:Settings.StatusStaleDays -gt 0) { $sd = [int]$script:Settings.StatusStaleDays } } catch { }
-    $bs = @(); $sbp = @(); $sbh = @(); $au = @()
+    $bs = @(); $sbp = @(); $sbh = @(); $au = @(); $sbHealth = @{}
     try { $bs = @(Get-HMBsRows) } catch { }
     if (-not $script:UserMode) {
         try { $sbp = @((Get-HMSbConfig).Profiles) } catch { }
         try { if ($sbp.Count) { $sbh = @(Get-HMSbAllHistory) } } catch { }
+        try { if ($sbp.Count) { $sbHealth = Get-HMSbHealthSummary (Read-HMSbHealthStore $script:SbHealthFile) } } catch { }
         try { if (Test-Path -LiteralPath $script:AuHistFile) { $aj = Get-Content -LiteralPath $script:AuHistFile -Raw -Encoding UTF8 | ConvertFrom-Json; $au = @($aj) } } catch { }
     }
-    $data = Get-HMStatusData -BsRows $bs -Backups @($script:BackupInfos) -SbProfiles $sbp -SbHistory $sbh -AuHistory $au -StaleDays $sd
+    $data = Get-HMStatusData -BsRows $bs -Backups @($script:BackupInfos) -SbProfiles $sbp -SbHistory $sbh -AuHistory $au -StaleDays $sd -SbHealth $sbHealth
     $script:StatusData = $data
     $nw = @($data.Warnings).Count
     if ($ui.tabStatus) { $ui.tabStatus.Header = $(if ($nw) { "Status ($nw)" } else { 'Status' }) }
@@ -203,7 +219,10 @@ function Update-HMStatusPage([switch]$StartUp) {
     if (@($data.Server).Count) {
         [void]$p.Children.Add((New-HMStatusHeader 'SERVER-BACKUP' (Get-HMStatusTab 'Server-Backup')))
         foreach ($s in @($data.Server)) {
-            $dk = @($s.Disks | ForEach-Object { "$($_.Label): $(if ($null -eq $_.Age) { 'nie' } elseif ($_.Age -le 0) { 'heute' } else { "vor $($_.Age) T." })" }) -join ', '
+            $dk = @($s.Disks | ForEach-Object {
+                $hz = switch ("$($_.Health)") { 'Error' { ', DEFEKT?' } 'Warning' { ', Zustand pruefen' } 'OK' { ', Zustand gut' } default { '' } }
+                if ($_.Archive) { "$($_.Label)$hz" } else { "$($_.Label): $(if ($null -eq $_.Age) { 'nie' } elseif ($_.Age -le 0) { 'heute' } else { "vor $($_.Age) T." })$hz" }
+            }) -join ', '
             $sub = @($(if ($s.LastOk) { "zuletzt erfolgreich $($s.LastOk) auf $($s.LastDisk)" } else { 'noch keine erfolgreiche Sicherung' }), $dk, $(if ($s.ArchiveDue) { 'Archiv faellig' })) | Where-Object { $_ }
             [void]$p.Children.Add((New-HMStatusLine $s.Level $s.Name ($sub -join '  |  ')))
         }

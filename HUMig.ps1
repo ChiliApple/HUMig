@@ -153,7 +153,7 @@ $script:SplashShown = Get-Date
 # ============================================================================
 # FUNKTIONEN LADEN
 # ============================================================================
-foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1', 'AppUpdates-Engine.ps1', 'UI-AppUpdates.ps1', 'UI-Status.ps1')) {
+foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Core-Notify.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1', 'AppUpdates-Engine.ps1', 'UI-AppUpdates.ps1', 'UI-Status.ps1', 'UI-Monitor.ps1')) {
     $mp = Join-Path $script:AppRoot "Functions\$mod"
     try { . $mp } catch { [System.Windows.MessageBox]::Show("$mod konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null; exit 1 }
 }
@@ -272,7 +272,7 @@ if ($script:AppIcon) { $script:Window.Icon = $script:AppIcon }
 
 function Get-UI([string]$n) { $e = $script:Window.FindName($n); if (-not $e) { Write-Host "[WARN] UI '$n' fehlt" -ForegroundColor Yellow }; return $e }
 $ui = @{}
-foreach ($n in @('tabStatus', 'pnlStatus', 'btnStatusRefresh', 'lblStatusTime', 'imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
+foreach ($n in @('brdMonBackup', 'brdMonRestore', 'brdMonServer', 'tabStatus', 'pnlStatus', 'btnStatusRefresh', 'lblStatusTime', 'imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
     'txtBackupRoot', 'btnBrowseRoot', 'btnOpenRoot', 'lblFree', 'tabMain', 'cmbPreset', 'btnAllOn', 'btnAllOff', 'btnPresetSave', 'pnlBackupModules', 'lstExtra', 'btnExtraAdd',
     'btnExtraDel', 'chkMinProfileExc', 'chkNoProfileFileExc', 'chkMinSystemExc', 'chkNoSystemFileExc', 'btnEditExceptions', 'cmbThreads', 'btnPrecheck',
     'btnProfileSize', 'btnBackup', 'btnCancel', 'btnRefreshBackups', 'btnOpenBackup', 'btnDeleteBackup', 'btnCleanupBackups', 'btnEmptyDeleted', 'dgBackups', 'lblRestoreInfo',
@@ -282,7 +282,7 @@ foreach ($n in @('tabStatus', 'pnlStatus', 'btnStatusRefresh', 'lblStatusTime', 
     'btnExclAdd', 'btnExclDel', 'btnBigFiles', 'chkIncremental', 'lblIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport',
     'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag',
     'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnBackupSearch', 'btnFileSearch', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnFeedback', 'btnFeedbackR', 'btnReinstall', 'btnADDevices',
-    'tabServerBackup', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
+    'tabServerBackup', 'btnSbHealth', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
     'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'cmbSbAfter', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
     'pnlSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'btnSbConflicts', 'dotSbBusy', 'lblSbBusy', 'dotBusy', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule',
     'tabAppUpdates', 'btnAuSearch', 'btnAuUpdateSel', 'btnAuUpdateAll', 'btnAuCancel', 'chkAuUnknown', 'btnAuSetup', 'dotAuBusy', 'lblAuBusy', 'lblAuInfo', 'lblAuTarget', 'btnAuPcs', 'btnAuPcTop', 'btnAuSchedule', 'btnAuScheduleView', 'lblAuListTitle', 'dgAu',
@@ -863,6 +863,8 @@ $ui.btnADDevices.Add_Click({ Show-HMMultiDialog })
 # ============================================================================
 function Set-JobUi([bool]$Running) {
     $script:JobRunning = $Running
+    # Live-Anzeige (Durchsatz, CPU, RAM) in Backup/Restore
+    try { if ($Running) { Start-HMMonitor } else { Stop-HMMonitor } } catch { }
     foreach ($b in @($ui.btnBackup, $ui.btnRestore, $ui.btnProfileSize, $ui.btnConnect, $ui.btnLocal, $ui.btnDeleteBackup, $ui.btnCleanupBackups, $ui.btnEmptyDeleted, $ui.btnUpdate, $ui.btnPrecheck)) { $b.IsEnabled = -not $Running }
     $ui.btnCancel.IsEnabled = $Running
     $ui.btnCancelRestore.IsEnabled = $Running
@@ -1029,6 +1031,17 @@ function Start-BackupJob([hashtable]$Ctx) {
         if ($script:Settings.OverviewAuto -ne $false) { Update-HMBackupOverview -Quiet }
         $rep = if ($j.Result -and $j.Result.Status -and $script:LastBackupCtx.BackupPath) { Join-Path $script:LastBackupCtx.BackupPath 'Bericht_Backup.html' } else { $null }
         if ($rep -and (Test-Path -LiteralPath $rep)) { Out-Console "Protokoll: $rep  (Reiter Restore > Protokoll)" 'Info' }
+        # Massenloeschung erkannt: Teams-Benachrichtigung (wenn auf diesem PC eingetragen, nur als Administrator)
+        if ($isAdmin -and $script:LastBackupCtx.BackupPath) {
+            try {
+                $mf = Read-JsonFile (Join-Path $script:LastBackupCtx.BackupPath 'manifest.json')
+                $ma = @(); if ($mf -and $mf.MassDeleteAlert) { $ma = @($mf.MassDeleteAlert | Where-Object { $_ }) }
+                if ($ma.Count) {
+                    $n = Send-HMNotify -Title "HUMig: Massenloeschung erkannt - $($script:LastBackupCtx.Computer) \ $($script:LastBackupCtx.UserFolder)" -Lines (@('An der Quelle fehlen auf einmal sehr viele Dateien - typisches Zeichen fuer einen Verschluesselungstrojaner. Nichts wurde beiseitegelegt, das Backup behaelt den alten Stand.') + @($ma | Select-Object -First 5) + @("Backup: $($script:LastBackupCtx.BackupPath)")) -Level 'Error'
+                    if ($n) { Out-Console $n 'Info' }
+                }
+            } catch { }
+        }
     }
 }
 
@@ -1322,6 +1335,7 @@ foreach ($c in @($ui.chkGpUpdate, $ui.chkWUDrivers, $ui.chkNumLock, $ui.chkFavor
 $ui.txtPostScript.Add_LostFocus({ if ("$($ui.txtPostScript.Text)".Trim() -ne "$($script:Settings.Restore.PostScript)".Trim()) { Save-RestoreOptionSettings } })
 
 $ui.btnRestore.Add_Click({
+    if ($script:RestoreAfterInstall) { Out-Console 'Es werden gerade fehlende Programme installiert - der Restore startet danach automatisch.' 'Warning'; return }
     $b = $script:SelectedBackup
     if (-not $b) { Out-Console 'Bitte zuerst ein Backup waehlen.' 'Warning'; return }
     $p = Get-SelectedProfile
@@ -1350,8 +1364,9 @@ $ui.btnRestore.Add_Click({
     if (-not $ctx) { return }
     Out-Separator
     $script:RestoreBackupForChecklist = $b
-    # Katalog-Programme am Ziel-PC, die vorher geschlossen werden sollen: Sammelabfrage, danach Start-RestoreJob
-    Invoke-HMProcCheck -Ctx $ctx -Kind 'Restore'
+    # Zuerst fehlende Programme (Angebot: installieren, dann Restore), Programm-Module ohne Programm auslassen,
+    # danach Katalog-Programme am Ziel-PC, die vorher geschlossen werden sollen (Sammelabfrage) und Start-RestoreJob
+    Start-HMRestorePrep $ctx
 })
 function Start-RestoreJob([hashtable]$Ctx) {
     Start-EngineJob -Command 'Start-HMRestore -Ctx $Ctx -Job $Job' -Ctx $Ctx -Title 'Restore' -OnFinished {
@@ -1359,9 +1374,14 @@ function Start-RestoreJob([hashtable]$Ctx) {
         if ($j.Result -and $j.Result.Report) { Out-Console "Protokoll: $($j.Result.Report)  (Knopf 'Protokoll')" 'Info' }
         Connect-Target
         if ($script:Settings.OverviewAuto -ne $false) { Update-HMBackupOverview -Quiet }
+        if ($j.Result -and [int]$j.Result.MissingFiles -gt 0) { Out-Console "Kontrolle nach dem Restore: $([int]$j.Result.MissingFiles) Datei(en) aus dem Backup fehlen am Ziel - Liste: $($j.Result.MissingList)" 'Warning' }
+        $skNames = @(@($script:RestoreSkippedApps) | Where-Object { $_ } | ForEach-Object { "$($_.Name)" })
+        if (-not $j.Cancel) { Set-HMRestoreChecksForSkippedApps } else { $script:RestoreSkippedApps = @() }
         if (-not $j.Cancel -and $j.Result -and $j.Result.Report -and (Test-Path -LiteralPath "$($j.Result.Report)") -and $script:Settings.RestoreChecklistAuto -ne $false) {
             $extra = @()
             if (Get-Command Get-HMAppAfterSteps -ErrorAction SilentlyContinue) { try { $extra = @(Get-HMAppAfterSteps $script:RestoreBackupForChecklist) } catch { } }
+            if ($skNames.Count) { $extra = @("Programm(e) installieren, dann Restore nur mit den Programm-Modulen wiederholen: $($skNames -join ', ')") + $extra }
+            if ([int]$j.Result.MissingFiles -gt 0) { $extra = @("Kontrolle: $([int]$j.Result.MissingFiles) Datei(en) fehlen am Ziel - Liste pruefen ($(Split-Path "$($j.Result.MissingList)" -Leaf))") + $extra }
             $script:PendingChecklist = @{ Report = "$($j.Result.Report)"; Extra = $extra }
             $script:Window.Dispatcher.BeginInvoke([action]{ $pc = $script:PendingChecklist; $script:PendingChecklist = $null; if ($pc) { Show-HMChecklist -ReportPath $pc.Report -Extra $pc.Extra } }) | Out-Null
         }
@@ -2168,6 +2188,7 @@ if ($script:UserMode) { Set-HMUserModeUi }
 Initialize-HMServerBackupTab -IsAdmin $isAdmin
 Initialize-HMAppUpdatesTab -IsAdmin $isAdmin
 Initialize-HMStatusTab
+Initialize-HMMonitor
 try { Update-HMBsLabel } catch { }
 Update-BackupList
 Connect-Target

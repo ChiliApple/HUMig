@@ -303,6 +303,7 @@
                                 <Button x:Name="btnPresetSave" Content="Als Vorlage speichern ..." Style="{StaticResource BtnBlue}" ToolTip="Angehakte Module unter einem eigenen Namen als Vorlage speichern (Rechtsklick auf die Vorlagen-Liste: verwalten)"/>
                                 <TextBlock x:Name="lblSizeTotal" Text="" Foreground="{StaticResource CatSubtext}" VerticalAlignment="Center" Margin="10,0,0,4" ToolTip="Summe der gemessenen, angehakten Module (Groesse ermitteln)"/>
                             </WrapPanel>
+                            <Border x:Name="brdMonBackup" DockPanel.Dock="Bottom" Visibility="Collapsed" Background="{StaticResource CatMantle}" CornerRadius="4" Padding="10,6" Margin="0,6,0,0" ToolTip="Live-Anzeige waehrend Backup/Restore - CPU und Arbeitsspeicher des PCs, auf dem HUMig laeuft"/>
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <StackPanel x:Name="pnlBackupModules"/>
                             </ScrollViewer>
@@ -389,9 +390,12 @@
                             </DataGrid>
                         </DockPanel>
                         <TextBlock x:Name="lblRestoreInfo" Grid.Row="1" Grid.Column="0" Text="Backup auswaehlen - vorhandene Module werden angehakt." Foreground="{StaticResource CatSubtext}" Margin="0,6,0,4" TextWrapping="Wrap"/>
-                        <ScrollViewer Grid.Row="2" Grid.Column="0" VerticalScrollBarVisibility="Auto">
-                            <StackPanel x:Name="pnlRestoreModules"/>
-                        </ScrollViewer>
+                        <DockPanel Grid.Row="2" Grid.Column="0">
+                            <Border x:Name="brdMonRestore" DockPanel.Dock="Bottom" Visibility="Collapsed" Background="{StaticResource CatMantle}" CornerRadius="4" Padding="10,6" Margin="0,6,0,0" ToolTip="Live-Anzeige waehrend Backup/Restore - CPU und Arbeitsspeicher des PCs, auf dem HUMig laeuft"/>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="pnlRestoreModules"/>
+                            </ScrollViewer>
+                        </DockPanel>
                         <ScrollViewer Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" VerticalScrollBarVisibility="Auto" Margin="8,0,0,0">
                             <StackPanel>
                                 <TextBlock Text="ZIEL" Style="{StaticResource SectionLabel}"/>
@@ -621,6 +625,7 @@
                                         <CheckBox x:Name="chkSbVerify" Content="Sicherung pruefen (Version und enthaltene VMs)" IsChecked="True"/>
                                         <CheckBox x:Name="chkSbHostSystem" Content="Host-System mitsichern (nur der Host: C:, Boot/EFI - fuer Bare-Metal-Wiederherstellung)" ToolTip="wbadmin -allCritical: sichert nur den Host selbst - Systemlaufwerk C: (Windows, Hyper-V-Rolle, Switches, Einstellungen) und EFI-/Boot-/Wiederherstellungspartition. Datenlaufwerke mit den VMs (z.B. D:) sind NICHT enthalten - dafuer die VM-Sicherung. Komplette Wiederherstellung nach Totalausfall: Host-System UND VMs sichern. Liegen VMs auf C:, werden sie hier zusaetzlich mitgesichert."/>
                                         <TextBlock x:Name="lblSbHostSystem" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="11" Margin="20,0,0,0"/>
+                                        <Border x:Name="brdMonServer" Visibility="Collapsed" Background="{StaticResource CatBase}" CornerRadius="4" Padding="10,6" Margin="0,8,0,0" ToolTip="Live-Anzeige waehrend der Sicherung: Durchsatz der Windows Server-Sicherung, CPU und Arbeitsspeicher dieses Servers"/>
                                     </StackPanel>
                                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                                         <StackPanel x:Name="pnlSbVms"/>
@@ -629,7 +634,10 @@
                             </Border>
                             <Border Grid.Column="2" Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <DockPanel>
-                                    <TextBlock DockPanel.Dock="Top" Text="PLATTEN / VERLAUF DES PROFILS" Style="{StaticResource SectionLabel}"/>
+                                    <DockPanel DockPanel.Dock="Top" LastChildFill="False">
+                                        <TextBlock Text="PLATTEN / VERLAUF DES PROFILS" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
+                                        <Button x:Name="btnSbHealth" DockPanel.Dock="Right" Content="Plattenzustand pruefen" Style="{StaticResource BtnDefault}" Padding="8,2" FontSize="11" ToolTip="Gesundheitsstatus (SMART) der angesteckten USB-Platten lesen - Windows-Status und, wenn das Gehaeuse sie durchreicht, Temperatur, Betriebsstunden, Lesefehler. Wird beim Aktualisieren und nach jeder Sicherung automatisch gelesen."/>
+                                    </DockPanel>
                                     <StackPanel x:Name="pnlSbDisks" DockPanel.Dock="Top" Margin="0,0,0,2"/>
                                     <TextBlock x:Name="lblSbSchedule" DockPanel.Dock="Top" Text="" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource CatMauve}" Margin="2,2,0,8"/>
                                     <DataGrid x:Name="dgSbHistory" Style="{StaticResource DarkGrid}" ToolTip="Doppelklick = Bericht des Laufs oeffnen (Details, wbadmin-Ausgabe, Pruefung)">

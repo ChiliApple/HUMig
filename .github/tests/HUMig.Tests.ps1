@@ -630,3 +630,121 @@ Describe 'Startseite Status und Hinweise beim Start' {
         $s.Apps[0].FailedNames | Should -Contain 'VLC'
     }
 }
+
+Describe 'Restore: fehlende Programme zuerst, Programm-Module ohne Programm auslassen' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Quality.ps1')
+        . (Join-Path $script:Root 'Functions\UI-Apps.ps1')
+        $script:Cat = @(
+            [pscustomobject]@{ Id = 'App_KeePass'; Name = 'KeePass'; Detect = '^KeePass'; Package = 'keepass'; Items = @([pscustomobject]@{ Type = 'Folder'; Path = '{APPDATA}\KeePass' }) },
+            [pscustomobject]@{ Id = 'App_Vlc'; Name = 'VLC'; Detect = '^VLC media player'; WingetId = 'VideoLAN.VLC'; Items = @([pscustomobject]@{ Type = 'Folder'; Path = '{APPDATA}\vlc' }) },
+            [pscustomobject]@{ Id = 'App_Ohne'; Name = 'Ohne'; Detect = ''; Items = @([pscustomobject]@{ Type = 'Folder'; Path = '{APPDATA}\x' }) })
+    }
+    It 'Plan: Paket der Softwareverteilung vor WinGet, schon installierte (auch andere Version) nicht' {
+        $src = @([pscustomobject]@{ Name = 'KeePass Password Safe 2.57'; Version = '2.57' }, [pscustomobject]@{ Name = 'VLC media player'; Version = '3.0' }, [pscustomobject]@{ Name = 'Notepad++ (64-bit x64)'; Version = '8.6' }, [pscustomobject]@{ Name = 'Unbekannt Tool'; Version = '1' })
+        $pk = @([pscustomobject]@{ Id = 'keepass-2.57'; Settings = [pscustomobject]@{ Name = 'KeePass'; DetectName = '' } })
+        $p = Get-HMMissingAppPlan -Src $src -Have @('Notepad++ (64-bit x64)') -Packages $pk -Catalog $script:Cat
+        @($p.Rows).Count | Should -Be 3
+        $p.Packages.ContainsKey('keepass-2.57') | Should -BeTrue
+        $p.Winget.ContainsKey('winget:VideoLAN.VLC') | Should -BeTrue
+        $p.NoPkg | Should -Be 1
+        $p.Installable | Should -Be 2
+    }
+    It 'Luecke: Programm-Module, deren Programm am Ziel fehlt; ohne Erkennung nie auslassen' {
+        $mods = @([pscustomobject]@{ Id = 'App_KeePass'; Catalog = $true; AppId = 'App_KeePass' }, [pscustomobject]@{ Id = 'App_Vlc'; Catalog = $true; AppId = 'App_Vlc' }, [pscustomobject]@{ Id = 'App_Ohne'; Catalog = $true; AppId = 'App_Ohne' }, [pscustomobject]@{ Id = 'Desktop'; Scope = 'User' })
+        $g = @(Get-HMRestoreAppGap -Modules $mods -Software @([pscustomobject]@{ Name = 'VLC media player'; Version = '3.0' }) -Catalog $script:Cat)
+        @($g).Count | Should -Be 1
+        $g[0].Id | Should -Be 'App_KeePass'
+        $g[0].Name | Should -Be 'KeePass'
+    }
+}
+
+Describe 'Kontrolle nach dem Restore (fehlende Dateien am Ziel)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        function New-HMTestFile([string]$Path) { $d = Split-Path $Path -Parent; if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }; [System.IO.File]::WriteAllText($Path, 'x') }
+    }
+    It 'findet Dateien, die im Backup liegen, am Ziel aber fehlen - Zielpfade in der Liste' {
+        $src = Join-Path $TestDrive 'BK\Dokumente'; $dst = Join-Path $TestDrive 'Ziel\Dokumente'
+        New-HMTestFile "$src\a.txt"; New-HMTestFile "$src\sub\b.txt"; New-HMTestFile "$src\c.txt"
+        New-HMTestFile "$dst\a.txt"; New-HMTestFile "$dst\extra.txt"
+        $ctx = @{ MissingAfter = (New-Object System.Collections.Generic.List[string]) }
+        $r = Test-HMRestoredItem -Ctx $ctx -Job $null -Src $src -Dst $dst -DstLocal 'C:\Users\max\Documents'
+        $r.Error | Should -BeNullOrEmpty
+        $r.Missing | Should -Be 2
+        $ctx.MissingAfter | Should -Contain 'C:\Users\max\Documents\c.txt'
+        $ctx.MissingAfter | Should -Contain 'C:\Users\max\Documents\sub\b.txt'
+    }
+}
+
+Describe 'Plattenzustand (SMART) der Server-Backup-Platten' {
+    It 'Bewertung: gut, ohne Detailwerte, Warnung, Defekt, steigende Fehler' {
+        (Get-HMSbHealthVerdict ([pscustomobject]@{ Health = 'Healthy'; Counters = $true; Temperature = 35; PowerOnHours = 1200 })).Level | Should -Be 'OK'
+        $v = Get-HMSbHealthVerdict ([pscustomobject]@{ Health = 'Healthy'; Counters = $false })
+        $v.Level | Should -Be 'OK'; $v.Text | Should -Match 'keine Detailwerte'
+        (Get-HMSbHealthVerdict ([pscustomobject]@{ Health = 'Unknown'; Counters = $false })).Level | Should -Be 'Unknown'
+        (Get-HMSbHealthVerdict ([pscustomobject]@{ Health = 'Warning' })).Level | Should -Be 'Warning'
+        (Get-HMSbHealthVerdict ([pscustomobject]@{ Health = 'Unhealthy' })).Level | Should -Be 'Error'
+        (Get-HMSbHealthVerdict ([pscustomobject]@{ Health = 'Healthy'; Counters = $true; ReadErrorsUncorrected = 3 })).Level | Should -Be 'Warning'
+        (Get-HMSbHealthVerdict ([pscustomobject]@{ Health = 'Healthy'; Counters = $true; ReadErrorsUncorrected = 5 }) ([pscustomobject]@{ ReadErrorsUncorrected = 3 })).Level | Should -Be 'Error'
+        (Get-HMSbHealthVerdict ([pscustomobject]@{ Health = 'Healthy'; Counters = $true; Temperature = 62 })).Text | Should -Match 'zu warm'
+        ConvertTo-HMSbHealthText 2 | Should -Be 'Unhealthy'
+    }
+    It 'Messwerte je Platte merken (hoechstens 30) und letzte Messung bewerten' {
+        $f = Join-Path $TestDrive 'ServerBackup\disk-health.json'
+        foreach ($i in 1..32) { Add-HMSbHealthStore $f 'HUMIG-GYM-1' ([pscustomobject]@{ Date = "2026-10-$('{0:D2}' -f [Math]::Min(28, $i)) 10:00"; Health = 'Healthy'; Counters = $true; ReadErrorsUncorrected = $(if ($i -eq 32) { 1 } else { 0 }) }) }
+        Add-HMSbHealthStore $f 'HUMIG-GYM-2' ([pscustomobject]@{ Date = '2026-10-01 10:00'; Health = 'Unhealthy' })
+        $st = Read-HMSbHealthStore $f
+        @($st['HUMIG-GYM-1']).Count | Should -Be 30
+        $sum = Get-HMSbHealthSummary $st
+        $sum['HUMIG-GYM-1'].Verdict.Level | Should -Be 'Error'   # Fehler gestiegen (0 -> 1)
+        $sum['HUMIG-GYM-2'].Verdict.Level | Should -Be 'Error'
+    }
+    It 'Startseite: Plattenzustand als Hinweis und in der Stufe' {
+        . (Join-Path $script:Root 'Functions\UI-Status.ps1')
+        $now = [datetime]'2026-10-20 10:00'
+        $p = [pscustomobject]@{ Name = 'Gym'; DiskPrefix = 'HUMIG-GYM'; Disks = 2; WarnDays = 14; ArchiveDisks = 0; ArchiveDays = 30 }
+        $h = @([pscustomobject]@{ Date = '2026-10-19 10:00'; Profile = 'Gym'; Disk = 'HUMIG-GYM-1'; Status = 'OK' }, [pscustomobject]@{ Date = '2026-10-18 10:00'; Profile = 'Gym'; Disk = 'HUMIG-GYM-2'; Status = 'OK' })
+        $hs = @{ 'HUMIG-GYM-2' = [pscustomobject]@{ Last = $null; Verdict = [pscustomobject]@{ Level = 'Warning'; Text = '3 nicht behebbare Lese-/Schreibfehler'; Detail = '' } } }
+        $s = Get-HMStatusData -SbProfiles @($p) -SbHistory $h -Now $now -SbHealth $hs
+        $s.Server[0].Level | Should -Be 'Warning'
+        @($s.Warnings | Where-Object { $_.Text -match 'HUMIG-GYM-2 - 3 nicht behebbare' }).Count | Should -Be 1
+        ($s.Server[0].Disks | Where-Object Label -eq 'HUMIG-GYM-2').Health | Should -Be 'Warning'
+    }
+}
+
+Describe 'Teams-Benachrichtigung (Workflow-Webhook)' {
+    BeforeAll { . (Join-Path $script:Root 'Functions\Core-Notify.ps1') }
+    It 'prueft die Adresse: https, keine alte Connector-Adresse' {
+        Test-HMTeamsWebhookUrl '' | Should -Not -BeNullOrEmpty
+        Test-HMTeamsWebhookUrl 'http://prod-01.westeurope.logic.azure.com/x' | Should -Match 'https'
+        Test-HMTeamsWebhookUrl 'https://schule.webhook.office.com/webhookb2/x' | Should -Match 'Connector'
+        Test-HMTeamsWebhookUrl 'https://prod-01.westeurope.logic.azure.com:443/workflows/abc/triggers/manual/paths/invoke?sig=x' | Should -BeNullOrEmpty
+        Test-HMTeamsWebhookHostKnown 'https://default123.environment.api.powerplatform.com/powerautomate/x' | Should -BeTrue
+        Test-HMTeamsWebhookHostKnown 'https://example.org/x' | Should -BeFalse
+    }
+    It 'Nachricht ist eine Adaptive Card im Format der Workflows-Vorlage' {
+        $j = New-HMTeamsPayload -Title 'Server-Backup FEHLGESCHLAGEN' -Lines @('Platte: X-1', '', 'Hinweis: y') -Level 'Error' -Source 'SRV'
+        $o = $j | ConvertFrom-Json
+        $o.type | Should -Be 'message'
+        $a = @($o.attachments)
+        $a.Count | Should -Be 1
+        $a[0].contentType | Should -Be 'application/vnd.microsoft.card.adaptive'
+        $a[0].content.type | Should -Be 'AdaptiveCard'
+        $b = @($a[0].content.body)
+        $b[0].text | Should -Be 'Server-Backup FEHLGESCHLAGEN'
+        $b[0].color | Should -Be 'Attention'
+        $b.Count | Should -Be 4   # Titel, 2 Zeilen (leere entfaellt), Fusszeile
+        $b[3].text | Should -Match '^SRV'
+    }
+    It 'Senden ohne eingetragene Adresse: kein Fehler, nur Hinweis' {
+        Mock Get-HMNotifyConfig { [pscustomobject]@{ Url = ''; OnSuccess = $false; Configured = $false; Error = '' } }
+        Send-HMNotify -Title 't' -Level 'Error' | Should -BeNullOrEmpty
+        Send-HMTeamsMessage -Title 't' | Should -Match 'kein Teams-Webhook'
+    }
+    It 'gibt die Adresse nie in Fehlermeldungen aus' {
+        $r = Send-HMTeamsMessage -Title 't' -Url 'https://localhost:1/workflows/geheim?sig=GEHEIM'
+        $r | Should -Match 'fehlgeschlagen'
+        $r | Should -Not -Match 'GEHEIM'
+    }
+}

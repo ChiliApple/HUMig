@@ -25,6 +25,8 @@ function New-HMRestoreCtx([switch]$Quiet) {
         ExplorerFavorites = [bool]$ui.chkFavorites.IsChecked; FastBootOff = [bool]$ui.chkFastBoot.IsChecked; PostScript = "$($ui.txtPostScript.Text)".Trim()
     }
     if ($p.NoProfile) { $ctx.UserSid = $null; $ctx.ProfilePath = $null }
+    $ctx.Options.VerifyAfter = ($script:Settings.Restore.VerifyAfter -ne $false)
+    $ctx.SkippedApps = @()
     return $ctx
 }
 

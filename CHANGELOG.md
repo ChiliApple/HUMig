@@ -1,5 +1,24 @@
 # Changelog
 
+## v2.0.104 - 2026-10-11
+### Restore: zuerst Programme, dann Einstellungen
+- *Restore starten* prueft zuerst die Programme am Ziel. Fehlen installierbare Programme aus dem Backup (Softwareverteilung oder WinGet), fragt HUMig: zuerst installieren und danach automatisch zurueckspielen, nur Restore oder abbrechen. Microsoft empfiehlt, Programme vor dem Zurueckspielen der Einstellungen zu installieren
+- Programm-Module, deren Programm am Ziel (noch) fehlt, werden ausgelassen (Konsole, Protokoll, Checkliste). Danach sind nur diese Programm-Module angehakt - Programm installieren, *Restore starten*: der 2. Lauf spielt nur noch die Programm-Einstellungen zurueck
+- Kontrolle nach dem Restore: je Ordner Backup und Ziel vergleichen (nur auflisten), fehlende Dateien beim Ordner im Protokoll, als Liste `Restore_<PC>_<Zeit>_Fehlende.txt` und in der Checkliste
+- Beides abschaltbar: Einstellungen > Restore
+### Live-Anzeige
+- Waehrend Backup, Restore und Server-Backup: Lesen/Schreiben des Kopiervorgangs (MB/s, auch bei Netzwerkzielen), CPU und Arbeitsspeicher mit Verlauf der letzten 60 Sekunden; am Ende Durchschnitt, Spitze und Menge
+### Server-Backup: Plattenzustand (SMART)
+- Gesundheitsstatus der USB-Platten (Windows) und, wenn das Gehaeuse sie durchreicht, Temperatur, Betriebsstunden, nicht behebbare Fehler, Abnutzung - automatisch beim Oeffnen/Aktualisieren und nach jeder Sicherung, Knopf *Plattenzustand pruefen*
+- Letzte 30 Messungen je Platte (`Config\ServerBackup\disk-health.json`), nicht angesteckte Platten zeigen den letzten Stand. Warnung/Defekt: Hinweis im Reiter, auf der Startseite, im Bericht, Lauf mit Status Warnung
+### Teams-Benachrichtigung
+- Ueber einen Teams-Workflow (Webhook): geplante Server-Backups mit Fehler/Warnung, Plattenzustand, Erinnerungen (Platte wechseln, Archiv faellig), auf Wunsch auch erfolgreiche; Massenloeschung bei Backups als Administrator. Einstellungen > Allgemein, mit *Test senden*
+- Die Adresse wird nur auf dem jeweiligen PC gespeichert: verschluesselt (DPAPI) in `HKLM\SOFTWARE\HUMig\Notify`, nur fuer Administratoren/SYSTEM lesbar, nie im Tool-Ordner oder in Logs
+### Behoben
+- Startseite: die Knoepfe *Oeffnen* gingen ueber die ganze Breite
+### Automatische Tests
+- Fehlende Programme/Programm-Module, Kontrolle nach dem Restore, Plattenzustand, Teams-Nachricht
+
 ## v2.0.103 - 2026-10-11
 ### Neu: Reiter Status (Startseite)
 - Alles auf einen Blick: offene Hinweise, Backup-Zeitplaene (letzter Lauf, letzter Erfolg, naechster Lauf), letzte Backups je PC und Benutzer, Server-Backup (letzte Sicherung, Alter je Platte, Archiv faellig), App-Updates der letzten 7 Tage. Abschaltbar unter Einstellungen > Allgemein
