@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.113 - 2026-10-11
+### Behoben
+- *Rueckmeldung* (GitHub-Issue) und andere Links (Quelle, Lizenz, eigene Links im Reiter Werkzeuge, Quellen im Katalog-Editor, ADK) oeffnen direkt im Standard-Browser - ueber den Explorer kam die Adresse teils verfaelscht an und GitHub meldete "Seite nicht gefunden"
+
 ## v2.0.112 - 2026-10-11
 ### Einstellungen
 - Allgemein: Beschriftung "Backups aufbewahren (Tage)" steht jetzt bei der richtigen Zeile (Tage + Anzahl je PC/Benutzer)

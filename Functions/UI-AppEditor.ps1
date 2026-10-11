@@ -379,7 +379,7 @@ function Show-HMAppEditor([string]$SelectId = '', $Owner = $null, $NewEntry = $n
     $f.bProc.Add_Click({ Select-HMAeProcesses })
     $f.bSvc.Add_Click({ Select-HMAeServices })
     $f.bToday.Add_Click({ $script:Ae.F.tVDate.Text = (Get-Date).ToString('yyyy-MM-dd') })
-    $f.bLinks.Add_Click({ foreach ($l in @(ConvertFrom-HMLines $script:Ae.F.tSources.Text)) { if ($l -match '^https?://') { try { Start-Process -FilePath $l } catch { } } } })
+    $f.bLinks.Add_Click({ foreach ($l in @(ConvertFrom-HMLines $script:Ae.F.tSources.Text)) { if ($l -match '^https?://') { try { Open-HMUrl $l } catch { } } } })
     $f.bSave.Add_Click({ Save-HMAeEntry })
     $f.bRevert.Add_Click({ if ($script:Ae.Cur) { Set-HMAeForm $script:Ae.Orig $script:Ae.CurKind $script:Ae.IsNew } })
     $f.bNew.Add_Click({ New-HMAeEntry })

@@ -578,7 +578,7 @@ function Start-HMUsmtSetup {
         @{ Name = 'Open'; Label = 'Download-Seite im Browser oeffnen'; Type = 'Check'; Default = $true }
     )
     if (-not $f) { return }
-    if ($f.Open) { Start-Process 'https://learn.microsoft.com/windows-hardware/get-started/adk-install' }
+    if ($f.Open) { Open-HMUrl 'https://learn.microsoft.com/windows-hardware/get-started/adk-install' }
     $d = New-Object Microsoft.Win32.OpenFileDialog
     $d.Filter = 'ADK-Setup (adksetup.exe)|adksetup.exe|Programme (*.exe)|*.exe'
     $d.Title = 'adksetup.exe auswaehlen'
