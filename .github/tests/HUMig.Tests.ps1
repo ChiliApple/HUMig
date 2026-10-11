@@ -713,6 +713,65 @@ Describe 'Plattenzustand (SMART) der Server-Backup-Platten' {
     }
 }
 
+Describe 'Fortlaufendes Backup: herausgenommene Ordner und neu ausgeschlossene Pfade' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        function New-HMTestFile([string]$Path) { $d = Split-Path $Path -Parent; if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }; [System.IO.File]::WriteAllText($Path, 'x') }
+    }
+    It 'Zusaetzliche Ordner behalten ihre Nummer; neue bekommen eine nie benutzte, herausgenommene werden erkannt' {
+        $bk = Join-Path $TestDrive 'BK1'; $d = Join-Path $bk 'ExtraFolders'; New-Item -ItemType Directory -Path $d -Force | Out-Null
+        '[{"Index":1,"Path":"C:\\A"},{"Index":2,"Path":"C:\\B"},{"Index":3,"Path":"C:\\C\\"}]' | Set-Content -LiteralPath (Join-Path $d 'folders.json') -Encoding UTF8
+        '[{"Index":4,"Path":"C:\\D","Removed":"2026-10-01 10:00"}]' | Set-Content -LiteralPath (Join-Path $d 'folders-alt.json') -Encoding UTF8
+        $m = Get-HMExtraFolderMap $bk @('C:\A', 'c:\c', 'C:\E')
+        ($m.Map | Where-Object Path -eq 'C:\A').Index | Should -Be 1
+        ($m.Map | Where-Object Path -eq 'c:\c').Index | Should -Be 3
+        ($m.Map | Where-Object Path -eq 'C:\E').Index | Should -Be 5
+        @($m.Removed).Count | Should -Be 1
+        $m.Removed[0].Path | Should -Be 'C:\B'
+        # ohne vorhandenes Backup: 1..n
+        $m2 = Get-HMExtraFolderMap (Join-Path $TestDrive 'leer') @('C:\X', 'C:\Y')
+        @($m2.Map | ForEach-Object { $_.Index }) -join ',' | Should -Be '1,2'
+    }
+    It 'neu ausgeschlossener Pfad wird beiseitegelegt, schon frueher ausgeschlossener und unbekannte Vorgabe bleiben' {
+        $bk = Join-Path $TestDrive 'BK2'; $dst = Join-Path $bk 'Profil'
+        New-HMTestFile "$dst\Gross\a.bin"; New-HMTestFile "$dst\Gross\sub\b.bin"; New-HMTestFile "$dst\Alt\x.txt"; New-HMTestFile "$dst\bleibt.txt"
+        $ctx = @{ BackupPath = $bk; PrevExcludePaths = @('C:\Users\max\Alt'); Options = @{ ExcludePaths = @('C:\Users\max\Alt', 'C:\Users\max\Gross\') } }
+        $r = Move-HMNewlyExcluded $ctx 'C:\Users\max' $dst
+        $r.Files | Should -Be 2
+        Test-Path -LiteralPath "$dst\Gross" | Should -BeFalse
+        Test-Path -LiteralPath "$($ctx.DeletedDir)\Profil\Gross\sub\b.bin" | Should -BeTrue
+        Test-Path -LiteralPath "$dst\Alt\x.txt" | Should -BeTrue
+        Test-Path -LiteralPath "$dst\bleibt.txt" | Should -BeTrue
+        $ctx2 = @{ BackupPath = $bk; PrevExcludePaths = $null; Options = @{ ExcludePaths = @('C:\Users\max\Alt') } }
+        (Move-HMNewlyExcluded $ctx2 'C:\Users\max' $dst).Files | Should -Be 0
+        Test-Path -LiteralPath "$dst\Alt\x.txt" | Should -BeTrue
+    }
+}
+
+Describe 'Listen-Rueckgaben (return ,@()) erst zuweisen' {
+    It 'Get-HMSbAllHistory / Read-HMSbHistory werden nie direkt in @() oder einer Pipeline verwendet' {
+        # die Funktionen geben die Liste als EIN Objekt zurueck - @(Aufruf) bzw. Aufruf | Where-Object sehen nur 1 Element
+        $bad = @()
+        foreach ($f in @(Get-ChildItem -Path (Join-Path $script:Root 'Functions'), $script:Root -Filter *.ps1 -File)) {
+            $n = 0
+            foreach ($l in @(Get-Content -LiteralPath $f.FullName -Encoding UTF8)) {
+                $n++
+                if ($l -match '@\(\s*(Get-HMSbAllHistory|Read-HMSbHistory)\b' -or $l -match '(Get-HMSbAllHistory|Read-HMSbHistory)\b[^|;)]*\|') { $bad += "$($f.Name):$n" }
+            }
+        }
+        $bad | Should -BeNullOrEmpty
+    }
+    It 'Startseite zaehlt Laeufe aus einer Liste korrekt (Regression Status "noch keine erfolgreiche Sicherung")' {
+        . (Join-Path $script:Root 'Functions\UI-Status.ps1')
+        function Get-HMTestList { return ,@([pscustomobject]@{ Date = '2026-10-19 10:00'; Profile = 'Gym'; Disk = 'HUMIG-GYM-1'; Status = 'OK' }, [pscustomobject]@{ Date = '2026-10-18 10:00'; Profile = 'Gym'; Disk = 'HUMIG-GYM-2'; Status = 'OK' }) }
+        $tmp = Get-HMTestList
+        $p = [pscustomobject]@{ Name = 'Gym'; DiskPrefix = 'HUMIG-GYM'; Disks = 2; WarnDays = 14; ArchiveDisks = 0; ArchiveDays = 30 }
+        $s = Get-HMStatusData -SbProfiles @($p) -SbHistory @($tmp) -Now ([datetime]'2026-10-20 10:00')
+        $s.Server[0].Runs | Should -Be 2
+        $s.Server[0].Level | Should -Be 'OK'
+    }
+}
+
 Describe 'Teams-Benachrichtigung (Workflow-Webhook)' {
     BeforeAll { . (Join-Path $script:Root 'Functions\Core-Notify.ps1') }
     It 'prueft die Adresse: https, keine alte Connector-Adresse' {

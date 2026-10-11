@@ -176,7 +176,8 @@ function Update-HMStatusPage([switch]$StartUp) {
     try { $bs = @(Get-HMBsRows) } catch { }
     if (-not $script:UserMode) {
         try { $sbp = @((Get-HMSbConfig).Profiles) } catch { }
-        try { if ($sbp.Count) { $sbh = @(Get-HMSbAllHistory) } } catch { }
+        # erst zuweisen: Get-HMSbAllHistory gibt die Liste als EIN Objekt zurueck (return ,@()) - @(Aufruf) haette sonst nur 1 Element
+        try { if ($sbp.Count) { $tmpH = Get-HMSbAllHistory -ScanDrives; $sbh = @($tmpH) } } catch { }
         try { if ($sbp.Count) { $sbHealth = Get-HMSbHealthSummary (Read-HMSbHealthStore $script:SbHealthFile) } } catch { }
         try { if (Test-Path -LiteralPath $script:AuHistFile) { $aj = Get-Content -LiteralPath $script:AuHistFile -Raw -Encoding UTF8 | ConvertFrom-Json; $au = @($aj) } } catch { }
     }
