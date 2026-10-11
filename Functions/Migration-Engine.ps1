@@ -2578,7 +2578,7 @@ function Measure-HMBackup {
         }
         # Module ohne Datei-Eintraege (nur Registry/Spezial) -> 0 (vernachlaessigbar bzw. nicht schaetzbar)
         foreach ($m in $Ctx.Modules) { if (-not $perMod.ContainsKey($m.Id)) { $perMod[$m.Id] = [long]-1 } }
-        Write-HMLog $Job "Summe: $(Format-HMSize $sum) (ohne Registry, USMT, Treiber, Schriftarten)" 'Success'
+        Write-HMLog $Job "Summe: $(Format-HMSize $sum) - nur Dateien; Registry, Windows-Einstellungen (USMT), Treiber und Schriftarten werden mitgesichert, ihre Groesse ist vorab aber nicht messbar" 'Success'
     } finally {
         try { Dismount-HMHive $Ctx $Job } catch { }
         if ($shareRoot) { Disconnect-HMShare $shareRoot }

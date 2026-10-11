@@ -85,7 +85,10 @@
                             <TextBlock Text="Text + Oberflaeche skalieren. Automatisch = verkleinert auf kleinen Bildschirmen. Im Hauptfenster: Strg + Mausrad, Strg + 0 = automatisch" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap" MaxWidth="440"/>
                         </StackPanel>
                         <TextBlock Grid.Row="11" Text="Backup-Uebersicht:" Style="{DynamicResource Lbl}"/>
-                        <CheckBox x:Name="chkOverviewAuto" Grid.Row="11" Grid.Column="1" Content="Backups.html im Backup-Ordner nach jedem Backup/Restore aktualisieren" Margin="0,10,0,0"/>
+                        <StackPanel Grid.Row="11" Grid.Column="1" Margin="0,10,0,0">
+                            <CheckBox x:Name="chkOverviewAuto" Content="Backups.html im Backup-Ordner nach jedem Backup/Restore aktualisieren"/>
+                            <CheckBox x:Name="chkStatusPage" Content="Reiter 'Status' als Startseite anzeigen (Zeitplaene, letzte Backups, Server-Backup, App-Updates auf einen Blick)" Margin="0,6,0,0"/>
+                        </StackPanel>
                         <TextBlock Grid.Row="8" Text="Starter:" Style="{DynamicResource Lbl}"/>
                         <StackPanel Grid.Row="8" Grid.Column="1" Orientation="Horizontal">
                             <Button x:Name="btnLauncher" Content="HUMig.exe neu erstellen" Style="{DynamicResource BtnMauve}" ToolTip="Starter mit Logo (startet HUMig ohne Konsolenfenster, kann an die Taskleiste angeheftet werden)"/>

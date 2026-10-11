@@ -277,6 +277,19 @@
 
             <TabControl x:Name="tabMain" Grid.Row="1" Margin="0,4,0,0">
 
+                <!-- STATUS (Startseite, abschaltbar unter Einstellungen > Allgemein) -->
+                <TabItem x:Name="tabStatus" Header="Status">
+                    <DockPanel>
+                        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,2">
+                            <Button x:Name="btnStatusRefresh" Content="Aktualisieren" Style="{StaticResource BtnDefault}"/>
+                            <TextBlock x:Name="lblStatusTime" Text="" Foreground="{StaticResource CatSubtext}" VerticalAlignment="Center" Margin="10,0,0,4"/>
+                        </WrapPanel>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="pnlStatus" Margin="0,0,8,8"/>
+                        </ScrollViewer>
+                    </DockPanel>
+                </TabItem>
+
                 <!-- BACKUP -->
                 <TabItem Header="Backup">
                     <Grid>
