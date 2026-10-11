@@ -40,7 +40,7 @@
                         </DockPanel>
                         <TextBlock Grid.Row="1" Text="Robocopy-Threads (Standard):" Style="{DynamicResource Lbl}"/>
                         <ComboBox x:Name="cmbThreads" Grid.Row="1" Grid.Column="1" Width="90" HorizontalAlignment="Left" Margin="0,0,0,8"/>
-                        <TextBlock Grid.Row="2" Text="Backups aufbewahren (Tage):" Style="{DynamicResource Lbl}"/>
+                        <TextBlock Grid.Row="2" Text="Backups aufbewahren (Tage):" Style="{DynamicResource Lbl}" VerticalAlignment="Top" Margin="0,4,6,0"/>
                         <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,0,8">
                             <StackPanel Orientation="Horizontal">
                                 <TextBox x:Name="txtRetention" Style="{DynamicResource DarkTextBox}" Width="60" ToolTip="Aeltere Backups werden erst nach so vielen Tagen zum Loeschen vorgeschlagen. 0 = nur die Anzahl zaehlt"/>

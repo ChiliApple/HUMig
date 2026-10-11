@@ -2263,7 +2263,8 @@ function Get-HMUsmtCodeText([int]$Code, [string]$Version) {
 
 function Find-HMUsmt([hashtable]$Ctx) {
     $cands = @()
-    if ($Ctx.Settings.UsmtPath) { $cands += $Ctx.Settings.UsmtPath }
+    # eingetragener Ordner: direkt, oder (haeufig) der uebergeordnete Ordner - amd64 bzw. USMT\amd64 darunter
+    if ($Ctx.Settings.UsmtPath) { $u0 = "$($Ctx.Settings.UsmtPath)".TrimEnd('\'); $cands += @($u0, "$u0\amd64", "$u0\USMT\amd64") }
     $cands += @(
         (Join-Path $Ctx.ToolRoot 'BIN\USMT\amd64'), (Join-Path $Ctx.ToolRoot 'BIN\USMT'),
         "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\User State Migration Tool\amd64"

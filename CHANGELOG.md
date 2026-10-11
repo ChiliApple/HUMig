@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.112 - 2026-10-11
+### Einstellungen
+- Allgemein: Beschriftung "Backups aufbewahren (Tage)" steht jetzt bei der richtigen Zeile (Tage + Anzahl je PC/Benutzer)
+- USMT-Ordner: eingetragener Ordner wird auch mit `amd64` bzw. `USMT\amd64` darunter gefunden; existiert er nicht oder liegt dort keine scanstate.exe, steht das als ACHTUNG unter dem Feld (bisher nur "gefunden:" mit einem anderen Ordner)
+
 ## v2.0.111 - 2026-10-11
 ### Start
 - HUMig kommt beim Start immer in den Vordergrund (auch nach UAC-Abfrage, ueber den Starter oder nach einem Update-Neustart) - bisher blieb das Fenster oft hinter anderen Fenstern
