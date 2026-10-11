@@ -116,9 +116,18 @@ function Show-TaskNotification([string]$Title, [string]$Text, [string]$Kind, [st
 function Complete-Task([string]$Status, [string]$Msg, [string]$BackupPath = '') {
     $st = switch ($Status) { 'OK' { 'OK' } 'Warning' { 'Warnung' } 'Skipped' { 'uebersprungen' } default { 'Fehler' } }
     Write-TaskLog "Ende - $st$(if ($Msg) { ": $Msg" })" $(if ($Status -eq 'OK') { 'Success' } elseif ($Status -eq 'Warning') { 'Warning' } else { 'Error' })
-    $state = @{ LastRun = (Get-Date).ToString('yyyy-MM-dd HH:mm'); LastStatus = $Status; LastMessage = $Msg; LastBackup = $BackupPath; LastLog = $script:TaskLog }
+    $state = @{ LastRun = (Get-Date).ToString('yyyy-MM-dd HH:mm'); LastStatus = $Status; LastMessage = $Msg; LastBackup = $BackupPath; LastLog = $script:TaskLog; LastMassDelete = [bool]$script:MassDelete }
     if ($Status -in @('OK', 'Warning')) { $state.LastSuccess = $state.LastRun }   # fuer die Warnung "seit X Tagen kein erfolgreicher Lauf"
     Save-TaskState $state
+    # Ereignis im Anwendungsprotokoll (Quelle HUMig, 1100 OK, 1101 Warnung, 1102 Fehler, 1103 uebersprungen). Ist am PC die
+    # Teams-Benachrichtigung eingerichtet, meldet eine Aufgabe unter SYSTEM den Lauf weiter (Functions\Notify-Relay.ps1) -
+    # dieses Skript selbst kennt die Webhook-Adressen nicht. Ohne Quelle 'HUMig' (legt HUMig als Administrator an) entfaellt es.
+    try {
+        $eid = switch ($Status) { 'OK' { 1100 } 'Warning' { 1101 } 'Skipped' { 1103 } default { 1102 } }
+        $ety = switch ($Status) { 'OK' { 'Information' } 'Error' { 'Error' } default { 'Warning' } }
+        $nm = if ($script:Def) { "$($script:Def.Name)" } else { $Id }
+        Write-EventLog -LogName Application -Source 'HUMig' -EntryType $ety -EventId $eid -Message ("Geplantes Profil-Backup '{0}' von {1}\{2} an {3}: {4}{5}" -f $nm, $env:USERDOMAIN, $env:USERNAME, $env:COMPUTERNAME, $st, $(if ($Msg) { " - $Msg" })) -ErrorAction Stop
+    } catch { Write-TaskLog "Ereignis nicht geschrieben (Quelle HUMig fehlt?): $($_.Exception.Message)" 'Debug' }
     # alte Protokolle dieses Zeitplans aufraeumen (neueste 30 bleiben)
     try { Get-ChildItem -LiteralPath $logDir -Filter "*_$Id.log" -File | Sort-Object Name -Descending | Select-Object -Skip 30 | Remove-Item -Force -ErrorAction SilentlyContinue } catch { }
     $always = $true
@@ -280,7 +289,9 @@ $dur = if ($res -and $res.Duration) { "$($res.Duration)" } else { '' }
 $msg = (@($size, $(if ($dur) { "Dauer $dur" })) | Where-Object { $_ }) -join ', '
 if ($openApps.Count -and $st -ne 'OK') { $msg += " - geoeffnet waren: $($openApps -join ', ')" }
 # Massenloeschung an der Quelle: typisches Zeichen fuer einen Verschluesselungstrojaner - immer melden
+$script:MassDelete = $false
 if ($ctx.Manifest -and $ctx.Manifest.MassDeleteAlert) {
+    $script:MassDelete = $true
     $msg = "ACHTUNG: ungewoehnlich viele Dateien an der Quelle verschwunden - typisches Zeichen fuer einen Verschluesselungstrojaner. Quell-PC pruefen! $msg"
     if ($st -eq 'OK') { $st = 'Warning' }
 }

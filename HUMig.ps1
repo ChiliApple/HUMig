@@ -2260,6 +2260,8 @@ Initialize-HMAppUpdatesTab -IsAdmin $isAdmin
 Initialize-HMStatusTab
 Initialize-HMMonitor
 try { Update-HMBsLabel } catch { }
+# Teams-Meldung der Profil-Backups: vorhandenes SYSTEM-Skript auf den Stand dieser Version bringen
+if ($isAdmin -and -not $script:UserMode) { try { $rr = Update-HMNotifyRelay -RefreshOnly; if ($rr) { Out-Console $rr 'Info' } } catch { Out-Console "Teams-Meldung Profil-Backups: $($_.Exception.Message)" 'Warning' } }
 Update-BackupList
 Connect-Target
 Invoke-UpdateCheck
