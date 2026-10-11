@@ -10,6 +10,16 @@
 function ConvertTo-HMLines($Arr) { return ((@($Arr) | Where-Object { "$_".Trim() }) -join "`r`n") }
 function ConvertFrom-HMLines([string]$Text) { return @($Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique) }
 
+# Anzeige unter dem USMT-Feld: gefunden / eingetragener Ordner ohne scanstate.exe (dann wird ein anderer verwendet)
+function Get-HMUsmtLabel([string]$Path) {
+    $u = Find-HMUsmt @{ Settings = [pscustomobject]@{ UsmtPath = $Path }; ToolRoot = $script:AppRoot }
+    $p = "$Path".Trim().TrimEnd('\')
+    if ($p -and -not (Test-Path -LiteralPath $p)) { return "ACHTUNG: eingetragener Ordner existiert nicht ($p)$(if ($u) { " - verwendet wird: $u" } else { ' - USMT nicht gefunden' })" }
+    if ($p -and $u -and -not "$u".StartsWith($p, [StringComparison]::OrdinalIgnoreCase)) { return "ACHTUNG: im eingetragenen Ordner liegt keine scanstate.exe - verwendet wird: $u (Feld leeren = automatisch suchen)" }
+    if ($u) { return "gefunden: $u" }
+    return 'USMT nicht gefunden - nur fuer das Modul Windows-Einstellungen noetig (Windows ADK bzw. BIN\USMT\amd64)'
+}
+
 function Show-SettingsDialog {
     param([string]$Tab = '')
     try {
@@ -52,9 +62,8 @@ function Show-SettingsDialog {
     $f.chkWlanClear.IsChecked = [bool]$s.WlanExportClearKey
     $f.txtSubnet.Text = "$($s.Network.SubnetMask)"
     $f.txtDns.Text = ConvertTo-HMLines $s.Network.DnsServers
-    $u0 = Find-HMUsmt @{ Settings = [pscustomobject]@{ UsmtPath = $f.txtUsmt.Text }; ToolRoot = $script:AppRoot }
-    $f.lblUsmt.Text = if ($u0) { "gefunden: $u0" } else { 'USMT nicht gefunden - nur fuer das Modul Windows-Einstellungen noetig (Windows ADK bzw. BIN\USMT\amd64)' }
-    $f.txtUsmt.Add_LostFocus({ $u = Find-HMUsmt @{ Settings = [pscustomobject]@{ UsmtPath = $script:SetDlg.F.txtUsmt.Text }; ToolRoot = $script:AppRoot }; $script:SetDlg.F.lblUsmt.Text = if ($u) { "gefunden: $u" } else { 'USMT nicht gefunden' } })
+    $f.lblUsmt.Text = Get-HMUsmtLabel $f.txtUsmt.Text
+    $f.txtUsmt.Add_LostFocus({ $script:SetDlg.F.lblUsmt.Text = Get-HMUsmtLabel $script:SetDlg.F.txtUsmt.Text })
     $f.btnRoot.Add_Click({
         $d = New-Object System.Windows.Forms.FolderBrowserDialog
         $d.Description = 'Backup-Ordner waehlen'
@@ -66,8 +75,7 @@ function Show-SettingsDialog {
         $d.Description = 'Ordner mit scanstate.exe / loadstate.exe (z.B. ...\User State Migration Tool\amd64)'
         if ($d.ShowDialog() -eq 'OK') {
             $script:SetDlg.F.txtUsmt.Text = $d.SelectedPath
-            $ok = Test-Path -LiteralPath (Join-Path $d.SelectedPath 'scanstate.exe')
-            $script:SetDlg.F.lblUsmt.Text = if ($ok) { "gefunden: $($d.SelectedPath)" } else { 'In diesem Ordner liegt keine scanstate.exe' }
+            $script:SetDlg.F.lblUsmt.Text = Get-HMUsmtLabel $d.SelectedPath
         }
     })
     $f.btnUsmtAdk.Add_Click({ Start-HMUsmtSetup; [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "Fortschritt in der Konsole. Das Feld 'USMT-Ordner' leer lassen - HUMig findet BIN\USMT\amd64 automatisch.", 'USMT', 'OK', 'Information') })
