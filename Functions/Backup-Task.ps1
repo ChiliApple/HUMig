@@ -287,7 +287,7 @@ if ($st -eq 'NoSpace') {
 $size = if ($res -and $res.SizeBytes) { Format-HMSize ([long]$res.SizeBytes) } else { '' }
 $dur = if ($res -and $res.Duration) { "$($res.Duration)" } else { '' }
 $msg = (@($size, $(if ($dur) { "Dauer $dur" })) | Where-Object { $_ }) -join ', '
-if ($openApps.Count -and $st -ne 'OK') { $msg += " - geoeffnet waren: $($openApps -join ', ')" }
+if ($openApps.Count) { $msg += $(if ($st -eq 'OK') { " - Hinweis: geoeffnet waren $($openApps -join ', ') (gesperrte Dateien wie Cookies fehlen evtl.)" } else { " - geoeffnet waren: $($openApps -join ', ')" }) }
 # Massenloeschung an der Quelle: typisches Zeichen fuer einen Verschluesselungstrojaner - immer melden
 $script:MassDelete = $false
 if ($ctx.Manifest -and $ctx.Manifest.MassDeleteAlert) {

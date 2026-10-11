@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## v2.0.118 - 2026-10-11
+### Geaendert
+- Browser-Profile (Edge, Chrome, Firefox), die trotz laufendem Browser kopiert werden (geplantes Backup oder *Trotzdem kopieren*): vom Browser gesperrte Dateien (Cookies, Sitzung) sind nur noch ein **Hinweis** statt Fehler - Backup, Windows-Meldung und Teams-Meldung bleiben "erfolgreich". Bei anderen Programmen bleiben nicht gesicherte Dateien ein Fehler
+- Knopf *Umzug ...* steht jetzt im Reiter Backup neben *Rueckmeldung*
+### Behoben
+- Geplantes Backup im Benutzer-Modus: unnoetige Warnung "ProgramData\HUMig nicht absicherbar ()" entfaellt (die Pruefung braucht Administratorrechte)
+
 ## v2.0.117 - 2026-10-11
 ### Teams-Meldung fuer geplante Profil-Backups
 - Neue Kategorien je Ziel: *Geplantes Profil-Backup fehlgeschlagen*, *uebersprungen* (Ziel nicht erreichbar), *mit Warnungen* (alle an) und *erfolgreich* (aus); Massenloeschung aus geplanten Profil-Backups wird ebenfalls gemeldet
