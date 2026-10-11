@@ -1,5 +1,14 @@
 ﻿# Changelog
 
+## v2.0.117 - 2026-10-11
+### Teams-Meldung fuer geplante Profil-Backups
+- Neue Kategorien je Ziel: *Geplantes Profil-Backup fehlgeschlagen*, *uebersprungen* (Ziel nicht erreichbar), *mit Warnungen* (alle an) und *erfolgreich* (aus); Massenloeschung aus geplanten Profil-Backups wird ebenfalls gemeldet
+- Das geplante Backup laeuft weiter im Benutzerkonto und kennt die Webhook-Adressen nicht: es schreibt ein Ereignis ins Anwendungsprotokoll (Quelle HUMig, 1100 OK, 1101 Warnung, 1102 Fehler, 1103 uebersprungen)
+- Eine Aufgabe unter SYSTEM (`\HUMig\Teams-Meldung Profil-Backups`) reagiert darauf (und prueft stuendlich), liest den Stand aus den Zeitplan-Dateien und meldet neue Laeufe an die Ziele - je Zeitplan hoechstens alle 10 Minuten, Texte aus Benutzer-Dateien werden entschaerft
+- Wird beim Speichern der Einstellungen eingerichtet bzw. entfernt; Skript geschuetzt in `%ProgramData%\HUMig\Notify\relay.ps1`, beim Start von HUMig als Administrator aktualisiert, Protokoll `relay.log`
+### Automatische Tests
+- Meldung je Status und Kategorie, Massenloeschung, Entschaerfen von Texten, Faelligkeit (neu, jung, hoechstens alle 10 Minuten), zusammengesetztes SYSTEM-Skript
+
 ## v2.0.116 - 2026-10-11
 ### Teams-Benachrichtigung: mehrere Ziele
 - Bis zu 10 Ziele (Chat oder Kanal) je PC, jedes mit Name, eigener Webhook-Adresse und eigenen Kategorien - nicht jeder bekommt alles (z.B. Fehler an den Kanal, Erfolg mit Details nur an den eigenen Chat)

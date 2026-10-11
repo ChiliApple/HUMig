@@ -200,6 +200,7 @@ function Show-SettingsDialog {
             catch { [void][System.Windows.MessageBox]::Show($S.Win, "Entfernen fehlgeschlagen: $($_.Exception.Message)", 'Teams', 'OK', 'Error'); return }
         }
         $S.TeamsList.RemoveAt($S.TeamsCur)
+        if ($t.Saved) { try { $rr = Update-HMNotifyRelay; if ($rr) { Out-Console $rr 'Info' } } catch { Out-Console "Teams-Meldung Profil-Backups: $($_.Exception.Message)" 'Warning' } }
         # gespeicherten Stand ohne dieses Ziel als Vergleich merken (Entfernen ist schon gespeichert)
         $cfgN = Get-HMNotifyConfig
         $S.TeamsOrig = Get-HMTeamsListKey $cfgN.Targets
@@ -433,6 +434,11 @@ function Show-SettingsDialog {
         if ($isAdmin -and (Get-HMTeamsListKey $script:SetDlg.TeamsList) -ne $script:SetDlg.TeamsOrig) {
             try { Set-HMNotifyTargets -Targets @($script:SetDlg.TeamsList); Out-Console "Teams-Benachrichtigung: $($script:SetDlg.TeamsList.Count) Ziel(e) auf diesem PC gespeichert (verschluesselt)." 'Success' }
             catch { [void][System.Windows.MessageBox]::Show($W, "Teams-Ziele nicht gespeichert: $($_.Exception.Message)", 'Einstellungen', 'OK', 'Error'); return }
+        }
+        # Weitergabe der geplanten Profil-Backups (Aufgabe unter SYSTEM) einrichten bzw. entfernen
+        if ($isAdmin) {
+            try { $rr = Update-HMNotifyRelay -Targets @($script:SetDlg.TeamsList); if ($rr) { Out-Console $rr 'Info' } }
+            catch { Out-Console "Teams-Meldung Profil-Backups nicht eingerichtet: $($_.Exception.Message)" 'Warning' }
         }
         $F.dgLinks.CommitEdit(); $F.dgLinks.CommitEdit()
         $h.Links = @(foreach ($r in $script:SetDlg.DtL.Rows) { if ($r.RowState -ne 'Deleted' -and "$($r.Name)".Trim() -and "$($r.Url)".Trim()) { [ordered]@{ Name = "$($r.Name)".Trim(); Url = "$($r.Url)".Trim(); CopySerial = [bool]($r.CopySerial -eq $true) } } })

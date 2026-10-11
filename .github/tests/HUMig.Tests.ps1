@@ -1003,3 +1003,68 @@ Describe 'Teams-Meldung Server-Backup (Kategorien, eine Karte je Lauf)' {
         New-HMSbNotifyMessage -Result (New-TestRes -Low) -ProfileName 'Gym' -Disk 'D1' -Reminders @('x') -Cats $c | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Teams-Meldung geplanter Profil-Backups (Weitergabe als SYSTEM)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Core-Notify.ps1')
+        $env:HUMIG_RELAY_NORUN = '1'
+        . (Join-Path $script:Root 'Functions\Notify-Relay.ps1')
+        function New-TestState([string]$St = 'OK', [switch]$Mass) {
+            [pscustomobject]@{ Key = 'S-1-5-21-1|abcdefgh'; Name = 'Taeglich'; Account = 'SCHULE\lehrer1'; Computer = 'NB001'; LastRun = '2026-10-11 12:00'
+                LastStatus = $St; LastMessage = '1,2 GB, Dauer 3 min'; LastBackup = 'E:\Backups\2026-10-11_1200_NB001_lehrer1'; LastMassDelete = [bool]$Mass }
+        }
+    }
+    AfterAll { Remove-Item Env:\HUMIG_RELAY_NORUN -ErrorAction SilentlyContinue }
+    It 'Standard: Fehler, uebersprungen, Warnung melden - Erfolg nicht' {
+        $c = Get-HMNotifyDefaultCats
+        (New-HMProfileNotifyMessage -State (New-TestState 'Error') -Cats $c).Level | Should -Be 'Error'
+        (New-HMProfileNotifyMessage -State (New-TestState 'Skipped') -Cats $c).Title | Should -Match 'uebersprungen'
+        (New-HMProfileNotifyMessage -State (New-TestState 'Warning') -Cats $c).Level | Should -Be 'Warning'
+        New-HMProfileNotifyMessage -State (New-TestState 'OK') -Cats $c | Should -BeNullOrEmpty
+    }
+    It 'Erfolg mit PbOK: Titel mit Zeitplan, Benutzer, PC; Details mit Backup-Ordner' {
+        $c = Get-HMNotifyDefaultCats; $c['PbOK'] = $true
+        $m = New-HMProfileNotifyMessage -State (New-TestState 'OK') -Cats $c
+        $m.Title | Should -Be "Profil-Backup 'Taeglich' von SCHULE\lehrer1 an NB001: erfolgreich"
+        $m.Level | Should -Be 'OK'
+        ($m.Lines -join '|') | Should -Match 'Backup: E:\\Backups'
+        $c['Details'] = $false
+        ((New-HMProfileNotifyMessage -State (New-TestState 'OK') -Cats $c).Lines -join '|') | Should -Not -Match 'Backup:'
+    }
+    It 'Massenloeschung wird als Fehler gemeldet, auch wenn Erfolg/Warnung aus sind' {
+        $c = Get-HMNotifyDefaultCats; $c['PbWarning'] = $false
+        $m = New-HMProfileNotifyMessage -State (New-TestState 'Warning' -Mass) -Cats $c
+        $m.Level | Should -Be 'Error'
+        $m.Title | Should -Match 'MASSENLOESCHUNG'
+        $c['MassDelete'] = $false
+        New-HMProfileNotifyMessage -State (New-TestState 'Warning' -Mass) -Cats $c | Should -BeNullOrEmpty
+    }
+    It 'Text aus der Benutzer-Datei wird entschaerft (Steuerzeichen, Links, Laenge)' {
+        ConvertTo-HMNotifySafeText "a`tb[Link](https://x)" | Should -Be 'a bLink(https://x)'
+        (ConvertTo-HMNotifySafeText ('x' * 1000)).Length | Should -BeLessThan 410
+    }
+    It 'Weitergabe nur noetig, wenn ein Ziel Profil-Backup-Kategorien hat' {
+        $c = Get-HMNotifyDefaultCats
+        Test-HMNotifyRelayNeeded @([pscustomobject]@{ Cats = $c }) | Should -BeTrue
+        foreach ($n in @('PbError', 'PbSkipped', 'PbWarning', 'PbOK')) { $c[$n] = $false }
+        Test-HMNotifyRelayNeeded @([pscustomobject]@{ Cats = $c }) | Should -BeFalse
+        Test-HMNotifyRelayNeeded @() | Should -BeFalse
+    }
+    It 'meldet nur neue, junge Laeufe und hoechstens alle 10 Minuten je Zeitplan' {
+        $now = [datetime]'2026-10-11 12:05'
+        $r = New-TestState
+        Test-HMRelayDue $r $null $now | Should -BeTrue
+        Test-HMRelayDue $r ([pscustomobject]@{ Run = '2026-10-11 12:00'; Sent = '' }) $now | Should -BeFalse
+        Test-HMRelayDue $r ([pscustomobject]@{ Run = '2026-10-11 11:00'; Sent = '2026-10-11 12:01:00' }) $now | Should -BeFalse
+        Test-HMRelayDue $r ([pscustomobject]@{ Run = '2026-10-11 11:00'; Sent = '2026-10-11 11:01:00' }) $now | Should -BeTrue
+        Test-HMRelayDue $r $null ([datetime]'2026-10-11 15:00') | Should -BeFalse
+        $r.LastRun = 'Unsinn'; Test-HMRelayDue $r $null $now | Should -BeFalse
+    }
+    It 'zusammengesetztes SYSTEM-Skript ist fehlerfrei' {
+        $t = Get-HMNotifyRelayText
+        $e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($t, [ref]$null, [ref]$e)
+        @($e).Count | Should -Be 0
+        $t | Should -Match 'function Invoke-HMNotifyRelay'
+        $t | Should -Match 'function Send-HMTeamsMessage'
+    }
+}

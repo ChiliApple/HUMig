@@ -21,6 +21,10 @@ $script:HMNotifyCats = [ordered]@{
     SbError    = @('Server-Backup fehlgeschlagen / abgebrochen', $true)
     SbWarning  = @('Server-Backup mit Warnungen', $true)
     SbOK       = @('Server-Backup erfolgreich', $false)
+    PbError    = @('Geplantes Profil-Backup fehlgeschlagen', $true)
+    PbSkipped  = @('Geplantes Profil-Backup uebersprungen (Ziel nicht erreichbar, z.B. USB nicht angesteckt)', $true)
+    PbWarning  = @('Geplantes Profil-Backup mit Warnungen', $true)
+    PbOK       = @('Geplantes Profil-Backup erfolgreich', $false)
     Health     = @('Plattenzustand (SMART) auffaellig', $true)
     Reminder   = @('Erinnerungen: Plattenwechsel / Archiv-Platte', $true)
     Space      = @('Speicherplatz auf der Backup-Platte knapp', $true)
@@ -63,6 +67,13 @@ function Get-HMNotifyDefaultCats {
 }
 
 $script:HMNotifyMaxTargets = 10
+$script:HMNotifySelfDir = $PSScriptRoot
+# Weitergabe der geplanten Profil-Backups (laufen im Benutzerkonto, duerfen die Adressen nicht lesen): das Backup schreibt
+# ein Ereignis (Anwendung, Quelle HUMig, 1100-1103), eine Aufgabe unter SYSTEM reagiert darauf und meldet nach Teams.
+$script:HMNotifyRelayTask = 'Teams-Meldung Profil-Backups'
+$script:HMNotifyRelayPath = '\HUMig\'
+$script:HMNotifyRelayCats = @('PbError', 'PbSkipped', 'PbWarning', 'PbOK')
+$script:HMNotifyRelayQuery = "<QueryList><Query Id=`"0`" Path=`"Application`"><Select Path=`"Application`">*[System[Provider[@Name='HUMig'] and (EventID=1100 or EventID=1101 or EventID=1102 or EventID=1103)]]</Select></Query></QueryList>"
 
 # Kategorien aus einem gelesenen Objekt/Hashtable uebernehmen (unbekannte Namen ignorieren, fehlende = Standard)
 function ConvertTo-HMNotifyCats($Src) {
@@ -164,6 +175,97 @@ function Remove-HMNotifyTarget([string]$Id) {
     $c = Get-HMNotifyConfig
     if ($c.Error) { throw "Teams-Ziele nicht lesbar: $($c.Error)" }
     Set-HMNotifyTargets -Targets @(@($c.Targets) | Where-Object { "$($_.Id)" -ne $Id })
+}
+
+# Text aus einer Datei des Benutzers fuer die Karte: Steuerzeichen und Markdown-Links entfernen, Laenge begrenzen
+function ConvertTo-HMNotifySafeText([string]$Text, [int]$Max = 400) {
+    $t = ("$Text" -replace '[\x00-\x1F]', ' ' -replace '[\[\]]', '').Trim()
+    if ($t.Length -gt $Max) { $t = $t.Substring(0, $Max) + ' ...' }
+    return $t
+}
+
+# Teams-Meldung eines geplanten Profil-Backups (Stand aus der Zeitplan-Datei des Benutzers) nach den Kategorien eines Ziels.
+# $State: Name, Account, Computer, LastRun, LastStatus (OK|Warning|Skipped|Error), LastMessage, LastBackup, LastMassDelete
+# Rueckgabe: Title, Lines, Level - oder $null, wenn keine eingeschaltete Kategorie betroffen ist
+function New-HMProfileNotifyMessage {
+    param($State, $Cats = $null)
+    $on = { param($n) if ($Cats -and $Cats.ContainsKey($n)) { [bool]$Cats[$n] } else { Test-HMNotifyCat $null $n } }
+    $st = "$($State.LastStatus)"
+    $cat = switch ($st) { 'OK' { 'PbOK' } 'Warning' { 'PbWarning' } 'Skipped' { 'PbSkipped' } default { 'PbError' } }
+    $lv = switch ($st) { 'OK' { 'OK' } 'Warning' { 'Warning' } 'Skipped' { 'Warning' } default { 'Error' } }
+    $mass = [bool]$State.LastMassDelete -and (& $on 'MassDelete')
+    $main = & $on $cat
+    if (-not $main -and -not $mass) { return $null }
+    if ($mass) { $lv = 'Error' }
+    $stTxt = switch ($st) { 'OK' { 'erfolgreich' } 'Warning' { 'mit Warnungen' } 'Skipped' { 'uebersprungen' } default { 'FEHLGESCHLAGEN' } }
+    if ($mass) { $stTxt = 'MASSENLOESCHUNG ERKANNT' }
+    $who = ConvertTo-HMNotifySafeText "$($State.Account)" 80
+    $pc = ConvertTo-HMNotifySafeText "$($State.Computer)" 40
+    $lines = New-Object System.Collections.Generic.List[string]
+    if ($mass) { $lines.Add('An der Quelle sind auf einmal ungewoehnlich viele Dateien verschwunden - typisches Zeichen fuer einen Verschluesselungstrojaner. PC pruefen!') }
+    $m = ConvertTo-HMNotifySafeText "$($State.LastMessage)"
+    if ($m) { $lines.Add($m) }
+    if (& $on 'Details') {
+        if ("$($State.LastRun)") { $lines.Add("Zeitpunkt: $(ConvertTo-HMNotifySafeText "$($State.LastRun)" 20)") }
+        if ("$($State.LastBackup)") { $lines.Add("Backup: $(ConvertTo-HMNotifySafeText "$($State.LastBackup)" 260)") }
+    }
+    return [pscustomobject]@{ Title = "Profil-Backup '$(ConvertTo-HMNotifySafeText "$($State.Name)" 80)' von $who an ${pc}: $stTxt"; Lines = @($lines.ToArray()); Level = $lv }
+}
+
+# Braucht eines der Ziele die Weitergabe der Profil-Backups?
+function Test-HMNotifyRelayNeeded([object[]]$Targets) {
+    foreach ($t in @($Targets | Where-Object { $_ })) { foreach ($n in $script:HMNotifyRelayCats) { if (Test-HMNotifyCat $t $n) { return $true } } }
+    return $false
+}
+
+# Inhalt des Weitergabe-Skripts (dieses Modul + Functions\Notify-Relay.ps1, ohne Abhaengigkeiten)
+function Get-HMNotifyRelayText {
+    $a = [System.IO.File]::ReadAllText((Join-Path $script:HMNotifySelfDir 'Core-Notify.ps1')) -replace '(?m)^#Requires.*$', ''
+    $b = [System.IO.File]::ReadAllText((Join-Path $script:HMNotifySelfDir 'Notify-Relay.ps1')) -replace '(?m)^#Requires.*$', ''
+    return ("#Requires -Version 5.1`r`n# HUMig: Teams-Meldung geplanter Profil-Backups (erzeugt von HUMig, wird bei jedem Speichern/Start ersetzt)`r`n" + $a + "`r`n" + $b)
+}
+
+# Weitergabe einrichten/entfernen (Administrator). -RefreshOnly: nur ein vorhandenes Skript auf den Stand dieser Version bringen.
+# Rueckgabe: Text fuer die Konsole ('' = nichts geaendert)
+function Update-HMNotifyRelay {
+    param([object[]]$Targets = $null, [switch]$RefreshOnly)
+    $dir = Join-Path $env:ProgramData 'HUMig\Notify'
+    $file = Join-Path $dir 'relay.ps1'
+    $task = Get-ScheduledTask -TaskPath $script:HMNotifyRelayPath -TaskName $script:HMNotifyRelayTask -ErrorAction SilentlyContinue
+    if ($RefreshOnly) {
+        if (-not $task) { return '' }
+        $txt = Get-HMNotifyRelayText
+        if ((Test-Path -LiteralPath $file) -and [System.IO.File]::ReadAllText($file) -ceq $txt) { return '' }
+        [void](Protect-HMDataDir)
+        [System.IO.File]::WriteAllText($file, $txt, (New-Object System.Text.UTF8Encoding($true)))
+        return 'Teams-Meldung Profil-Backups: Skript auf den Stand dieser Version gebracht'
+    }
+    if ($null -eq $Targets) { $Targets = @((Get-HMNotifyConfig).Targets) }
+    if (-not (Test-HMNotifyRelayNeeded $Targets)) {
+        if (-not $task) { return '' }
+        Unregister-ScheduledTask -TaskPath $script:HMNotifyRelayPath -TaskName $script:HMNotifyRelayTask -Confirm:$false -ErrorAction Stop
+        if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
+        return 'Teams-Meldung Profil-Backups: ausgeschaltet (Aufgabe entfernt)'
+    }
+    # %ProgramData%\HUMig absichern: das Skript laeuft als SYSTEM, Benutzer duerfen es nicht austauschen
+    [void](Protect-HMDataDir)
+    New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop | Out-Null
+    [System.IO.File]::WriteAllText($file, (Get-HMNotifyRelayText), (New-Object System.Text.UTF8Encoding($true)))
+    # Ereignisquelle anlegen (Benutzer duerfen ins Anwendungsprotokoll schreiben, aber keine Quelle anlegen)
+    $ex = $false; try { $ex = [System.Diagnostics.EventLog]::SourceExists('HUMig') } catch { }
+    if (-not $ex) { New-EventLog -LogName Application -Source 'HUMig' -ErrorAction Stop }
+    $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$file`""
+    $cls = Get-CimClass -ClassName MSFT_TaskEventTrigger -Namespace 'Root/Microsoft/Windows/TaskScheduler'
+    $trg = New-CimInstance -CimClass $cls -ClientOnly
+    $trg.Enabled = $true
+    $trg.Subscription = $script:HMNotifyRelayQuery
+    $trgs = @($trg)
+    # zusaetzlich stuendlich nachsehen (falls das Ereignis im Benutzerkonto nicht geschrieben werden konnte)
+    try { $trgs += New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddHours((Get-Date).Hour + 1)) -RepetitionInterval (New-TimeSpan -Hours 1) -ErrorAction Stop } catch { $null = $_ }
+    $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -MultipleInstances Queue
+    $pr = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    Register-ScheduledTask -TaskName $script:HMNotifyRelayTask -TaskPath $script:HMNotifyRelayPath -Action $a -Trigger $trgs -Principal $pr -Settings $set -Description 'HUMig: meldet geplante Profil-Backups (Ereignis HUMig 1100-1103, zusaetzlich stuendlich) an die Teams-Ziele dieses PCs. Verwalten: HUMig > Einstellungen > Allgemein > Teams-Benachrichtigung.' -Force -ErrorAction Stop | Out-Null
+    return $(if ($task) { 'Teams-Meldung Profil-Backups: Aufgabe aktualisiert' } else { 'Teams-Meldung Profil-Backups: eingerichtet (Aufgabe \HUMig\Teams-Meldung Profil-Backups, laeuft als SYSTEM)' })
 }
 
 # Nachricht als Adaptive Card (Format der Workflows-Vorlage: attachments[].content). Level: OK | Warning | Error | Info
