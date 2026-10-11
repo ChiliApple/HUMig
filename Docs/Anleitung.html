@@ -108,6 +108,8 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <li><b>Start.cmd</b> ausführen – fragt nach Administratorrechten. Dabei entsteht <b>HUMig.exe</b>: ab dann damit starten (kein Konsolenfenster, anheftbar).</li>
     <li>Oben den Backup-Ordner prüfen (Standard: <code>BACKUPS\</code> neben dem Tool) und bei Bedarf einen <b>Standort</b> anlegen (siehe <a href="#standorte">Standorte</a>).</li>
   </ol>
+  <h3 id="assistent">Umzugs-Assistent</h3>
+  <p><span class="ui m">Umzug …</span> oben rechts führt Schritt für Schritt durch einen Umzug: <b>1</b> alter PC und Benutzer (im Hauptfenster wählen, <i>Auswahl übernehmen</i>) · <b>2</b> Vorab-Prüfung · <b>3</b> Backup · <b>4</b> neuer PC und Zielbenutzer · <b>5</b> Restore – das Backup aus Schritt 3 wird automatisch markiert, fehlende Programme werden zuerst angeboten · <b>6</b> Checkliste und <i>Umzug abschließen</i>. Nach Backup und Restore geht es von selbst zum nächsten Schritt. Das Fenster kann offen bleiben, während man im Hauptfenster arbeitet; geschlossen bleibt der Stand erhalten (<code>%APPDATA%\HUMig\umzug.json</code>) und der Assistent macht beim nächsten Öffnen dort weiter – auch nach einem Neustart von HUMig. <i>Neu beginnen</i> verwirft nur den Stand, nie ein Backup.</p>
   <h3>Profil umziehen (alter PC → neuer PC)</h3>
   <ol class="steps">
     <li><b>Alter PC:</b> Computer wählen (<span class="ui">Lokal</span> oder Name eintippen + <span class="ui">Verbinden</span>), Benutzer wählen.</li>
@@ -123,6 +125,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h2><span class="n">2</span>Die Oberfläche</h2>
   <table>
     <tr><th style="width:230px">Bereich</th><th>Bedeutung</th></tr>
+    <tr><td><span class="ui m">Umzug …</span></td><td><a href="#assistent">Umzugs-Assistent</a> – geführt vom alten zum neuen PC, fortsetzbar.</td></tr>
     <tr><td><span class="ui">Update</span></td><td>Links: neue Version laden und prüfen (Tool startet neu, eigene Daten bleiben). Wird gelb, wenn im gewählten <a href="#update">Kanal</a> eine neuere Version da ist. Rechts: andere Version / Vorversion, Update-Einstellungen, GitHub-Token.</td></tr>
     <tr><td>Reiter <b>Status</b></td><td>Startseite – alles auf einen Blick: <b>Wichtig</b> (offene Hinweise), Backup-Zeitpläne (letzter Lauf, letzter Erfolg, nächster Lauf), letzte Backups je PC und Benutzer, Server-Backup (letzte Sicherung, Alter und <a href="#plattenzustand">Zustand</a> je Platte, Archiv fällig) und App-Updates der letzten 7 Tage. <span class="ui">Oeffnen</span> springt in den passenden Reiter. Hinweise beim Start stehen auch in der Ausgabe: Zeitplan seit 8 Tagen ohne Erfolg (<code>StatusStaleDays</code> in <code>settings.json</code>), letzter Lauf fehlgeschlagen oder Aufgabe fehlt, Server-Platte länger nicht gesichert als die Warnfrist des Profils („Platte wechseln“), Archiv fällig, Massenlöschung. Ausblenden: Einstellungen › Allgemein. HUMig öffnet beim Start den zuletzt gewählten Reiter.</td></tr>
     <tr><td>Benutzer-Auswahl</td><td>Hinter dem Benutzer steht die ungefähre Profilgröße (<i>· ~12,3 GB</i>) aus dem letzten Backup bzw. der letzten Messung. Rechts daneben eine Ampel: <b>gelb</b> = großes Profil (ab 20 GB), <b>orange</b> = knapp (über 80 % des freien Platzes am Backup-Ziel), <b>rot</b> = passt nicht aufs Ziel.</td></tr>

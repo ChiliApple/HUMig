@@ -153,7 +153,7 @@ $script:SplashShown = Get-Date
 # ============================================================================
 # FUNKTIONEN LADEN
 # ============================================================================
-foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Core-Notify.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1', 'AppUpdates-Engine.ps1', 'UI-AppUpdates.ps1', 'UI-Status.ps1', 'UI-Monitor.ps1')) {
+foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Core-Notify.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1', 'AppUpdates-Engine.ps1', 'UI-AppUpdates.ps1', 'UI-Status.ps1', 'UI-Monitor.ps1', 'UI-Wizard.ps1')) {
     $mp = Join-Path $script:AppRoot "Functions\$mod"
     try { . $mp } catch { [System.Windows.MessageBox]::Show("$mod konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null; exit 1 }
 }
@@ -272,7 +272,7 @@ if ($script:AppIcon) { $script:Window.Icon = $script:AppIcon }
 
 function Get-UI([string]$n) { $e = $script:Window.FindName($n); if (-not $e) { Write-Host "[WARN] UI '$n' fehlt" -ForegroundColor Yellow }; return $e }
 $ui = @{}
-foreach ($n in @('brdMonBackup', 'brdMonRestore', 'brdMonServer', 'tabStatus', 'pnlStatus', 'btnStatusRefresh', 'lblStatusTime', 'imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
+foreach ($n in @('btnWizard', 'brdMonBackup', 'brdMonRestore', 'brdMonServer', 'tabStatus', 'pnlStatus', 'btnStatusRefresh', 'lblStatusTime', 'imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
     'txtBackupRoot', 'btnBrowseRoot', 'btnOpenRoot', 'lblFree', 'tabMain', 'cmbPreset', 'btnAllOn', 'btnAllOff', 'btnPresetSave', 'pnlBackupModules', 'lstExtra', 'btnExtraAdd',
     'btnExtraDel', 'chkMinProfileExc', 'chkNoProfileFileExc', 'chkMinSystemExc', 'chkNoSystemFileExc', 'btnEditExceptions', 'cmbThreads', 'btnPrecheck',
     'btnProfileSize', 'btnBackup', 'btnCancel', 'btnRefreshBackups', 'btnOpenBackup', 'btnDeleteBackup', 'btnCleanupBackups', 'btnEmptyDeleted', 'dgBackups', 'lblRestoreInfo',
@@ -1046,6 +1046,7 @@ function Start-BackupJob([hashtable]$Ctx) {
         }
         Update-BackupList; Update-BackupRootInfo; Update-IncrementalInfo
         if ($script:Settings.OverviewAuto -ne $false) { Update-HMBackupOverview -Quiet }
+        try { Update-HMWizardAfterJob 'Backup' $j "$($script:LastBackupCtx.BackupPath)" } catch { }
         $rep = if ($j.Result -and $j.Result.Status -and $script:LastBackupCtx.BackupPath) { Join-Path $script:LastBackupCtx.BackupPath 'Bericht_Backup.html' } else { $null }
         if ($rep -and (Test-Path -LiteralPath $rep)) { Out-Console "Protokoll: $rep  (Reiter Restore > Protokoll)" 'Info' }
         # Massenloeschung erkannt: Teams-Benachrichtigung (wenn auf diesem PC eingetragen, nur als Administrator)
@@ -1396,6 +1397,7 @@ function Start-RestoreJob([hashtable]$Ctx) {
         Connect-Target
         if ($script:Settings.OverviewAuto -ne $false) { Update-HMBackupOverview -Quiet }
         if ($j.Result -and [int]$j.Result.MissingFiles -gt 0) { Out-Console "Kontrolle nach dem Restore: $([int]$j.Result.MissingFiles) Datei(en) aus dem Backup fehlen am Ziel - Liste: $($j.Result.MissingList)" 'Warning' }
+        try { Update-HMWizardAfterJob 'Restore' $j } catch { }
         $skNames = @(@($script:RestoreSkippedApps) | Where-Object { $_ } | ForEach-Object { "$($_.Name)" })
         if (-not $j.Cancel) { Set-HMRestoreChecksForSkippedApps } else { $script:RestoreSkippedApps = @() }
         if (-not $j.Cancel -and $j.Result -and $j.Result.Report -and (Test-Path -LiteralPath "$($j.Result.Report)") -and $script:Settings.RestoreChecklistAuto -ne $false) {
@@ -1770,6 +1772,7 @@ function Show-HMManual {
     }
 }
 $ui.btnAbout.Add_Click({ Show-About })
+$ui.btnWizard.Add_Click({ Show-HMWizard })
 $ui.btnHelp.Add_Click({ Show-HMManual })
 $script:Window.Add_PreviewKeyDown({ param($s, $e) if ("$($e.Key)" -eq 'F1') { $e.Handled = $true; Show-HMManual } })
 $ui.imgLogo.Add_MouseLeftButtonUp({ Show-About })
