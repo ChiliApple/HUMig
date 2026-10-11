@@ -5,6 +5,8 @@
   "RetentionDays": 30,
   "RetentionKeepPerUser": 3,
   "DeletedKeepDays": 90,
+  "DeletedMassPercent": 20,
+  "DeletedMassMin": 50,
   "UsmtPath": "",
   "SoftwareFolder": "",
   "DriverFolder": "",

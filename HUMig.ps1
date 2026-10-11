@@ -1133,6 +1133,12 @@ function Update-BackupList {
             Computer = $b.Computer; Benutzer = $(if ($b.Account) { $b.Account } else { $b.User })
             Groesse = $(if ($b.SizeBytes) { Format-HMSize $b.SizeBytes } else { '' })
             Status = $b.Status; Anzahl = @($b.Modules).Count; Name = $b.Name; Info = $b
+            # beiseitegelegte (an der Quelle geloeschte) Dateien laut manifest.json; Massenloeschung deutlich markieren
+            Geloescht = $(
+                $gx = ''
+                if ($b.Manifest -and $b.Manifest.Deleted -and [int]$b.Manifest.Deleted.Files -gt 0) { $gx = "$([int]$b.Manifest.Deleted.Files) ($(Format-HMSize ([long]$b.Manifest.Deleted.Bytes)))" }
+                if ($b.Manifest -and $b.Manifest.MassDeleteAlert) { $gx = ("ALARM Massenloeschung " + $gx).Trim() }
+                $gx)
         }
     }
     $ui.dgBackups.ItemsSource = @($rows)
@@ -1169,6 +1175,8 @@ $ui.dgBackups.Add_SelectionChanged({
     if ($b.Legacy) { $txt += '  |  Format der Vorgaengerversion' }
     if ($b.Manifest -and $b.Manifest.SourceOS) { $txt += "  |  Quelle: $($b.Manifest.SourceOS)" }
     if ($b.Manifest -and $b.Manifest.OneDriveFolders) { $txt += "  |  OneDrive-Ordner nicht enthalten" }
+    if ($b.Manifest -and $b.Manifest.Deleted -and [int]$b.Manifest.Deleted.Files -gt 0) { $txt += "  |  $([int]$b.Manifest.Deleted.Files) beiseitegelegte (am Quell-PC geloeschte) Dateien werden nicht zurueckgespielt" }
+    if ($b.Manifest -and $b.Manifest.MassDeleteAlert) { $txt += "  |  ACHTUNG: Massenloeschung an der Quelle erkannt (typisches Zeichen fuer einen Verschluesselungstrojaner) - Stand pruefen" }
     $ui.lblRestoreInfo.Text = $txt
     Update-RestoreTargetLabel
 })
@@ -1219,8 +1227,14 @@ $ui.btnEmptyDeleted.Add_Click({
         $fmt = { param($x) if ("$x" -match '^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})') { "$($Matches[3]).$($Matches[2]).$($Matches[1]) $($Matches[4]):$($Matches[5])" } else { "$x" } }
         if (-not (Confirm-Action "Backup '$($c.Name)': $($r.Files) beiseitegelegte Datei(en) ($(Format-HMSize $r.Bytes)) aus $($r.Runs) Lauf/Laeufen$(if ($r.First) { " ($(& $fmt $r.First) bis $(& $fmt $r.Last))" }).`n`nDas sind Dateien, die am Quell-PC geloescht wurden. Endgueltig loeschen?`n`nDanach sind sie auch ueber 'Im Backup suchen' nicht mehr auffindbar. Der aktuelle Stand des Backups bleibt unveraendert." 'Geloeschte leeren')) { return }
         Out-Console "Loesche beiseitegelegte Dateien in $($c.Name) ..." 'Warning'
-        Invoke-AsyncCommand -ScriptBlock { param($eng, $p) . $eng; Remove-HMBackupFolder $p } -ArgumentList @($script:Engine, $c.Dir) -TimeoutSec 3600 -OnComplete {
-            param($r2) Out-Console $(if ($r2 -eq 'OK') { 'Beiseitegelegte Dateien geloescht' } else { "$r2" }) $(if ($r2 -eq 'OK') { 'Success' } else { 'Error' }); Update-BackupRootInfo
+        Invoke-AsyncCommand -ScriptBlock {
+            param($eng, $p)
+            . $eng
+            $r = Remove-HMBackupFolder $p
+            try { Update-HMManifestDeleted (Split-Path $p -Parent) } catch { }
+            $r
+        } -ArgumentList @($script:Engine, $c.Dir) -TimeoutSec 3600 -OnComplete {
+            param($r2) Out-Console $(if ($r2 -eq 'OK') { 'Beiseitegelegte Dateien geloescht' } else { "$r2" }) $(if ($r2 -eq 'OK') { 'Success' } else { 'Error' }); Update-BackupList; Update-BackupRootInfo
         }
     }
 })

@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.0.102 - 2026-10-11
+### Schutz vor Massenloeschung (Verschluesselungstrojaner)
+- Fehlen in einem gesicherten Ordner auf einmal ungewoehnlich viele Dateien (Standard: mehr als 20 % und mindestens 50), legt das fortlaufende Backup dort nichts beiseite und warnt deutlich - das ist ein typisches Zeichen fuer einen Verschluesselungstrojaner (oder einen verschobenen Ordner). Warnung im Protokoll, als Benachrichtigung des Zeitplans, in der Backup-Liste und beim Restore. Schwelle: Einstellungen > Allgemein (0 = aus)
+### Geloeschte Dateien - Bedienung
+- Backup-Liste: neue Spalte *Geloescht* (Anzahl und Groesse der beiseitegelegten Dateien, *ALARM Massenloeschung*)
+- Restore: Hinweis in der Info-Zeile, im Protokoll und in der *Vorschau*, wie viele beiseitegelegte Dateien nicht zurueckgespielt werden
+- *Im Backup suchen*: Knopf *An Originalort zurueck* - markierte Treffer (auch geloeschte) an ihren urspruenglichen Ort auf den gewaehlten Computer, bei gewaehltem Benutzer in dessen Profil; vorhandene Dateien werden nie ueberschrieben
+- *Geloeschte leeren* aktualisiert die Anzeige in der Backup-Liste
+
 ## v2.0.101 - 2026-10-11
 ### Fortlaufendes Backup: geloeschte Dateien
 - Am Quell-PC geloeschte Dateien werden im weitergefuehrten Backup nach `_GELOESCHT\<Datum_Zeit>` verschoben (beiseitegelegt). Der Restore bringt damit nur noch den aktuellen Stand zurueck, verloren geht nichts. Bisher blieben sie im Backup und kamen beim Restore wieder

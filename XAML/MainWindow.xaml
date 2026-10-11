@@ -370,6 +370,7 @@
                                     <DataGridTextColumn Header="Groesse" Binding="{Binding Groesse}" Width="Auto"/>
                                     <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="Auto"/>
                                     <DataGridTextColumn Header="Module" Binding="{Binding Anzahl}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Geloescht" Binding="{Binding Geloescht}" Width="Auto"/>
                                     <DataGridTextColumn Header="Ordner" Binding="{Binding Name}" Width="Auto"/>
                                 </DataGrid.Columns>
                             </DataGrid>

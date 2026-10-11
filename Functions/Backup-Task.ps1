@@ -277,6 +277,11 @@ $size = if ($res -and $res.SizeBytes) { Format-HMSize ([long]$res.SizeBytes) } e
 $dur = if ($res -and $res.Duration) { "$($res.Duration)" } else { '' }
 $msg = (@($size, $(if ($dur) { "Dauer $dur" })) | Where-Object { $_ }) -join ', '
 if ($openApps.Count -and $st -ne 'OK') { $msg += " - geoeffnet waren: $($openApps -join ', ')" }
+# Massenloeschung an der Quelle: typisches Zeichen fuer einen Verschluesselungstrojaner - immer melden
+if ($ctx.Manifest -and $ctx.Manifest.MassDeleteAlert) {
+    $msg = "ACHTUNG: ungewoehnlich viele Dateien an der Quelle verschwunden - typisches Zeichen fuer einen Verschluesselungstrojaner. Quell-PC pruefen! $msg"
+    if ($st -eq 'OK') { $st = 'Warning' }
+}
 
 # ---- Aufbewahrung (nur nach erfolgreichem Lauf) ----
 $ret = $script:Def.Retention

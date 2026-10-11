@@ -51,6 +51,10 @@
                                 <TextBox x:Name="txtDeletedKeep" Style="{DynamicResource DarkTextBox}" Width="60" ToolTip="Fortlaufendes Backup: an der Quelle geloeschte Dateien liegen im Backup unter _GELOESCHT und werden nach so vielen Tagen entfernt. 0 = nie automatisch entfernen"/>
                                 <TextBlock Text="Tage: an der Quelle geloeschte Dateien im fortlaufenden Backup aufheben (_GELOESCHT, 0 = nie entfernen)" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="6,0,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <TextBox x:Name="txtDeletedMass" Style="{DynamicResource DarkTextBox}" Width="60" ToolTip="Fehlen in einem Ordner auf einmal mehr als so viele Prozent der Dateien (und mind. 50), legt HUMig nichts beiseite und warnt - typisches Zeichen fuer einen Verschluesselungstrojaner. 0 = Schutz aus"/>
+                                <TextBlock Text="% : Warnung bei Massenloeschung (Schutz vor Verschluesselungstrojanern, 0 = aus)" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="6,0,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
                         </StackPanel>
                         <TextBlock Grid.Row="3" Text="USMT-Ordner (scanstate.exe):" Style="{DynamicResource Lbl}"/>
                         <DockPanel Grid.Row="3" Grid.Column="1" Margin="0,0,0,2">

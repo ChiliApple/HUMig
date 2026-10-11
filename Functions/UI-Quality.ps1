@@ -113,9 +113,12 @@ function Start-HMRestorePreviewUi {
         if (-not $r) { return }
         $rows = New-Object System.Collections.Generic.List[object]
         foreach ($x in @($r.Rows)) { $rows.Add(@($x.Aktion, $x.Modul, $x.Ziel, $x.Groesse, $x.Backup, $x.Ziel_Datei)) }
-        if (-not $rows.Count) { Out-Console 'Vorschau: am Ziel ist alles bereits gleich (nichts zu tun).' 'Success'; return }
+        $sum = "$($r.Summary)"
+        $b = $script:SelectedBackup
+        if ($b -and $b.Manifest -and $b.Manifest.Deleted -and [int]$b.Manifest.Deleted.Files -gt 0) { $sum += " | $([int]$b.Manifest.Deleted.Files) beiseitegelegte (am Quell-PC geloeschte) Dateien werden nicht zurueckgespielt" }
+        if (-not $rows.Count) { Out-Console "Vorschau: am Ziel ist alles bereits gleich (nichts zu tun).$(if ($sum -ne "$($r.Summary)") { $sum.Substring("$($r.Summary)".Length) })" 'Success'; return }
         Show-DataGridWindow -Title 'Restore-Vorschau' -Columns @('Aktion', 'Modul', 'Ziel', 'Groesse', 'Stand Backup', 'Stand Ziel') `
-            -ColumnTypes @{ Groesse = [long]; 'Stand Backup' = [datetime]; 'Stand Ziel' = [datetime] } -Rows $rows.ToArray() -Sort 'Aktion ASC, Ziel ASC' -CountText $r.Summary -Width 1300 -Height 640
+            -ColumnTypes @{ Groesse = [long]; 'Stand Backup' = [datetime]; 'Stand Ziel' = [datetime] } -Rows $rows.ToArray() -Sort 'Aktion ASC, Ziel ASC' -CountText $sum -Width 1300 -Height 640
     }
 }
 
