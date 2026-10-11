@@ -366,7 +366,7 @@
                             <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                                 <TextBlock Text="BACKUPS" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                 <Button x:Name="btnRefreshBackups" Content="Aktualisieren" Style="{StaticResource BtnDefault}"/>
-                                <Button x:Name="btnOpenBackup" Content="Ordner oeffnen" Style="{StaticResource BtnDefault}"/>
+                                <Button x:Name="btnOpenBackup" Content="Ordner oeffnen" Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup im Explorer oeffnen - ohne Auswahl den Backup-Ordner"/>
                                 <Button x:Name="btnReport" Content="Protokoll" Style="{StaticResource BtnTeal}" ToolTip="Backup-/Restore-Protokoll (HTML) des markierten Backups oeffnen - druckbar, auch als PDF"/>
                                 <Button x:Name="btnVerifyBackup" Content="Backup pruefen" Style="{StaticResource BtnBlue}" ToolTip="Alle Dateien des markierten Backups gegen den Pruefsummen-Katalog pruefen (beschaedigt? fehlt etwas?). Ohne Katalog: Rechtsklick = Katalog jetzt erstellen"/>
                                 <Button x:Name="btnCompare" Content="Vergleichen ..." Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup mit einem anderen vergleichen: was ist neu, was fehlt, was hat sich geaendert"/>
