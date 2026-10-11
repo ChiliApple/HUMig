@@ -567,8 +567,9 @@ function New-HMSbNotifyMessage {
     $notes = @(@($Result.Notes) | Where-Object { "$_".Trim() } | ForEach-Object { "$_" })
     $diskNotes = @($notes | Where-Object { $_ -match '^Platte: ' })
     $other = @($notes | Where-Object { $_ -notmatch '^Platte: ' })
+    $warnNotes = @($other | Where-Object { $_ -notmatch '^Hinweis: ' })   # reine Hinweise (z.B. VM offline gesichert) machen keine Warnung
     # Ergebnis der Sicherung selbst (ohne Plattenzustand, der eine eigene Kategorie hat)
-    $core = if ($st -eq 'Error') { 'Error' } elseif ($st -eq 'Warning' -and ($other.Count -or -not $diskNotes.Count)) { 'Warning' } else { 'OK' }
+    $core = if ($st -eq 'Error') { 'Error' } elseif ($st -eq 'Warning' -and ($warnNotes.Count -or -not $diskNotes.Count)) { 'Warning' } else { 'OK' }
     $coreCat = switch ($core) { 'Error' { 'SbError' } 'Warning' { 'SbWarning' } default { 'SbOK' } }
     $lines = New-Object System.Collections.Generic.List[string]
     $lv = New-Object System.Collections.Generic.List[string]

@@ -1,5 +1,32 @@
 ﻿# Changelog
 
+## v2.0.121 - 2026-10-11
+### Sicherheit
+- **Ordnerrechte beim Start:** die Pruefung (HUMig-Ordner, Config, Functions, XAML, BIN, Tools) laeuft jetzt **bevor** HUMig etwas aus dem Ordner laedt - gleiche Rueckfrage wie bisher (Absichern / Trotzdem / Nie mehr fragen). *Nie mehr fragen* gilt nur, wenn `settings.json` einem Administrator gehoert und fuer Benutzer nicht beschreibbar ist. Absichern setzt zusaetzlich den Besitzer Administratoren
+- **Backup-Ordner im HUMig-Ordner:** jeder Benutzer sieht nur die Ordnernamen und oeffnet nur eigene Backups (bisher konnten alle Benutzer alle Backups lesen); ein Admin-Backup eines Benutzers bleibt fuer diesen lesbar. `Pull.ps1` stellt das bei Installation/Update als Administrator ein
+- **Restore als Administrator:** Registry-Dateien aus dem Backup werden nur in den Zweig des Zielbenutzers bzw. den Schluessel des Moduls importiert; *Zusaetzliche Ordner* mit Ziel unter Windows, Programme, ProgramData oder im HUMig-Ordner kommen ins Profil (`Zusaetzliche Ordner`); Aufgaben, Schriftarten, Treiber, Drucker und Freigaben aus einem Backup, das nicht von einem Administrator stammt, nur nach Rueckfrage. Aufgaben-Import, *An Originalort zurueck* und Freigaben aus Backup kennzeichnen Systemziele und erhoehte Rechte mit ACHTUNG
+- Besitzer-Setzen nach dem Restore und *Profil zuweisen* folgen keinen Verknuepfungen nach ausserhalb des Profils mehr (*Profil zuweisen* bricht dann mit Liste ab)
+- *Speicher aufraeumen* folgt keinen Verknuepfungen (Junction) in Temp-Ordnern der Benutzer
+- `%ProgramData%\HUMig`: ein von einem Benutzer vorab angelegter Ordner bzw. Inhalt wird beiseitegelegt und neu angelegt statt uebernommen
+- Berichte/Links bei HUMig unter fremdem Admin-Konto: Programm nur noch aus der Registrierung des PCs (Browser bzw. registrierte Zuordnung), keine Skript-/Installer-Programme
+- Cloud-Ordner-Sicherung folgt keinen Verknuepfungen (Junction/Symlink)
+- Update: signierte Pruefsummen-Datei enthaelt die Version (`# HUMig-Release <tag>`) und wird beim Update und beim Signieren gegen das Release geprueft (Pflicht ab 2.0.121)
+- Automatische Tests: Schreibrecht nur im Release-Schritt
+### Behoben
+- Geplantes Profil-Backup: nach einer Massenloeschung loescht die Aufbewahrung 14 Tage lang keine alten Backups; USB-Laufwerk wird auch nach Abbruch, Platzmangel oder ohne sicherbare Module ausgeworfen
+- Startseite: mehrere Backup-Zeitplaene wurden zu einer Zeile zusammengefasst
+- Aufbewahrung/Uebersicht brach ab, wenn ein Backup-Ordner waehrend der Auswertung verschwand
+- Anmeldeskript nach Restore: Profilordner mit Apostroph (z. B. O'Brien) zerstoerte das Skript
+- Browser-Sperre: nur gesperrte/verschwundene Dateien sind ein Hinweis, andere Kopierfehler (Zugriff verweigert, Ziel voll) wieder ein Fehler
+- Teams: Massenloeschung aus geplanten Profil-Backups wird auch gemeldet, wenn nur diese Kategorie an ist; fehlgeschlagene Meldungen werden je Ziel bis zu 3-mal wiederholt; je Benutzer hoechstens 10 Meldungen pro Stunde (darueber Sammelkarte); Einstellungen: nach *Entfernen* ging eine eingetippte Adresse an das naechste Ziel; Server-Backup: reine Hinweise (VM offline gesichert) zaehlen nicht als Warnung
+- App-Updates: Ausnahmen werden am Ziel-PC vor dem Aktualisieren erneut geprueft; Hinweis, dass bestehende Zeitplaene alte Ausnahmen behalten
+- Profil erneuern/zuweisen: bricht ab, wenn die Registry-Sicherung fehlschlaegt; Profil erneuern baut bei Fehler zurueck
+- Software-/Treiberverteilung: hinterlegte Anmeldedaten fuer den PC werden genutzt, wenn die Verbindung ohne scheitert; Windows-Installer-Sperre wird nach der Pruefung freigegeben
+- Beschaedigte `settings.json`/`modules.json` werden nicht mehr stillschweigend ueberschrieben (Einstellungen: Rueckfrage mit Sicherung); Einstellungen werden ueber eine Zwischendatei geschrieben
+- Rueckmeldung: bei vielen Programmen war die GitHub-Adresse zu lang (Fehlerseite) - der Text kommt dann ueber die Zwischenablage
+- Ereignisquelle HUMig wird beim Start als Administrator angelegt
+- Automatische Tests: nicht ladbare Testdatei gilt als Fehler; abgebrochener Release-Lauf reicht die Pruefsummen-Datei nach
+
 ## v2.0.120 - 2026-10-11
 ### Dokumentation
 - Anleitung: eigenes Kapitel **Teams-Benachrichtigung** (im Inhaltsverzeichnis) - Einrichten in Teams Schritt fuer Schritt, Eintragen in HUMig, alle Kategorien als Tabelle, geplante Profil-Backups, Sicherheit/Entfernen, Probleme (App fehlt, private Kanaele, Kollegen ohne Benachrichtigung, Bot-Nachrichten loeschen, relay.log)

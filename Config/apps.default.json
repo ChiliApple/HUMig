@@ -12802,6 +12802,35 @@
       "CloseProcess": [
         "openvpn-gui"
       ]
+    },
+    {
+      "Id": "App_Reflector4",
+      "Name": "Reflector 4 (Squirrels)",
+      "Detect": "^Reflector 4",
+      "Items": [
+        {
+          "Type": "Folder",
+          "Name": "LOCAL",
+          "Path": "{LOCALAPPDATA}\\Squirrels",
+          "Role": "Settings"
+        }
+      ],
+      "CloseProcess": [
+        "Reflector4"
+      ],
+      "Transfer": "Einstellungen (user.config unter AppData\\Local\\Squirrels)",
+      "NotTransfer": "Lizenz - ggf. Lizenzschluessel neu eingeben",
+      "License": "kostenpflichtig (Lizenzschluessel)",
+      "After": [
+        "Reflector 4: starten, Einstellungen und Lizenz pruefen"
+      ],
+      "Package": "reflector",
+      "WingetId": "Squirrels.Reflector.4",
+      "Confidence": "medium",
+      "Sources": [
+        "https://www.wingetly.io/apps/squirrels/reflector-4"
+      ],
+      "Note": "Ordner Squirrels\\Reflector4.exe_Url_<Hash>\\<Version>\\user.config am echten PC gesehen. Der Hash haengt vom Programmpfad ab - gleicher Installationspfad (MSI, machine) ergibt denselben Ordner. Speicherort der Lizenz ungeprueft."
     }
   ]
 }

@@ -38,6 +38,7 @@ function Update-HMSetTeamsCombo([int]$Select) {
     if ($Select -lt 0 -and $S.TeamsList.Count) { $Select = 0 }
     $F.cmbTeams.SelectedIndex = $Select
     $S.TeamsLoading = $false
+    $F.pwdTeams.Password = ''   # Adresse nie beim naechsten Ziel stehen lassen (Aufrufer haben vorher gespeichert)
     $S.TeamsCur = $Select
     $has = $Select -ge 0
     foreach ($c in @(@($F.txtTeamsName, $F.pwdTeams, $F.btnTeamsTest, $F.btnTeamsDel) + @($S.TeamsChk.Values))) { if ($isAdmin) { $c.IsEnabled = $has } }
@@ -199,6 +200,7 @@ function Show-SettingsDialog {
             try { Remove-HMNotifyTarget "$($t.Id)"; Out-Console "Teams-Benachrichtigung: Ziel '$($t.Name)' entfernt." 'Info' }
             catch { [void][System.Windows.MessageBox]::Show($S.Win, "Entfernen fehlgeschlagen: $($_.Exception.Message)", 'Teams', 'OK', 'Error'); return }
         }
+        $S.F.pwdTeams.Password = ''   # eingetippte Adresse gehoert zum entfernten Ziel
         $S.TeamsList.RemoveAt($S.TeamsCur)
         if ($t.Saved) { try { $rr = Update-HMNotifyRelay; if ($rr) { Out-Console $rr 'Info' } } catch { Out-Console "Teams-Meldung Profil-Backups: $($_.Exception.Message)" 'Warning' } }
         # gespeicherten Stand ohne dieses Ziel als Vergleich merken (Entfernen ist schon gespeichert)
@@ -279,6 +281,9 @@ function Show-SettingsDialog {
         if ($type -eq 'Files') { $item.Filter = $flt }
         $mod = [pscustomobject][ordered]@{ Id = $id; Name = $name; Group = $grp; Default = $true; Scope = $(if ($isUser) { 'User' } else { 'Machine' }); Remote = $true; Hint = "Eigenes Modul: $path"; Items = @([pscustomobject]$item) }
         $mp = Join-Path $script:ConfigDir 'modules.json'
+        # beschaedigte modules.json nicht ueberschreiben (eigene Module/Vorlagen gingen verloren)
+        $bad = Test-HMJsonBroken $mp
+        if ($bad) { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "modules.json ist fehlerhaft ($bad).`n`nModul nicht angelegt - Datei bleibt unveraendert (bitte mit 'modules.json (Experten)' reparieren).", 'Eigenes Modul', 'OK', 'Warning'); return }
         $cur = Read-JsonFile $mp
         $mods = @(); $pre = @()
         if ($cur) { $mods = @($cur.Modules | Where-Object { $_ -and $_.Id -ne $id }); $pre = @($cur.Presets | Where-Object { $_ }) }
@@ -298,6 +303,8 @@ function Show-SettingsDialog {
         $id = $rv.Row.Id
         if ("$([System.Windows.MessageBox]::Show($script:SetDlg.Win, "Eigenes Modul '$($rv.Row.Name)' loeschen?", 'Module', 'YesNo', 'Question'))" -ne 'Yes') { return }
         $mp = Join-Path $script:ConfigDir 'modules.json'
+        $bad = Test-HMJsonBroken $mp
+        if ($bad) { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "modules.json ist fehlerhaft ($bad).`n`nModul nicht geloescht - Datei bleibt unveraendert.", 'Module', 'OK', 'Warning'); return }
         $cur = Read-JsonFile $mp
         if ($cur) {
             $cur.Modules = @($cur.Modules | Where-Object { $_.Id -ne $id })
@@ -399,7 +406,16 @@ function Show-SettingsDialog {
         }
         # settings.json: vorhandene (auch unbekannte) Schluessel behalten
         $p = Join-Path $script:ConfigDir 'settings.json'
-        $cur = Read-JsonFile $p
+        # beschaedigte settings.json: erst sichern, dann neu schreiben (sonst gingen unbekannte Schluessel ohne Sicherung verloren)
+        $bad = Test-HMJsonBroken $p
+        if ($bad) {
+            $bk = "$p.defekt_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+            if ("$([System.Windows.MessageBox]::Show($W, "settings.json ist fehlerhaft ($bad).`n`nAls $(Split-Path $bk -Leaf) sichern und neu schreiben?`n`nNein = Einstellungen nicht speichern.", 'Einstellungen', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+            try { Copy-Item -LiteralPath $p -Destination $bk -Force -ErrorAction Stop }
+            catch { [void][System.Windows.MessageBox]::Show($W, "Sicherung fehlgeschlagen ($($_.Exception.Message)) - nichts gespeichert.", 'Einstellungen', 'OK', 'Error'); return }
+            Out-Console "settings.json war fehlerhaft - gesichert als $bk (wird mit den Werten dieses Fensters neu geschrieben)." 'Warning'
+        }
+        $cur = if ($bad) { $null } else { Read-JsonFile $p }
         $h = [ordered]@{}
         if ($cur) { foreach ($x in $cur.PSObject.Properties) { if ($x.Name -ne '_Info') { $h[$x.Name] = $x.Value } } }
         $h.BackupRoot = $root
@@ -460,13 +476,20 @@ function Show-SettingsDialog {
             SystemFolders = @(ConvertFrom-HMLines $F.txtExSF.Text); SystemFiles = @(ConvertFrom-HMLines $F.txtExSFi.Text)
             MinimalProfileFolders = @(ConvertFrom-HMLines $F.txtExPMin.Text); MinimalSystemFolders = @(ConvertFrom-HMLines $F.txtExSMin.Text)
         }
-        Write-JsonFile (Join-Path $script:ConfigDir 'exceptions.json') ([pscustomobject]$ex)
+        # beschaedigte exceptions.json/update.json nicht ueberschreiben (das Fenster zeigt dann nur Standardwerte)
+        $exP = Join-Path $script:ConfigDir 'exceptions.json'
+        $bad = Test-HMJsonBroken $exP
+        if ($bad) { [void][System.Windows.MessageBox]::Show($W, "exceptions.json ist fehlerhaft ($bad).`n`nAusnahmen nicht gespeichert - Datei bleibt unveraendert. Die uebrigen Einstellungen werden gespeichert.", 'Einstellungen', 'OK', 'Warning') }
+        else { Write-JsonFile $exP ([pscustomobject]$ex) }
         # Update-Quelle
         $o = "$($F.txtOwner.Text)".Trim(); $rp = "$($F.txtRepo.Text)".Trim(); $b = "$($F.txtBranch.Text)".Trim()
         $tp = ("$($F.txtSignerThumb.Text)" -replace '[^0-9A-Fa-f]', '').ToUpper()
         if ($tp -and $tp -eq (Get-HMDefaultSigner $o $rp)) { $tp = '' }   # eingebauter Fingerabdruck der offiziellen Quelle: nicht festschreiben
-        if ($o -and $rp) {
-            Write-JsonFile (Join-Path $script:ConfigDir 'update.json') ([pscustomobject][ordered]@{
+        $upP = Join-Path $script:ConfigDir 'update.json'
+        $bad = if ($o -and $rp) { Test-HMJsonBroken $upP } else { '' }
+        if ($bad) { [void][System.Windows.MessageBox]::Show($W, "update.json ist fehlerhaft ($bad).`n`nUpdate-Quelle nicht gespeichert - Datei bleibt unveraendert. Die uebrigen Einstellungen werden gespeichert.", 'Einstellungen', 'OK', 'Warning') }
+        elseif ($o -and $rp) {
+            Write-JsonFile $upP ([pscustomobject][ordered]@{
                 Owner = $o; Repo = $rp; Branch = $(if ($b) { $b } else { 'main' }); UseBranch = [bool]$F.chkUseBranch.IsChecked
                 Channel = $(if ($F.cmbChannel.SelectedIndex -eq 1) { 'Test' } else { 'Stable' }); AllowUnsigned = (-not [bool]$F.chkRequireSig.IsChecked); SignerThumbprint = $tp
             })

@@ -88,6 +88,7 @@ try {
             Write-WLog "START|$($it.Id)"
             $r = [ordered]@{ Id = "$($it.Id)"; Status = ''; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = ''; Code = 0 }
             try {
+                if ("$($it.Id)" -notmatch '^[^\s-]\S{0,254}$') { throw "ungueltige Paket-ID '$($it.Id)' - nicht ausgefuehrt" }
                 $a = if ("$($req.Mode)" -eq 'Install') { @('install', '--id', "$($it.Id)", '--exact', '--source', "$($it.Source)", '--scope', 'machine') } else { @('upgrade', '--id', "$($it.Id)", '--exact', '--source', "$($it.Source)") }
                 $a += @('--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
                 if ([bool]$it.Unknown) { $a += '--include-unknown' }
@@ -106,6 +107,7 @@ try {
             Write-WLog "START|$($it.Id)"
             $r = [ordered]@{ Id = "$($it.Id)"; Status = ''; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = ''; Code = 0 }
             try {
+                if ("$($it.Id)" -notmatch '^[^\s-]\S{0,254}$') { throw "ungueltige Paket-ID '$($it.Id)' - nicht ausgefuehrt" }
                 $up = @{ Id = "$($it.Id)"; Source = "$($it.Source)"; MatchOption = 'Equals'; Mode = 'Silent'; ErrorAction = 'Stop' }
                 if ([bool]$it.Unknown) { $up.IncludeUnknown = $true }
                 $u = Update-WinGetPackage @up

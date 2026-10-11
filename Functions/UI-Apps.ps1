@@ -218,9 +218,17 @@ function Start-HMAppFeedback([object[]]$Rows = @(), [ValidateSet('', 'Detected',
             Start-Process -FilePath ("mailto:{0}?subject={1}&body={2}" -f $mail, [uri]::EscapeDataString("HUMig $title"), [uri]::EscapeDataString(($mb -replace "`r?`n", "`r`n")))
             Out-Console "Rueckmeldung: E-Mail an $mail im Mailprogramm geoeffnet - bitte ergaenzen und senden." 'Info'
         } else {
-            $url = "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)/issues/new?title=$([uri]::EscapeDataString($title))&body=$([uri]::EscapeDataString($body))"
+            $base = "https://github.com/$($script:UpdateOwner)/$($script:UpdateRepo)/issues/new?title=$([uri]::EscapeDataString($title))"
+            $url = "$base&body=$([uri]::EscapeDataString($body))"
+            $clip = $false
+            # lange Adressen scheitern bei GitHub (vor allem ueber die Anmeldeseite) - Text dann ueber die Zwischenablage
+            if ($url.Length -gt 1800) {
+                try { Set-Clipboard -Value $body -ErrorAction Stop; $clip = $true } catch { $clip = $false }
+                $url = "$base&body=$([uri]::EscapeDataString($(if ($clip) { "(Text aus der Zwischenablage hier einfuegen: Strg+V)" } else { $body.Substring(0, [Math]::Min($body.Length, 900)) + "`n... (gekuerzt)" })))"
+            }
             Open-HMUrl $url
-            Out-Console 'Rueckmeldung: GitHub-Issue im Browser geoeffnet - bitte ergaenzen und absenden (GitHub-Konto noetig).' 'Info'
+            if ($clip) { Out-Console 'Rueckmeldung: GitHub-Issue im Browser geoeffnet - der Text liegt in der Zwischenablage: im Feld mit Strg+V einfuegen, ergaenzen und absenden (GitHub-Konto noetig).' 'Info' }
+            else { Out-Console 'Rueckmeldung: GitHub-Issue im Browser geoeffnet - bitte ergaenzen und absenden (GitHub-Konto noetig).' 'Info' }
         }
     } catch { Out-Console "Rueckmeldung: konnte nicht geoeffnet werden ($($_.Exception.Message))." 'Warning' }
 }

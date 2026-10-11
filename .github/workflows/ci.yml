@@ -4,6 +4,9 @@
 #   Vorab-Release v<Version> (Kanal Test) automatisch anlegen, Text aus CHANGELOG.md, HUMig-files.sha256 anhaengen,
 #   nur die letzten 10 Releases behalten (die freigegebene Version bleibt immer)
 # - von Hand veroeffentlichtes Release: HUMig-files.sha256 anhaengen
+# - Release ohne HUMig-files.sha256 (z.B. abgebrochener Lauf): Datei wird beim naechsten Push auf main nachgereicht -
+#   immer aus dem Stand des Tags, eine vorhandene Datei wird nie ueberschrieben (sie kann schon signiert sein)
+# - HUMig-files.sha256 beginnt mit "# HUMig-Release <Tag>" (Pull.ps1 prueft, dass die signierte Datei zum Release passt)
 # - danach jeweils den Update-Weg testen (Pull.ps1 laedt genau dieses Release und prueft alle Pruefsummen; zweiter Lauf = Update mit Journal/Aufraeumen)
 # - Signatur + Freigabe macht der Herausgeber in HUMig (Rechtsklick auf Update > Release signieren / Release freigeben),
 #   erst dann wird das Release den Installationen angeboten
@@ -17,13 +20,15 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Standard: nur lesen. Schreibrecht (Release anlegen, Datei anhaengen, alte Releases entfernen) nur im Job "release"
 permissions:
-  contents: write
+  contents: read
 
-# neuer Push bricht einen noch laufenden Lauf desselben Branches ab
+# Pull-Request: neuer Push bricht den laufenden Lauf ab. main/Releases nie abbrechen (ein abgebrochener Release-Lauf
+# hinterliesse ein Release ohne Pruefsummen-Datei)
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -33,6 +38,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+          persist-credentials: false
       - name: Pruefungen
         shell: powershell
         run: .\.github\tests\Invoke-CITests.ps1
@@ -50,6 +56,8 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
     outputs:
       tag: ${{ steps.rel.outputs.tag }}
     steps:
@@ -68,7 +76,11 @@ jobs:
           if [ -z "$V" ]; then echo "Version in Config/version.json nicht gefunden"; exit 1; fi
           T="v$V"
           if gh release view "$T" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $T gibt es schon - nichts anzulegen"; echo "tag=" >> "$GITHUB_OUTPUT"; exit 0
+            if gh release view "$T" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx 'HUMig-files.sha256'; then
+              echo "Release $T gibt es schon (mit HUMig-files.sha256) - nichts zu tun"; echo "tag=" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            echo "Release $T ohne HUMig-files.sha256 - wird nachgereicht" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "tag=$T" >> "$GITHUB_OUTPUT"; exit 0
           fi
           # Abschnitt "## v<Version>" aus CHANGELOG.md als Release-Text
           python3 - "$V" > notes.md <<'PY'
@@ -87,8 +99,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.rel.outputs.tag }}
         run: |
-          python3 .github/scripts/manifest.py HUMig-files.sha256
-          gh release upload "$TAG" HUMig-files.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+          # Pruefsummen immer aus dem Stand des Tags (bei nachgereichter Datei kann main schon weiter sein)
+          git fetch --depth=1 origin "+refs/tags/$TAG:refs/tags/$TAG" && git checkout -q "$TAG"
+          # vorhandene Datei nie ersetzen (kann schon signiert sein - eine neue wuerde die Signatur ungueltig machen)
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx 'HUMig-files.sha256'; then
+            echo "HUMig-files.sha256 ist an $TAG schon vorhanden - nicht ersetzt"; exit 0
+          fi
+          python3 .github/scripts/manifest.py HUMig-files.sha256 "$TAG"
+          gh release upload "$TAG" HUMig-files.sha256 --repo "$GITHUB_REPOSITORY"
       - name: Alte Releases entfernen (nur die letzten 10 behalten, Tags bleiben)
         if: github.event_name == 'push' && steps.rel.outputs.tag != ''
         env:
@@ -116,6 +134,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.release.outputs.tag }}
+          persist-credentials: false
       - name: Pull.ps1 laedt das Release und prueft alle Pruefsummen
         shell: powershell
         env:

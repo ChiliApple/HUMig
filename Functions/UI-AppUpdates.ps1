@@ -254,11 +254,14 @@ function Start-HMAuUpdate([switch]$All) {
     if ($exRows.Count -and -not $All) { Out-Console "App-Updates: $(@($exRows | ForEach-Object { $_.Programm } | Select-Object -Unique) -join ', ') - Ausnahme, wird nicht aktualisiert (Ausnahme zuerst entfernen)." 'Warning' }
     if (-not $rows.Count) { Out-Console 'App-Updates: nichts zu aktualisieren.' 'Warning'; return }
     $byPc = @{}; $noUser = @()
+    # aktuelle Ausnahmen des Standorts mitgeben - der Ziel-PC prueft sie vor dem Update noch einmal
+    $exl = @()
+    try { $exl = @(@((Get-HMAuConfig).Exclude) | Where-Object { $_ -and "$($_.Pattern)".Trim() } | ForEach-Object { @{ Pattern = "$($_.Pattern)".Trim(); Reason = "$($_.Reason)" } }) } catch { }
     foreach ($r in $rows) {
         $k = "$($r.PC)"
         $u = $script:AuUsers[$k]
         if ("$($r.Scope)" -eq 'User' -and -not ($u -and $u.Sid)) { $noUser += "$($r.Programm) ($k)"; continue }
-        if (-not $byPc.ContainsKey($k)) { $byPc[$k] = @{ Items = @(); UserSid = $(if ($u) { "$($u.Sid)" } else { '' }); UserAccount = $(if ($u) { "$($u.Account)" } else { '' }) } }
+        if (-not $byPc.ContainsKey($k)) { $byPc[$k] = @{ Items = @(); UserSid = $(if ($u) { "$($u.Sid)" } else { '' }); UserAccount = $(if ($u) { "$($u.Account)" } else { '' }); Exclude = $exl } }
         $byPc[$k].Items += [pscustomobject]@{ Id = "$($r.Paket)"; Name = "$($r.Programm)"; Source = "$($r.Quelle)"; Installed = "$($r.Installiert)"; Available = "$($r.Verfuegbar)"; Unknown = [bool]$r.Unknown; Scope = "$($r.Scope)" }
     }
     if ($noUser.Count) { Out-Console "App-Updates: ohne angemeldeten Benutzer nicht moeglich: $($noUser -join ', ')" 'Warning' }
@@ -512,6 +515,7 @@ function Add-HMAuExclusionUi {
     $sel = @(@($ui.dgAu.SelectedItems) | Where-Object { $_ -and "$($_.Paket)" })
     $c = Get-HMAuConfig
     $pats = if ($sel.Count) { @($sel | ForEach-Object { "$($_.Paket)" }) } else { @('') }
+    $changed = $false
     foreach ($p0 in $pats) {
         $v = Show-HMAuInputDialog 'Ausnahme' "Programme, die auf diesem Standort ($($c.Location)) NIE ueber App-Updates aktualisiert werden (z.B. Pruefungssoftware, gezielt verteilte Versionen).`nMuster mit Platzhalter * auf Paket-ID oder Programmname, z.B. Mozilla.Firefox* oder *Next-Exam*." @('Muster:', 'Grund:') @($p0, '')
         if (-not $v -or -not $v[0]) { continue }
@@ -519,7 +523,9 @@ function Add-HMAuExclusionUi {
         $c.Exclude = @($c.Exclude) + @([pscustomobject]@{ Pattern = $v[0]; Reason = $v[1] })
         Save-HMAuConfig $c.Sources $c.Exclude
         Out-Console "App-Updates: Ausnahme '$($v[0])' fuer Standort $($c.Location) eingetragen." 'Success'
+        $changed = $true
     }
+    if ($changed) { Out-Console 'Ausnahmen geaendert - bestehende Zeitplaene gelten mit den alten Ausnahmen, bis sie mit "Zeitplan" neu angelegt werden.' 'Warning' }
     Update-HMAuExclList
     if ($script:AuDt) { Start-HMAuSearch }
 }
@@ -530,6 +536,7 @@ function Remove-HMAuExclusionUi {
     $c = Get-HMAuConfig
     $pat = @($sel | ForEach-Object { $_.Pattern })
     Save-HMAuConfig $c.Sources @($c.Exclude | Where-Object { $pat -notcontains $_.Pattern })
+    Out-Console 'Ausnahmen geaendert - bestehende Zeitplaene gelten mit den alten Ausnahmen, bis sie mit "Zeitplan" neu angelegt werden.' 'Warning'
     Update-HMAuExclList
     if ($script:AuDt) { Start-HMAuSearch }
 }

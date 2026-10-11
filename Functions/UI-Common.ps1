@@ -262,15 +262,79 @@ function Format-RemoteError([string]$Text) {
 # Datei (Protokoll, Bericht, Anleitung) oeffnen.
 # HTML: direkt mit dem Standard-Browser starten (Browser-Zuordnung https), NICHT ueber die .html-Zuordnung - Windows 11 zeigt
 # sonst "Waehlen Sie eine App aus" (z.B. wenn HUMig unter einem eigenen Admin-Konto laeuft oder ein neues Programm .html
-# registriert hat). Laeuft HUMig unter einem anderen Konto als der Desktop-Benutzer, gilt dessen Standard-Browser.
+# registriert hat). Laeuft HUMig unter einem anderen Konto als der Desktop-Benutzer, gilt dessen Standard-Browser (ProgId aus
+# seinem Hive, Befehl aber nur aus HKLM und nur ein Programm unter Programme/Windows - sonst der eigene bzw. Edge).
 # ----------------------------------------------------------------------------
 # Befehlszeile zu einer ProgId (Root = 'HKCU:' oder 'Registry::HKEY_USERS\<SID>'), sonst ''
-function Get-HMProgIdCommand([string]$ProgId, [string]$Root = 'HKCU:') {
+# -MachineOnly (fremder Benutzer-Hive): Befehl NUR aus HKLM\SOFTWARE\Classes und nur ein Programm unter Programme/Windows,
+# keine Skript-Hosts/Installer - den Hive eines anderen Kontos kann dessen Benutzer beliebig fuellen, HUMig startet das als
+# Administrator. Mit -Ext zusaetzlich: Browser (http/https/.htm/.html) nur bekannte Browser-Programme, andere Endungen nur
+# eine ProgId, die in HKLM fuer diese Endung eingetragen ist (Standardwert oder OpenWithProgids) - sonst z.B. Msi.Package.
+function Get-HMProgIdCommand([string]$ProgId, [string]$Root = 'HKCU:', [switch]$MachineOnly, [string]$Ext = '') {
     if (-not "$ProgId".Trim()) { return '' }
-    foreach ($cls in @("$Root\Software\Classes\$ProgId\shell\open\command", "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\$ProgId\shell\open\command")) {
-        try { $c = (Get-ItemProperty -LiteralPath $cls -ErrorAction Stop).'(default)'; if ("$c".Trim()) { return "$c".Trim() } } catch { }
+    $keys = @("$Root\Software\Classes\$ProgId\shell\open\command", "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\$ProgId\shell\open\command")
+    $browser = $false
+    if ($MachineOnly) {
+        $keys = @($keys[1])
+        if ($Ext) {
+            $browser = @('http', 'https', '.htm', '.html') -contains $Ext.ToLowerInvariant()
+            if (-not $browser -and -not (Test-HMMachineProgIdForExt $ProgId $Ext)) { return '' }
+        }
+    }
+    foreach ($cls in $keys) {
+        try {
+            $c = (Get-ItemProperty -LiteralPath $cls -ErrorAction Stop).'(default)'
+            if ("$c".Trim()) {
+                if ($MachineOnly -and -not (Test-HMSafeHandlerCommand "$c".Trim())) { return '' }
+                if ($browser -and -not (Test-HMBrowserCommand "$c".Trim())) { return '' }
+                return "$c".Trim()
+            }
+        } catch { }
     }
     return ''
+}
+# Erstes Programm einer Befehlszeile (Pfad wie angegeben, Umgebungsvariablen aufgeloest), sonst ''
+function Get-HMCommandExe([string]$Cmd) {
+    if (-not $Cmd -or $Cmd -notmatch '^\s*"([^"]+)"|^\s*(\S+)') { return '' }
+    $exe = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+    return [Environment]::ExpandEnvironmentVariables($exe)
+}
+# Ist das Programm der Befehlszeile ein bekannter Browser? (nur Dateiname; Ort prueft Test-HMSafeHandlerCommand)
+function Test-HMBrowserCommand([string]$Cmd) {
+    $exe = Get-HMCommandExe $Cmd
+    if (-not $exe) { return $false }
+    $name = [System.IO.Path]::GetFileName(($exe -replace '\\', '/').Split('/')[-1]).ToLowerInvariant()
+    return (@('msedge.exe', 'chrome.exe', 'firefox.exe', 'brave.exe', 'opera.exe', 'launcher.exe', 'vivaldi.exe', 'iexplore.exe') -contains $name)
+}
+# Ist die ProgId in HKLM fuer diese Endung eingetragen (Standardwert von HKLM\SOFTWARE\Classes\<ext> oder OpenWithProgids)?
+function Test-HMMachineProgIdForExt([string]$ProgId, [string]$Ext) {
+    if (-not "$ProgId".Trim() -or -not "$Ext".StartsWith('.')) { return $false }
+    $k = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\$Ext"
+    try { if ("$((Get-ItemProperty -LiteralPath $k -ErrorAction Stop).'(default)')" -ieq $ProgId) { return $true } } catch { }
+    try {
+        $o = Get-ItemProperty -LiteralPath "$k\OpenWithProgids" -ErrorAction Stop
+        if (@($o.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' -and $_.Name -ieq $ProgId }).Count) { return $true }
+    } catch { }
+    return $false
+}
+# Programm einer Befehlszeile: liegt es unter %ProgramFiles%, %ProgramFiles(x86)% oder %windir% und ist kein Skript-Host,
+# Installer oder sonstiges Werkzeug, das Befehle/Programme startet? (explorer bleibt erlaubt - legitimer Handler)
+function Test-HMSafeHandlerCommand([string]$Cmd) {
+    $exe = Get-HMCommandExe $Cmd
+    if (-not $exe) { return $false }
+    if (-not [System.IO.Path]::IsPathRooted($exe) -or $exe -like '\\*') { return $false }
+    try { $full = [System.IO.Path]::GetFullPath($exe) } catch { return $false }
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($full)
+    $deny = @('mshta', 'wscript', 'cscript', 'cmd', 'powershell', 'powershell_ise', 'pwsh', 'rundll32', 'regsvr32',
+        'msiexec', 'mmc', 'hh', 'control', 'infdefaultinstall', 'cmstp', 'msbuild', 'installutil', 'regasm', 'regsvcs', 'forfiles',
+        'bitsadmin', 'certutil', 'wmic', 'schtasks', 'reg', 'sc', 'net', 'net1', 'msdt', 'odbcconf', 'pcalua')
+    if ($deny -contains $name.ToLowerInvariant()) { return $false }
+    foreach ($b in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432, $env:windir)) {
+        if (-not "$b".Trim()) { continue }
+        $bp = "$b".TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+        if ($full.StartsWith($bp, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
 }
 # ProgId aus UserChoice bzw. (neuere Windows 11) UserChoiceLatest
 function Get-HMUserChoiceProgId([string]$KeyPath) {
@@ -279,13 +343,13 @@ function Get-HMUserChoiceProgId([string]$KeyPath) {
     }
     return ''
 }
-function Get-HMAssocCommand([string]$Ext, [string]$Root = 'HKCU:') {
-    return (Get-HMProgIdCommand (Get-HMUserChoiceProgId "$Root\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$Ext") $Root)
+function Get-HMAssocCommand([string]$Ext, [string]$Root = 'HKCU:', [switch]$MachineOnly) {
+    return (Get-HMProgIdCommand (Get-HMUserChoiceProgId "$Root\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$Ext") $Root -MachineOnly:$MachineOnly -Ext $Ext)
 }
 # Standard-Browser (Befehlszeile) eines Kontos, sonst ''
-function Get-HMBrowserCommand([string]$Root = 'HKCU:') {
+function Get-HMBrowserCommand([string]$Root = 'HKCU:', [switch]$MachineOnly) {
     foreach ($proto in @('https', 'http')) {
-        $c = Get-HMProgIdCommand (Get-HMUserChoiceProgId "$Root\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\$proto") $Root
+        $c = Get-HMProgIdCommand (Get-HMUserChoiceProgId "$Root\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\$proto") $Root -MachineOnly:$MachineOnly -Ext $proto
         if ($c) { return $c }
     }
     return ''
@@ -321,7 +385,7 @@ function Open-HMFile([string]$Path) {
     $uRoot = if ($us -and (Test-Path -LiteralPath "Registry::HKEY_USERS\$us")) { "Registry::HKEY_USERS\$us" } else { '' }
     if ($ext -in @('.html', '.htm')) {
         $cmds = @()
-        if ($uRoot) { $cmds += Get-HMBrowserCommand $uRoot }
+        if ($uRoot) { $cmds += Get-HMBrowserCommand $uRoot -MachineOnly }
         $cmds += Get-HMBrowserCommand 'HKCU:'
         $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
         if ($edge) { $cmds += "`"$edge`" `"%1`"" }
@@ -330,7 +394,7 @@ function Open-HMFile([string]$Path) {
     }
     # andere Dateien: eigene Zuordnung, sonst die des Desktop-Benutzers
     if (-not $ext -or (Get-HMAssocCommand $ext) -or -not $uRoot) { Start-Process -FilePath $Path; return }
-    if (Start-HMCommandWithFile (Get-HMAssocCommand $ext $uRoot) $Path) { return }
+    if (Start-HMCommandWithFile (Get-HMAssocCommand $ext $uRoot -MachineOnly) $Path) { return }
     Start-Process -FilePath $Path
 }
 
@@ -340,7 +404,7 @@ function Open-HMUrl([string]$Url) {
     if ("$Url" -notmatch '^https?://') { return }
     $cmds = @()
     $us = Get-HMDesktopUserSid
-    if ($us -and (Test-Path -LiteralPath "Registry::HKEY_USERS\$us")) { $cmds += Get-HMBrowserCommand "Registry::HKEY_USERS\$us" }
+    if ($us -and (Test-Path -LiteralPath "Registry::HKEY_USERS\$us")) { $cmds += Get-HMBrowserCommand "Registry::HKEY_USERS\$us" -MachineOnly }
     $cmds += Get-HMBrowserCommand 'HKCU:'
     foreach ($c in @($cmds | Where-Object { $_ })) { if (Start-HMCommandWithFile $c $Url) { return } }
     try { Start-Process -FilePath $Url } catch { }

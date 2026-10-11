@@ -72,7 +72,7 @@ $script:HMNotifySelfDir = $PSScriptRoot
 # ein Ereignis (Anwendung, Quelle HUMig, 1100-1103), eine Aufgabe unter SYSTEM reagiert darauf und meldet nach Teams.
 $script:HMNotifyRelayTask = 'Teams-Meldung Profil-Backups'
 $script:HMNotifyRelayPath = '\HUMig\'
-$script:HMNotifyRelayCats = @('PbError', 'PbSkipped', 'PbWarning', 'PbOK')
+$script:HMNotifyRelayCats = @('PbError', 'PbSkipped', 'PbWarning', 'PbOK', 'MassDelete')
 $script:HMNotifyRelayQuery = "<QueryList><Query Id=`"0`" Path=`"Application`"><Select Path=`"Application`">*[System[Provider[@Name='HUMig'] and (EventID=1100 or EventID=1101 or EventID=1102 or EventID=1103)]]</Select></Query></QueryList>"
 
 # Kategorien aus einem gelesenen Objekt/Hashtable uebernehmen (unbekannte Namen ignorieren, fehlende = Standard)
@@ -177,10 +177,15 @@ function Remove-HMNotifyTarget([string]$Id) {
     Set-HMNotifyTargets -Targets @(@($c.Targets) | Where-Object { "$($_.Id)" -ne $Id })
 }
 
-# Text aus einer Datei des Benutzers fuer die Karte: Steuerzeichen und Markdown-Links entfernen, Laenge begrenzen
+# Text aus einer Datei des Benutzers fuer die Karte: Steuer-/Richtungszeichen, Markdown (Links, Fett, HTML) und
+# klickbare Adressen entschaerfen, Laenge begrenzen. '_' und '~' bleiben (Backup-Ordner, Konten, 8.3-Pfade)
 function ConvertTo-HMNotifySafeText([string]$Text, [int]$Max = 400) {
-    $t = ("$Text" -replace '[\x00-\x1F]', ' ' -replace '[\[\]]', '').Trim()
-    if ($t.Length -gt $Max) { $t = $t.Substring(0, $Max) + ' ...' }
+    $t = ("$Text" -replace '[\x00-\x1F\x7F\u200B-\u200F\u202A-\u202E\u2066-\u2069]', ' ' -replace '[\[\]\*`<>]', '' -replace '(?i)\b(https?|ftp|file)://', '$1 :// ' -replace '(?i)\bwww\.', 'www .').Trim()
+    if ($t.Length -gt $Max) {
+        $n = $Max
+        if ($n -gt 0 -and [char]::IsHighSurrogate($t[$n - 1])) { $n-- }   # Ersatzpaar (z.B. Emoji) nicht zerschneiden
+        $t = $t.Substring(0, $n) + ' ...'
+    }
     return $t
 }
 

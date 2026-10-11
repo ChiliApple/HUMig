@@ -86,6 +86,8 @@ try {
     $i = 0
     foreach ($t in $todo) {
         Set-AProgress $true $i $todo.Count "$($t.Name)" $ok $err
+        # Paket-ID pruefen (keine Optionen/Leerzeichen), sonst nicht an winget weitergeben
+        if ("$($t.Id)" -notmatch '^[^\s-]\S{0,254}$') { $i++; $err++; Write-ALog "$($t.Name): ungueltige Paket-ID '$($t.Id)' - uebersprungen"; continue }
         $out = @(& $wg upgrade --id $t.Id --exact --source $t.Source --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | ForEach-Object { "$_" })
         $r = Format-ACode ([int64]$LASTEXITCODE)
         $i++

@@ -550,6 +550,7 @@ $script:RS_ProfileOp = {
             if (Test-Path -LiteralPath $pl2) {
                 $reg2 = Join-Path $bdir "ProfileList_$($sid)_TESTPROFIL_$ts.reg"
                 & reg.exe export "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" "$reg2" /y | Out-Null
+                if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $reg2)) { return "FEHLER: Registry-Sicherung fehlgeschlagen (Code $LASTEXITCODE) - nichts geaendert" }
                 $p2 = [Environment]::ExpandEnvironmentVariables("$((Get-ItemProperty -LiteralPath $pl2).ProfileImagePath)")
                 $g2 = (Get-ItemProperty -LiteralPath $pl2).Guid
                 Remove-Item -LiteralPath $pl2 -Recurse -Force -ErrorAction Stop
@@ -575,16 +576,31 @@ $script:RS_ProfileOp = {
         $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
         $reg = Join-Path $bdir "ProfileList_$($sid)_$ts.reg"
         & reg.exe export "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" "$reg" /y | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $reg)) { return "FEHLER: Registry-Sicherung fehlgeschlagen (Code $LASTEXITCODE) - nichts geaendert" }
         $out = @("INFO Registry-Sicherung: $reg")
         if ($action -eq 'Renew') {
             $new = "$path.alt_$ts"
-            if (Test-Path -LiteralPath $path) { Rename-Item -LiteralPath $path -NewName (Split-Path $new -Leaf) -ErrorAction Stop; $out += "OK Profilordner umbenannt: $new" }
             $guid = (Get-ItemProperty -LiteralPath $pl).Guid
-            Remove-Item -LiteralPath $pl -Recurse -Force -ErrorAction Stop
+            $acc = $null; try { $acc = (New-Object System.Security.Principal.SecurityIdentifier($sid)).Translate([System.Security.Principal.NTAccount]).Value } catch { }
+            # Reihenfolge: Ordner umbenennen -> Sicherungs-JSON -> Profil-Eintrag entfernen; scheitert ein Schritt danach, wird zurueckgebaut
+            $renamed = $false
+            if (Test-Path -LiteralPath $path) { Rename-Item -LiteralPath $path -NewName (Split-Path $new -Leaf) -ErrorAction Stop; $renamed = $true; $out += "OK Profilordner umbenannt: $new" }
+            $json = Join-Path $bdir "Profil_$($sid)_$ts.json"
+            try {
+                [pscustomobject]@{ Sid = $sid; Account = $acc; Path = $path; AltPath = $new; Reg = $reg; Created = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'); Computer = $env:COMPUTERNAME } | ConvertTo-Json | Set-Content -LiteralPath $json -Encoding UTF8 -ErrorAction Stop
+                Remove-Item -LiteralPath $pl -Recurse -Force -ErrorAction Stop
+            } catch {
+                $err = $_.Exception.Message
+                Remove-Item -LiteralPath $json -Force -ErrorAction SilentlyContinue
+                if ($renamed) {
+                    try { Rename-Item -LiteralPath $new -NewName (Split-Path $path -Leaf) -ErrorAction Stop; $out += "OK Profilordner zurueckbenannt: $path" }
+                    catch { $out += "FEHLER: Zurueckbenennen fehlgeschlagen - Profilordner liegt unter $new ($($_.Exception.Message))" }
+                }
+                $out += "FEHLER: $err - Profil-Eintrag nicht entfernt"
+                return $out
+            }
             if ($guid -and (Test-Path -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileGuid\$guid")) { Remove-Item -LiteralPath "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileGuid\$guid" -Recurse -Force -ErrorAction SilentlyContinue }
             $out += 'OK Profil-Eintrag entfernt - bei der naechsten Anmeldung wird ein neues Profil angelegt'
-            $acc = $null; try { $acc = (New-Object System.Security.Principal.SecurityIdentifier($sid)).Translate([System.Security.Principal.NTAccount]).Value } catch { }
-            [pscustomobject]@{ Sid = $sid; Account = $acc; Path = $path; AltPath = $new; Reg = $reg; Created = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'); Computer = $env:COMPUTERNAME } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bdir "Profil_$($sid)_$ts.json") -Encoding UTF8
             $out += 'INFO Zurueckholen: Werkzeuge > Profil zurueckholen (das Test-Profil wird dabei beiseitegelegt, nicht geloescht)' 
         } else {
             $parent = Split-Path $path -Parent
@@ -674,6 +690,20 @@ function Start-HMAppxReregister {
 # ============================================================================
 # 8. AUFGABEN AUS EINEM BACKUP EINZELN IMPORTIEREN
 # ============================================================================
+# Spalte "Ausfuehren als": Systemkonten, Administratoren-Gruppe oder hoechste Rechte als erhoeht kennzeichnen
+function Get-HMTaskRunAsText($Xml) {
+    $pr = @($Xml.Task.Principals.Principal | Where-Object { $_ })
+    $user = "$($Xml.Task.Principals.Principal.UserId)$($Xml.Task.Principals.Principal.GroupId)"
+    $hi = $false
+    foreach ($p in $pr) {
+        $u = "$($p.UserId)".Trim(); $g = "$($p.GroupId)".Trim()
+        if ($u -match '^(S-1-5-(18|19|20)|((NT[ -]AUTHORITY|NT-AUTORIT\S*)\\)?(SYSTEM|LOCAL ?SERVICE|NETWORK ?SERVICE|LOKALER ?DIENST|NETZWERKDIENST))$') { $hi = $true }
+        if ($g -match '^(S-1-5-32-544|((BUILTIN|VORDEFINIERT)\\)?(Administrators|Administratoren))$') { $hi = $true }
+        if ("$($p.RunLevel)".Trim() -eq 'HighestAvailable') { $hi = $true }
+    }
+    if ($hi) { return "ACHTUNG: $(if ($user) { "$user " })(erhoeht)" }
+    return $user
+}
 function Show-HMTaskImport {
     $b = $script:SelectedBackup
     if (-not $b) { Out-Console 'Im Reiter Restore zuerst ein Backup markieren (mit Modul Aufgabenplanung).' 'Warning'; return }
@@ -685,7 +715,7 @@ function Show-HMTaskImport {
     $rows = New-Object System.Collections.Generic.List[object]
     foreach ($t in $list) {
         $user = ''
-        try { [xml]$x = Get-Content -LiteralPath (Join-Path $dir $t.File) -Raw; $user = "$($x.Task.Principals.Principal.UserId)$($x.Task.Principals.Principal.GroupId)" } catch { }
+        try { [xml]$x = Get-Content -LiteralPath (Join-Path $dir $t.File) -Raw; $user = Get-HMTaskRunAsText $x } catch { }
         $rows.Add(@("$($t.Path)", "$($t.Name)", $user, "$($t.File)"))
     }
     Show-DataGridWindow -Title "Aufgaben im Backup $($b.Name)" -Columns @('Ordner', 'Name', 'Ausfuehren als', 'Datei') -Rows $rows.ToArray() -Sort 'Ordner ASC, Name ASC' -Width 1000 -Height 520 `
@@ -871,6 +901,34 @@ function Set-HMFirewallRow($Rows, $Win, $Ctx, [string]$What) {
 # ============================================================================
 $script:RS_ProfileAssign = {
     param($srcSid, $target, $createLocal, $cred, $addAdmin, $setOwner)
+    # Verknuepfungen (Junction/SymbolicLink) unter $Root mit Ziel ausserhalb $Root, max. $Max Treffer ("<link> -> <ziel>")
+    function Find-HUOutsideLinks([string]$Root, [int]$Max = 20) {
+        $hits = New-Object System.Collections.Generic.List[string]
+        $sep = [IO.Path]::DirectorySeparatorChar
+        $rf = [IO.Path]::GetFullPath($Root).TrimEnd($sep)
+        $stack = New-Object System.Collections.Generic.Stack[string]; $stack.Push($rf)
+        while ($stack.Count -and $hits.Count -lt $Max) {
+            $d = $stack.Pop()
+            $subs = @(); try { $subs = [IO.Directory]::GetDirectories($d) } catch { continue }
+            foreach ($sd in $subs) {
+                if ($hits.Count -ge $Max) { break }
+                $attr = 0; try { $attr = [int][IO.File]::GetAttributes($sd) } catch { continue }
+                if ($attr -band [int][IO.FileAttributes]::ReparsePoint) {
+                    $it = $null; try { $it = Get-Item -LiteralPath $sd -Force -ErrorAction Stop } catch { }
+                    if ($it -and "$($it.LinkType)" -in @('Junction', 'SymbolicLink')) {
+                        $tg = ("$(@($it.Target)[0])" -replace '^\\\?\?\\', '')
+                        if (-not $tg) { $hits.Add("$sd -> ?"); continue }
+                        if (-not [IO.Path]::IsPathRooted($tg)) { $tg = Join-Path (Split-Path $sd -Parent) $tg }
+                        try { $tg = [IO.Path]::GetFullPath($tg).TrimEnd($sep) } catch { }
+                        if ($tg -ne $rf -and -not $tg.StartsWith($rf + $sep, [StringComparison]::OrdinalIgnoreCase)) { $hits.Add("$sd -> $tg") }
+                        continue
+                    }
+                }
+                $stack.Push($sd)
+            }
+        }
+        $hits.ToArray()
+    }
     $out = New-Object System.Collections.Generic.List[string]
     $hkuName = 'HUMIG_ZUWEISUNG'
     $loaded = @()
@@ -881,6 +939,9 @@ $script:RS_ProfileAssign = {
         if (Test-Path -LiteralPath "Registry::HKEY_USERS\$srcSid") { return 'FEHLER: Quellbenutzer ist angemeldet (oder Registry geladen) - abmelden bzw. PC neu starten' }
         $path = [Environment]::ExpandEnvironmentVariables("$((Get-ItemProperty -LiteralPath $pl1).ProfileImagePath)")
         if (-not (Test-Path -LiteralPath (Join-Path $path 'NTUSER.DAT'))) { return "FEHLER: NTUSER.DAT fehlt in $path" }
+        # icacls /T folgt Verknuepfungen - Verknuepfungen nach ausserhalb des Profils vorher ausschliessen (laeuft am Ziel, daher eigene Kopie)
+        $links = @(Find-HUOutsideLinks $path 20)
+        if ($links.Count) { return @('FEHLER: Im Profil liegen Verknuepfungen nach ausserhalb - bitte entfernen und wiederholen:') + @($links | ForEach-Object { "   $_" }) }
 
         # --- Zielkonto ermitteln/anlegen ---
         $name = $target
@@ -908,7 +969,9 @@ $script:RS_ProfileAssign = {
         $bdir = Join-Path $env:ProgramData 'HUMig\ProfilZuweisung'
         New-Item -ItemType Directory -Path $bdir -Force | Out-Null
         $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
-        & reg.exe export "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$srcSid" (Join-Path $bdir "ProfileList_$($srcSid)_$ts.reg") /y | Out-Null
+        $reg1 = Join-Path $bdir "ProfileList_$($srcSid)_$ts.reg"
+        & reg.exe export "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$srcSid" "$reg1" /y | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $reg1)) { $out.Add("FEHLER: Registry-Sicherung fehlgeschlagen (Code $LASTEXITCODE) - $(if ($out.Count) { 'Profil nicht geaendert' } else { 'nichts geaendert' })"); return $out.ToArray() }
         & icacls.exe "$path" /save (Join-Path $bdir "Rechte_$($srcSid)_$ts.acl") /T /C /Q | Out-Null
         $out.Add("INFO Sicherung: $bdir (ProfileList_*.reg, Rechte_*.acl - wiederherstellen mit icacls <Elternordner> /restore <Datei>)")
 
@@ -1263,12 +1326,15 @@ function Start-HMSpoolerReset {
 $script:RS_Cleanup = {
     param($o)
     function Get-HUFreeBytes { [long](Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$($env:SystemDrive)'").FreeSpace }
-    function Remove-HUOld([string]$Root, [int]$Hours) {
+    function Test-HUIsLink([string]$Path) { try { return [bool]((New-Object System.IO.DirectoryInfo $Path).Attributes -band [IO.FileAttributes]::ReparsePoint) } catch { return $true } }
+    function Remove-HUOld([string]$Root, [int]$Hours, [switch]$UserPath) {
         if (-not (Test-Path -LiteralPath $Root)) { return 0 }
         $lim = (Get-Date).AddHours(-$Hours); $n = 0
         $stack = New-Object System.Collections.Generic.Stack[string]; $stack.Push($Root)
         while ($stack.Count) {
             $d = $stack.Pop()
+            # Unterordner koennen zwischen Auflisten und Bearbeiten gegen eine Verknuepfung getauscht werden - erneut pruefen
+            if (($UserPath -or $d -ne $Root) -and (Test-HUIsLink $d)) { continue }
             try {
                 foreach ($i in (New-Object System.IO.DirectoryInfo $d).EnumerateFileSystemInfos()) {
                     if ($i.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
@@ -1283,7 +1349,12 @@ $script:RS_Cleanup = {
     $out = @()
     if ($o.Temp) {
         $n = Remove-HUOld (Join-Path $env:windir 'Temp') 24
-        foreach ($p in @(Get-CimInstance Win32_UserProfile | Where-Object { -not $_.Special -and $_.LocalPath })) { $n += Remove-HUOld (Join-Path $p.LocalPath 'AppData\Local\Temp') 24 }
+        foreach ($p in @(Get-CimInstance Win32_UserProfile | Where-Object { -not $_.Special -and $_.LocalPath })) {
+            # Benutzerpfade: AppData, AppData\Local und Temp duerfen keine Verknuepfung sein (Profilordner selbst nicht pruefen - FSLogix/VHD sind Mount Points)
+            $lnk = @(foreach ($sub in @('AppData', 'AppData\Local', 'AppData\Local\Temp')) { $q = Join-Path $p.LocalPath $sub; if ((Test-Path -LiteralPath $q) -and (Test-HUIsLink $q)) { $q } })
+            if ($lnk.Count) { $out += "WARN $($lnk[0]) ist eine Verknuepfung - uebersprungen"; continue }
+            $n += Remove-HUOld (Join-Path $p.LocalPath 'AppData\Local\Temp') 24 -UserPath
+        }
         $out += "OK Temp-Ordner: $n Dateien (aelter als 24 h) geloescht"
     }
     if ($o.WU) {

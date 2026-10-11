@@ -1052,13 +1052,15 @@ Describe 'Teams-Meldung geplanter Profil-Backups (Weitergabe als SYSTEM)' {
         New-HMProfileNotifyMessage -State (New-TestState 'Warning' -Mass) -Cats $c | Should -BeNullOrEmpty
     }
     It 'Text aus der Benutzer-Datei wird entschaerft (Steuerzeichen, Links, Laenge)' {
-        ConvertTo-HMNotifySafeText "a`tb[Link](https://x)" | Should -Be 'a bLink(https://x)'
+        ConvertTo-HMNotifySafeText "a`tb[Link](https://x)" | Should -Be 'a bLink(https :// x)'
         (ConvertTo-HMNotifySafeText ('x' * 1000)).Length | Should -BeLessThan 410
     }
-    It 'Weitergabe nur noetig, wenn ein Ziel Profil-Backup-Kategorien hat' {
+    It 'Weitergabe nur noetig, wenn ein Ziel Profil-Backup-Kategorien oder Massenloeschung hat' {
         $c = Get-HMNotifyDefaultCats
         Test-HMNotifyRelayNeeded @([pscustomobject]@{ Cats = $c }) | Should -BeTrue
         foreach ($n in @('PbError', 'PbSkipped', 'PbWarning', 'PbOK')) { $c[$n] = $false }
+        Test-HMNotifyRelayNeeded @([pscustomobject]@{ Cats = $c }) | Should -BeTrue
+        $c['MassDelete'] = $false
         Test-HMNotifyRelayNeeded @([pscustomobject]@{ Cats = $c }) | Should -BeFalse
         Test-HMNotifyRelayNeeded @() | Should -BeFalse
     }

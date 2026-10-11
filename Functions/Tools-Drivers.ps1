@@ -642,14 +642,16 @@ function Get-DrvPreText { return "param([string]`$PkgJson, [string]`$MapJson, [b
 
 # Worker je PC (wie Softwareverteilung) + Vorpruefung vor der Kopie, Kopie per SMB (C$) mit Robocopy, sonst ueber WinRM
 $script:DrvWorkerText = @'
-param($h, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $sizeMB, $timeoutMin, $preText, $mapJson, $incStr)
+param($h, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $sizeMB, $timeoutMin, $preText, $mapJson, $incStr, $cred)
 $isLocal = ($h -eq '.' -or $h -eq 'localhost' -or $h -ieq $env:COMPUTERNAME -or $h -ilike "$($env:COMPUTERNAME).*")
 $inc = @("$incStr" -split '\|' | Where-Object { $_ })
 $s = $null; $remote = ''; $done = $false
 try {
     if (-not $isLocal) {
         $opt = New-PSSessionOption -OpenTimeout 15000 -OperationTimeout ([int](($timeoutMin + 30) * 60000))
-        $s = New-PSSession -ComputerName $h -SessionOption $opt -ErrorAction Stop
+        # zuerst mit dem eigenen Konto, nur bei Fehler mit den hinterlegten Remote-Anmeldedaten
+        try { $s = New-PSSession -ComputerName $h -SessionOption $opt -ErrorAction Stop }
+        catch { if (-not $cred) { throw }; $s = New-PSSession -ComputerName $h -SessionOption $opt -Credential $cred -ErrorAction Stop }
     }
     if ($preText -and $mapJson) {
         $pre = if ($isLocal) { "$(& ([scriptblock]::Create($preText)) $pkgJson $mapJson $force)".Trim() } else { "$(Invoke-Command -Session $s -ErrorAction Stop -ScriptBlock ([scriptblock]::Create($preText)) -ArgumentList $pkgJson, $mapJson, $force)".Trim() }
@@ -717,12 +719,12 @@ function Start-DriverDeploy {
     }
     $jobSec = [int][Math]::Max(1800, ([Math]::Ceiling($Hosts.Count / 8.0) * (($tmo + 15) * 60 + $copyMB)))
     Invoke-AsyncCommand -ScriptBlock {
-        param($hostStr, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $workerText, $sizeMB, $timeoutMin, $deadlineSec, $preText, $mapJson, $incStr)
+        param($hostStr, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $workerText, $sizeMB, $timeoutMin, $deadlineSec, $preText, $mapJson, $incStr, $cred)
         $list = @($hostStr -split '\|' | Where-Object { $_ })
         $deadline = (Get-Date).AddSeconds($deadlineSec)
         $pool = [runspacefactory]::CreateRunspacePool(1, 8); $pool.Open()
         $jobs = foreach ($h in $list) {
-            $ps = [PowerShell]::Create().AddScript($workerText).AddArgument($h).AddArgument($src).AddArgument($isDir).AddArgument($pkgJson).AddArgument($force).AddArgument($prepText).AddArgument($instText).AddArgument($cleanText).AddArgument($sizeMB).AddArgument($timeoutMin).AddArgument($preText).AddArgument($mapJson).AddArgument($incStr)
+            $ps = [PowerShell]::Create().AddScript($workerText).AddArgument($h).AddArgument($src).AddArgument($isDir).AddArgument($pkgJson).AddArgument($force).AddArgument($prepText).AddArgument($instText).AddArgument($cleanText).AddArgument($sizeMB).AddArgument($timeoutMin).AddArgument($preText).AddArgument($mapJson).AddArgument($incStr).AddArgument($cred)
             $ps.RunspacePool = $pool
             [pscustomobject]@{ PS = $ps; Handle = $ps.BeginInvoke(); Host = $h }
         }
@@ -742,7 +744,7 @@ function Start-DriverDeploy {
         }
         if ($stuck -eq 0) { try { $pool.Close(); $pool.Dispose() } catch { } }
         $out -join "`n"
-    } -ArgumentList @(($Hosts -join '|'), $Package.SrcPath, [bool]$Package.IsDir, $pkgJson, $Force, $script:RS_SwPrep.ToString(), (Get-DrvInstallText), $script:RS_SwCleanup.ToString(), $script:DrvWorkerText, $copyMB, $tmo, ($jobSec - 60), (Get-DrvPreText), $mapJson, $incStr) `
+    } -ArgumentList @(($Hosts -join '|'), $Package.SrcPath, [bool]$Package.IsDir, $pkgJson, $Force, $script:RS_SwPrep.ToString(), (Get-DrvInstallText), $script:RS_SwCleanup.ToString(), $script:DrvWorkerText, $copyMB, $tmo, ($jobSec - 60), (Get-DrvPreText), $mapJson, $incStr, $script:RemoteCred) `
       -TimeoutSec $jobSec -State @{ Name = "$($s.Name)"; Hosts = $Hosts; Package = $Package; Force = $Force } -OnComplete {
         param($result, $st)
         $r = "$result".Trim()

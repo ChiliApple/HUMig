@@ -266,6 +266,13 @@ function New-HMBackupSchedule {
     }
     $def.TaskPath = $used
     try { [pscustomobject]$def | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $defFile -Encoding UTF8 -Force } catch { }
+    # Ereignisquelle HUMig (fuer Ereignisse 1100-1103 des Backup-Laufs) - anlegen geht nur mit Administratorrechten
+    if ($elev) {
+        try {
+            $ex = $false; try { $ex = [System.Diagnostics.EventLog]::SourceExists('HUMig') } catch { }
+            if (-not $ex) { New-EventLog -LogName Application -Source 'HUMig' -ErrorAction Stop }
+        } catch { Out-Console "Ereignisquelle HUMig nicht angelegt (Ereignisse des Zeitplans fehlen im Anwendungsprotokoll): $($_.Exception.Message)" 'Warning' }
+    }
     Out-Console "Geplant: '$($r.Name)' - $(Format-HMBsWhen ([pscustomobject]@{ Trigger = [pscustomobject]$def.Trigger })), $(if ($r.Kind -eq 'Update') { 'fortlaufend' } else { 'neues Backup' }) -> $($tg.Display)$(if ($r.RetEnabled) { ", neueste $($r.Keep) bleiben" })$(if ($r.EjectAfter) { ', danach auswerfen' })" 'Success'
     Out-Console "   Aufgabenplanung: $used$taskName   (Konto $($me.Name)$(if ($elev) { ', mit Administratorrechten' } else { ', Benutzer-Modus' }))   Verwalten: Rechtsklick auf 'Zeitplan ...'" 'Info'
     Update-HMBsLabel
