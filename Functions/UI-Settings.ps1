@@ -21,7 +21,7 @@ function Show-SettingsDialog {
     if ($script:LogoImage) { $w.FindName('imgLogo').Source = $script:LogoImage }
     $w.Owner = $script:Window; Set-HMWindowScale $w
     $f = @{}
-    foreach ($n in @('lblPath', 'btnOpenConfig', 'btnSave', 'btnCancel', 'tabs', 'txtRoot', 'btnRoot', 'cmbThreads', 'txtRetention', 'txtRetentionKeep', 'txtFeedbackMail', 'cmbUiScale', 'chkOverviewAuto', 'txtChecklist', 'chkChecklistAuto', 'tabSchools', 'dgSchools', 'btnSchoolAdd', 'btnSchoolDel', 'txtUsmt', 'btnUsmt', 'btnUsmtAdk', 'lblUsmt',
+    foreach ($n in @('lblPath', 'btnOpenConfig', 'btnSave', 'btnCancel', 'tabs', 'txtRoot', 'btnRoot', 'cmbThreads', 'txtRetention', 'txtRetentionKeep', 'txtDeletedKeep', 'txtFeedbackMail', 'cmbUiScale', 'chkOverviewAuto', 'txtChecklist', 'chkChecklistAuto', 'tabSchools', 'dgSchools', 'btnSchoolAdd', 'btnSchoolDel', 'txtUsmt', 'btnUsmt', 'btnUsmtAdk', 'lblUsmt',
         'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtDrvDir', 'btnDrvDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript',
         'tabExceptions', 'btnExcDefault', 'txtExPF', 'txtExPFi', 'txtExPMin', 'txtExSF', 'txtExSFi', 'txtExSMin', 'tabModules', 'txtNmName', 'cmbNmGroup',
         'cmbNmType', 'txtNmFilter', 'txtNmPath', 'btnNmAdd', 'btnModDel', 'btnModJson', 'btnAppEditor', 'dgModules', 'btnLinkAdd', 'btnLinkDel', 'dgLinks',
@@ -37,6 +37,7 @@ function Show-SettingsDialog {
     $f.cmbThreads.SelectedItem = "$([int]$s.Threads)"; if (-not $f.cmbThreads.SelectedItem) { $f.cmbThreads.SelectedItem = '32' }
     $f.txtRetention.Text = "$([int]$s.RetentionDays)"
     $f.txtRetentionKeep.Text = "$(if ($null -ne $s.RetentionKeepPerUser) { [int]$s.RetentionKeepPerUser } else { 3 })"
+    $f.txtDeletedKeep.Text = "$(if ($null -ne $s.DeletedKeepDays) { [int]$s.DeletedKeepDays } else { 90 })"
     $f.chkOverviewAuto.IsChecked = ($s.OverviewAuto -ne $false)
     $f.txtFeedbackMail.Text = "$($s.FeedbackMail)"
     foreach ($t in @('Automatisch', '70 %', '80 %', '90 %', '100 %', '110 %', '125 %', '140 %', '160 %')) { [void]$f.cmbUiScale.Items.Add($t) }
@@ -251,6 +252,8 @@ function Show-SettingsDialog {
         if (-not [int]::TryParse("$($F.txtRetention.Text)".Trim(), [ref]$ret) -or $ret -lt 0 -or $ret -gt 3650) { [void][System.Windows.MessageBox]::Show($W, 'Aufbewahrung: Zahl 0 bis 3650', 'Einstellungen', 'OK', 'Warning'); return }
         $keep = 0
         if (-not [int]::TryParse("$($F.txtRetentionKeep.Text)".Trim(), [ref]$keep) -or $keep -lt 0 -or $keep -gt 100) { [void][System.Windows.MessageBox]::Show($W, 'Aufbewahrung: Anzahl 0 bis 100', 'Einstellungen', 'OK', 'Warning'); return }
+        $delKeep = 0
+        if (-not [int]::TryParse("$($F.txtDeletedKeep.Text)".Trim(), [ref]$delKeep) -or $delKeep -lt 0 -or $delKeep -gt 3650) { [void][System.Windows.MessageBox]::Show($W, 'Geloeschte Dateien aufheben: Tage 0 bis 3650 (0 = nie entfernen)', 'Einstellungen', 'OK', 'Warning'); return }
         $F.dgSchools.CommitEdit(); $F.dgSchools.CommitEdit()
         $schools = @(foreach ($r in $script:SetDlg.DtS.Rows) {
             if ($r.RowState -eq 'Deleted' -or -not "$($r.Name)".Trim()) { continue }
@@ -273,6 +276,7 @@ function Show-SettingsDialog {
         $h.Threads = if ($F.cmbThreads.SelectedItem) { [int]$F.cmbThreads.SelectedItem } else { 32 }
         $h.RetentionDays = $ret
         $h.RetentionKeepPerUser = $keep
+        $h.DeletedKeepDays = $delKeep
         $h.OverviewAuto = [bool]$F.chkOverviewAuto.IsChecked
         $fm = "$($F.txtFeedbackMail.Text)".Trim()
         if ($fm -and $fm -notmatch '^[^@\s;,]+@[^@\s;,]+\.[^@\s;,]+$') { [void][System.Windows.MessageBox]::Show($W, 'Rueckmeldung: ungueltige E-Mail-Adresse', 'Einstellungen', 'OK', 'Warning'); return }

@@ -360,6 +360,7 @@
                                 <Button x:Name="btnOverview" Content="Uebersicht (HTML)" Style="{StaticResource BtnDefault}" ToolTip="HTML-Uebersicht aller Backups im Backup-Ordner erstellen und oeffnen (Backups.html)"/>
                                 <Button x:Name="btnDeleteBackup" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Markiertes Backup loeschen (mit Bestaetigung)"/>
                                 <Button x:Name="btnCleanupBackups" Content="Alte loeschen" Style="{StaticResource BtnPeach}" ToolTip="Backups aelter als die Aufbewahrungsdauer (Einstellungen) anzeigen und loeschen"/>
+                                <Button x:Name="btnEmptyDeleted" Content="Geloeschte leeren" Style="{StaticResource BtnPeach}" ToolTip="Im markierten (fortlaufenden) Backup die beiseitegelegten, an der Quelle geloeschten Dateien (_GELOESCHT) endgueltig loeschen - mit Rueckfrage"/>
                             </WrapPanel>
                             <DataGrid x:Name="dgBackups" Style="{StaticResource DarkGrid}" SelectionMode="Single">
                                 <DataGrid.Columns>
