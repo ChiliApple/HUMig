@@ -259,22 +259,35 @@ function Format-RemoteError([string]$Text) {
 }
 
 # ----------------------------------------------------------------------------
-# Datei (Protokoll, Bericht, Anleitung) mit dem Standardprogramm des angemeldeten Benutzers oeffnen.
-# Laeuft HUMig unter einem anderen Konto (z.B. eigenes Admin-Konto per "Als Administrator"), hat dieses Konto oft keine
-# Standard-App fuer .html - Windows fragt dann jedes Mal "Wie moechten Sie diese Datei oeffnen?". Darum: hat das eigene Konto
-# keine Zuordnung, wird die Zuordnung des am Desktop angemeldeten Benutzers verwendet (Programm laeuft unter dem HUMig-Konto).
+# Datei (Protokoll, Bericht, Anleitung) oeffnen.
+# HTML: direkt mit dem Standard-Browser starten (Browser-Zuordnung https), NICHT ueber die .html-Zuordnung - Windows 11 zeigt
+# sonst "Waehlen Sie eine App aus" (z.B. wenn HUMig unter einem eigenen Admin-Konto laeuft oder ein neues Programm .html
+# registriert hat). Laeuft HUMig unter einem anderen Konto als der Desktop-Benutzer, gilt dessen Standard-Browser.
 # ----------------------------------------------------------------------------
+# Befehlszeile zu einer ProgId (Root = 'HKCU:' oder 'Registry::HKEY_USERS\<SID>'), sonst ''
+function Get-HMProgIdCommand([string]$ProgId, [string]$Root = 'HKCU:') {
+    if (-not "$ProgId".Trim()) { return '' }
+    foreach ($cls in @("$Root\Software\Classes\$ProgId\shell\open\command", "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\$ProgId\shell\open\command")) {
+        try { $c = (Get-ItemProperty -LiteralPath $cls -ErrorAction Stop).'(default)'; if ("$c".Trim()) { return "$c".Trim() } } catch { }
+    }
+    return ''
+}
+# ProgId aus UserChoice bzw. (neuere Windows 11) UserChoiceLatest
+function Get-HMUserChoiceProgId([string]$KeyPath) {
+    foreach ($k in @("$KeyPath\UserChoiceLatest", "$KeyPath\UserChoice")) {
+        try { $p0 = "$((Get-ItemProperty -LiteralPath $k -ErrorAction Stop).ProgId)"; if ($p0) { return $p0 } } catch { }
+    }
+    return ''
+}
 function Get-HMAssocCommand([string]$Ext, [string]$Root = 'HKCU:') {
-    # Root = 'HKCU:' oder 'Registry::HKEY_USERS\<SID>'; Rueckgabe: Befehlszeile mit %1 oder ''
-    try {
-        $uc = Get-ItemProperty -LiteralPath "$Root\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$Ext\UserChoice" -ErrorAction Stop
-        $pid0 = "$($uc.ProgId)"
-        if (-not $pid0) { return '' }
-        foreach ($cls in @("$Root\Software\Classes\$pid0\shell\open\command", "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\$pid0\shell\open\command")) {
-            $c = (Get-ItemProperty -LiteralPath $cls -ErrorAction SilentlyContinue).'(default)'
-            if ("$c".Trim()) { return "$c".Trim() }
-        }
-    } catch { }
+    return (Get-HMProgIdCommand (Get-HMUserChoiceProgId "$Root\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$Ext") $Root)
+}
+# Standard-Browser (Befehlszeile) eines Kontos, sonst ''
+function Get-HMBrowserCommand([string]$Root = 'HKCU:') {
+    foreach ($proto in @('https', 'http')) {
+        $c = Get-HMProgIdCommand (Get-HMUserChoiceProgId "$Root\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\$proto") $Root
+        if ($c) { return $c }
+    }
     return ''
 }
 function Get-HMDesktopUserSid {
@@ -288,41 +301,35 @@ function Get-HMDesktopUserSid {
     } catch { }
     return ''
 }
+# Befehlszeile mit Platzhalter %1 starten. Rueckgabe: $true = gestartet
+function Start-HMCommandWithFile([string]$Cmd, [string]$Path) {
+    if (-not $Cmd -or $Cmd -notmatch '^\s*"([^"]+)"\s*(.*)$|^\s*(\S+)\s*(.*)$') { return $false }
+    $exe = if ($Matches[1]) { $Matches[1] } else { $Matches[3] }
+    $rest = if ($Matches[1]) { $Matches[2] } else { $Matches[4] }
+    $exe = [Environment]::ExpandEnvironmentVariables($exe)
+    if (-not (Test-Path -LiteralPath $exe)) { return $false }
+    # %1 / %L = Datei (Platzhalter vereinheitlichen, uebrige wie %* entfernen), Pfad nur ohne vorhandene Anfuehrungszeichen quoten
+    $r2 = ($rest -replace '%[1lL]', '<<HMFILE>>' -replace '%\*', '' -replace '%[A-Za-z0-9]', '').Trim()
+    if ($r2 -notmatch '<<HMFILE>>') { $r2 = "$r2 <<HMFILE>>".Trim() }
+    $q = if ($r2 -match '"<<HMFILE>>"' -or $r2 -match '--single-argument\s+<<HMFILE>>') { $Path } else { '"' + $Path + '"' }
+    try { Start-Process -FilePath $exe -ArgumentList $r2.Replace('<<HMFILE>>', $q) -ErrorAction Stop; return $true } catch { return $false }
+}
 function Open-HMFile([string]$Path) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return }
     $ext = [System.IO.Path]::GetExtension($Path).ToLowerInvariant()
-    if (-not $ext -or (Get-HMAssocCommand $ext)) { Start-Process -FilePath $Path; return }
-    # eigenes Konto ohne Standard-App: die des Desktop-Benutzers (oder fuer .html/.htm dessen Standard-Browser)
-    $cmd = ''
     $us = Get-HMDesktopUserSid
-    if ($us -and (Test-Path -LiteralPath "Registry::HKEY_USERS\$us")) {
-        $cmd = Get-HMAssocCommand $ext "Registry::HKEY_USERS\$us"
-        if (-not $cmd -and $ext -in @('.html', '.htm')) {
-            try {
-                $bp = "$((Get-ItemProperty -LiteralPath "Registry::HKEY_USERS\$us\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice" -ErrorAction Stop).ProgId)"
-                foreach ($cls in @("Registry::HKEY_USERS\$us\Software\Classes\$bp\shell\open\command", "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\$bp\shell\open\command")) {
-                    $c = (Get-ItemProperty -LiteralPath $cls -ErrorAction SilentlyContinue).'(default)'
-                    if ("$c".Trim()) { $cmd = "$c".Trim(); break }
-                }
-            } catch { }
-        }
-    }
-    if (-not $cmd -and $ext -in @('.html', '.htm')) {
+    $uRoot = if ($us -and (Test-Path -LiteralPath "Registry::HKEY_USERS\$us")) { "Registry::HKEY_USERS\$us" } else { '' }
+    if ($ext -in @('.html', '.htm')) {
+        $cmds = @()
+        if ($uRoot) { $cmds += Get-HMBrowserCommand $uRoot }
+        $cmds += Get-HMBrowserCommand 'HKCU:'
         $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-        if ($edge) { $cmd = "`"$edge`" `"%1`"" }
+        if ($edge) { $cmds += "`"$edge`" `"%1`"" }
+        foreach ($c in @($cmds | Where-Object { $_ })) { if (Start-HMCommandWithFile $c $Path) { return } }
+        Start-Process -FilePath $Path; return
     }
-    if ($cmd -and $cmd -match '^\s*"([^"]+)"\s*(.*)$|^\s*(\S+)\s*(.*)$') {
-        $exe = if ($Matches[1]) { $Matches[1] } else { $Matches[3] }
-        $rest = if ($Matches[1]) { $Matches[2] } else { $Matches[4] }
-        $exe = [Environment]::ExpandEnvironmentVariables($exe)
-        if (Test-Path -LiteralPath $exe) {
-            # %1 / %L = Datei (Platzhalter vereinheitlichen, uebrige wie %* entfernen), Pfad nur ohne vorhandene Anfuehrungszeichen quoten
-            $r2 = ($rest -replace '%[1lL]', '<<HMFILE>>' -replace '%\*', '' -replace '%[A-Za-z0-9]', '').Trim()
-            if ($r2 -notmatch '<<HMFILE>>') { $r2 = "$r2 <<HMFILE>>".Trim() }
-            $q = if ($r2 -match '"<<HMFILE>>"' -or $r2 -match '--single-argument\s+<<HMFILE>>') { $Path } else { '"' + $Path + '"' }
-            $arg = $r2.Replace('<<HMFILE>>', $q)
-            try { Start-Process -FilePath $exe -ArgumentList $arg; return } catch { }
-        }
-    }
+    # andere Dateien: eigene Zuordnung, sonst die des Desktop-Benutzers
+    if (-not $ext -or (Get-HMAssocCommand $ext) -or -not $uRoot) { Start-Process -FilePath $Path; return }
+    if (Start-HMCommandWithFile (Get-HMAssocCommand $ext $uRoot) $Path) { return }
     Start-Process -FilePath $Path
 }

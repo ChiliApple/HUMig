@@ -773,6 +773,23 @@ Describe 'Browser vor Backup/Restore schliessen' {
     }
 }
 
+Describe 'Protokolle direkt mit dem Browser oeffnen' {
+    BeforeAll { . (Join-Path $script:Root 'Functions\UI-Common.ps1') }
+    It 'baut die Befehlszeile richtig (Chrome/Edge --single-argument, Firefox mit Anfuehrungszeichen, ohne Platzhalter)' {
+        Mock Test-Path { $true }
+        Mock Start-Process { $script:LastArgs = "$ArgumentList"; $script:LastExe = "$FilePath" }
+        $f = 'E:\HUMig\BACKUPS\a b\Bericht_Backup.html'
+        Start-HMCommandWithFile '"C:\Program Files\Google\Chrome\Application\chrome.exe" --single-argument %1' $f | Should -BeTrue
+        $script:LastExe | Should -Be 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+        $script:LastArgs | Should -Be "--single-argument $f"
+        Start-HMCommandWithFile '"C:\Program Files\Mozilla Firefox\firefox.exe" -osint -url "%1"' $f | Should -BeTrue
+        $script:LastArgs | Should -Be "-osint -url `"$f`""
+        Start-HMCommandWithFile '"C:\x\browser.exe"' $f | Should -BeTrue
+        $script:LastArgs | Should -Be "`"$f`""
+        Start-HMCommandWithFile '' $f | Should -BeFalse
+    }
+}
+
 Describe 'Listen-Rueckgaben (return ,@()) erst zuweisen' {
     It 'Get-HMSbAllHistory / Read-HMSbHistory werden nie direkt in @() oder einer Pipeline verwendet' {
         # die Funktionen geben die Liste als EIN Objekt zurueck - @(Aufruf) bzw. Aufruf | Where-Object sehen nur 1 Element
