@@ -586,8 +586,9 @@ function Find-HMDeletedInBackup {
 # An der Quelle geloeschte Dateien eines Eintrags im Backup beiseitelegen. Jede Datei wird vorher einzeln an der Quelle geprueft:
 # nur wenn sie dort sicher fehlt (Ordner darueber lesbar), wird sie verschoben - bei jedem Zweifel bleibt sie liegen.
 function Move-HMDeletedFromBackup {
-    param([hashtable]$Ctx, $Job, [string]$Src, [string]$Dst, [string[]]$Files = @(), [string[]]$XD = @(), [string[]]$XF = @(), [switch]$NoRecurse, [switch]$NoHidden)
-    $res = [pscustomobject]@{ Moved = 0; Kept = 0; Failed = 0; Error = '' }
+    param([hashtable]$Ctx, $Job, [string]$Src, [string]$Dst, [string[]]$Files = @(), [string[]]$XD = @(), [string[]]$XF = @(), [switch]$NoRecurse, [switch]$NoHidden,
+          [int]$TotalFiles = -1, [int]$MassPercent = 20, [int]$MassMin = 50)
+    $res = [pscustomobject]@{ Moved = 0; Kept = 0; Failed = 0; Error = ''; Mass = $false; Count = 0; Total = 0 }
     try { Initialize-HMFsMove } catch { $res.Error = "Pruefung nicht moeglich: $($_.Exception.Message)"; return $res }
     $s0 = $Src.TrimEnd('\'); $d0 = $Dst.TrimEnd('\')
     # Ausschluesse mit vollem Quellpfad auf die Backup-Seite umschreiben (Namen/Muster gelten unveraendert)
@@ -601,6 +602,13 @@ function Move-HMDeletedFromBackup {
     $xf2 = @($XF | Where-Object { $_ } | ForEach-Object { & $map $_ })
     $f = Find-HMDeletedInBackup -Backup $d0 -Source $s0 -Files $Files -XD $xd2 -XF $xf2 -NoRecurse:$NoRecurse -NoHidden:$NoHidden -Job $Job
     if ($f.ExitCode -ge 8) { $res.Error = "Vergleich mit der Quelle nicht moeglich (Robocopy-Code $($f.ExitCode))"; return $res }
+    # Schutz vor Massenloeschung: fehlen auf einmal ungewoehnlich viele Dateien (typisch fuer Verschluesselungstrojaner, die Originale
+    # durch verschluesselte Kopien mit neuem Namen ersetzen, oder fuer einen verschobenen Ordner), wird NICHTS beiseitegelegt
+    $n = @($f.Paths).Count
+    if ($TotalFiles -ge 0 -and $MassPercent -gt 0 -and $n -ge $MassMin) {
+        $all = [Math]::Max(1, $TotalFiles + $n)
+        if (($n * 100) -gt ($MassPercent * $all)) { $res.Mass = $true; $res.Count = $n; $res.Total = $all; return $res }
+    }
     $bp = "$($Ctx.BackupPath)".TrimEnd('\')
     foreach ($p in @($f.Paths)) {
         if ($Job -and (Test-HMCancel $Job)) { break }
@@ -630,6 +638,27 @@ function Remove-HMDeletedExpired([string]$BackupPath, [int]$Days) {
     }
     if (-not @(Get-ChildItem -LiteralPath $g -Force -ErrorAction SilentlyContinue).Count) { try { [System.IO.Directory]::Delete($g, $false) } catch { } }
     return $out
+}
+
+# Anzahl/Groesse der beiseitegelegten Dateien eines Backups (fuer Backup-Liste, Restore-Hinweis)
+function Get-HMDeletedInfo([string]$BackupPath) {
+    $g = Join-Path $BackupPath $script:HMDeletedDirName
+    $n = 0; $s = [long]0
+    if (Test-Path -LiteralPath $g) { foreach ($x in @(Get-ChildItem -LiteralPath $g -Recurse -File -Force -ErrorAction SilentlyContinue)) { $n++; $s += [long]$x.Length } }
+    return [ordered]@{ Files = $n; Bytes = $s }
+}
+# Wert "Deleted" im manifest.json eines Backups neu zaehlen (nach "Geloeschte leeren"); $ClearAlert = Massenloeschungs-Hinweis entfernen
+function Update-HMManifestDeleted([string]$BackupPath, [switch]$ClearAlert) {
+    $mf = Join-Path $BackupPath 'manifest.json'
+    if (-not (Test-Path -LiteralPath $mf)) { return }
+    $m = Get-Content -LiteralPath $mf -Raw -Encoding UTF8 | ConvertFrom-Json
+    $h = [ordered]@{}
+    foreach ($p in $m.PSObject.Properties) { $h[$p.Name] = $p.Value }
+    $h.Deleted = Get-HMDeletedInfo $BackupPath
+    if ($ClearAlert -and $h.Contains('MassDeleteAlert')) { $h.Remove('MassDeleteAlert') }
+    $tmp = "$mf.tmp"
+    [System.IO.File]::WriteAllText($tmp, ([pscustomobject]$h | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($true)))
+    Move-Item -LiteralPath $tmp -Destination $mf -Force
 }
 
 # Eintrag schreibt beim Restore ausserhalb des Profils (Programme, Windows, HKLM) -> braucht Administratorrechte
@@ -1849,8 +1878,19 @@ function Backup-HMFolderItem {
     $hasExtra = ([int]$rc.FilesExtra -gt 0 -or [int]$rc.DirsExtra -gt 0 -or -not $rc.HaveDirs)
     if (-not $fresh -and -not $Ctx.ListOnly -and $hasExtra -and $st -in @('OK', 'Warning') -and [int]$rc.ExitCode -lt 8 -and [int]$rc.FilesFailed -eq 0 -and -not (Test-HMCancel $Job)) {
         $mv = $null
-        try { $mv = Move-HMDeletedFromBackup -Ctx $Ctx -Job $Job -Src $src -Dst $dst -Files $files -XD $xd -XF $xf -NoRecurse:$noRec -NoHidden:([bool]$Item.NoHidden) }
-        catch { $mv = [pscustomobject]@{ Moved = 0; Kept = 0; Failed = 0; Error = "$($_.Exception.Message)" } }
+        $mp = 20; $mm = 50
+        if ($Ctx.Settings -and $null -ne $Ctx.Settings.DeletedMassPercent) { $mp = [int]$Ctx.Settings.DeletedMassPercent }
+        if ($Ctx.Settings -and $null -ne $Ctx.Settings.DeletedMassMin) { $mm = [int]$Ctx.Settings.DeletedMassMin }
+        try { $mv = Move-HMDeletedFromBackup -Ctx $Ctx -Job $Job -Src $src -Dst $dst -Files $files -XD $xd -XF $xf -NoRecurse:$noRec -NoHidden:([bool]$Item.NoHidden) -TotalFiles ([int]$rc.FilesTotal) -MassPercent $mp -MassMin $mm }
+        catch { $mv = [pscustomobject]@{ Moved = 0; Kept = 0; Failed = 0; Error = "$($_.Exception.Message)"; Mass = $false; Count = 0; Total = 0 } }
+        if ($mv.Mass) {
+            $pct = [Math]::Round(100.0 * $mv.Count / [Math]::Max(1, $mv.Total))
+            $alert = "$($Module.Name) - ${srcLocal}: $($mv.Count) von $($mv.Total) Dateien ($pct %) an der Quelle verschwunden"
+            $msg += " | ACHTUNG MASSENLOESCHUNG: $($mv.Count) von $($mv.Total) Dateien ($pct %) fehlen an der Quelle - das ist ein typisches Zeichen fuer einen Verschluesselungstrojaner (oder der Ordner wurde verschoben/umbenannt). Nichts beiseitegelegt, die Dateien bleiben im Backup. Quell-PC pruefen!"
+            if ($st -eq 'OK') { $st = 'Warning' }
+            if ($null -eq $Ctx.MassAlerts) { $Ctx.MassAlerts = New-Object System.Collections.Generic.List[string] }
+            [void]$Ctx.MassAlerts.Add($alert)
+        }
         if ($mv.Moved) {
             $msg += " | $($mv.Moved) an der Quelle geloeschte Datei(en) beiseitegelegt ($($script:HMDeletedDirName)\$(Split-Path "$($Ctx.DeletedDir)" -Leaf) - werden nicht zurueckgespielt)"
             $Ctx.DeletedMoved = [int]$Ctx.DeletedMoved + [int]$mv.Moved
@@ -2419,6 +2459,11 @@ function Start-HMBackup {
         }
 
         # ---- Beiseitegelegte (an der Quelle geloeschte) Dateien: Zusammenfassung, abgelaufene entfernen ----
+        if ($Ctx.MassAlerts -and $Ctx.MassAlerts.Count) {
+            Write-HMLog $Job 'ACHTUNG - MASSENLOESCHUNG ERKANNT: an der Quelle fehlen auf einmal ungewoehnlich viele Dateien. Das ist ein typisches Zeichen fuer einen Verschluesselungstrojaner (verschluesselte Kopien ersetzen die Originale) - oder ein Ordner wurde verschoben/umbenannt. HUMig hat dort nichts beiseitegelegt, die bisherigen Dateien bleiben im Backup. Quell-PC sofort pruefen (neue Dateiendungen, Erpresser-Hinweise), Netzwerk trennen, falls verdaechtig. War die Loeschung gewollt: Backup einmal mit "Neu" erstellen oder die Schwelle unter Einstellungen > Allgemein anpassen.' 'Error'
+            foreach ($a in $Ctx.MassAlerts) { Write-HMLog $Job "   $a" 'Error' }
+            $Ctx.Manifest.MassDeleteAlert = @($Ctx.MassAlerts.ToArray())
+        }
         if ($prev -and -not (Test-HMCancel $Job)) {
             if ([int]$Ctx.DeletedMoved -gt 0) { Write-HMLog $Job "Fortlaufend: $($Ctx.DeletedMoved) an der Quelle geloeschte Datei(en) nach $($script:HMDeletedDirName)\$(Split-Path "$($Ctx.DeletedDir)" -Leaf) verschoben - werden beim Restore nicht zurueckgespielt (Im Backup suchen > mit geloeschten)" 'Info' }
             $kd = 90
@@ -2428,6 +2473,7 @@ function Start-HMBackup {
                 if ($ex.Removed) { Write-HMLog $Job "Beiseitegelegte Dateien aelter als $kd Tage entfernt ($($ex.Removed) Lauf/Laeufe)" 'Info' }
                 foreach ($er in @($ex.Errors)) { Write-HMLog $Job "   Beiseitegelegte nicht entfernt: $er" 'Warning' }
             } catch { Write-HMLog $Job "   Beiseitegelegte nicht entfernt: $($_.Exception.Message)" 'Warning' }
+            try { $Ctx.Manifest.Deleted = Get-HMDeletedInfo $Ctx.BackupPath } catch { }
         }
 
         # ---- Pruefsummen-Katalog (spaetere Pruefung des Backups moeglich) ----
@@ -3053,6 +3099,11 @@ function Start-HMRestore {
     $Job.LogFile = Join-Path $Ctx.Backup.Path ("Restore_{0}_{1}.log" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))
     $Ctx.RoboLog = Join-Path $Ctx.Backup.Path ("Restore_{0}_{1}_Robocopy.log" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))
     Write-HMLog $Job "RESTORE  $($Ctx.Backup.Name)  ->  $($Ctx.Computer) \ $($Ctx.UserFolder)" 'Header'
+    try {
+        $dm = if ($Ctx.Backup.Manifest) { $Ctx.Backup.Manifest.Deleted } else { $null }
+        if ($dm -and [int]$dm.Files -gt 0) { Write-HMLog $Job "$([int]$dm.Files) beiseitegelegte (am Quell-PC geloeschte) Datei(en) werden nicht zurueckgespielt - bei Bedarf: Im Backup suchen > Mit geloeschten" 'Info' }
+        if ($Ctx.Backup.Manifest -and $Ctx.Backup.Manifest.MassDeleteAlert) { Write-HMLog $Job 'ACHTUNG: beim letzten Backup wurde eine Massenloeschung an der Quelle erkannt (typisches Zeichen fuer einen Verschluesselungstrojaner) - Backup-Stand vor dem Restore pruefen' 'Warning' }
+    } catch { }
     if ($Ctx.Backup.Legacy) { Write-HMLog $Job 'Backup der Vorgaengerversion erkannt (ohne manifest.json)' 'Info' }
 
     $shareRoot = $null

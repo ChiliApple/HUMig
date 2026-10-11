@@ -475,6 +475,64 @@ function New-HMDbCatalogEntry([object[]]$Rows) {
 # ----------------------------------------------------------------------------
 # Im Backup suchen und einzelne Dateien herauskopieren
 # ----------------------------------------------------------------------------
+# Treffer an den Originalort zurueckkopieren: Pfad im Backup <Modul>\<Eintrag>\... (auch _GELOESCHT\<Zeit>\<Modul>\...)
+# -> Quellpfad aus manifest.json. Ziel = oben gewaehlter Computer; liegt der Pfad im Profil des Quell-Benutzers und ist oben
+# ein Benutzer mit Profil gewaehlt, wird ins Profil dieses Benutzers umgeschrieben. Vorhandene Dateien werden NIE ueberschrieben
+# (dann "<Name> (wiederhergestellt <Datum>)").
+function Get-HMOriginalPath($Backup, [string]$Rel) {
+    $r = "$Rel" -replace '^_GELOESCHT\\\d{8}_\d{6}\\', ''
+    $parts = $r -split '\\', 3
+    if ($parts.Count -lt 3 -or -not $Backup.Manifest) { return $null }
+    # Zusaetzliche Ordner: ExtraFolders\FOLDER<n>\... -> Originalpfad aus ExtraFolders\folders.json
+    if ($parts[0] -eq 'ExtraFolders' -and $parts[1] -match '^FOLDER(\d+)$') {
+        $idx = [int]$Matches[1]
+        $jf = Join-Path (Join-Path $Backup.Path 'ExtraFolders') 'folders.json'
+        if (Test-Path -LiteralPath $jf) {
+            $fj = Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json
+            $e = @(@($fj) | Where-Object { [int]$_.Index -eq $idx })[0]
+            if ($e -and "$($e.Path)") { return ("$($e.Path)".TrimEnd('\') + '\' + $parts[2]) }
+        }
+        return $null
+    }
+    $mod = @($Backup.Manifest.Modules | Where-Object { "$($_.Id)" -eq $parts[0] })[0]
+    if (-not $mod) { return $null }
+    $it = @($mod.Items | Where-Object { "$($_.Name)" -eq $parts[1] -and "$($_.Source)" -match '^([A-Za-z]:\\|\\\\)' })[0]
+    if (-not $it) { return $null }
+    return ("$($it.Source)".TrimEnd('\') + '\' + $parts[2])
+}
+function Restore-HMSearchHitsToOrigin($Rows, $Backup, $Win) {
+    $comp = Get-TargetComputer
+    $pctx = @{ Computer = $comp; IsRemote = -not (Test-HMIsLocal $comp) }
+    $prof = Get-SelectedProfile
+    $srcProf = "$($Backup.ProfilePath)".TrimEnd('\')
+    $plan = @(); $noMap = 0
+    foreach ($x in @($Rows)) {
+        $o = Get-HMOriginalPath $Backup "$($x.Pfad)"
+        if (-not $o) { $noMap++; continue }
+        if ($srcProf -and $prof -and $prof.LocalPath -and ($o -ieq $srcProf -or $o.StartsWith($srcProf + '\', [StringComparison]::OrdinalIgnoreCase))) { $o = "$($prof.LocalPath)".TrimEnd('\') + $o.Substring($srcProf.Length) }
+        $plan += [pscustomobject]@{ Src = (Join-Path $Backup.Path "$($x.Pfad)"); Dst = $o }
+    }
+    if (-not $plan.Count) { [void][System.Windows.MessageBox]::Show($Win, 'Fuer die markierten Dateien ist kein Originalort bekannt (z. B. Registry-Export oder Backup der Vorgaengerversion). "Markierte kopieren nach ..." verwenden.', 'An Originalort zurueck', 'OK', 'Information'); return }
+    $list = (@($plan | Select-Object -First 12 | ForEach-Object { $_.Dst }) -join "`n") + $(if ($plan.Count -gt 12) { "`n..." } else { '' })
+    $q = "$($plan.Count) Datei(en) an den Originalort auf $comp zurueckkopieren?`n`n$list`n`nVorhandene Dateien werden NICHT ueberschrieben - dann entsteht '<Name> (wiederhergestellt $(Get-Date -Format 'yyyy-MM-dd'))'.$(if ($noMap) { "`n$noMap Datei(en) ohne bekannten Originalort werden ausgelassen." })"
+    if ("$([System.Windows.MessageBox]::Show($Win, $q, 'An Originalort zurueck', 'YesNo', 'Question'))" -ne 'Yes') { return }
+    $ok = 0; $bad = 0; $ren = 0
+    foreach ($p in $plan) {
+        try {
+            $d = Convert-HMPath $pctx $p.Dst
+            if (Test-Path -LiteralPath $d) {
+                $ext = [System.IO.Path]::GetExtension($d); $base = $d.Substring(0, $d.Length - $ext.Length)
+                $d = "$base (wiederhergestellt $(Get-Date -Format 'yyyy-MM-dd'))$ext"; $i = 2
+                while (Test-Path -LiteralPath $d) { $d = "$base (wiederhergestellt $(Get-Date -Format 'yyyy-MM-dd') $i)$ext"; $i++ }
+                $ren++
+            }
+            $dd = Split-Path $d -Parent; if (-not (Test-Path -LiteralPath $dd)) { New-Item -ItemType Directory -Path $dd -Force | Out-Null }
+            Copy-Item -LiteralPath $p.Src -Destination $d -ErrorAction Stop; $ok++
+            Out-Console "Zurueck: $($p.Dst)$(if ($d -ne (Convert-HMPath $pctx $p.Dst)) { " (als $(Split-Path $d -Leaf))" })" 'Success'
+        } catch { $bad++; Out-Console "Nicht zurueckkopiert: $($p.Dst): $($_.Exception.Message)" 'Error' }
+    }
+    Out-Console "An Originalort zurueck: $ok Datei(en) auf $comp$(if ($ren) { ", davon $ren unter neuem Namen (Datei war schon da)" })$(if ($bad) { ", $bad Fehler" })" $(if ($bad) { 'Warning' } else { 'Success' })
+}
 function Start-HMBackupSearch {
     $b = $script:SelectedBackup
     if (-not $b) { Out-Console 'Bitte im Reiter Restore zuerst ein Backup markieren.' 'Warning'; return }
@@ -517,7 +575,8 @@ function Start-HMBackupSearch {
         }
         if (-not $rows.Count) { Out-Console 'Keine Treffer im Backup.' 'Info'; return }
         Show-DataGridWindow -Title "Suche im Backup - $($st.Backup.Name)" -Columns @('Pfad', 'Groesse', 'Geaendert', 'Geloescht (erkannt)') -ColumnTypes @{ Groesse = [long]; Geaendert = [datetime] } -Rows $rows.ToArray() `
-            -Sort 'Pfad ASC' -CountText "$($rows.Count) Treffer$(if ($rows.Count -ge 20000) { ' (nach 20000 beendet)' })" -Width 1200 -Height 600 -ActionContext @{ Root = $st.Backup.Path } -Actions @(
+            -Sort 'Pfad ASC' -CountText "$($rows.Count) Treffer$(if ($rows.Count -ge 20000) { ' (nach 20000 beendet)' })" -Width 1200 -Height 600 -ActionContext @{ Root = $st.Backup.Path; Backup = $st.Backup } -Actions @(
+                @{ Text = 'An Originalort zurueck ...'; Color = '#FFF9E2AF'; Handler = { param($rows, $win, $ctx) Restore-HMSearchHitsToOrigin @($rows) $ctx.Backup $win } }
                 @{ Text = 'Markierte kopieren nach ...'; Color = '#FFA6E3A1'; Handler = {
                     param($rows, $win, $ctx)
                     $d = New-Object System.Windows.Forms.FolderBrowserDialog

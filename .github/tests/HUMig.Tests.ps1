@@ -528,3 +528,56 @@ Describe 'PS 5.1: JSON-Arrays aus ConvertFrom-Json' {
         $bad | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Schutz vor Massenloeschung, Zaehler, Originalort' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\Tools-School.ps1'), [ref]$null, [ref]$null)
+        $f = @($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq 'Get-HMOriginalPath' }, $true))[0]
+        . ([scriptblock]::Create($f.Extent.Text))
+        function New-HMTestFile([string]$Path, [string]$Text = 'x') {
+            $d = Split-Path $Path -Parent; if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+            [System.IO.File]::WriteAllText($Path, $Text)
+        }
+    }
+    It 'fehlen ungewoehnlich viele Dateien, wird nichts beiseitegelegt (Massenloeschung)' {
+        $src = Join-Path $TestDrive 'Q1'; $bk = Join-Path $TestDrive 'B1'; $dst = Join-Path $bk 'Dokumente\Eigene'
+        1..100 | ForEach-Object { New-HMTestFile "$dst\d$_.docx" }
+        1..30 | ForEach-Object { New-HMTestFile "$src\d$_.docx" }
+        $ctx = @{ BackupPath = $bk }
+        $r = Move-HMDeletedFromBackup -Ctx $ctx -Job $null -Src $src -Dst $dst -TotalFiles 30 -MassPercent 20 -MassMin 50
+        $r.Mass | Should -BeTrue
+        $r.Count | Should -Be 70
+        $r.Moved | Should -Be 0
+        @(Get-ChildItem -LiteralPath $dst -File).Count | Should -Be 100
+        Test-Path -LiteralPath (Join-Path $bk '_GELOESCHT') | Should -BeFalse
+        # Schutz aus (0 %): wird beiseitegelegt
+        $r2 = Move-HMDeletedFromBackup -Ctx $ctx -Job $null -Src $src -Dst $dst -TotalFiles 30 -MassPercent 0
+        $r2.Moved | Should -Be 70
+    }
+    It 'zaehlt beiseitegelegte Dateien und schreibt den Zaehler ins manifest.json' {
+        $bk = Join-Path $TestDrive 'B2'
+        New-HMTestFile "$bk\_GELOESCHT\20261011_120000\Mod\a.txt" 'abc'; New-HMTestFile "$bk\_GELOESCHT\20261011_120000\Mod\b.txt" 'de'
+        '{ "Status": "OK", "Modules": [ { "Id": "Mod" } ], "MassDeleteAlert": [ "x" ] }' | Set-Content -LiteralPath "$bk\manifest.json" -Encoding UTF8
+        $i = Get-HMDeletedInfo $bk
+        $i.Files | Should -Be 2; $i.Bytes | Should -Be 5
+        Update-HMManifestDeleted $bk -ClearAlert
+        $m = Get-Content -LiteralPath "$bk\manifest.json" -Raw | ConvertFrom-Json
+        [int]$m.Deleted.Files | Should -Be 2
+        $m.Status | Should -Be 'OK'
+        $m.PSObject.Properties['MassDeleteAlert'] | Should -BeNullOrEmpty
+    }
+    It 'findet den Originalort (normale Eintraege, beiseitegelegte, Zusaetzliche Ordner)' {
+        $bk = Join-Path $TestDrive 'B3'
+        New-Item -ItemType Directory -Path "$bk\ExtraFolders" -Force | Out-Null
+        $fj = '[{"Index":1,"Path":"D:\\Projekte"},{"Index":2,"Path":"E:\\Daten"}]'
+        [System.IO.File]::WriteAllText("$bk\ExtraFolders\folders.json", $fj)
+        $b = [pscustomobject]@{ Path = $bk; ProfilePath = 'C:\Users\max'; Manifest = [pscustomobject]@{ Modules = @(
+            [pscustomobject]@{ Id = 'Dokumente'; Items = @([pscustomobject]@{ Name = 'DOCS'; Source = 'C:\Users\max\Documents' }) },
+            [pscustomobject]@{ Id = 'ExtraFolders'; Items = @([pscustomobject]@{ Name = 'ExtraFolders'; Source = '' }) }) } }
+        Get-HMOriginalPath $b 'Dokumente\DOCS\Brief\a.docx' | Should -Be 'C:\Users\max\Documents\Brief\a.docx'
+        Get-HMOriginalPath $b '_GELOESCHT\20261011_120000\Dokumente\DOCS\b.docx' | Should -Be 'C:\Users\max\Documents\b.docx'
+        Get-HMOriginalPath $b 'ExtraFolders\FOLDER2\x\y.txt' | Should -Be 'E:\Daten\x\y.txt'
+        Get-HMOriginalPath $b 'Registry\HKCU.reg' | Should -BeNullOrEmpty
+    }
+}
