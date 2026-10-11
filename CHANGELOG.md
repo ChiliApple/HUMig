@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## v2.0.119 - 2026-10-11
+### Dokumentation
+- Anleitung, Zeitplan > Meldung: Ereignisse 1100-1103, Weitergabe nach Teams, Browser-Sperren nur als Hinweis
+- README: Zeitplan meldet auch in Ereignisanzeige und Teams
+
 ## v2.0.118 - 2026-10-11
 ### Geaendert
 - Browser-Profile (Edge, Chrome, Firefox), die trotz laufendem Browser kopiert werden (geplantes Backup oder *Trotzdem kopieren*): vom Browser gesperrte Dateien (Cookies, Sitzung) sind nur noch ein **Hinweis** statt Fehler - Backup, Windows-Meldung und Teams-Meldung bleiben "erfolgreich". Bei anderen Programmen bleiben nicht gesicherte Dateien ein Fehler

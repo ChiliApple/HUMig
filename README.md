@@ -97,7 +97,7 @@ Für einen kompletten PC-Umzug führt der **Umzugs-Assistent** (*Umzug …* im R
 
 > **Hinweis:** *Standard* enthält USMT – das braucht Administratorrechte und *Werkzeuge › USMT einrichten (ADK)*. Ist USMT nicht eingerichtet: Haken entfernen und als eigene Vorlage speichern (z. B. *Standard ohne USMT*). Im Benutzer-Modus ist USMT ohnehin ausgeblendet.
 
-**Zeitplan:** *Zeitplan …* sichert das eigene Profil automatisch – täglich, wöchentlich oder bei Anmeldung, auf USB (an der Bezeichnung erkannt) oder ein Netzlaufwerk, optional mit Auswerfen danach.
+**Zeitplan:** *Zeitplan …* sichert das eigene Profil automatisch – täglich, wöchentlich oder bei Anmeldung, auf USB (an der Bezeichnung erkannt) oder ein Netzlaufwerk, optional mit Auswerfen danach. Ergebnis als Windows-Meldung, in der Ereignisanzeige und – wenn eingerichtet – in Teams.
 
 ## Programm-Katalog
 
