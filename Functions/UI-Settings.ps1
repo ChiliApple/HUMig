@@ -7,11 +7,52 @@
     Wird im UI-Thread geladen (dot-source aus HUMig.ps1). Gibt $true zurueck, wenn gespeichert wurde.
 #>
 
-# Haken der Teams-Kategorien im Einstellungsfenster -> Hashtable Name -> bool
-function Get-HMSetTeamsCats {
-    $c = @{}
-    if ($script:SetDlg -and $script:SetDlg.TeamsChk) { foreach ($n in $script:SetDlg.TeamsChk.Keys) { $c[$n] = [bool]$script:SetDlg.TeamsChk[$n].IsChecked } }
-    return $c
+# --- Teams-Ziele im Einstellungsfenster ($script:SetDlg.TeamsList: Id, Name, Url, Cats, Saved, NewUrl)
+# Vergleichswert einer Ziel-Liste (geaendert ja/nein)
+function Get-HMTeamsListKey($List) {
+    $parts = foreach ($t in @($List | Where-Object { $_ })) {
+        $c = ConvertTo-HMNotifyCats $t.Cats
+        $bits = foreach ($n in $script:HMNotifyCats.Keys) { [int][bool]$c[$n] }
+        '{0}|{1}|{2}|{3}' -f "$($t.Id)", "$($t.Name)".Trim(), "$($t.Url)".Trim(), ($bits -join '')
+    }
+    return (@($parts) -join ';')
+}
+# Felder des gewaehlten Ziels in die Liste uebernehmen
+function Save-HMSetTeamsCur {
+    $S = $script:SetDlg
+    if (-not $S -or $S.TeamsCur -lt 0 -or $S.TeamsCur -ge $S.TeamsList.Count) { return }
+    $t = $S.TeamsList[$S.TeamsCur]
+    $t.Name = "$($S.F.txtTeamsName.Text)".Trim()
+    foreach ($n in $S.TeamsChk.Keys) { $t.Cats[$n] = [bool]$S.TeamsChk[$n].IsChecked }
+    $u = "$($S.F.pwdTeams.Password)".Trim()
+    if ($u) { $t.Url = $u; $t.NewUrl = $true }
+    $S.F.pwdTeams.Password = ''
+}
+# Auswahlliste neu fuellen und Ziel $Select anzeigen (-1 = keins)
+function Update-HMSetTeamsCombo([int]$Select) {
+    $S = $script:SetDlg; $F = $S.F
+    $S.TeamsLoading = $true
+    $F.cmbTeams.Items.Clear()
+    foreach ($t in $S.TeamsList) { [void]$F.cmbTeams.Items.Add($(if ("$($t.Name)") { "$($t.Name)" } else { '(ohne Namen)' })) }
+    if ($Select -ge $S.TeamsList.Count) { $Select = $S.TeamsList.Count - 1 }
+    if ($Select -lt 0 -and $S.TeamsList.Count) { $Select = 0 }
+    $F.cmbTeams.SelectedIndex = $Select
+    $S.TeamsLoading = $false
+    $S.TeamsCur = $Select
+    $has = $Select -ge 0
+    foreach ($c in @(@($F.txtTeamsName, $F.pwdTeams, $F.btnTeamsTest, $F.btnTeamsDel) + @($S.TeamsChk.Values))) { if ($isAdmin) { $c.IsEnabled = $has } }
+    if (-not $has) {
+        $F.txtTeamsName.Text = ''
+        foreach ($n in $S.TeamsChk.Keys) { $S.TeamsChk[$n].IsChecked = $false }
+        $F.lblTeams.Text = "Kein Ziel eingerichtet (Benachrichtigung aus) - mit 'Neues Ziel' anlegen."
+        return
+    }
+    $t = $S.TeamsList[$Select]
+    $F.txtTeamsName.Text = "$($t.Name)"
+    foreach ($n in $S.TeamsChk.Keys) { $S.TeamsChk[$n].IsChecked = [bool](Test-HMNotifyCat $t $n) }
+    $F.lblTeams.Text = if ($t.Saved -and -not $t.NewUrl -and "$($t.Url)") { "Adresse gespeichert - zum Aendern neue Adresse eintragen. $($S.TeamsList.Count) Ziel(e) auf diesem PC." }
+        elseif ("$($t.Url)") { 'Adresse eingetragen - wird mit Speichern uebernommen.' }
+        else { 'Noch keine Adresse - Adresse aus der Teams-App Workflows eintragen.' }
 }
 
 function ConvertTo-HMLines($Arr) { return ((@($Arr) | Where-Object { "$_".Trim() }) -join "`r`n") }
@@ -39,7 +80,7 @@ function Show-SettingsDialog {
     $w.Owner = $script:Window; Set-HMWindowScale $w
     $f = @{}
     foreach ($n in @('lblPath', 'btnOpenConfig', 'btnSave', 'btnCancel', 'tabs', 'txtRoot', 'btnRoot', 'cmbThreads', 'txtRetention', 'txtRetentionKeep', 'txtDeletedKeep', 'txtDeletedMass', 'txtFeedbackMail', 'cmbUiScale', 'chkOverviewAuto', 'chkStatusPage', 'txtChecklist', 'chkChecklistAuto', 'tabSchools', 'dgSchools', 'btnSchoolAdd', 'btnSchoolDel', 'txtUsmt', 'btnUsmt', 'btnUsmtAdk', 'lblUsmt',
-        'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtDrvDir', 'btnDrvDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript', 'chkROfferApps', 'chkRVerify', 'pwdTeams', 'btnTeamsTest', 'btnTeamsDel', 'lblTeams', 'pnlTeamsCats',
+        'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtDrvDir', 'btnDrvDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript', 'chkROfferApps', 'chkRVerify', 'cmbTeams', 'btnTeamsAdd', 'txtTeamsName', 'pwdTeams', 'btnTeamsTest', 'btnTeamsDel', 'lblTeams', 'pnlTeamsCats',
         'tabExceptions', 'btnExcDefault', 'txtExPF', 'txtExPFi', 'txtExPMin', 'txtExSF', 'txtExSFi', 'txtExSMin', 'tabModules', 'txtNmName', 'cmbNmGroup',
         'cmbNmType', 'txtNmFilter', 'txtNmPath', 'btnNmAdd', 'btnModDel', 'btnModJson', 'btnAppEditor', 'dgModules', 'btnLinkAdd', 'btnLinkDel', 'dgLinks',
         'txtOwner', 'txtRepo', 'txtBranch', 'lblToken', 'btnTokenSet', 'btnTokenDel', 'tabUpdate', 'cmbChannel', 'lblInstalled', 'btnVersions', 'chkRequireSig', 'txtSignerThumb', 'chkUseBranch')) { $f[$n] = $w.FindName($n) }
@@ -101,35 +142,69 @@ function Show-SettingsDialog {
         if (New-HMLauncher -Force) { Out-Console "Starter erstellt: $(Join-Path $script:AppRoot 'HUMig.exe')" 'Success'; [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "HUMig.exe wurde erstellt.`n`nKann an die Taskleiste angeheftet werden (Rechtsklick > An Taskleiste anheften).", 'HUMig', 'OK', 'Information') }
         else { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, 'Starter konnte nicht erstellt werden (Details in der Konsole). Start.cmd funktioniert weiterhin.', 'HUMig', 'OK', 'Warning') }
     })
-    # Teams-Benachrichtigung (Adresse nur auf diesem PC, verschluesselt in HKLM - nie in settings.json)
+    # Teams-Benachrichtigung: mehrere Ziele, je Ziel Name, Adresse, Kategorien (Adressen nur auf diesem PC, verschluesselt in HKLM)
     $st.TeamsCfg = Get-HMNotifyConfig
-    # Kategorien als Haken (einzeln ein-/ausschaltbar)
+    $st.TeamsList = New-Object System.Collections.ArrayList
+    foreach ($t in @($st.TeamsCfg.Targets | Where-Object { $_ })) { [void]$st.TeamsList.Add(@{ Id = "$($t.Id)"; Name = "$($t.Name)"; Url = "$($t.Url)"; Cats = (ConvertTo-HMNotifyCats $t.Cats); Saved = $true; NewUrl = $false }) }
+    $st.TeamsOrig = Get-HMTeamsListKey $st.TeamsList
+    $st.TeamsCur = -1; $st.TeamsLoading = $false
     $st.TeamsChk = [ordered]@{}
     foreach ($n in $script:HMNotifyCats.Keys) {
         $cb = New-Object System.Windows.Controls.CheckBox
         $cb.Content = "$($script:HMNotifyCats[$n][0])"
-        $cb.IsChecked = [bool](Test-HMNotifyCat $st.TeamsCfg $n)
         $cb.Margin = [System.Windows.Thickness]::new(0, 2, 0, 0)
         [void]$f.pnlTeamsCats.Children.Add($cb)
         $st.TeamsChk[$n] = $cb
     }
-    $f.lblTeams.Text = if ($st.TeamsCfg.Configured) { 'Auf diesem PC ist eine Webhook-Adresse gespeichert - zum Aendern neue Adresse eintragen.' } else { 'Keine Webhook-Adresse gespeichert (Benachrichtigung aus).' }
-    if (-not $isAdmin) { foreach ($c in @(@($f.pwdTeams, $f.btnTeamsTest, $f.btnTeamsDel) + @($st.TeamsChk.Values))) { $c.IsEnabled = $false }; $f.lblTeams.Text = 'Nur als Administrator einstellbar.' }
+    Update-HMSetTeamsCombo 0
+    if ($st.TeamsCfg.Error) { $f.lblTeams.Text = "Gespeicherte Ziele nicht lesbar: $($st.TeamsCfg.Error)" }
+    if (-not $isAdmin) { foreach ($c in @(@($f.cmbTeams, $f.btnTeamsAdd, $f.txtTeamsName, $f.pwdTeams, $f.btnTeamsTest, $f.btnTeamsDel) + @($st.TeamsChk.Values))) { $c.IsEnabled = $false }; $f.lblTeams.Text = 'Nur als Administrator einstellbar.' }
+    $f.cmbTeams.Add_SelectionChanged({
+        $S = $script:SetDlg
+        if ($S.TeamsLoading) { return }
+        $i = $S.F.cmbTeams.SelectedIndex
+        Save-HMSetTeamsCur
+        Update-HMSetTeamsCombo $i
+    })
+    $f.btnTeamsAdd.Add_Click({
+        $S = $script:SetDlg
+        if ($S.TeamsList.Count -ge $script:HMNotifyMaxTargets) { [void][System.Windows.MessageBox]::Show($S.Win, "Hoechstens $($script:HMNotifyMaxTargets) Ziele.", 'Teams', 'OK', 'Information'); return }
+        Save-HMSetTeamsCur
+        $nm = "Ziel $($S.TeamsList.Count + 1)"
+        [void]$S.TeamsList.Add(@{ Id = [guid]::NewGuid().ToString('N').Substring(0, 8); Name = $nm; Url = ''; Cats = (Get-HMNotifyDefaultCats); Saved = $false; NewUrl = $false })
+        Update-HMSetTeamsCombo ($S.TeamsList.Count - 1)
+        $S.F.txtTeamsName.Focus(); $S.F.txtTeamsName.SelectAll()
+    })
     $f.btnTeamsTest.Add_Click({
-        $F = $script:SetDlg.F
-        $u = "$($F.pwdTeams.Password)".Trim()
-        if (-not $u -and -not $script:SetDlg.TeamsCfg.Configured) { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, 'Bitte zuerst die Webhook-Adresse eintragen.', 'Teams', 'OK', 'Information'); return }
-        $r = Send-HMTeamsMessage -Title 'HUMig - Testnachricht' -Lines @("Die Benachrichtigung von $env:COMPUTERNAME funktioniert.") -Level 'OK' -Url $u
-        if ($r) { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "$r`n`nPruefen: Adresse vollstaendig kopiert? Workflow eingeschaltet? Ausgehendes HTTPS am PC erlaubt?", 'Teams', 'OK', 'Warning') }
+        $S = $script:SetDlg
+        if ($S.TeamsCur -lt 0) { [void][System.Windows.MessageBox]::Show($S.Win, "Bitte zuerst mit 'Neues Ziel' ein Ziel anlegen.", 'Teams', 'OK', 'Information'); return }
+        Save-HMSetTeamsCur
+        $t = $S.TeamsList[$S.TeamsCur]
+        Update-HMSetTeamsCombo $S.TeamsCur
+        if (-not "$($t.Url)") { [void][System.Windows.MessageBox]::Show($S.Win, 'Bitte zuerst die Webhook-Adresse eintragen.', 'Teams', 'OK', 'Information'); return }
+        $r = Send-HMTeamsMessage -Title "HUMig - Testnachricht ($($t.Name))" -Lines @("Die Benachrichtigung von $env:COMPUTERNAME an '$($t.Name)' funktioniert.") -Level 'OK' -Url $t.Url
+        if ($r) { [void][System.Windows.MessageBox]::Show($S.Win, "$r`n`nPruefen: Adresse vollstaendig kopiert? Workflow eingeschaltet? Ausgehendes HTTPS am PC erlaubt?", 'Teams', 'OK', 'Warning') }
         else {
-            $hint = if ($u -and -not (Test-HMTeamsWebhookHostKnown $u)) { "`n`nHinweis: die Adresse stammt nicht erkennbar aus der Workflows-App." } else { '' }
-            [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "Testnachricht gesendet - sie sollte gleich im Kanal stehen.$(if ($u) { ' Mit Speichern wird die Adresse uebernommen.' })$hint", 'Teams', 'OK', 'Information')
+            $hint = if (-not (Test-HMTeamsWebhookHostKnown $t.Url)) { "`n`nHinweis: die Adresse stammt nicht erkennbar aus der Workflows-App." } else { '' }
+            [void][System.Windows.MessageBox]::Show($S.Win, "Testnachricht an '$($t.Name)' gesendet - sie sollte gleich im Chat/Kanal stehen.$(if (-not $t.Saved -or $t.NewUrl) { ' Mit Speichern wird die Adresse uebernommen.' })$hint", 'Teams', 'OK', 'Information')
         }
     })
     $f.btnTeamsDel.Add_Click({
-        if ("$([System.Windows.MessageBox]::Show($script:SetDlg.Win, 'Webhook-Adresse auf diesem PC loeschen (sofort)?', 'Teams', 'YesNo', 'Question'))" -ne 'Yes') { return }
-        try { Set-HMNotifyConfig -Url '' -Cats (Get-HMSetTeamsCats); $script:SetDlg.TeamsCfg = Get-HMNotifyConfig; $script:SetDlg.F.pwdTeams.Password = ''; $script:SetDlg.F.lblTeams.Text = 'Keine Webhook-Adresse gespeichert (Benachrichtigung aus).'; Out-Console 'Teams-Benachrichtigung: Adresse geloescht.' 'Info' }
-        catch { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "Loeschen fehlgeschlagen: $($_.Exception.Message)", 'Teams', 'OK', 'Error') }
+        $S = $script:SetDlg
+        if ($S.TeamsCur -lt 0) { return }
+        $t = $S.TeamsList[$S.TeamsCur]
+        $q = "Ziel '$($t.Name)' entfernen?$(if ($t.Saved) { "`n`nDie gespeicherte Adresse wird sofort von diesem PC geloescht, die anderen Ziele bleiben.`nDanach in Teams den Workflow loeschen oder ausschalten - sonst bleibt die Adresse gueltig." })"
+        if ("$([System.Windows.MessageBox]::Show($S.Win, $q, 'Teams', 'YesNo', 'Question'))" -ne 'Yes') { return }
+        if ($t.Saved) {
+            try { Remove-HMNotifyTarget "$($t.Id)"; Out-Console "Teams-Benachrichtigung: Ziel '$($t.Name)' entfernt." 'Info' }
+            catch { [void][System.Windows.MessageBox]::Show($S.Win, "Entfernen fehlgeschlagen: $($_.Exception.Message)", 'Teams', 'OK', 'Error'); return }
+        }
+        $S.TeamsList.RemoveAt($S.TeamsCur)
+        # gespeicherten Stand ohne dieses Ziel als Vergleich merken (Entfernen ist schon gespeichert)
+        $cfgN = Get-HMNotifyConfig
+        $S.TeamsOrig = Get-HMTeamsListKey $cfgN.Targets
+        $S.TeamsCur = -1
+        Update-HMSetTeamsCombo ([Math]::Min($S.F.cmbTeams.SelectedIndex, $S.TeamsList.Count - 1))
     })
     $f.btnShortcut.Add_Click({
         try { $l = New-HMDesktopShortcut; Out-Console "Desktop-Verknuepfung erstellt: $l" 'Success' } catch { Out-Console "Verknuepfung fehlgeschlagen: $($_.Exception.Message)" 'Error' }
@@ -305,8 +380,9 @@ function Show-SettingsDialog {
         if (-not [int]::TryParse("$($F.txtDeletedKeep.Text)".Trim(), [ref]$delKeep) -or $delKeep -lt 0 -or $delKeep -gt 3650) { [void][System.Windows.MessageBox]::Show($W, 'Geloeschte Dateien aufheben: Tage 0 bis 3650 (0 = nie entfernen)', 'Einstellungen', 'OK', 'Warning'); return }
         $delMass = 0
         if (-not [int]::TryParse("$($F.txtDeletedMass.Text)".Trim(), [ref]$delMass) -or $delMass -lt 0 -or $delMass -gt 100) { [void][System.Windows.MessageBox]::Show($W, 'Warnung bei Massenloeschung: Prozent 0 bis 100 (0 = aus)', 'Einstellungen', 'OK', 'Warning'); return }
-        $tu = "$($F.pwdTeams.Password)".Trim()
-        if ($tu) { $why = Test-HMTeamsWebhookUrl $tu; if ($why) { [void][System.Windows.MessageBox]::Show($W, "Teams-Webhook: $why", 'Einstellungen', 'OK', 'Warning'); return } }
+        Save-HMSetTeamsCur; Update-HMSetTeamsCombo $script:SetDlg.TeamsCur
+        $tWhy = Test-HMNotifyTargets @($script:SetDlg.TeamsList)
+        if ($isAdmin -and $tWhy) { [void][System.Windows.MessageBox]::Show($W, "Teams-Benachrichtigung: $tWhy`n`nAdresse eintragen oder das Ziel entfernen.", 'Einstellungen', 'OK', 'Warning'); return }
         $F.dgSchools.CommitEdit(); $F.dgSchools.CommitEdit()
         $schools = @(foreach ($r in $script:SetDlg.DtS.Rows) {
             if ($r.RowState -eq 'Deleted' -or -not "$($r.Name)".Trim()) { continue }
@@ -353,12 +429,10 @@ function Show-SettingsDialog {
         $rs.ExplorerFavorites = [bool]$F.chkRFav.IsChecked; $rs.FastBootOff = [bool]$F.chkRFast.IsChecked; $rs.PostScript = "$($F.txtRScript.Text)".Trim()
         $rs.OfferApps = [bool]$F.chkROfferApps.IsChecked; $rs.VerifyAfter = [bool]$F.chkRVerify.IsChecked
         $h.Restore = $rs
-        # Teams: nur speichern, wenn etwas geaendert wurde (Adresse eingetragen oder Haken anders)
-        $tc = Get-HMSetTeamsCats
-        $tcChanged = @($tc.Keys | Where-Object { [bool]$tc[$_] -ne [bool](Test-HMNotifyCat $script:SetDlg.TeamsCfg $_) }).Count -gt 0
-        if ($isAdmin -and ($tu -or $tcChanged)) {
-            try { Set-HMNotifyConfig -Url $(if ($tu) { $tu } else { $null }) -Cats $tc; if ($tu) { Out-Console 'Teams-Benachrichtigung: Webhook-Adresse auf diesem PC gespeichert (verschluesselt).' 'Success' } }
-            catch { [void][System.Windows.MessageBox]::Show($W, "Teams-Webhook nicht gespeichert: $($_.Exception.Message)", 'Einstellungen', 'OK', 'Error'); return }
+        # Teams: nur speichern, wenn sich an den Zielen etwas geaendert hat
+        if ($isAdmin -and (Get-HMTeamsListKey $script:SetDlg.TeamsList) -ne $script:SetDlg.TeamsOrig) {
+            try { Set-HMNotifyTargets -Targets @($script:SetDlg.TeamsList); Out-Console "Teams-Benachrichtigung: $($script:SetDlg.TeamsList.Count) Ziel(e) auf diesem PC gespeichert (verschluesselt)." 'Success' }
+            catch { [void][System.Windows.MessageBox]::Show($W, "Teams-Ziele nicht gespeichert: $($_.Exception.Message)", 'Einstellungen', 'OK', 'Error'); return }
         }
         $F.dgLinks.CommitEdit(); $F.dgLinks.CommitEdit()
         $h.Links = @(foreach ($r in $script:SetDlg.DtL.Rows) { if ($r.RowState -ne 'Deleted' -and "$($r.Name)".Trim() -and "$($r.Url)".Trim()) { [ordered]@{ Name = "$($r.Name)".Trim(); Url = "$($r.Url)".Trim(); CopySerial = [bool]($r.CopySerial -eq $true) } } })

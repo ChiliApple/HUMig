@@ -899,6 +899,42 @@ Describe 'Teams-Benachrichtigung (Workflow-Webhook)' {
         Mock Get-HMNotifyConfig { [pscustomobject]@{ Url = 'https://localhost:1/x'; OnSuccess = $false; Cats = @{ MassDelete = $false }; Configured = $true; Error = '' } }
         Send-HMNotify -Title 't' -Level 'Error' -Category 'MassDelete' | Should -BeNullOrEmpty
     }
+    It 'mehrere Ziele: jede Meldung nur an Ziele mit eingeschalteter Kategorie' {
+        $a = Get-HMNotifyDefaultCats; $a['SbOK'] = $true
+        $b = Get-HMNotifyDefaultCats; $b['MassDelete'] = $false
+        Mock Get-HMNotifyConfig { [pscustomobject]@{ Configured = $true; Error = ''; Url = 'https://x.logic.azure.com/a'; Cats = $a
+            Targets = @([pscustomobject]@{ Id = 'a'; Name = 'nur ich'; Url = 'https://x.logic.azure.com/a'; Cats = $a }, [pscustomobject]@{ Id = 'b'; Name = 'Kanal'; Url = 'https://x.logic.azure.com/b'; Cats = $b }) } }
+        Mock Send-HMTeamsMessage { '' }
+        Send-HMNotify -Title 't' -Level 'Error' -Category 'MassDelete' | Should -Be 'Teams-Benachrichtigung: nur ich: gesendet'
+        Should -Invoke Send-HMTeamsMessage -Times 1 -Exactly -ParameterFilter { $Url -like '*/a' }
+        Send-HMNotify -Title 't' -Level 'OK' | Should -Match '^Teams-Benachrichtigung: nur ich: gesendet$'
+        Send-HMNotify -Title 't' -Level 'Error' -Category 'SbError' | Should -Match 'nur ich: gesendet; Kanal: gesendet'
+    }
+    It 'Ziele pruefen: Name, doppelte Namen, Adresse, Hoechstzahl' {
+        $u = 'https://x.logic.azure.com/a'
+        Test-HMNotifyTargets @() | Should -BeNullOrEmpty
+        Test-HMNotifyTargets @(@{ Name = 'A'; Url = $u }, @{ Name = 'B'; Url = $u }) | Should -BeNullOrEmpty
+        Test-HMNotifyTargets @(@{ Name = ''; Url = $u }) | Should -Match 'keinen Namen'
+        Test-HMNotifyTargets @(@{ Name = 'A'; Url = $u }, @{ Name = 'a'; Url = $u }) | Should -Match 'doppelt'
+        Test-HMNotifyTargets @(@{ Name = 'A'; Url = '' }) | Should -Match "Ziel 'A'"
+        Test-HMNotifyTargets @(1..11 | ForEach-Object { @{ Name = "Z$_"; Url = $u } }) | Should -Match 'hoechstens'
+    }
+    It 'Kategorien aus gelesener Liste: unbekannte ignoriert, fehlende = Standard' {
+        $c = ConvertTo-HMNotifyCats ([pscustomobject]@{ SbOK = $true; Health = $false; Unsinn = $true })
+        $c['SbOK'] | Should -BeTrue
+        $c['Health'] | Should -BeFalse
+        $c['SbError'] | Should -BeTrue
+        $c.ContainsKey('Unsinn') | Should -BeFalse
+        (ConvertTo-HMNotifyCats @{ Space = $false })['Space'] | Should -BeFalse
+    }
+    It 'Einstellungsfenster erkennt Aenderungen an den Zielen' {
+        . (Join-Path $script:Root 'Functions\UI-Settings.ps1')
+        $l1 = @(@{ Id = 'a'; Name = 'Kanal'; Url = 'https://x/a'; Cats = (Get-HMNotifyDefaultCats) })
+        $k1 = Get-HMTeamsListKey $l1
+        $l1[0].Cats['SbOK'] = $true
+        Get-HMTeamsListKey $l1 | Should -Not -Be $k1
+        Get-HMTeamsListKey @() | Should -Be ''
+    }
     It 'gibt die Adresse nie in Fehlermeldungen aus' {
         $r = Send-HMTeamsMessage -Title 't' -Url 'https://localhost:1/workflows/geheim?sig=GEHEIM'
         $r | Should -Match 'fehlgeschlagen'

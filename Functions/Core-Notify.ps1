@@ -1,21 +1,22 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Benachrichtigung ueber einen Teams-Workflow (Workflows-App: "Bei Eingang einer Teams-Webhookanforderung"
-    bzw. Vorlage "Send webhook alerts to a channel"). Die alten Office-365-Connectors sind abgeschaltet.
+    Benachrichtigung ueber Teams-Workflows (Workflows-App, Vorlage "Webhookbenachrichtigungen an einen Chat/Kanal").
+    Die alten Office-365-Connectors sind abgeschaltet.
 .DESCRIPTION
-    Die Webhook-Adresse ist ein Geheimnis (wer sie kennt, kann in den Kanal schreiben). Sie wird darum nur auf dem PC
-    gespeichert, auf dem sie eingetragen wird: HKLM:\SOFTWARE\HUMig\Notify, mit DPAPI (Computer) verschluesselt,
-    Schluessel nur fuer SYSTEM + Administratoren lesbar. Nie im Tool-Ordner, in settings.json, Logs oder Support-Paketen.
-    Gesendet wird darum nur aus Vorgaengen mit Administrator-/SYSTEM-Rechten (geplantes Server-Backup, Vorgaenge in HUMig
-    als Administrator) - geplante Profil-Backups im Benutzerkonto melden sich lokal (Windows-Hinweis, Startseite).
+    Mehrere Ziele (Chat/Kanal) je PC, jedes mit Name und eigenen Kategorien - z.B. Fehler an den Kanal des Teams,
+    Erfolgsmeldungen nur an einen selbst. Webhook-Adressen sind Geheimnisse (wer sie kennt, kann dort schreiben). Sie werden
+    darum nur auf dem PC gespeichert, auf dem sie eingetragen werden: HKLM:\SOFTWARE\HUMig\Notify (Wert Targets), mit DPAPI
+    (Computer) verschluesselt, Schluessel nur fuer SYSTEM + Administratoren lesbar. Nie im Tool-Ordner, in settings.json,
+    Logs oder Support-Paketen. Gesendet wird darum nur aus Vorgaengen mit Administrator-/SYSTEM-Rechten (geplantes
+    Server-Backup, Vorgaenge in HUMig als Administrator) - geplante Profil-Backups im Benutzerkonto melden sich lokal.
 .NOTES
     Zielmaschine: der PC, auf dem HUMig bzw. die geplante Aufgabe laeuft. Ohne Abhaengigkeiten (auch in Aufgaben geladen).
 #>
 
 $script:HMNotifyKey = 'HKLM:\SOFTWARE\HUMig\Notify'
 $script:HMNotifyEntropy = [System.Text.Encoding]::UTF8.GetBytes('HUMig-Notify-v1')
-# Kategorien (einzeln ein-/ausschaltbar, Registry-Wert Cat_<Name> als DWORD). Wert: Text, Standard
+# Kategorien (je Ziel einzeln ein-/ausschaltbar). Wert: Text, Standard
 $script:HMNotifyCats = [ordered]@{
     SbError    = @('Server-Backup fehlgeschlagen / abgebrochen', $true)
     SbWarning  = @('Server-Backup mit Warnungen', $true)
@@ -61,25 +62,46 @@ function Get-HMNotifyDefaultCats {
     return $c
 }
 
-# Einstellungen lesen: Url (entschluesselt, '' wenn keine/nicht lesbar), OnSuccess, Cats, Configured, Error
+$script:HMNotifyMaxTargets = 10
+
+# Kategorien aus einem gelesenen Objekt/Hashtable uebernehmen (unbekannte Namen ignorieren, fehlende = Standard)
+function ConvertTo-HMNotifyCats($Src) {
+    $c = Get-HMNotifyDefaultCats
+    if ($null -eq $Src) { return $c }
+    if ($Src -is [System.Collections.IDictionary]) { foreach ($n in @($c.Keys)) { if ($Src.Contains($n)) { $c[$n] = [bool]$Src[$n] } } }
+    else { foreach ($p in @($Src.PSObject.Properties)) { if ($c.ContainsKey($p.Name)) { $c[$p.Name] = [bool]$p.Value } } }
+    return $c
+}
+
+# Einstellungen lesen. Targets = Ziele (Id, Name, Url entschluesselt, Cats). Url/Cats/OnSuccess = erstes Ziel (aeltere Aufrufer)
 function Get-HMNotifyConfig {
-    $r = [pscustomobject]@{ Url = ''; OnSuccess = $false; Cats = (Get-HMNotifyDefaultCats); Configured = $false; Error = '' }
+    $r = [pscustomobject]@{ Url = ''; OnSuccess = $false; Cats = (Get-HMNotifyDefaultCats); Targets = @(); Configured = $false; Error = '' }
     try {
         if (-not (Test-Path -LiteralPath $script:HMNotifyKey)) { return $r }
         $k = Get-ItemProperty -LiteralPath $script:HMNotifyKey -ErrorAction Stop
-        $r.OnSuccess = [bool]([int]"0$($k.OnSuccess)")
-        $r.Cats['SbOK'] = $r.OnSuccess   # aeltere Versionen: nur der Haken 'auch bei Erfolg'
-        foreach ($n in $script:HMNotifyCats.Keys) {
-            $v = $k.PSObject.Properties["Cat_$n"]
-            if ($v) { $r.Cats[$n] = [bool]([int]"0$($v.Value)") }
+        $list = @()
+        if ("$($k.Targets)") {
+            $j = (Unprotect-HMNotifyText "$($k.Targets)") | ConvertFrom-Json   # erst zuweisen (PS 5.1: Liste kommt als EIN Objekt)
+            foreach ($t in @($j | ForEach-Object { $_ } | Where-Object { $_ })) {
+                if (-not "$($t.Url)") { continue }
+                $list += [pscustomobject]@{ Id = "$($t.Id)"; Name = "$($t.Name)"; Url = "$($t.Url)"; Cats = (ConvertTo-HMNotifyCats $t.Cats) }
+            }
+        } else {
+            # bis 2.0.115: eine Adresse (TeamsUrl), Kategorien Cat_<Name>, davor nur OnSuccess
+            $c = Get-HMNotifyDefaultCats
+            $c['SbOK'] = [bool]([int]"0$($k.OnSuccess)")
+            foreach ($n in @($c.Keys)) { $v = $k.PSObject.Properties["Cat_$n"]; if ($v) { $c[$n] = [bool]([int]"0$($v.Value)") } }
+            $r.Cats = $c
+            if ("$($k.TeamsUrl)") { $list += [pscustomobject]@{ Id = 'standard'; Name = 'Standard'; Url = (Unprotect-HMNotifyText "$($k.TeamsUrl)"); Cats = $c } }
         }
+        $r.Targets = @($list)
+        if ($list.Count) { $r.Configured = $true; $r.Url = $list[0].Url; $r.Cats = $list[0].Cats }
         $r.OnSuccess = [bool]$r.Cats['SbOK']
-        if ("$($k.TeamsUrl)") { $r.Configured = $true; $r.Url = Unprotect-HMNotifyText "$($k.TeamsUrl)" }
-    } catch { $r.Error = "$($_.Exception.Message)"; $r.Url = '' }
+    } catch { $r.Error = "$($_.Exception.Message)"; $r.Url = ''; $r.Targets = @(); $r.Configured = $false }
     return $r
 }
 
-# Ist die Kategorie eingeschaltet? (unbekannte Kategorie = ein)
+# Ist die Kategorie eingeschaltet? $Cfg = Konfiguration oder Ziel (mit .Cats). Unbekannte Kategorie = ein
 function Test-HMNotifyCat($Cfg, [string]$Name) {
     if (-not $Name) { return $true }
     $c = $null
@@ -89,12 +111,9 @@ function Test-HMNotifyCat($Cfg, [string]$Name) {
     return $true
 }
 
-# Speichern (Administrator). $Url = $null: Adresse unveraendert lassen, '' = Adresse entfernen
-function Set-HMNotifyConfig {
-    param($Url = $null, [bool]$OnSuccess = $false, [hashtable]$Cats = $null)
-    if ($Cats -and $Cats.ContainsKey('SbOK')) { $OnSuccess = [bool]$Cats['SbOK'] }
+# Schluessel anlegen, nur SYSTEM + Administratoren (Vererbung aus) - Benutzer koennen die Adressen nicht lesen
+function Initialize-HMNotifyKey {
     if (-not (Test-Path -LiteralPath $script:HMNotifyKey)) { New-Item -Path $script:HMNotifyKey -Force -ErrorAction Stop | Out-Null }
-    # Schluessel nur fuer SYSTEM + Administratoren (Vererbung aus) - Benutzer koennen die Adresse nicht lesen
     $acl = New-Object System.Security.AccessControl.RegistrySecurity
     $acl.SetAccessRuleProtection($true, $false)
     $acl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')))
@@ -102,19 +121,49 @@ function Set-HMNotifyConfig {
         $acl.AddAccessRule((New-Object System.Security.AccessControl.RegistryAccessRule((New-Object System.Security.Principal.SecurityIdentifier($s)), 'FullControl', 'ContainerInherit', 'None', 'Allow')))
     }
     Set-Acl -LiteralPath $script:HMNotifyKey -AclObject $acl -ErrorAction Stop
-    if ($null -ne $Url) {
-        if ("$Url".Trim()) {
-            $why = Test-HMTeamsWebhookUrl $Url
-            if ($why) { throw "Webhook-Adresse ungueltig: $why" }
-            Set-ItemProperty -LiteralPath $script:HMNotifyKey -Name 'TeamsUrl' -Value (Protect-HMNotifyText "$Url".Trim()) -Type String -ErrorAction Stop
-        } else { Remove-ItemProperty -LiteralPath $script:HMNotifyKey -Name 'TeamsUrl' -ErrorAction SilentlyContinue }
+}
+
+# Ziele pruefen. Rueckgabe: '' = in Ordnung, sonst Grund
+function Test-HMNotifyTargets([object[]]$Targets) {
+    $l = @($Targets | Where-Object { $_ })
+    if ($l.Count -gt $script:HMNotifyMaxTargets) { return "hoechstens $($script:HMNotifyMaxTargets) Ziele" }
+    $names = @{}
+    foreach ($t in $l) {
+        $n = "$($t.Name)".Trim()
+        if (-not $n) { return 'ein Ziel hat keinen Namen' }
+        if ($names.ContainsKey($n.ToLower())) { return "Name '$n' doppelt" }
+        $names[$n.ToLower()] = 1
+        $why = Test-HMTeamsWebhookUrl "$($t.Url)"
+        if ($why) { return "Ziel '$n': Webhook-Adresse $why" }
     }
-    Set-ItemProperty -LiteralPath $script:HMNotifyKey -Name 'OnSuccess' -Value ([int]$OnSuccess) -Type DWord -ErrorAction Stop
-    if ($Cats) {
-        foreach ($n in $script:HMNotifyCats.Keys) {
-            if ($Cats.ContainsKey($n)) { Set-ItemProperty -LiteralPath $script:HMNotifyKey -Name "Cat_$n" -Value ([int][bool]$Cats[$n]) -Type DWord -ErrorAction Stop }
-        }
-    }
+    return ''
+}
+
+# Ziele speichern (Administrator): alle Ziele als eine mit DPAPI verschluesselte Liste. Leere Liste = alles entfernen
+function Set-HMNotifyTargets {
+    param([object[]]$Targets = @())
+    $why = Test-HMNotifyTargets $Targets
+    if ($why) { throw "Teams-Ziele ungueltig: $why" }
+    Initialize-HMNotifyKey
+    $list = @(foreach ($t in @($Targets | Where-Object { $_ })) {
+        $id = "$($t.Id)".Trim(); if (-not $id) { $id = [guid]::NewGuid().ToString('N').Substring(0, 8) }
+        $c = ConvertTo-HMNotifyCats $t.Cats
+        $co = [ordered]@{}; foreach ($n in $script:HMNotifyCats.Keys) { $co[$n] = [bool]$c[$n] }
+        [ordered]@{ Id = $id; Name = "$($t.Name)".Trim(); Url = "$($t.Url)".Trim(); Cats = $co }
+    })
+    if ($list.Count) {
+        $json = ConvertTo-Json -InputObject @($list) -Depth 5 -Compress
+        Set-ItemProperty -LiteralPath $script:HMNotifyKey -Name 'Targets' -Value (Protect-HMNotifyText $json) -Type String -ErrorAction Stop
+    } else { Remove-ItemProperty -LiteralPath $script:HMNotifyKey -Name 'Targets' -ErrorAction SilentlyContinue }
+    # Werte bis 2.0.115 (eine Adresse) entfernen - sind jetzt in der Liste
+    foreach ($v in @(@('TeamsUrl', 'OnSuccess') + @($script:HMNotifyCats.Keys | ForEach-Object { "Cat_$_" }))) { Remove-ItemProperty -LiteralPath $script:HMNotifyKey -Name $v -ErrorAction SilentlyContinue }
+}
+
+# Ein Ziel sofort entfernen (nur dieses, die anderen bleiben)
+function Remove-HMNotifyTarget([string]$Id) {
+    $c = Get-HMNotifyConfig
+    if ($c.Error) { throw "Teams-Ziele nicht lesbar: $($c.Error)" }
+    Set-HMNotifyTargets -Targets @(@($c.Targets) | Where-Object { "$($_.Id)" -ne $Id })
 }
 
 # Nachricht als Adaptive Card (Format der Workflows-Vorlage: attachments[].content). Level: OK | Warning | Error | Info
@@ -152,15 +201,19 @@ function Send-HMTeamsMessage {
     }
 }
 
-# Meldung nur wenn eingetragen und die Kategorie eingeschaltet ist; Ergebnis als Text fuer das Protokoll
-# ('' = nichts zu melden / nicht eingerichtet / Kategorie aus). Ohne Kategorie: OK nur mit 'Server-Backup erfolgreich'
+# Meldung an alle Ziele, bei denen die Kategorie eingeschaltet ist; Ergebnis als Text fuer das Protokoll
+# ('' = nichts zu melden / nicht eingerichtet / Kategorie ueberall aus). Ohne Kategorie: OK nur an Ziele mit 'Server-Backup erfolgreich'
 function Send-HMNotify {
     param([string]$Title, [string[]]$Lines = @(), [string]$Level = 'Info', [string]$Source = '', [string]$Category = '')
     $c = Get-HMNotifyConfig
     if (-not $c.Configured) { return '' }
-    if ($Category) { if (-not (Test-HMNotifyCat $c $Category)) { return '' } }
-    elseif ($Level -eq 'OK' -and -not $c.OnSuccess) { return '' }
-    $r = Send-HMTeamsMessage -Title $Title -Lines $Lines -Level $Level -Url $c.Url -Source $Source
-    if ($r) { return "Teams-Benachrichtigung: $r" }
-    return 'Teams-Benachrichtigung gesendet'
+    $out = @()
+    foreach ($t in @($c.Targets | Where-Object { $_ })) {
+        if ($Category) { if (-not (Test-HMNotifyCat $t $Category)) { continue } }
+        elseif ($Level -eq 'OK' -and -not (Test-HMNotifyCat $t 'SbOK')) { continue }
+        $r = Send-HMTeamsMessage -Title $Title -Lines $Lines -Level $Level -Url $t.Url -Source $Source
+        $out += "$($t.Name): $(if ($r) { $r } else { 'gesendet' })"
+    }
+    if (-not $out.Count) { return '' }
+    return "Teams-Benachrichtigung: $($out -join '; ')"
 }

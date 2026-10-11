@@ -117,13 +117,16 @@ try {
         $rem = @(@($sd.Warnings) | Where-Object { "$($_.Area)" -eq 'Server-Backup' -and "$($_.Text)" -notmatch 'letzter Lauf fehlgeschlagen|keine erfolgreiche Sicherung|letzte erfolgreiche Sicherung vor' } | ForEach-Object { "$($_.Text)" })
     } catch { }
     # eine Karte je Lauf aus den eingeschalteten Kategorien (Einstellungen > Allgemein > Teams-Benachrichtigung)
+    # je Ziel (Chat/Kanal) mit dessen Kategorien - nicht jeder bekommt alles
     $nc = Get-HMNotifyConfig
     if ($nc.Configured) {
-        $msg = New-HMSbNotifyMessage -Result $Job.Result -ProfileName $ProfileName -Disk "$($d.Label)" -Reminders $rem -Cats $nc.Cats
-        if ($msg) {
-            $r = Send-HMTeamsMessage -Title $msg.Title -Lines $msg.Lines -Level $msg.Level -Url $nc.Url
-            Write-HMSbLog $(if ($r) { "Teams-Benachrichtigung: $r" } else { 'Teams-Benachrichtigung gesendet' }) 'Info'
-        } else { Write-HMSbLog 'Teams-Benachrichtigung: nichts zu melden (Kategorien ausgeschaltet)' 'Info' }
+        foreach ($tg in @($nc.Targets | Where-Object { $_ })) {
+            $msg = New-HMSbNotifyMessage -Result $Job.Result -ProfileName $ProfileName -Disk "$($d.Label)" -Reminders $rem -Cats $tg.Cats
+            if ($msg) {
+                $r = Send-HMTeamsMessage -Title $msg.Title -Lines $msg.Lines -Level $msg.Level -Url $tg.Url
+                Write-HMSbLog "Teams-Benachrichtigung '$($tg.Name)': $(if ($r) { $r } else { 'gesendet' })" 'Info'
+            } else { Write-HMSbLog "Teams-Benachrichtigung '$($tg.Name)': nichts zu melden (Kategorien ausgeschaltet)" 'Info' }
+        }
     } elseif ($nc.Error) { Write-HMSbLog "Teams-Benachrichtigung: Webhook nicht lesbar: $($nc.Error)" 'Warning' }
 } catch { Write-HMSbLog "Benachrichtigung: $($_.Exception.Message)" 'Warning' }
 Write-HMSbLog "Ende - Status $st" $(if ($st -eq 'OK') { 'Success' } elseif ($st -eq 'Warning') { 'Warning' } else { 'Error' })
