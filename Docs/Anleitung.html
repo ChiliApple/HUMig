@@ -94,7 +94,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <div class="card g"><b>Backup</b>Dateien, Browser, Office, Windows-Einstellungen, Drucker, WLAN, Programme mit Lizenzdateien …</div>
     <div class="card b"><b>Restore</b>mit Vorschau, was überschrieben wird, Nachinstallation fehlender Programme und Checkliste</div>
     <div class="card p"><b>Werkzeuge</b>Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot, BitLocker, Profil-Reparatur, Diagnose</div>
-    <div class="card m"><b>Softwareverteilung</b>MSI/EXE still installieren – auf einem oder vielen PCs</div>
+    <div class="card m"><b>Softwareverteilung</b>MSI/EXE still installieren – auf einem oder vielen PCs, vorher in der Windows Sandbox testen</div>
     <div class="card t"><b>Treiberverteilung</b>eigene Treiber (INF oder Setup) mit Hardware-Prüfung ausrollen – auch erzwungen</div>
     <div class="card r"><b>Server-Backup + Teams</b>Hyper-V auf rotierende USB-Platten sichern, Meldungen nach <a href="#teams">Teams</a></div>
   </div>
@@ -493,8 +493,34 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <div class="card b"><b>Eine Datei</b><code>.msi</code>, <code>.exe</code>, <code>.msp</code> = ein Paket</div>
     <div class="card t"><b>Ein Unterordner</b>= ein Paket mit Installer + Zubehör. Ordner mit <code>_</code> am Anfang werden ignoriert.</div>
   </div>
-  <p>HUMig liest den Installer aus und schlägt die Silent-Parameter vor (MSI, Inno Setup, NSIS, WiX Burn, InstallShield, Advanced Installer, Squirrel, 7-Zip-SFX – bei unbekanntem Typ nur geraten, Herstellerdoku prüfen). Je Paket gespeichert: Name, Installer, Parameter, Erkennung (ProductCode oder Name + Mindestversion), Erfolgs-ExitCodes, Timeout.</p>
+  <p>HUMig liest den Installer aus und schlägt die Silent-Parameter vor (MSI, Inno Setup, NSIS, WiX Burn, InstallShield, Advanced Installer, Squirrel, 7-Zip-SFX – bei unbekanntem Typ nur geraten, Herstellerdoku prüfen). Je Paket gespeichert (<code>&lt;Datei&gt;.hu.json</code> bzw. <code>hu-package.json</code> im Paketordner): Name, Installer, Parameter, Erkennung, Erfolgs-ExitCodes, Timeout, Deinstallation, Abhängigkeiten, WinGet-ID und das Ergebnis der Testinstallation.</p>
   <p>Installiert wird auf dem gewählten Computer oder auf <b>mehreren PCs</b> (<span class="ui g">Mehrere PCs …</span> öffnet die PC-Auswahl aus dem AD mit OU und Filter, weitere Namen eintragbar; bis zu 8 gleichzeitig); bereits installierte werden übersprungen.</p>
+  <h3 id="sw-felder">Felder eines Pakets</h3>
+  <table>
+    <tr><th style="width:230px">Feld</th><th>Bedeutung</th></tr>
+    <tr><td>Erkennung</td><td>Woran HUMig erkennt, dass das Programm installiert ist (überspringen, Nachkontrolle, Status): <b>ProductCode</b> (MSI), <b>Name</b> in <i>Apps &amp; Features</i> (<code>*</code> erlaubt) + Mindestversion, <b>Schlüssel</b> (Registry-Pfad, z.&nbsp;B. <code>HKLM:\SOFTWARE\…\Uninstall\Programm</code>; HKCU sucht in allen geladenen Benutzerprofilen) oder <b>Datei/Ordner</b> (Umgebungsvariablen erlaubt, z.&nbsp;B. <code>%ProgramFiles%\Programm\app.exe</code>). Sind mehrere ausgefüllt, müssen <b>alle</b> zutreffen.</td></tr>
+    <tr><td>Deinstallation</td><td>Stiller Deinstallationsbefehl (leer bei MSI = <code>msiexec /x {ProductCode} /qn</code>). Fehlende stille Schalter für Inno Setup und NSIS ergänzt HUMig.</td></tr>
+    <tr><td>Keine Desktop-Verknüpfung</td><td>Entfernt nach der Installation 30 Sekunden lang neu angelegte Verknüpfungen auf dem öffentlichen Desktop (für EDV-Säle).</td></tr>
+    <tr><td>Abhängigkeiten</td><td>Andere Pakete, die vorher installiert werden müssen (<span class="ui">Auswaehlen …</span>). Beim Verteilen installiert HUMig sie zuerst – vorhandene werden übersprungen; scheitert eine, wird das Paket nicht installiert. Kreisläufe werden erkannt und abgelehnt.</td></tr>
+    <tr><td>WinGet-ID</td><td>Für <span class="ui">Neue Version (WinGet) …</span></td></tr>
+  </table>
+  <h3 id="sandbox">Testinstallation in der Windows Sandbox</h3>
+  <p>Bevor ein neues Setup auf die PCs geht: <span class="ui p">Testinstallation in der Sandbox</span>. Die Windows Sandbox ist ein Wegwerf-Windows auf deinem PC – das Setup wird dort mit <b>genau demselben Code</b> installiert wie bei der Verteilung, danach ist alles wieder weg. Häkchen <i>Deinstallation mittesten</i> (Standard an) und <i>Sandbox offen lassen</i> (zum Nachsehen).</p>
+  <ul>
+    <li><b>Ergebnis:</b> <span style="color:#a6e3a1">OK</span> / <span style="color:#f9e2af">mit Hinweisen</span> / <span style="color:#f38ba8">fehlgeschlagen</span> – mit Exitcode, Dauer, sichtbaren Fenstern (ein „stilles“ Setup zeigt keine), neuen Desktop-Verknüpfungen, Installation ins Benutzerprofil, neuen Einträgen in <i>Apps &amp; Features</i>, Ergebnis der Deinstallation und bei Fehlern den Protokollen (MSI-Log, Ereignisse).</li>
+    <li><b>Übernehmen:</b> HUMig schlägt danach Erkennung und stille Deinstallation vor (bei Desktop-Verknüpfungen auch <i>Keine Desktop-Verknüpfung</i>). <i>Ja</i> trägt die Werte ins Paket ein; andere Erkennungsfelder werden dabei geleert (angezeigt).</li>
+    <li><b>Kennzeichen in der Liste:</b> ✓ getestet · ! mit Hinweisen · ✗ fehlgeschlagen · ○ ungetestet · ↻ veraltet (Installer oder Parameter seither geändert). Der Test gilt für alle Admins am Standort (gespeichert beim Paket). Die Bestätigung vor dem Verteilen weist auf ungetestete oder veraltete Pakete hin.</li>
+    <li>Abhängigkeiten werden in der Sandbox vorher mitinstalliert. Große Pakete und Pakete auf einer Freigabe werden zuerst nach <code>%LOCALAPPDATA%\HUMig\Sandbox</code> kopiert (im Hintergrund, Fortschritt in der Konsole) – beim nächsten Test nur, wenn sich etwas geändert hat. Größe und Lage des Sandbox-Fensters merkt sich HUMig.</li>
+    <li><b>Voraussetzung:</b> Windows 10/11 Pro, Education oder Enterprise mit Virtualisierung. Fehlt die Sandbox, bietet HUMig an, sie zu aktivieren (Administrator, danach Neustart). Nicht auf Windows Home und nicht auf Windows Server. Es läuft immer nur eine Sandbox. In der Sandbox gibt es Internet, aber keine Domäne, keine Gruppenrichtlinien und keine Lizenzserver der Schule – das Ergebnis zeigt also, ob das Setup still durchläuft, nicht ob die Lizenz greift.</li>
+  </ul>
+  <h3 id="sw-weitere">Weitere Knöpfe im Fenster Softwareverteilung</h3>
+  <table>
+    <tr><th style="width:230px">Knopf</th><th>Wirkung</th></tr>
+    <tr><td><span class="ui">Deinstallieren …</span></td><td>Das Paket still deinstallieren – am gewählten Computer oder an mehreren PCs (bis zu 8 gleichzeitig), mit Rückfrage.</td></tr>
+    <tr><td><span class="ui">Status auf PCs …</span></td><td>Prüft mit der Erkennung des Pakets, auf welchen PCs es installiert ist (Version). Das letzte Ergebnis – auch von Verteilung und Deinstallation – steht in <code>Softwareverteilung\_status\</code> und in den Paketdetails.</td></tr>
+    <tr><td><span class="ui">Neue Version (WinGet) …</span></td><td>Sucht die WinGet-ID (oder nimmt die eingetragene), vergleicht die Versionen und lädt den neuen Installer ins Paket (MSI bleibt MSI). Parameter und Einstellungen bleiben, Silent-Schalter und Erkennung werden angepasst; die Testinstallation gilt danach als veraltet. Braucht WinGet am eigenen PC.</td></tr>
+    <tr><td>Hineinziehen</td><td>Setup-Dateien oder Ordner auf die Paketliste ziehen = <span class="ui">Datei hinzufuegen</span>. Windows erlaubt das nur, wenn der Explorer ebenfalls als Administrator läuft – sonst <span class="ui">Datei hinzufuegen</span> nehmen.</td></tr>
+  </table>
   <h3>Installierte Software</h3>
   <p>Liste des gewählten Computers mit Filter, CSV und Drucken. Markierte Programme lassen sich still <b>deinstallieren</b> (MSI per <code>msiexec /x</code>, sonst stiller Herstellerbefehl) – Ergebnis je Programm in der Konsole.</p>
 </section>

@@ -28,7 +28,8 @@ Das Tool zeigt beim *Verbinden* an, was erreichbar ist.
 
 ## Softwareverteilung
 Installer in `Softwareverteilung\` legen (oder im Fenster *Datei hinzufuegen*). Fuer andere PCs wird PowerShell-Remoting (WinRM) benoetigt,
-der eigene PC wird direkt installiert.
+der eigene PC wird direkt installiert. Fuer die *Testinstallation in der Sandbox* braucht der eigene PC die Windows Sandbox
+(Windows 10/11 Pro/Education/Enterprise, Virtualisierung an; HUMig bietet das Aktivieren an, danach Neustart) - nicht auf Windows Home oder Server.
 
 ## Treiberverteilung
 Entpackte Treiber (Ordner mit INF-Dateien) oder Hersteller-Setups in `Treiberverteilung\` legen (oder im Fenster *Ordner/Datei hinzufuegen*,
