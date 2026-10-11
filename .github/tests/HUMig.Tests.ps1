@@ -790,6 +790,45 @@ Describe 'Protokolle direkt mit dem Browser oeffnen' {
     }
 }
 
+Describe 'Umzugs-Assistent: Stand und Ablauf' {
+    BeforeAll {
+        function Out-Console { param($m, $l) }
+        . (Join-Path $script:Root 'Functions\UI-Wizard.ps1')
+        $script:WizFile = Join-Path $TestDrive 'umzug.json'
+    }
+    It 'speichert den Stand, liest ihn wieder (fortsetzbar) und ignoriert abgeschlossene' {
+        $script:WizState = New-HMWizState
+        $script:WizState.Source = [pscustomobject]@{ Computer = 'PC-ALT'; Account = 'SCHULE\max'; Folder = 'max'; SID = 'S-1-5-21-1'; NoProfile = $false }
+        Set-HMWizDone 1; $script:WizState.Step = 2
+        Save-HMWizState
+        $r = Read-HMWizState
+        $r.Step | Should -Be 2
+        @($r.Done) | Should -Contain 1
+        $r.Source.Computer | Should -Be 'PC-ALT'
+        $script:WizState.Finished = '2026-10-11 12:00'; Save-HMWizState
+        Read-HMWizState | Should -BeNullOrEmpty
+    }
+    It 'Backup und Restore melden ihr Ende: weiter zum naechsten Schritt, nur wenn erwartet' {
+        $script:Wiz = $null
+        $script:WizState = New-HMWizState; $script:WizState.Step = 3
+        $script:WizWaitFor = ''
+        Update-HMWizardAfterJob 'Backup' @{ Cancel = $false; Result = [pscustomobject]@{ Status = 'OK' } } 'E:\B\1'
+        $script:WizState.Step | Should -Be 3          # nicht vom Assistenten gestartet
+        $script:WizWaitFor = 'Backup'
+        Update-HMWizardAfterJob 'Backup' @{ Cancel = $false; Result = [pscustomobject]@{ Status = 'Error' } } 'E:\B\1'
+        $script:WizState.Step | Should -Be 3          # fehlgeschlagen: bleibt
+        $script:WizWaitFor = 'Backup'
+        Update-HMWizardAfterJob 'Backup' @{ Cancel = $false; Result = [pscustomobject]@{ Status = 'Warning' } } 'E:\B\2'
+        $script:WizState.Step | Should -Be 4
+        $script:WizState.BackupPath | Should -Be 'E:\B\2'
+        $script:WizState.Step = 5; $script:WizWaitFor = 'Restore'
+        Update-HMWizardAfterJob 'Restore' @{ Cancel = $false; Result = [pscustomobject]@{ Status = 'OK'; Report = 'E:\B\2\Bericht_Restore.html' } }
+        $script:WizState.Step | Should -Be 6
+        $script:WizState.RestoreReport | Should -Be 'E:\B\2\Bericht_Restore.html'
+        @($script:WizState.Done) -join ',' | Should -Be '3,5'
+    }
+}
+
 Describe 'Listen-Rueckgaben (return ,@()) erst zuweisen' {
     It 'Get-HMSbAllHistory / Read-HMSbHistory werden nie direkt in @() oder einer Pipeline verwendet' {
         # die Funktionen geben die Liste als EIN Objekt zurueck - @(Aufruf) bzw. Aufruf | Where-Object sehen nur 1 Element

@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.0.114 - 2026-10-11
+### Neu: Umzugs-Assistent
+- Knopf *Umzug ...* oben rechts: Schritt fuer Schritt alter PC und Benutzer, Vorab-Pruefung, Backup, neuer PC und Zielbenutzer, Restore (Backup wird automatisch markiert, fehlende Programme zuerst), Checkliste und Abschluss
+- Nach Backup und Restore geht es automatisch zum naechsten Schritt; warnt, wenn im Hauptfenster gerade der falsche PC/Benutzer gewaehlt ist
+- Fortsetzbar: der Stand liegt in `%APPDATA%\HUMig\umzug.json` - nach Schliessen oder Neustart von HUMig geht es dort weiter
+### Automatische Tests
+- Assistent: Stand speichern/fortsetzen, Ende von Backup/Restore
+
 ## v2.0.113 - 2026-10-11
 ### Behoben
 - *Rueckmeldung* (GitHub-Issue) und andere Links (Quelle, Lizenz, eigene Links im Reiter Werkzeuge, Quellen im Katalog-Editor, ADK) oeffnen direkt im Standard-Browser - ueber den Explorer kam die Adresse teils verfaelscht an und GitHub meldete "Seite nicht gefunden"

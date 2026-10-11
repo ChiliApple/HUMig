@@ -56,6 +56,8 @@ Details: [INSTALL.md](INSTALL.md) und die [Anleitung](https://chiliapple.github.
 
 ## Bedienung
 
+Für einen kompletten PC-Umzug führt der **Umzugs-Assistent** (*Umzug …* oben rechts) Schritt für Schritt durch alles unten – fortsetzbar nach Abbruch.
+
 | Schritt | Ablauf |
 |---|---|
 | **1 · Verbinden** | Computer wählen (dieser PC, Name/IP oder **Geräte (AD)**) → **Verbinden** → Benutzer wählen. Installierte Programme werden dabei erkannt. |
