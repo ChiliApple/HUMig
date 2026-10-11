@@ -1,5 +1,14 @@
 ﻿# Changelog
 
+## v2.0.116 - 2026-10-11
+### Teams-Benachrichtigung: mehrere Ziele
+- Bis zu 10 Ziele (Chat oder Kanal) je PC, jedes mit Name, eigener Webhook-Adresse und eigenen Kategorien - nicht jeder bekommt alles (z.B. Fehler an den Kanal, Erfolg mit Details nur an den eigenen Chat)
+- Einstellungen > Allgemein: Auswahlliste der Ziele, *Neues Ziel*, *Test senden* an das gewaehlte Ziel, *Entfernen* loescht nur das gewaehlte Ziel (sofort)
+- Geplante Server-Backups schicken je Ziel eine Nachricht mit den dort eingeschalteten Punkten; im Aufgaben-Protokoll steht das Ergebnis je Ziel
+- Die bisherige Adresse wird als Ziel "Standard" mit ihren Kategorien uebernommen; alle Ziele liegen verschluesselt in einem Wert (nur Administratoren/SYSTEM)
+### Automatische Tests
+- Verteilung an mehrere Ziele nach Kategorie, Pruefung der Ziele (Name, doppelt, Adresse, Hoechstzahl), Aenderungserkennung im Einstellungsfenster
+
 ## v2.0.115 - 2026-10-11
 ### Teams-Benachrichtigung: Kategorien
 - Einstellungen > Allgemein > Teams-Benachrichtigung: jede Kategorie einzeln ein-/ausschaltbar - Server-Backup fehlgeschlagen, mit Warnungen, erfolgreich, Plattenzustand (SMART), Erinnerungen Plattenwechsel/Archiv, Speicherplatz knapp, Massenloeschung, Details

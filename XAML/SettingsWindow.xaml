@@ -103,14 +103,23 @@
                         <TextBlock Grid.Row="14" Text="Teams-Benachrichtigung:" Style="{DynamicResource Lbl}" VerticalAlignment="Top" Margin="0,14,6,0"/>
                         <StackPanel Grid.Row="14" Grid.Column="1" Margin="0,12,0,0">
                             <DockPanel>
-                                <Button x:Name="btnTeamsDel" DockPanel.Dock="Right" Content="Entfernen" Style="{DynamicResource BtnRed}" Margin="4,0,0,0" ToolTip="Webhook-Adresse auf diesem PC loeschen"/>
-                                <Button x:Name="btnTeamsTest" DockPanel.Dock="Right" Content="Test senden" Style="{DynamicResource BtnMauve}" Margin="4,0,0,0" ToolTip="Testnachricht an den Kanal senden (eingetragene oder gespeicherte Adresse)"/>
+                                <Button x:Name="btnTeamsDel" DockPanel.Dock="Right" Content="Entfernen" Style="{DynamicResource BtnRed}" Margin="4,0,0,0" ToolTip="Gewaehltes Ziel auf diesem PC loeschen (sofort). Danach in Teams den Workflow loeschen/ausschalten - sonst bleibt die Adresse gueltig"/>
+                                <Button x:Name="btnTeamsAdd" DockPanel.Dock="Right" Content="Neues Ziel" Style="{DynamicResource BtnBlue}" Margin="4,0,0,0" ToolTip="Weiteres Ziel (Chat oder Kanal) mit eigenen Kategorien anlegen"/>
+                                <ComboBox x:Name="cmbTeams" ToolTip="Ziele (Webhook-Adressen) auf diesem PC - jedes mit eigenen Kategorien"/>
+                            </DockPanel>
+                            <DockPanel Margin="0,6,0,0">
+                                <TextBlock Text="Name:" Width="62" Foreground="#FFCDD6F4" VerticalAlignment="Center"/>
+                                <TextBox x:Name="txtTeamsName" Style="{DynamicResource DarkTextBox}" ToolTip="Frei waehlbar, z.B. 'Kanal HyperV Backup' oder 'nur ich'"/>
+                            </DockPanel>
+                            <DockPanel Margin="0,4,0,0">
+                                <TextBlock Text="Adresse:" Width="62" Foreground="#FFCDD6F4" VerticalAlignment="Center"/>
+                                <Button x:Name="btnTeamsTest" DockPanel.Dock="Right" Content="Test senden" Style="{DynamicResource BtnMauve}" Margin="4,0,0,0" ToolTip="Testnachricht an dieses Ziel senden (eingetragene oder gespeicherte Adresse)"/>
                                 <PasswordBox x:Name="pwdTeams" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF45475A" Padding="4,3" ToolTip="Adresse aus der Teams-App Workflows: Vorlage 'Webhookbenachrichtigungen an einen Chat' bzw. '... an einen Kanal' (engl. 'Send webhook alerts to a chat/channel') > Speichern > Adresse kopieren. Leer lassen = gespeicherte Adresse behalten"/>
                             </DockPanel>
                             <TextBlock x:Name="lblTeams" Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
-                            <TextBlock Text="Melden:" Foreground="#FFCDD6F4" Margin="0,8,0,2"/>
+                            <TextBlock Text="An dieses Ziel melden:" Foreground="#FFCDD6F4" Margin="0,8,0,2"/>
                             <StackPanel x:Name="pnlTeamsCats" Margin="8,0,0,0"/>
-                            <TextBlock Text="Geplante Server-Backups kommen als eine Nachricht je Lauf mit allen eingeschalteten Punkten. Massenloeschung wird bei Backups gemeldet, die in HUMig als Administrator laufen. Die Adresse wird nur auf diesem PC gespeichert (verschluesselt, nur Administratoren/SYSTEM) - auf dem Server, auf dem die Zeitplaene laufen, eintragen. Geplante Profil-Backups im Benutzerkonto melden sich nur lokal. Teams: App Workflows > Vorlage 'Webhookbenachrichtigungen an einen Chat' bzw. '... an einen Kanal' (private Kanaele gehen nicht - Gruppenchat oder Standardkanal eines privaten Teams verwenden)." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                            <TextBlock Text="Mehrere Ziele moeglich (bis 10), jedes mit eigenen Kategorien - z.B. Fehler und Erinnerungen an den Kanal des Teams, Erfolgsmeldungen nur an den eigenen Chat. Geplante Server-Backups kommen je Ziel als eine Nachricht je Lauf. Massenloeschung wird bei Backups gemeldet, die in HUMig als Administrator laufen. Die Adressen werden nur auf diesem PC gespeichert (verschluesselt, nur Administratoren/SYSTEM) - auf dem Server, auf dem die Zeitplaene laufen, eintragen. Teams: App Workflows > Vorlage 'Webhookbenachrichtigungen an einen Chat' bzw. '... an einen Kanal' (private Kanaele gehen nicht - Gruppenchat oder Standardkanal eines privaten Teams verwenden)." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,6,0,0"/>
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>

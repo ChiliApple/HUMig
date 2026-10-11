@@ -159,7 +159,7 @@ Hyper-V-VMs oder die Laufwerke eines Servers mit der Windows Server-Sicherung au
 - Online-Sicherung der VMs, optional Host-System, Host-Konfiguration mit Skript zum Wiederherstellen der Switches
 - Zeitplan, Verlauf, Bericht je Lauf, Einträge in der Ereignisanzeige
 - **Plattenzustand (SMART)** je Platte, automatisch gelesen und gemerkt
-- **Teams-Benachrichtigung** über einen Workflow, Kategorien einzeln schaltbar (Fehler, Warnungen, Erfolg, Plattenzustand, Plattenwechsel/Archiv, Speicherplatz, Massenlöschung, Details mit Stand der Platte)
+- **Teams-Benachrichtigung** über Workflows, mehrere Ziele (Chat/Kanal) mit je eigenen Kategorien (Fehler, Warnungen, Erfolg, Plattenzustand, Plattenwechsel/Archiv, Speicherplatz, Massenlöschung, Details mit Stand der Platte)
 - **Archiv-Platten** gegen Verschlüsselungstrojaner; Platte danach auswerfen oder offline schalten
 - Wiederherstellung auch ohne HUMig (`wbadmin`, Installationsmedium)
 
