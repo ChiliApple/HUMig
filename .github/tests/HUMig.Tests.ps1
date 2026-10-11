@@ -766,6 +766,18 @@ Describe 'Browser vor Backup/Restore schliessen' {
         $r = Enter-HMModule @{ ProcDecisions = @{}; UserSid = 'S-1-5-21-1' } $job $m @{} 'Backup'
         $r.Skip | Should -BeFalse
         $r.ProcAction | Should -Be 'trotzdem kopiert'
+        # Browser trotzdem kopiert: nur Hinweis, gesperrte Dateien kein Fehler
+        $r.LockedHint | Should -BeTrue
+        @($r.Warn).Count | Should -Be 0
+        @($r.Info).Count | Should -Be 1
+        # Restore oder Programm ohne CloseDefault Copy: weiter Warnung
+        $rr = Enter-HMModule @{ ProcDecisions = @{}; UserSid = 'S-1-5-21-1' } $job $m @{} 'Restore'
+        $rr.LockedHint | Should -BeFalse
+        @($rr.Warn).Count | Should -Be 1
+        $mo = [pscustomobject]@{ Id = 'Outlook'; Name = 'Outlook'; CloseProcess = @('msedge') }
+        $ro = Enter-HMModule @{ ProcDecisions = @{ Outlook = 'Copy' }; UserSid = 'S-1-5-21-1' } $job $mo @{} 'Backup'
+        $ro.LockedHint | Should -BeFalse
+        @($ro.Warn).Count | Should -Be 1
         $r2 = Enter-HMModule @{ ProcDecisions = @{ Edge = 'Skip' }; UserSid = 'S-1-5-21-1' } $job $m @{} 'Backup'
         $r2.Skip | Should -BeTrue
         $m3 = [pscustomobject]@{ Id = 'App_X'; Name = 'X'; CloseProcess = @('x') }

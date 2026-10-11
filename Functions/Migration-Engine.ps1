@@ -883,7 +883,8 @@ function Test-HMHiveLoaded([hashtable]$Ctx, [string]$Sid) {
 function Mount-HMHive {
     param([hashtable]$Ctx, $Job, [string]$Sid, [string]$ProfilePath)
     # zuerst verwaiste, von einem abgebrochenen HUMig geladene Hives entladen (sonst wuerde ein solcher als 'angemeldet' gelten)
-    try { foreach ($l in @(Clear-HMStaleHives $Ctx | Where-Object { $_ })) { Write-HMLog $Job "$l" 'Warning' } } catch { }
+    # Benutzer-Modus (ohne Adminrechte): ProgramData\HUMig ist nicht absicherbar und fremde Hives sind ohnehin nicht entladbar - nicht pruefen
+    if (-not $Ctx.UserMode) { try { foreach ($l in @(Clear-HMStaleHives $Ctx | Where-Object { $_ })) { Write-HMLog $Job "$l" 'Warning' } } catch { } }
     if (Test-HMHiveLoaded $Ctx $Sid) { Write-HMLog $Job "Benutzer-Registry ist geladen (Benutzer angemeldet)" 'Debug'; return $true }
     $st0 = ''; try { $st0 = (Get-Process -Id $PID).StartTime.ToString('yyyyMMddHHmmss') } catch { }
     $mark = "$env:COMPUTERNAME|$PID|$st0|$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
@@ -1058,9 +1059,9 @@ function Add-HMDbCompanions([string[]]$Filter) {
 function Test-HMServiceItem($Item) { return ("$($Item.Role)" -eq 'Database' -and "$($Item.DbKind)" -eq 'Service') }
 
 # Vor einem Modul: Programm schliessen, Dienste stoppen, Access-Sperrdateien pruefen.
-# Rueckgabe: @{ Skip; Warn (Liste); ProcAction; ServiceAction; Stopped (Dienste zum Wiederstarten); SkipServiceItems }
+# Rueckgabe: @{ Skip; Warn (Liste); Info (Hinweise); LockedHint; ProcAction; ServiceAction; Stopped (Dienste zum Wiederstarten); SkipServiceItems }
 function Enter-HMModule([hashtable]$Ctx, $Job, $Module, [hashtable]$TEnv, [string]$Phase) {
-    $st = @{ Skip = $false; Warn = @(); ProcAction = ''; ServiceAction = ''; Stopped = @(); SkipServiceItems = $false }
+    $st = @{ Skip = $false; Warn = @(); Info = @(); LockedHint = $false; ProcAction = ''; ServiceAction = ''; Stopped = @(); SkipServiceItems = $false }
     # --- Programm schliessen ---
     $names = @($Module.CloseProcess | Where-Object { "$_".Trim() })
     if ($names.Count) {
@@ -1076,7 +1077,11 @@ function Enter-HMModule([hashtable]$Ctx, $Job, $Module, [hashtable]$TEnv, [strin
             switch ($dec) {
                 'Copy' {
                     $st.ProcAction = 'trotzdem kopiert'
-                    $st.Warn += "$pn lief - trotzdem kopiert (Daten evtl. nicht aktuell/inkonsistent)"
+                    if ($Phase -eq 'Backup' -and "$($Module.CloseDefault)" -eq 'Copy') {
+                        # Browser: laufen oft dauerhaft - vom Programm gesperrte Dateien (Cookies, Sitzung) sind nur ein Hinweis, kein Fehler
+                        $st.LockedHint = $true
+                        $st.Info += "$pn lief - trotzdem kopiert; vom Programm gesperrte Dateien (z.B. Cookies, Sitzung) fehlen evtl. - fuer eine vollstaendige Sicherung vorher schliessen"
+                    } else { $st.Warn += "$pn lief - trotzdem kopiert (Daten evtl. nicht aktuell/inkonsistent)" }
                 }
                 { $_ -in @('Close', 'CloseForce') } {
                     Write-HMLog $Job "   $pn wird geschlossen ..." 'Info'
@@ -1871,10 +1876,18 @@ function Backup-HMFolderItem {
         $msg = "{0} Dateien, {1}" -f $rc.FilesTotal, (Format-HMSize $rc.BytesTotal)
         if ($rc.FilesCopied -lt $rc.FilesTotal) { $msg += " ($($rc.FilesCopied) neu/geaendert kopiert, $($rc.FilesSkipped) unveraendert oder ausgelassen: $exWhy)" }
     }
+    $lockHint = $false
     if ($rc.FilesFailed -gt 0) {
-        $msg += ", $($rc.FilesFailed) FEHLGESCHLAGEN (gesperrt/keine Rechte - siehe Robocopy-Log)"
-        if (@($rc.FailedFiles).Count) { $msg += ': ' + (@($rc.FailedFiles | ForEach-Object { ConvertFrom-HMPath "$_" }) -join '; ') }
-        if ($st -ne 'Cancel') { $st = 'Error' }   # nicht gesicherte Dateien = Fehler (rot), nie nur Warnung
+        $fl = if (@($rc.FailedFiles).Count) { ': ' + (@($rc.FailedFiles | ForEach-Object { ConvertFrom-HMPath "$_" }) -join '; ') } else { '' }
+        if ($Ctx.LockedHint -and $st -ne 'Cancel' -and [int]$rc.ExitCode -lt 16) {
+            # Browser lief (Modul mit CloseDefault Copy): gesperrte Dateien nur als Hinweis
+            $lockHint = $true
+            $msg += ", Hinweis: $($rc.FilesFailed) Datei(en) vom laufenden Programm gesperrt und nicht gesichert (z.B. Cookies, Sitzung - fuer eine vollstaendige Sicherung das Programm vorher schliessen)$fl"
+            $st = if (([int]$rc.ExitCode -band 4) -ne 0) { 'Warning' } else { 'OK' }
+        } else {
+            $msg += ", $($rc.FilesFailed) FEHLGESCHLAGEN (gesperrt/keine Rechte - siehe Robocopy-Log)$fl"
+            if ($st -ne 'Cancel') { $st = 'Error' }   # nicht gesicherte Dateien = Fehler (rot), nie nur Warnung
+        }
     }
     # Backup ergaenzt: Dateien, die nur noch im Backup liegen (an der Quelle geloescht/verschoben) -> beiseitelegen (_GELOESCHT),
     # damit der Restore nur den aktuellen Stand bringt. Nur nach fehlerfreiem Kopieren; jede Datei wird an der Quelle nachgeprueft.
@@ -1903,7 +1916,7 @@ function Backup-HMFolderItem {
     } elseif (-not $fresh -and -not $Ctx.ListOnly -and [int]$rc.FilesExtra -gt 0) {
         $msg += " | $($rc.FilesExtra) Datei(en) nur noch im Backup (an der Quelle geloescht/verschoben - nicht beiseitegelegt, weil das Kopieren nicht fehlerfrei war; Restore spielt sie ein)"
     }
-    if ($rc.Level -eq 'Error') { $msg += " (Robocopy-Code $($rc.ExitCode))" }
+    if ($rc.Level -eq 'Error' -and -not $lockHint) { $msg += " (Robocopy-Code $($rc.ExitCode))" }
     # Seit dem letzten Lauf neu ausgeschlossene Pfade: alten Stand beiseitelegen (wird sonst beim Restore wieder eingespielt)
     if (-not $fresh -and -not $Ctx.ListOnly -and $st -ne 'Cancel' -and -not (Test-HMCancel $Job) -and @($Ctx.Options.ExcludePaths).Count) {
         $nx = Move-HMNewlyExcluded $Ctx $srcLocal $dst
@@ -2461,6 +2474,8 @@ function Start-HMBackup {
             # Programm-Katalog: Programm schliessen / Dienst stoppen (Dienste werden im finally immer wieder gestartet)
             $pre = Enter-HMModule $Ctx $Job $mod $tenv 'Backup'
             foreach ($w in @($pre.Warn)) { Write-HMLog $Job "   $w" 'Warning'; $mres.Items += [pscustomobject]@{ Name = 'Hinweis'; Status = 'Warning'; Msg = $w; Bytes = [long]0; Source = '' } }
+            foreach ($w in @($pre.Info)) { Write-HMLog $Job "   Hinweis: $w" 'Info'; $mres.Items += [pscustomobject]@{ Name = 'Hinweis'; Status = 'OK'; Msg = $w; Bytes = [long]0; Source = '' } }
+            $Ctx.LockedHint = [bool]$pre.LockedHint
             if (@($pre.Warn).Count) { $mres.Status = 'Warning' }
             if ($pre.ProcAction) { $mres.Process = $pre.ProcAction }
             if ($pre.ServiceAction) { $mres.Service = $pre.ServiceAction }
@@ -2491,7 +2506,7 @@ function Start-HMBackup {
                 $done++
                 $Job.Progress = [int](95 * $done / $total)
             }
-            } finally { Exit-HMModule $Ctx $Job $pre }
+            } finally { $Ctx.LockedHint = $false; Exit-HMModule $Ctx $Job $pre }
             if (@($mres.Items | Where-Object { $_.Status -ne 'Skip' }).Count -eq 0) { $mres.Status = 'Skip' }
             $allBytes += $mres.Bytes
             $Ctx.Manifest.Modules += [pscustomobject]$mres

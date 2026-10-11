@@ -56,7 +56,7 @@ Details: [INSTALL.md](INSTALL.md) und die [Anleitung](https://chiliapple.github.
 
 ## Bedienung
 
-Für einen kompletten PC-Umzug führt der **Umzugs-Assistent** (*Umzug …* oben rechts) Schritt für Schritt durch alles unten – fortsetzbar nach Abbruch.
+Für einen kompletten PC-Umzug führt der **Umzugs-Assistent** (*Umzug …* im Reiter Backup neben *Rueckmeldung*) Schritt für Schritt durch alles unten – fortsetzbar nach Abbruch.
 
 | Schritt | Ablauf |
 |---|---|
