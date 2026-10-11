@@ -1901,6 +1901,12 @@ function Backup-HMFolderItem {
         $msg += " | $($rc.FilesExtra) Datei(en) nur noch im Backup (an der Quelle geloescht/verschoben - nicht beiseitegelegt, weil das Kopieren nicht fehlerfrei war; Restore spielt sie ein)"
     }
     if ($rc.Level -eq 'Error') { $msg += " (Robocopy-Code $($rc.ExitCode))" }
+    # Seit dem letzten Lauf neu ausgeschlossene Pfade: alten Stand beiseitelegen (wird sonst beim Restore wieder eingespielt)
+    if (-not $fresh -and -not $Ctx.ListOnly -and $st -ne 'Cancel' -and -not (Test-HMCancel $Job) -and @($Ctx.Options.ExcludePaths).Count) {
+        $nx = Move-HMNewlyExcluded $Ctx $srcLocal $dst
+        foreach ($l in @($nx.Lines)) { $msg += " | $l" }
+        if ($nx.Files) { $Ctx.DeletedMoved = [int]$Ctx.DeletedMoved + [int]$nx.Files }
+    }
 
     # Cloud-Ordner innerhalb der Quelle: auslassen (Standard) oder nur lokal vorhandene Dateien sichern
     $skipped = @()
@@ -1935,6 +1941,63 @@ function Backup-HMRegItem {
     return [pscustomobject]@{ Name = $Item.Name; Status = 'Error'; Msg = $r; Bytes = 0; Source = $Item.Key }
 }
 
+# Zusaetzliche Ordner: feste Nummer je Pfad (FOLDER<n>), damit ein herausgenommener Ordner nicht den Platz eines anderen bekommt.
+# Grundlage: ExtraFolders\folders.json (aktuelle) und folders-alt.json (herausgenommene, Nummer wird nie wieder vergeben).
+# Rueckgabe: Map (Index, Path) fuer $Paths, Removed (bisher gesicherte, jetzt nicht mehr gewaehlte), Alt (bisherige Liste herausgenommener)
+function Get-HMExtraFolderMap([string]$BackupPath, [string[]]$Paths) {
+    $dir = Join-Path $BackupPath 'ExtraFolders'
+    $old = @(); $alt = @()
+    foreach ($x in @(@{ F = 'folders.json'; V = 'old' }, @{ F = 'folders-alt.json'; V = 'alt' })) {
+        $f = Join-Path $dir $x.F
+        if (-not (Test-Path -LiteralPath $f)) { continue }
+        try {
+            $j = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json   # PS 5.1: erst zuweisen
+            $l = @(@($j) | Where-Object { $_ -and "$($_.Path)" -and [int]$_.Index -gt 0 })
+            if ($x.V -eq 'old') { $old = $l } else { $alt = $l }
+        } catch { }
+    }
+    $norm = { param($p) "$p".Trim().TrimEnd('\').ToUpperInvariant() }
+    $used = @(@($old) + @($alt) | ForEach-Object { [int]$_.Index })
+    $next = 1; if ($used.Count) { $next = [int](($used | Measure-Object -Maximum).Maximum) + 1 }
+    $map = New-Object System.Collections.Generic.List[object]
+    foreach ($p in @($Paths | Where-Object { "$_".Trim() })) {
+        $o = @($old | Where-Object { (& $norm $_.Path) -eq (& $norm $p) })[0]
+        if ($o) { $i = [int]$o.Index } else { $i = $next; $next++ }
+        $map.Add([pscustomobject]@{ Index = $i; Path = "$p" })
+    }
+    $cur = @($map | ForEach-Object { & $norm $_.Path })
+    $removed = @($old | Where-Object { $cur -notcontains (& $norm $_.Path) })
+    return [pscustomobject]@{ Map = $map.ToArray(); Removed = $removed; Alt = $alt }
+}
+
+# Fortlaufendes Backup: Pfade, die seit dem letzten Lauf neu ausgeschlossen sind, aus dem Backup beiseitelegen (_GELOESCHT),
+# sonst spielte der Restore den alten Stand wieder ein. Rueckgabe: Anzahl verschobener Dateien, Texte fuer das Protokoll
+function Move-HMNewlyExcluded([hashtable]$Ctx, [string]$SrcLocal, [string]$Dst) {
+    $res = [pscustomobject]@{ Files = 0; Lines = @() }
+    if ($null -eq $Ctx.PrevExcludePaths) { return $res }   # aeltere Backups ohne Angabe: nichts anfassen
+    $norm = { param($p) "$p".Trim().TrimEnd('\').ToUpperInvariant() }
+    $prevEx = @(@($Ctx.PrevExcludePaths) | ForEach-Object { & $norm $_ })
+    $bp = "$($Ctx.BackupPath)".TrimEnd('\')
+    $s0 = "$SrcLocal".TrimEnd('\')
+    foreach ($p in @($Ctx.Options.ExcludePaths | Where-Object { "$_".Trim() })) {
+        if ($prevEx -contains (& $norm $p)) { continue }
+        if (-not (Test-HMPathUnder $p $s0) -or (& $norm $p) -eq (& $norm $s0)) { continue }
+        $rel = "$p".TrimEnd('\').Substring($s0.Length).TrimStart('\')
+        if (-not $rel) { continue }
+        $b = Join-Path $Dst $rel
+        if (-not $b.StartsWith($bp + '\', [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $b)) { continue }
+        try {
+            Initialize-HMFsMove
+            $n = if (Test-Path -LiteralPath $b -PathType Container) { @(Get-ChildItem -LiteralPath $b -Recurse -File -Force -ErrorAction SilentlyContinue).Count } else { 1 }
+            if (-not $Ctx.DeletedDir) { $Ctx.DeletedDir = "$bp\$($script:HMDeletedDirName)\$(Get-Date -Format 'yyyyMMdd_HHmmss')" }
+            $e = [HMFs.Mover]::Move($b, "$($Ctx.DeletedDir)\$($b.Substring($bp.Length + 1))")
+            if ($e -eq 0) { $res.Files += $n; $res.Lines += "neu ausgeschlossen, $n Datei(en) beiseitegelegt: $p" }
+            else { $res.Lines += "neu ausgeschlossen, bleibt im Backup (Verschieben Fehler $e - Restore spielt den alten Stand ein): $p" }
+        } catch { $res.Lines += "neu ausgeschlossen, bleibt im Backup ($($_.Exception.Message)): $p" }
+    }
+    return $res
+}
+
 # --- Builtin-Handler Backup ---
 function Backup-HMBuiltin {
     param([hashtable]$Ctx, $Job, $Module, $Item, [hashtable]$TEnv)
@@ -1956,10 +2019,27 @@ function Backup-HMBuiltin {
 
         'ExtraFolders' {
             $list = @($Ctx.Options.ExtraFolders | Where-Object { $_ })
-            if (-not $list.Count) { return (& $res 'Skip' 'keine Ordner ausgewaehlt') }
-            $idx = 0; $meta = @(); $bytes = [long]0; $worst = 'OK'; $lines = @()
-            foreach ($p in $list) {
-                $idx++
+            $meta = @(); $bytes = [long]0; $worst = 'OK'; $lines = @()
+            $fm = Get-HMExtraFolderMap $Ctx.BackupPath $list
+            # nicht mehr gewaehlte Ordner (fortlaufendes Backup): beiseitelegen, Nummer merken (folders-alt.json, nie wieder vergeben)
+            $alt = @($fm.Alt)
+            foreach ($r0 in @($fm.Removed)) {
+                $od = Join-Path $dir "FOLDER$([int]$r0.Index)"
+                $alt += [pscustomobject]@{ Index = [int]$r0.Index; Path = "$($r0.Path)"; Removed = (Get-Date).ToString('yyyy-MM-dd HH:mm') }
+                if (-not (Test-Path -LiteralPath $od)) { continue }
+                try {
+                    Initialize-HMFsMove
+                    $bp0 = "$($Ctx.BackupPath)".TrimEnd('\')
+                    $n0 = @(Get-ChildItem -LiteralPath $od -Recurse -File -Force -ErrorAction SilentlyContinue).Count
+                    if (-not $Ctx.DeletedDir) { $Ctx.DeletedDir = "$bp0\$($script:HMDeletedDirName)\$(Get-Date -Format 'yyyyMMdd_HHmmss')" }
+                    $e0 = [HMFs.Mover]::Move($od, "$($Ctx.DeletedDir)\$($od.Substring($bp0.Length + 1))")
+                    if ($e0 -eq 0) { $lines += "$($r0.Path) - nicht mehr ausgewaehlt: $n0 Datei(en) beiseitegelegt ($($script:HMDeletedDirName), werden nicht zurueckgespielt)"; $Ctx.DeletedMoved = [int]$Ctx.DeletedMoved + $n0 }
+                    else { $lines += "$($r0.Path) - nicht mehr ausgewaehlt, alter Stand bleibt in FOLDER$([int]$r0.Index) (Verschieben Fehler $e0, wird nicht zurueckgespielt)" }
+                } catch { $lines += "$($r0.Path) - nicht mehr ausgewaehlt, alter Stand bleibt ($($_.Exception.Message), wird nicht zurueckgespielt)" }
+            }
+            if (@($fm.Removed).Count) { try { ConvertTo-Json -InputObject @($alt) -Depth 3 | Set-Content -LiteralPath (Join-Path $dir 'folders-alt.json') -Encoding UTF8 } catch { } }
+            foreach ($fx in @($fm.Map)) {
+                $idx = [int]$fx.Index; $p = "$($fx.Path)"
                 $fake = [pscustomobject]@{ Name = "FOLDER$idx"; Path = $p; Type = 'Folder' }
                 $r = Backup-HMFolderItem $Ctx $Job $Module $fake $TEnv
                 Write-HMLog $Job ("   Ordner {0}: {1} - {2}" -f $idx, $p, $r.Msg) $(if ($r.Status -eq 'OK') { 'Debug' } else { 'Warning' })
@@ -1968,7 +2048,12 @@ function Backup-HMBuiltin {
                 $bytes += $r.Bytes
                 if ($r.Status -in @('Error', 'Cancel')) { $worst = $r.Status } elseif ($r.Status -eq 'Warning' -and $worst -eq 'OK') { $worst = 'Warning' }
             }
-            $meta | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $dir 'folders.json') -Encoding UTF8
+            if (-not $list.Count) {
+                # keine Ordner mehr gewaehlt: Liste leeren (herausgenommene sind oben beiseitegelegt)
+                if (@($fm.Removed).Count) { Set-Content -LiteralPath (Join-Path $dir 'folders.json') -Value '[]' -Encoding UTF8 }
+                return (& $res 'Skip' ((@('keine Ordner ausgewaehlt') + $lines) -join "`n"))
+            }
+            ConvertTo-Json -InputObject @($meta) -Depth 3 | Set-Content -LiteralPath (Join-Path $dir 'folders.json') -Encoding UTF8
             # je Ordner eine Zeile im Protokoll (Pfad am Quell-PC, Dateien, Groesse)
             return (& $res $worst ("$($list.Count) Ordner, $(Format-HMSize $bytes)`n" + ($lines -join "`n")) $bytes)
         }
@@ -2249,6 +2334,9 @@ function Start-HMBackup {
         try { $prev = Get-Content -LiteralPath (Join-Path $Ctx.ExistingBackup 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $prev = $null }
         if ($prev) { $Ctx.BackupPath = $Ctx.ExistingBackup }
     }
+    # Ausschluesse des letzten Laufs (neu ausgeschlossene Pfade werden beiseitegelegt); $null = unbekannt (aeltere Backups)
+    $Ctx.PrevExcludePaths = $null
+    if ($prev -and $prev.PSObject.Properties['ExcludePaths']) { $Ctx.PrevExcludePaths = @($prev.ExcludePaths | Where-Object { $_ }) }
     Write-HMLog $Job "BACKUP  $($Ctx.Computer) \ $($Ctx.UserFolder)  ->  $target" 'Header'
     if ($prev) { Write-HMLog $Job "Inkrementell: vorhandenes Backup vom $($prev.Created) wird aktualisiert (nur neue/geaenderte Dateien)" 'Info' }
 
@@ -2300,10 +2388,8 @@ function Start-HMBackup {
                             $r = Backup-HMFolderItem $Ctx $Job $mod $it $tenv
                             $need += [long]$r.BytesCopied
                         } elseif ($it.Type -eq 'Builtin' -and $it.Handler -eq 'ExtraFolders') {
-                            $idx = 0
-                            foreach ($p in @($Ctx.Options.ExtraFolders | Where-Object { $_ })) {
-                                $idx++
-                                $r = Backup-HMFolderItem $Ctx $Job $mod ([pscustomobject]@{ Name = "FOLDER$idx"; Path = $p; Type = 'Folder' }) $tenv
+                            foreach ($fx in @((Get-HMExtraFolderMap $Ctx.BackupPath @($Ctx.Options.ExtraFolders | Where-Object { $_ })).Map)) {
+                                $r = Backup-HMFolderItem $Ctx $Job $mod ([pscustomobject]@{ Name = "FOLDER$([int]$fx.Index)"; Path = "$($fx.Path)"; Type = 'Folder' }) $tenv
                                 $need += [long]$r.BytesCopied
                             }
                         }
@@ -2460,6 +2546,22 @@ function Start-HMBackup {
             } catch { Write-HMLog $Job "   Pruefung fehlgeschlagen: $($_.Exception.Message)" 'Warning' }
         }
 
+        # ---- Fortlaufend: Module, die diesmal nicht gesichert wurden (alter Stand bleibt im Backup-Ordner, wird nicht zurueckgespielt) ----
+        if ($prev) {
+            $curIds = @($Ctx.Modules | ForEach-Object { "$($_.Id)" })
+            $sk = @()
+            foreach ($pm in @(@($prev.Modules) + @($prev.SkippedModules) | Where-Object { $_ -and "$($_.Id)" })) {
+                if ($curIds -contains "$($pm.Id)" -or @($sk | Where-Object { $_.Id -eq "$($pm.Id)" }).Count) { continue }
+                if (-not (Test-Path -LiteralPath (Join-Path $Ctx.BackupPath "$($pm.Id)"))) { continue }
+                $since = if ($pm.PSObject.Properties['Since'] -and "$($pm.Since)") { "$($pm.Since)" } else { "$($prev.Created)" }
+                $sk += [pscustomobject]@{ Id = "$($pm.Id)"; Name = "$($pm.Name)"; Since = $since }
+            }
+            if ($sk.Count) {
+                $Ctx.Manifest.SkippedModules = $sk
+                Write-HMLog $Job "Fortlaufend: diesmal NICHT gesichert (nicht angehakt): $(@($sk | ForEach-Object { "$($_.Name) (Stand $($_.Since))" }) -join ', ') - der alte Stand bleibt im Backup-Ordner, wird beim Restore aber nicht zurueckgespielt. Wieder anhaken = beim naechsten Lauf aktualisiert." 'Warning'
+            }
+        }
+
         # ---- Beiseitegelegte (an der Quelle geloeschte) Dateien: Zusammenfassung, abgelaufene entfernen ----
         if ($Ctx.MassAlerts -and $Ctx.MassAlerts.Count) {
             Write-HMLog $Job 'ACHTUNG - MASSENLOESCHUNG ERKANNT: an der Quelle fehlen auf einmal ungewoehnlich viele Dateien. Das ist ein typisches Zeichen fuer einen Verschluesselungstrojaner (verschluesselte Kopien ersetzen die Originale) - oder ein Ordner wurde verschoben/umbenannt. HUMig hat dort nichts beiseitegelegt, die bisherigen Dateien bleiben im Backup. Quell-PC sofort pruefen (neue Dateiendungen, Erpresser-Hinweise), Netzwerk trennen, falls verdaechtig. War die Loeschung gewollt: Backup einmal mit "Neu" erstellen oder die Schwelle unter Einstellungen > Allgemein anpassen.' 'Error'
@@ -2564,8 +2666,7 @@ function Measure-HMBackup {
         $items = @(foreach ($m in $Ctx.Modules) { foreach ($it in @($m.Items)) { if ($it.Type -in @('Folder', 'Files')) { [pscustomobject]@{ M = $m; I = $it } } } })
         if (@($Ctx.Modules | Where-Object { $_.Id -eq 'ExtraFolders' }).Count) {
             $mx = @($Ctx.Modules | Where-Object { $_.Id -eq 'ExtraFolders' })[0]
-            $idx = 0
-            foreach ($p in @($Ctx.Options.ExtraFolders | Where-Object { $_ })) { $idx++; $items += [pscustomobject]@{ M = $mx; I = [pscustomobject]@{ Name = "FOLDER$idx"; Type = 'Folder'; Path = $p } } }
+            foreach ($fx in @((Get-HMExtraFolderMap $Ctx.BackupPath @($Ctx.Options.ExtraFolders | Where-Object { $_ })).Map)) { $items += [pscustomobject]@{ M = $mx; I = [pscustomobject]@{ Name = "FOLDER$([int]$fx.Index)"; Type = 'Folder'; Path = "$($fx.Path)" } } }
         }
         $n = 0
         foreach ($x in $items) {
@@ -2770,7 +2871,7 @@ function Restore-HMBuiltin {
                 if (Test-Path -LiteralPath $jf) {
                     # erst zuweisen, dann durchlaufen: PS 5.1 gibt ein JSON-Array aus ConvertFrom-Json als EIN Objekt aus
                     $fj = Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json
-                    foreach ($e in @($fj)) { $entries += [pscustomobject]@{ Src = (Join-Path $dir "FOLDER$($e.Index)"); Path = $e.Path; Key = "FOLDER$($e.Index)" } }
+                    foreach ($e in @(@($fj) | Where-Object { $_ -and [int]$_.Index -gt 0 -and "$($_.Path)" })) { $entries += [pscustomobject]@{ Src = (Join-Path $dir "FOLDER$($e.Index)"); Path = $e.Path; Key = "FOLDER$($e.Index)" } }
                 }
             }
             if (-not $entries.Count) { return (& $res 'Skip' 'keine Ordner im Backup') }

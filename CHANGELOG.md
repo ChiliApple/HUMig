@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.0.106 - 2026-10-11
+### Fortlaufendes Backup: Auswahl geaendert
+- Aus *Zusaetzliche Ordner* herausgenommene Ordner werden nach `_GELOESCHT` beiseitegelegt (Grund "nicht mehr ausgewaehlt") und nicht mehr zurueckgespielt. Jeder Ordner behaelt seinen festen Platz im Backup (`FOLDER<n>`) - bisher wurde neu durchnummeriert, ein herausgenommener Ordner aus der Mitte vermischte den Inhalt mit dem naechsten
+- Seit dem letzten Lauf neu ausgeschlossene Pfade (*Pfade ausschliessen*, *Grosse Dateien*): der alte Stand wird beiseitegelegt, bisher spielte der Restore ihn wieder ein
+- Diesmal nicht angehakte Module: Hinweis im Protokoll (alter Stand bleibt im Backup-Ordner, wird nicht zurueckgespielt)
+- *Im Backup suchen*: Originalort auch fuer beiseitegelegte Dateien herausgenommener Ordner
+### Behoben
+- Startseite: Server-Backup zeigte "noch keine erfolgreiche Sicherung" und "Archiv faellig", obwohl es erfolgreiche Laeufe gab (Verlaufsliste wurde als ein Eintrag gelesen). Sie liest jetzt auch den Verlauf auf allen lokalen Laufwerken und wird nach *Aktualisieren* im Reiter Server-Backup neu berechnet
+- Gleicher Fehler bei den Erinnerungen in der Teams-Benachrichtigung des geplanten Server-Backups und bei der geschaetzten Dauer in der Zeitplan-Pruefung
+### Automatische Tests
+- Feste Nummern der Zusaetzlichen Ordner, neu ausgeschlossene Pfade, Listen-Rueckgaben (Regression)
+
 ## v2.0.105 - 2026-10-11
 ### Protokoll: Zusaetzliche Ordner
 - Backup- und Restore-Protokoll nennen je zusaetzlichem Ordner den Pfad mit Dateien und Groesse (bisher nur "1 Ordner, 954,5 MB"); mehrzeilige Details werden im Protokoll als eigene Zeilen dargestellt

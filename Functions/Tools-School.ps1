@@ -486,10 +486,12 @@ function Get-HMOriginalPath($Backup, [string]$Rel) {
     # Zusaetzliche Ordner: ExtraFolders\FOLDER<n>\... -> Originalpfad aus ExtraFolders\folders.json
     if ($parts[0] -eq 'ExtraFolders' -and $parts[1] -match '^FOLDER(\d+)$') {
         $idx = [int]$Matches[1]
-        $jf = Join-Path (Join-Path $Backup.Path 'ExtraFolders') 'folders.json'
-        if (Test-Path -LiteralPath $jf) {
+        # folders.json = aktuelle, folders-alt.json = herausgenommene Ordner (Nummern werden nie doppelt vergeben)
+        foreach ($fn in @('folders.json', 'folders-alt.json')) {
+            $jf = Join-Path (Join-Path $Backup.Path 'ExtraFolders') $fn
+            if (-not (Test-Path -LiteralPath $jf)) { continue }
             $fj = Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json
-            $e = @(@($fj) | Where-Object { [int]$_.Index -eq $idx })[0]
+            $e = @(@($fj) | Where-Object { $_ -and [int]$_.Index -eq $idx })[0]
             if ($e -and "$($e.Path)") { return ("$($e.Path)".TrimEnd('\') + '\' + $parts[2]) }
         }
         return $null

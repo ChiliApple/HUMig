@@ -118,6 +118,7 @@ Aufbau der Einträge mit allen Feldern: Anleitung, Kapitel *Programme*.
 | Fehlende Programme installieren | Vergleich Backup ↔ neuer PC, Installation aus der Softwareverteilung, sonst WinGet – beim Restore automatisch angeboten (zuerst installieren, dann zurückspielen) |
 | Programm-Module ohne Programm | werden ausgelassen und für einen 2. Lauf nach der Installation angehakt |
 | Kontrolle | nach dem Restore Backup ↔ Ziel vergleichen, fehlende Dateien als Liste |
+| Fortlaufendes Backup | an der Quelle gelöschte Dateien, herausgenommene Zusätzliche Ordner und neu ausgeschlossene Pfade werden beiseitegelegt (`_GELOESCHT`), nicht angehakte Module im Protokoll genannt |
 | Live-Anzeige | Lesen/Schreiben (MB/s), CPU, Arbeitsspeicher – auch bei Backup und Server-Backup |
 | Checkliste | Nacharbeiten abhaken, Stand landet im Protokoll |
 | Backup prüfen · Vergleichen | gegen den Prüfsummen-Katalog · zwei Backups gegenüberstellen |

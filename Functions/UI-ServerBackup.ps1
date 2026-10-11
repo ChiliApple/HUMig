@@ -333,7 +333,8 @@ function Update-HMSbDrives([switch]$All) {
         Select-HMSbDriveForProfile
         Update-HMSbHistory
         Import-HMSbDiskProfiles
-        # Plattenzustand (SMART) der angesteckten USB-Platten automatisch lesen
+        # Startseite mit dem Verlauf der angesteckten Platten auffrischen, Plattenzustand (SMART) der USB-Platten lesen
+        if (Get-Command Update-HMStatusPage -ErrorAction SilentlyContinue) { try { Update-HMStatusPage } catch { } }
         Start-HMSbHealthRead
     }
 }
@@ -484,12 +485,26 @@ function Update-HMSbSize {
 # ----------------------------------------------------------------------------
 # Verlauf / Statistik
 # ----------------------------------------------------------------------------
-function Get-HMSbAllHistory {
+# -ScanDrives: zusaetzlich alle bereiten lokalen Laufwerke nach HUMig-ServerBackup\history.json durchsuchen (Startseite -
+# dort ist die Laufwerksliste des Reiters Server-Backup noch nicht gelesen). Nur feste/Wechsel-Laufwerke, keine Netzlaufwerke.
+function Get-HMSbAllHistory([switch]$ScanDrives) {
     $all = @()
     $h = Read-HMSbHistory $script:SbHistFile
     $all += @($h)
-    foreach ($d in @($script:SbDrives)) {
-        $f = "$($d.Letter):\$($script:SbDirName)\history.json"
+    $letters = @(@($script:SbDrives) | ForEach-Object { "$($_.Letter)".ToUpper() } | Where-Object { $_ })
+    if ($ScanDrives) {
+        try {
+            foreach ($di in [System.IO.DriveInfo]::GetDrives()) {
+                try {
+                    if ("$($di.DriveType)" -notin @('Fixed', 'Removable') -or -not $di.IsReady) { continue }
+                    $L = "$($di.Name)".Substring(0, 1).ToUpper()
+                    if ($letters -notcontains $L) { $letters += $L }
+                } catch { }
+            }
+        } catch { }
+    }
+    foreach ($L in $letters) {
+        $f = "${L}:\$($script:SbDirName)\history.json"
         if (Test-Path -LiteralPath $f) { $h2 = Read-HMSbHistory $f; $all += @($h2) }
     }
     $ren = @((Get-HMSbConfig).Renames)
@@ -1282,7 +1297,7 @@ function New-HMSbSchedule {
     try {
         $own = 'Server-Backup - {0} - ' -f ($p.Name -replace '[\\/:*?"<>|]', '_')
         $avg = 360.0
-        try { $okr = @(Get-HMSbAllHistory | Where-Object { "$($_.Profile)" -eq $p.Name -and "$($_.Status)" -ne 'Error' -and [double]$_.Minutes -gt 0 }); if ($okr.Count) { $avg = [double](@($okr | ForEach-Object { [double]$_.Minutes }) | Measure-Object -Maximum).Maximum } } catch { }
+        try { $ah = Get-HMSbAllHistory; $okr = @(@($ah) | Where-Object { "$($_.Profile)" -eq $p.Name -and "$($_.Status)" -ne 'Error' -and [double]$_.Minutes -gt 0 }); if ($okr.Count) { $avg = [double](@($okr | ForEach-Object { [double]$_.Minutes }) | Measure-Object -Maximum).Maximum } } catch { }
         $cf = Get-HMSbConflicts $r $own $avg
         $hit = @(@($cf) | Where-Object { "$($_.Ueberschneidung)" -like 'JA*' })
         if ($hit.Count) {
