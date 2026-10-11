@@ -163,6 +163,16 @@ Hyper-V-VMs oder die Laufwerke eines Servers mit der Windows Server-Sicherung au
 - **Archiv-Platten** gegen Verschlüsselungstrojaner; Platte danach auswerfen oder offline schalten
 - Wiederherstellung auch ohne HUMig (`wbadmin`, Installationsmedium)
 
+## Teams-Benachrichtigung
+
+Geplante Server-Backups, geplante Profil-Backups und Warnungen (Plattenzustand, Plattenwechsel, Speicherplatz, Massenlöschung) als Karte in einen Teams-Chat oder -Kanal:
+
+1. In Teams die App **Workflows** öffnen › Vorlage *Webhookbenachrichtigungen an einen Chat* bzw. *… an einen Kanal* › Speichern › Adresse kopieren. Private Kanäle gehen nicht – Gruppenchat oder Standardkanal eines privaten Teams nehmen.
+2. HUMig als Administrator auf dem PC, der melden soll (Hyper-V-Host bzw. PC mit Profil-Backup-Zeitplan) › *Einstellungen* › Allgemein › *Teams-Benachrichtigung* › *Neues Ziel*, Adresse einfügen, Kategorien wählen, *Test senden*, Speichern.
+3. Bis zu 10 Ziele mit je eigenen Kategorien – nicht jeder bekommt alles (z. B. Fehler an den Kanal, Erfolg mit Details nur an den eigenen Chat).
+
+Die Adressen liegen nur verschlüsselt in der Registry des jeweiligen PCs (nur Administratoren/SYSTEM), nie im Tool-Ordner. Details: Anleitung, Kapitel *Teams-Benachrichtigung*.
+
 ## App-Updates
 
 Installierte Programme per **WinGet** aktualisieren – am gewählten PC oder in einem ganzen EDV-Saal:
