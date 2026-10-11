@@ -332,6 +332,6 @@ function Update-HMBackupOverview([switch]$Open, [switch]$Quiet) {
         $file = Join-Path $root 'Backups.html'
         [System.IO.File]::WriteAllText($file, $sb.ToString(), (New-Object System.Text.UTF8Encoding $true))
         if (-not $Quiet) { Out-Console "Uebersicht: $file" 'Success' }
-        if ($Open) { Start-Process $file }
+        if ($Open) { Open-HMFile $file }
     } catch { if (-not $Quiet) { Out-Console "Uebersicht fehlgeschlagen: $($_.Exception.Message)" 'Error' } }
 }

@@ -748,6 +748,31 @@ Describe 'Fortlaufendes Backup: herausgenommene Ordner und neu ausgeschlossene P
     }
 }
 
+Describe 'Browser vor Backup/Restore schliessen' {
+    BeforeAll { . (Join-Path $script:Root 'Functions\Migration-Engine.ps1') }
+    It 'Edge, Chrome, Firefox fragen nach dem Schliessen; ohne Abfrage wird trotzdem kopiert' {
+        $j = Get-Content -LiteralPath (Join-Path $script:Root 'Config\modules.default.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $mods = @($j.Modules)
+        foreach ($x in @(@('Edge', 'msedge'), @('Chrome', 'chrome'), @('Firefox', 'firefox'))) {
+            $m = @($mods | Where-Object { $_.Id -eq $x[0] })[0]
+            @($m.CloseProcess) | Should -Contain $x[1]
+            $m.CloseDefault | Should -Be 'Copy'
+        }
+    }
+    It 'Entscheidung: ohne Abfrage kopieren (CloseDefault), Ueberspringen und ohne CloseDefault auslassen' {
+        Mock Get-HMRunningProcs { @([pscustomobject]@{ Name = 'msedge'; Id = 42 }) }
+        $job = @{ Log = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue)); Cancel = $false }
+        $m = [pscustomobject]@{ Id = 'Edge'; Name = 'Edge-Profil'; CloseProcess = @('msedge'); CloseDefault = 'Copy' }
+        $r = Enter-HMModule @{ ProcDecisions = @{}; UserSid = 'S-1-5-21-1' } $job $m @{} 'Backup'
+        $r.Skip | Should -BeFalse
+        $r.ProcAction | Should -Be 'trotzdem kopiert'
+        $r2 = Enter-HMModule @{ ProcDecisions = @{ Edge = 'Skip' }; UserSid = 'S-1-5-21-1' } $job $m @{} 'Backup'
+        $r2.Skip | Should -BeTrue
+        $m3 = [pscustomobject]@{ Id = 'App_X'; Name = 'X'; CloseProcess = @('x') }
+        (Enter-HMModule @{ ProcDecisions = @{}; UserSid = 'S-1-5-21-1' } $job $m3 @{} 'Backup').Skip | Should -BeTrue
+    }
+}
+
 Describe 'Listen-Rueckgaben (return ,@()) erst zuweisen' {
     It 'Get-HMSbAllHistory / Read-HMSbHistory werden nie direkt in @() oder einer Pipeline verwendet' {
         # die Funktionen geben die Liste als EIN Objekt zurueck - @(Aufruf) bzw. Aufruf | Where-Object sehen nur 1 Element

@@ -1070,6 +1070,9 @@ function Enter-HMModule([hashtable]$Ctx, $Job, $Module, [hashtable]$TEnv, [strin
             $pn = (@($run | ForEach-Object { $_.Name } | Select-Object -Unique) -join ', ')
             $dec = ''
             if ($Ctx.ProcDecisions -and $Ctx.ProcDecisions.ContainsKey("$($Module.Id)")) { $dec = "$($Ctx.ProcDecisions["$($Module.Id)"])" }
+            # ohne Abfrage (geplantes Backup, Mehrfachaktion): Module mit CloseDefault = Copy (Browser) trotzdem kopieren statt auslassen -
+            # Browser laufen oft dauerhaft im Hintergrund; gesperrte Dateien (z.B. Cookies) fehlen dann im Backup
+            elseif ("$($Module.CloseDefault)" -eq 'Copy') { $dec = 'Copy' }
             switch ($dec) {
                 'Copy' {
                     $st.ProcAction = 'trotzdem kopiert'

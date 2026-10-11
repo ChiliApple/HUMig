@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.0.107 - 2026-10-11
+### Browser vor Backup/Restore schliessen
+- Edge, Chrome und Firefox stehen jetzt in der Abfrage *Programme geoeffnet* (schliessen, notfalls beenden, ueberspringen, trotzdem kopieren). Bisher wurden sie nicht gefragt, gesperrte Dateien (Cookies, Sitzungen) fehlten und das Modul stand auf Fehler
+- Ohne Abfrage (geplantes Backup, Mehrfachaktion) werden Browser-Profile trotzdem kopiert (neues Modul-Feld `CloseDefault`), damit sie nicht ausgelassen werden, wenn der Browser im Hintergrund laeuft
+### Protokolle oeffnen
+- Laeuft HUMig unter einem eigenen Admin-Konto, oeffnen Berichte (Backup, Restore, Server-Backup, Host-Konfiguration, Uebersicht, Zeitplan) und die Anleitung mit dem Standard-Browser des am PC angemeldeten Benutzers - bisher fragte Windows jedes Mal, womit
+### Automatische Tests
+- Browser-Abfrage und Standard ohne Abfrage
+
 ## v2.0.106 - 2026-10-11
 ### Fortlaufendes Backup: Auswahl geaendert
 - Aus *Zusaetzliche Ordner* herausgenommene Ordner werden nach `_GELOESCHT` beiseitegelegt (Grund "nicht mehr ausgewaehlt") und nicht mehr zurueckgespielt. Jeder Ordner behaelt seinen festen Platz im Backup (`FOLDER<n>`) - bisher wurde neu durchnummeriert, ein herausgenommener Ordner aus der Mitte vermischte den Inhalt mit dem naechsten

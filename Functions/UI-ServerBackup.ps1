@@ -1012,7 +1012,7 @@ function Start-HMSbHostOnly {
         Out-Console "Host-Konfiguration: $($r.Switches) Switch(es), $($r.ManagementAdapters) Host-vNIC(s), $($r.VMs) VM(s) -> $($r.Folder)" 'Success'
         foreach ($w in @($r.Warnings)) { if ($w) { Out-Console "  $w" 'Warning' } }
         $h = Join-Path $r.Folder 'HostConfig.html'
-        if (Test-Path -LiteralPath $h) { try { Start-Process $h } catch { } }
+        if (Test-Path -LiteralPath $h) { try { Open-HMFile $h } catch { } }
     }
 }
 
@@ -1088,7 +1088,7 @@ function Open-HMSbReport($Entry) {
     }
     foreach ($c in $cands) {
         $h = Join-Path $c 'Bericht.html'
-        if (Test-Path -LiteralPath $h) { try { Start-Process $h; return } catch { } }
+        if (Test-Path -LiteralPath $h) { try { Open-HMFile $h; return } catch { } }
         if (Test-Path -LiteralPath $c) { try { Start-Process explorer.exe -ArgumentList "`"$c`""; return } catch { } }
     }
     $msg = "Bericht zum Lauf $($Entry.Date) nicht gefunden (Platte $($Entry.Disk) angesteckt?)."

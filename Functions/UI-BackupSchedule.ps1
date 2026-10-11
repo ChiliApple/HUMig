@@ -349,7 +349,7 @@ function Show-HMBackupSchedules {
                     foreach ($x in @($sel | Select-Object -First 1)) {
                         $all = Get-HMBsDefinitions; $d = @(@($all) | Where-Object { "$($_.Id)" -eq "$($x.Id)" })[0]
                         $rep = if ($d -and $d.LastBackup) { Join-Path "$($d.LastBackup)" 'Bericht_Backup.html' } else { '' }
-                        if ($rep -and (Test-Path -LiteralPath $rep)) { Start-Process -FilePath $rep } else { Out-Console "$($x.Name): kein Bericht vorhanden (noch nicht gelaufen, uebersprungen oder Ziel nicht angesteckt)" 'Info' }
+                        if ($rep -and (Test-Path -LiteralPath $rep)) { Open-HMFile $rep } else { Out-Console "$($x.Name): kein Bericht vorhanden (noch nicht gelaufen, uebersprungen oder Ziel nicht angesteckt)" 'Info' }
                     } } },
             @{ Text = 'Loeschen'; Color = '#FFF38BA8'; Handler = { param($sel, $w, $c)
                     if (-not (Confirm-Action "$(@($sel).Count) Zeitplan/Zeitplaene loeschen?`n(Vorhandene Backups bleiben erhalten.)")) { return }
