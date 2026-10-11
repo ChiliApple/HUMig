@@ -2693,7 +2693,9 @@ function Restore-HMBuiltin {
             } else {
                 $jf = Join-Path $dir 'folders.json'
                 if (Test-Path -LiteralPath $jf) {
-                    foreach ($e in @(Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json)) { $entries += [pscustomobject]@{ Src = (Join-Path $dir "FOLDER$($e.Index)"); Path = $e.Path; Key = "FOLDER$($e.Index)" } }
+                    # erst zuweisen, dann durchlaufen: PS 5.1 gibt ein JSON-Array aus ConvertFrom-Json als EIN Objekt aus
+                    $fj = Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json
+                    foreach ($e in @($fj)) { $entries += [pscustomobject]@{ Src = (Join-Path $dir "FOLDER$($e.Index)"); Path = $e.Path; Key = "FOLDER$($e.Index)" } }
                 }
             }
             if (-not $entries.Count) { return (& $res 'Skip' 'keine Ordner im Backup') }
@@ -2790,7 +2792,7 @@ function Restore-HMBuiltin {
             if (-not (Test-Path -LiteralPath $fdir)) { return (& $res 'Skip' 'keine Schriftarten im Backup') }
             $map = @{}
             $jf = Join-Path $dir 'fonts.json'
-            if (-not $Ctx.Backup.Legacy -and (Test-Path -LiteralPath $jf)) { foreach ($e in @(Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json)) { if ($e.File) { $map[(Split-Path $e.File -Leaf).ToLower()] = $e.Name } } }
+            if (-not $Ctx.Backup.Legacy -and (Test-Path -LiteralPath $jf)) { $mj = Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json; foreach ($e in @($mj)) { if ($e.File) { $map[(Split-Path $e.File -Leaf).ToLower()] = $e.Name } } }
             $existing = Invoke-HMTarget $Ctx { @(Get-ChildItem -LiteralPath (Join-Path $env:windir 'Fonts') -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name.ToLower() }) }
             $ex = @{}; foreach ($e in @($existing)) { $ex[$e] = $true }
             $new = @(Get-ChildItem -LiteralPath $fdir -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.ttf', '.ttc', '.otf', '.fon') -and -not $ex.ContainsKey($_.Name.ToLower()) })
@@ -2814,7 +2816,7 @@ function Restore-HMBuiltin {
             if ($Ctx.Backup.Legacy) { $files = @(Get-ChildItem -LiteralPath $dir -Filter *.xml -ErrorAction SilentlyContinue | ForEach-Object { [pscustomobject]@{ Path = '\'; Name = $_.BaseName; File = $_.FullName } }) }
             else {
                 $jf = Join-Path $dir 'tasks.json'
-                if (Test-Path -LiteralPath $jf) { $files = @(Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { [pscustomobject]@{ Path = $_.Path; Name = $_.Name; File = (Join-Path $dir $_.File) } }) }
+                if (Test-Path -LiteralPath $jf) { $tj = Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json; $files = @(@($tj) | ForEach-Object { [pscustomobject]@{ Path = $_.Path; Name = $_.Name; File = (Join-Path $dir $_.File) } }) }
             }
             if (-not $files.Count) { return (& $res 'Skip' 'keine Aufgaben im Backup') }
             $payload = @($files | ForEach-Object { [pscustomobject]@{ Path = $_.Path; Name = $_.Name; Xml = (Get-Content -LiteralPath $_.File -Raw) } })

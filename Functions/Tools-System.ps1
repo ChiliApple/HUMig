@@ -680,7 +680,8 @@ function Show-HMTaskImport {
     $dir = Join-Path $b.Path 'Tasks'
     $idx = Join-Path $dir 'tasks.json'
     if (-not (Test-Path -LiteralPath $idx)) { Out-Console "Im Backup $($b.Name) sind keine Aufgaben gesichert (Modul 'Aufgabenplanung')." 'Warning'; return }
-    $list = @(Get-Content -LiteralPath $idx -Raw -Encoding UTF8 | ConvertFrom-Json)
+    $tl = Get-Content -LiteralPath $idx -Raw -Encoding UTF8 | ConvertFrom-Json   # erst zuweisen (PS 5.1: Array kommt als EIN Objekt)
+    $list = @($tl)
     $rows = New-Object System.Collections.Generic.List[object]
     foreach ($t in $list) {
         $user = ''

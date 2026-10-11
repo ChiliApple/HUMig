@@ -8,6 +8,9 @@
 - Reiter Restore: neuer Knopf *Geloeschte leeren* (mit Rueckfrage, zeigt Anzahl, Groesse und Zeitraum)
 - *Im Backup suchen*: Haekchen *Mit geloeschten*, Spalte *Geloescht (erkannt)*
 - Pruefsummen-Katalog, *Backup pruefen* und *Vergleichen* zaehlen `_GELOESCHT` nicht zum Backup
+### Behoben (Windows PowerShell 5.1)
+- Restore *Zusaetzliche Ordner* mit zwei oder mehr gesicherten Ordnern: die Ordner wurden nicht gefunden (`ConvertFrom-Json` gibt ein JSON-Array unter PS 5.1 als ein Objekt aus - gleicher Fehler wie in v2.0.100 beim Update-Journal). Ebenso korrigiert: Restore und Anzeige gesicherter Aufgaben (Aufgabenplanung) mit mehreren Aufgaben
+- Automatischer Test sucht kuenftig im ganzen Code nach diesem Muster
 ### Oberflaeche
 - Der zuletzt gewaehlte Reiter wird gemerkt und beim naechsten Start wieder geoeffnet (pro Windows-Benutzer)
 ### Automatische Tests

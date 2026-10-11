@@ -507,3 +507,24 @@ Describe 'Fortlaufendes Backup: an der Quelle geloeschte Dateien beiseitelegen' 
         Test-Path -LiteralPath "$bk\_GELOESCHT\$neu\Mod\neu.txt" | Should -BeTrue
     }
 }
+
+Describe 'PS 5.1: JSON-Arrays aus ConvertFrom-Json' {
+    It 'Zuweisen und dann @() liefert jedes Element einzeln (auch unter Windows PowerShell 5.1)' {
+        $j = '[{"Index":1,"Path":"C:\\a"},{"Index":2,"Path":"C:\\b"}]' | ConvertFrom-Json
+        @($j).Count | Should -Be 2
+        @($j)[1].Index | Should -Be 2
+    }
+    It 'kein Code nutzt @(... | ConvertFrom-Json) oder verarbeitet das Array direkt im Pipeline-Schritt' {
+        # unter PS 5.1 kommt ein JSON-Array als EIN Objekt aus ConvertFrom-Json - @() und ForEach-Object sehen dann nur ein Element
+        $bad = @()
+        foreach ($f in @(Get-ChildItem -Path (Join-Path $script:Root 'Functions'), $script:Root -Filter *.ps1 -File)) {
+            $n = 0
+            foreach ($l in (Get-Content -LiteralPath $f.FullName -Encoding UTF8)) {
+                $n++
+                if ($l -match '^\s*#') { continue }
+                if ($l -match '@\([^()]*\|\s*ConvertFrom-Json\s*\)' -or ($l -match 'ConvertFrom-Json\s*\|\s*(ForEach-Object|Where-Object|%|\?)\s*\{' -and $l -notmatch 'ConvertFrom-Json\s*\|\s*ForEach-Object\s*\{\s*\$_\s*\}')) { $bad += "$($f.Name):$n" }
+            }
+        }
+        $bad | Should -BeNullOrEmpty
+    }
+}
