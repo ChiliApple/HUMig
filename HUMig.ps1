@@ -623,11 +623,29 @@ if (-not $ui.cmbThreads.SelectedItem) { $ui.cmbThreads.SelectedItem = '32' }
 $ui.cmbThreads.Add_SelectionChanged({ if ($ui.cmbThreads.SelectedItem -and -not $script:SuppressThreadSave) { Save-LocalSetting 'Threads' ([int]$ui.cmbThreads.SelectedItem) } })
 
 # Zusaetzliche Ordner
-$ui.btnExtraAdd.Add_Click({
+# Ordner am QUELL-PC waehlen: startet im Profil des gewaehlten Benutzers, Baum ab "Dieser PC" - nicht die eigenen
+# Ordner (Desktop, Downloads ...) des Kontos, unter dem HUMig laeuft (z.B. Admin-Konto). Remote: ueber \\PC\C$,
+# Rueckgabe immer als Pfad am Quell-PC (C:\...). $null = abgebrochen
+function Select-HMSourceFolder([string]$Description) {
+    $comp = Get-TargetComputer
+    $remote = -not (Test-HMIsLocal $comp)
+    $p = Get-SelectedProfile
+    $start = if ($p -and "$($p.LocalPath)") { "$($p.LocalPath)" } else { "$env:SystemDrive\" }
+    if ($remote -and $start -match '^([A-Za-z]):(.*)$') { $start = "\\$comp\$($Matches[1])`$$($Matches[2])" }
     $d = New-Object System.Windows.Forms.FolderBrowserDialog
-    $d.Description = 'Zusaetzlichen Ordner waehlen (bei Remote-Backup: Pfad am Quell-PC, z.B. D:\Daten)'
-    if ($d.ShowDialog() -eq 'OK') {
-        [void]$ui.lstExtra.Items.Add($d.SelectedPath)
+    $d.Description = $Description + $(if ($p -and -not $remote) { "  -  Profil von $($p.Folder): $($p.LocalPath)" } elseif ($remote) { "  -  $comp ueber Admin-Freigabe" } else { '' })
+    $d.ShowNewFolderButton = $false
+    if (-not $remote) { $d.RootFolder = [System.Environment+SpecialFolder]::MyComputer }
+    if (Test-Path -LiteralPath $start) { $d.SelectedPath = $start }
+    if ($d.ShowDialog() -ne 'OK' -or -not $d.SelectedPath) { return $null }
+    $r = "$($d.SelectedPath)"
+    if ($r -match '^\\\\[^\\]+\\([A-Za-z])\$(\\.*)?$') { $r = "$($Matches[1].ToUpper()):$(if ($Matches[2]) { $Matches[2] } else { '\' })" }
+    return $r
+}
+$ui.btnExtraAdd.Add_Click({
+    $sel = Select-HMSourceFolder 'Zusaetzlichen Ordner am Quell-PC waehlen'
+    if ($sel) {
+        [void]$ui.lstExtra.Items.Add($sel)
         if ($script:BackupChecks.ContainsKey('ExtraFolders')) { $script:BackupChecks['ExtraFolders'].IsChecked = $true }
     }
 })
@@ -646,9 +664,8 @@ function Add-ExcludePath([string]$Path) {
     return $true
 }
 $ui.btnExclAdd.Add_Click({
-    $d = New-Object System.Windows.Forms.FolderBrowserDialog
-    $d.Description = 'Ordner, der NICHT gesichert werden soll (bei Remote-Backup: Rechtsklick = Pfad am Quell-PC eintippen)'
-    if ($d.ShowDialog() -eq 'OK') { [void](Add-ExcludePath $d.SelectedPath) }
+    $sel = Select-HMSourceFolder 'Ordner, der NICHT gesichert werden soll (Rechtsklick auf + Ordner = Pfad eintippen)'
+    if ($sel) { [void](Add-ExcludePath $sel) }
 })
 $ui.btnExclAdd.Add_MouseRightButtonUp({
     $p = [Microsoft.VisualBasic.Interaction]::InputBox('Pfad am Quell-PC (Ordner oder Datei), z.B. C:\Users\max\Videos:', 'Pfad ausschliessen', '')
