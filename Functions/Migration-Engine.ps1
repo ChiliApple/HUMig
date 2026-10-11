@@ -2648,7 +2648,34 @@ function Restore-HMFolderItem {
             $msg += " | Cloud-Ordner '$leaf' nicht zurueckgeschrieben (Inhalt kommt ueber die Cloud; bei Bedarf Option 'OneDrive-Dateien in eigenen Ordner')"
         }
     }
+    # Kontrolle: liegt jede Datei aus dem Backup jetzt am Ziel? (nur Liste, nichts wird kopiert - Robocopy /L)
+    if ($Ctx.Options.VerifyAfter -and $st -ne 'Cancel' -and -not (Test-HMCancel $Job)) {
+        $v = Test-HMRestoredItem -Ctx $Ctx -Job $Job -Src $src -Dst $dst -DstLocal $dstLocal -Files $files -XD $xd -NoRecurse:$noRec
+        if ($v.Error) { $msg += " | Kontrolle nicht moeglich ($($v.Error))" }
+        elseif ($v.Missing -gt 0) {
+            $msg += " | KONTROLLE: $($v.Missing) Datei(en) fehlen am Ziel (Liste: Restore_*_Fehlende.txt)"
+            if ($st -eq 'OK') { $st = 'Warning' }
+        }
+    }
     return [pscustomobject]@{ Name = $Item.Name; Status = $st; Msg = $msg }
+}
+
+# Kontrolle nach dem Restore: Dateien, die im Backup liegen, am Ziel aber fehlen (gleiche Auswahl wie beim Kopieren).
+# Pfade werden fuer die Liste in $Ctx.MissingAfter gesammelt (Zielpfad, wie am Ziel-PC).
+function Test-HMRestoredItem {
+    param([hashtable]$Ctx, $Job, [string]$Src, [string]$Dst, [string]$DstLocal, [string[]]$Files = @(), [string[]]$XD = @(), [switch]$NoRecurse)
+    $res = [pscustomobject]@{ Missing = 0; Error = '' }
+    try {
+        $f = Find-HMDeletedInBackup -Backup $Src -Source $Dst -Files $Files -XD $XD -NoRecurse:$NoRecurse -Job $Job
+        if ($f.ExitCode -ge 8) { $res.Error = "Robocopy-Code $($f.ExitCode)"; return $res }
+        $paths = @($f.Paths)
+        $res.Missing = $paths.Count
+        if ($paths.Count -and $null -ne $Ctx.MissingAfter) {
+            $s0 = $Src.TrimEnd('\')
+            foreach ($p in $paths) { if ($Ctx.MissingAfter.Count -lt 20000) { [void]$Ctx.MissingAfter.Add(("$DstLocal".TrimEnd('\') + $p.Substring($s0.Length))) } }
+        }
+    } catch { $res.Error = "$($_.Exception.Message)" }
+    return $res
 }
 
 function Restore-HMRegItem {
@@ -3091,6 +3118,7 @@ function Repair-HMRestoredOwner([hashtable]$Ctx, $Job, [hashtable]$TEnv) {
 function Start-HMRestore {
     param([hashtable]$Ctx, $Job)
     $Ctx.RestoredUserDirs = New-Object System.Collections.Generic.List[string]
+    $Ctx.MissingAfter = New-Object System.Collections.Generic.List[string]
     $start = Get-Date
     $Ctx.IsRemote = -not (Test-HMIsLocal $Ctx.Computer)
     if (-not $Ctx.IsRemote) { $Ctx.Computer = $env:COMPUTERNAME }
@@ -3105,6 +3133,9 @@ function Start-HMRestore {
         if ($Ctx.Backup.Manifest -and $Ctx.Backup.Manifest.MassDeleteAlert) { Write-HMLog $Job 'ACHTUNG: beim letzten Backup wurde eine Massenloeschung an der Quelle erkannt (typisches Zeichen fuer einen Verschluesselungstrojaner) - Backup-Stand vor dem Restore pruefen' 'Warning' }
     } catch { }
     if ($Ctx.Backup.Legacy) { Write-HMLog $Job 'Backup der Vorgaengerversion erkannt (ohne manifest.json)' 'Info' }
+    $skipApps = @(@($Ctx.SkippedApps) | Where-Object { $_ } | ForEach-Object { "$($_.Name)" })
+    if ($skipApps.Count) { Write-HMLog $Job "Programm-Einstellungen ausgelassen (Programm am Ziel nicht installiert): $($skipApps -join ', ') - nach der Installation Restore nur mit diesen Modulen wiederholen" 'Warning' }
+    if ($Ctx.Options.VerifyAfter) { Write-HMLog $Job 'Nach jedem Ordner wird kontrolliert, ob alle Dateien aus dem Backup am Ziel liegen' 'Debug' }
 
     $shareRoot = $null
     $results = @()
@@ -3210,10 +3241,22 @@ function Start-HMRestore {
         'Gestartet' = $start.ToString('yyyy-MM-dd HH:mm:ss'); 'Dauer' = $dur
         'Quell-Betriebssystem' = $(if ($mf) { $mf.SourceOS } else { '' }); 'Durchgefuehrt von' = "$env:USERDOMAIN\$env:USERNAME an $env:COMPUTERNAME"
     }
+    # Liste der am Ziel fehlenden Dateien (Kontrolle nach dem Restore)
+    $missList = ''
+    if ($Ctx.MissingAfter -and $Ctx.MissingAfter.Count) {
+        $missList = Join-Path $Ctx.Backup.Path ("Restore_{0}_{1}_Fehlende.txt" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))
+        try {
+            $hdr = @("Kontrolle nach dem Restore $($start.ToString('yyyy-MM-dd HH:mm')) - $($Ctx.Backup.Name) -> $($Ctx.Computer)", 'Diese Dateien liegen im Backup, fehlen aber am Ziel (z.B. Datei war geoeffnet, Zugriff verweigert, Pfad zu lang). Restore wiederholen oder von Hand kopieren.', '')
+            [System.IO.File]::WriteAllLines($missList, [string[]](@($hdr) + @($Ctx.MissingAfter)), (New-Object System.Text.UTF8Encoding($true)))
+        } catch { $missList = '' }
+        Write-HMLog $Job ("KONTROLLE: {0} Datei(en) aus dem Backup fehlen am Ziel{1}" -f $Ctx.MissingAfter.Count, $(if ($missList) { " - Liste: $missList" } else { '' })) 'Warning'
+    } elseif ($Ctx.Options.VerifyAfter -and -not (Test-HMCancel $Job)) { Write-HMLog $Job 'Kontrolle: alle Dateien aus dem Backup liegen am Ziel' 'Success' }
     $notes = @('Benutzer ab- und wieder anmelden bzw. Neustart, damit alle Einstellungen wirken.')
+    if ($Ctx.MissingAfter -and $Ctx.MissingAfter.Count) { $notes += "Kontrolle: $($Ctx.MissingAfter.Count) Datei(en) aus dem Backup fehlen am Ziel$(if ($missList) { " - Liste: $(Split-Path $missList -Leaf) im Backup-Ordner" })." }
+    if ($skipApps.Count) { $notes += "Programm-Einstellungen ausgelassen (Programm fehlt am Ziel): $($skipApps -join ', ') - Programm installieren, dann Restore nur mit diesen Programm-Modulen wiederholen." }
     if (@($Ctx.LogonActions).Count) { $notes += 'Einige Einstellungen werden bei der naechsten Anmeldung des Benutzers automatisch uebernommen (einmalige Aufgabe).' }
     $rep = New-HMReport -Ctx $Ctx -Kind Restore -OutFile (Join-Path $Ctx.Backup.Path ("Bericht_Restore_{0}_{1}.html" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))) -Modules $results -Facts $facts -Notes $notes -Status $st
-    $Job.Result = [pscustomobject]@{ Status = $st; Duration = $dur; Modules = $results; Report = $rep }
+    $Job.Result = [pscustomobject]@{ Status = $st; Duration = $dur; Modules = $results; Report = $rep; MissingFiles = $(if ($Ctx.MissingAfter) { $Ctx.MissingAfter.Count } else { 0 }); MissingList = $missList }
 }
 
 # ============================================================================

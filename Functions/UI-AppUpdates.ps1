@@ -452,9 +452,9 @@ function Import-HMAuScheduleHistory {
 # Fehlende Programme ueber WinGet installieren (aus "Programme neu installieren" nach dem Restore): $Items = Id, Name
 # ----------------------------------------------------------------------------
 function Start-HMAuInstall([string]$Computer, $Items) {
-    if ($script:JobRunning) { Out-Console 'WinGet-Installation: es laeuft bereits ein Vorgang - spaeter erneut starten.' 'Warning'; return }
+    if ($script:JobRunning) { Out-Console 'WinGet-Installation: es laeuft bereits ein Vorgang - spaeter erneut starten.' 'Warning'; if (Get-Command Complete-HMInstallQueue -ErrorAction SilentlyContinue) { Complete-HMInstallQueue $true }; return }
     $its = @($Items | Where-Object { $_ -and "$($_.Id)" })
-    if (-not $its.Count) { return }
+    if (-not $its.Count) { if (Get-Command Complete-HMInstallQueue -ErrorAction SilentlyContinue) { Complete-HMInstallQueue $false }; return }
     $k = if (Test-HMIsLocal $Computer) { "$env:COMPUTERNAME".ToUpper() } else { "$Computer".Trim().ToUpper() }
     $byPc = @{ $k = @{ UserSid = ''; UserAccount = ''; Items = @($its | ForEach-Object { [pscustomobject]@{ Id = "$($_.Id)"; Name = "$($_.Name)"; Source = 'winget'; Installed = ''; Available = 'neu'; Unknown = $false; Scope = 'Machine' } }) } }
     $ctx = @{ Op = 'Install'; ByPc = $byPc; Running = @(); ProcDecisions = @{}; Credential = $script:RemoteCred }
@@ -462,6 +462,8 @@ function Start-HMAuInstall([string]$Computer, $Items) {
         param($j)
         if ($j.Result -and $j.Result.Items) { Add-HMAuHistory @($j.Result.Items) }
         if ($j.Result -and $j.Result.Reboot) { Out-Console 'WinGet: mindestens ein Programm braucht einen Neustart.' 'Warning' }
+        # Folgeaktion (z.B. Restore nach "zuerst installieren")
+        if (Get-Command Complete-HMInstallQueue -ErrorAction SilentlyContinue) { Complete-HMInstallQueue ([bool]$j.Cancel) }
     }
 }
 

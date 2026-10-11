@@ -11,6 +11,7 @@
 $script:SbEngine     = Join-Path $script:AppRoot 'Functions\ServerBackup-Engine.ps1'
 $script:SbCfgFile    = Join-Path $script:ConfigDir 'serverbackup.json'
 $script:SbHistFile   = Join-Path $script:ConfigDir 'ServerBackup\history.json'
+$script:SbHealthFile = Join-Path $script:ConfigDir 'ServerBackup\disk-health.json'
 $script:SbReportDir  = Join-Path $script:LogDir 'ServerBackup'
 $script:SbVms        = @()
 $script:SbVols       = @()
@@ -332,7 +333,48 @@ function Update-HMSbDrives([switch]$All) {
         Select-HMSbDriveForProfile
         Update-HMSbHistory
         Import-HMSbDiskProfiles
+        # Plattenzustand (SMART) der angesteckten USB-Platten automatisch lesen
+        Start-HMSbHealthRead
     }
+}
+# Plattenzustand (SMART) der angesteckten USB-Platten lesen, je Bezeichnung merken (Config\ServerBackup\disk-health.json)
+function Start-HMSbHealthRead([switch]$Manual) {
+    $seen = @{}
+    $ds = @(foreach ($d in @($script:SbDrives)) {
+        if ([int]$d.DiskNumber -lt 0 -or -not "$($d.Label)".Trim() -or "$($d.Bus)" -notmatch '^(USB|7)$' -or $seen.ContainsKey([int]$d.DiskNumber)) { continue }
+        $seen[[int]$d.DiskNumber] = $true; $d
+    })
+    if (-not $ds.Count) { if ($Manual) { Out-Console 'Plattenzustand: keine USB-Platte angesteckt - Platte anstecken und "Aktualisieren" druecken.' 'Info' }; return }
+    $arg = (@($ds | ForEach-Object { "$([int]$_.DiskNumber)|$($_.Label)" }) -join ';')
+    Invoke-AsyncCommand -ScriptBlock {
+        param($eng, $list)
+        . $eng
+        foreach ($x in @("$list".Split(';') | Where-Object { $_ })) { $p = $x.Split('|', 2); [pscustomobject]@{ Label = $p[1]; H = (Get-HMSbDiskHealth ([int]$p[0])) } }
+    } -ArgumentList @($script:SbEngine, $arg) -TimeoutSec 120 -BusyTag 'Sb' -BusyText 'Plattenzustand wird gelesen ...' -State @{ Manual = [bool]$Manual } -OnComplete {
+        param($r, $st)
+        if ($r -is [string]) { Out-Console "Plattenzustand nicht lesbar: $r" 'Warning'; return }
+        $store = Read-HMSbHealthStore $script:SbHealthFile
+        foreach ($x in @($r | Where-Object { $_ -and $_.Label })) {
+            $pl = @(@($store["$($x.Label)"]) | Where-Object { $_ })
+            $prev = if ($pl.Count) { $pl[$pl.Count - 1] } else { $null }
+            $v = Get-HMSbHealthVerdict $x.H $prev
+            try { Add-HMSbHealthStore $script:SbHealthFile "$($x.Label)" $x.H } catch { Out-Console "Plattenzustand nicht gespeichert: $($_.Exception.Message)" 'Warning' }
+            $lvl = switch ($v.Level) { 'OK' { 'Success' } 'Error' { 'Error' } 'Warning' { 'Warning' } default { 'Info' } }
+            if ($st.Manual -or $v.Level -in @('Warning', 'Error')) { Out-Console "Plattenzustand $($x.Label): $($v.Text)$(if ($v.Detail) { " ($($v.Detail))" })$(if ($x.H.Error) { " - $($x.H.Error)" })" $lvl }
+        }
+        Update-HMSbHistory
+        if (Get-Command Update-HMStatusPage -ErrorAction SilentlyContinue) { try { Update-HMStatusPage } catch { } }
+    }
+}
+function Format-HMSbHealthTag($Sum) {
+    if (-not $Sum) { return $null }
+    $v = $Sum.Verdict
+    $col = switch ($v.Level) { 'OK' { '#FFA6E3A1' } 'Warning' { '#FFFAB387' } 'Error' { '#FFF38BA8' } default { '#FF6C7086' } }
+    $t = switch ($v.Level) { 'OK' { 'Zustand gut' } 'Unknown' { 'Zustand unbekannt' } default { "ZUSTAND: $($v.Text)" } }
+    if ($v.Detail -and $v.Level -ne 'Unknown') { $t += " - $($v.Detail)" }
+    $dt = Get-HMSbDate "$($Sum.Last.Date)"
+    if ($dt -and $dt.Date -lt (Get-Date).Date) { $t += " (Stand $($dt.ToString('dd.MM.')))" }
+    return [pscustomobject]@{ Text = $t; Color = $col }
 }
 # Profile von angesteckten Platten anbieten, die es am Host nicht gibt (z.B. nach Neuinstallation)
 function Import-HMSbDiskProfiles {
@@ -483,8 +525,9 @@ function Format-HMSbAge([int]$Age) {
     if ($Age -eq 1) { return 'vor 1 Tag' }
     return "vor $Age Tagen"
 }
-function Get-HMSbDiskStatus($p, $mine) {
+function Get-HMSbDiskStatus($p, $mine, $Health = @{}) {
     $mine = @($mine)
+    if ($null -eq $Health) { $Health = @{} }
     $now = Get-Date
     $labels = @(1..$p.Disks | ForEach-Object { "$($p.DiskPrefix)-$_" })
     $arcLabels = @(); if ($p.ArchiveDisks -gt 0) { $arcLabels = @(1..$p.ArchiveDisks | ForEach-Object { "$($p.DiskPrefix)-A$_" }) }
@@ -502,6 +545,7 @@ function Get-HMSbDiskStatus($p, $mine) {
             $age = if ($dt) { [int][Math]::Floor(($now - $dt).TotalDays) } else { $null }
             $tags = New-Object System.Collections.Generic.List[object]
             if ($any -and "$($any.Status)" -eq 'Error') { $tags.Add([pscustomobject]@{ Text = 'letzter Lauf fehlgeschlagen'; Color = '#FFF38BA8' }) }
+            if ($Health.ContainsKey($lb)) { $ht = Format-HMSbHealthTag $Health[$lb]; if ($ht) { $tags.Add($ht) } }
             $out += [pscustomobject]@{ Label = $lb; Archive = $arc; Date = $dt; Age = $age; Dot = '#FF6C7086'; Tags = $tags }
         }
         return $out
@@ -546,6 +590,13 @@ function Get-HMSbDiskStatus($p, $mine) {
             $n = $p.ArchiveDays - $aAge
             $aNext.Tags.Insert(0, [pscustomobject]@{ Text = "naechste in $n Tag$(if ($n -ne 1) { 'en' })"; Color = '#FF94E2D5' })
         }
+    }
+    # Plattenzustand: Warnung/Fehler als Hinweis
+    foreach ($r in @($rot) + @($arcRows)) {
+        if (-not $Health.ContainsKey($r.Label)) { continue }
+        $v = $Health[$r.Label].Verdict
+        if ($v.Level -eq 'Error') { $hints += [pscustomobject]@{ Text = "Platte $($r.Label): $($v.Text) - Platte ersetzen, naechste Sicherung auf eine andere Platte."; Color = '#FFF38BA8' } }
+        elseif ($v.Level -eq 'Warning') { $hints += [pscustomobject]@{ Text = "Platte $($r.Label): $($v.Text) - Platte beobachten bzw. ersetzen."; Color = '#FFFAB387' } }
     }
     return [pscustomobject]@{ Rotation = $rot; Archive = $arcRows; Hints = $hints }
 }
@@ -654,8 +705,9 @@ function Update-HMSbHistory {
         $rows += [pscustomobject]@{ Datum = "$($e.Date)"; Platte = "$($e.Disk)"; Status = (Format-HMSbStatus "$($e.Status)" "$($e.Note)"); Minuten = (Format-HMDuration $e.Minutes); GB = $e.SizeGB; VMs = ((@("$($e.VMs)", $(if ("$($e.Volumes)") { "Laufwerke $($e.Volumes)" })) | Where-Object { $_ }) -join ' | '); Hinweis = $hin; Entry = $e }
     }
     $ui.dgSbHistory.ItemsSource = $rows
-    # Plattenstatus + Rotationsempfehlung + Archiv
-    Show-HMSbDiskStatus (Get-HMSbDiskStatus $p $mine)
+    # Plattenstatus + Rotationsempfehlung + Archiv + Plattenzustand (SMART, letzte Messung je Platte)
+    $hs = @{}; try { $hs = Get-HMSbHealthSummary (Read-HMSbHealthStore $script:SbHealthFile) } catch { }
+    Show-HMSbDiskStatus (Get-HMSbDiskStatus $p $mine $hs)
     $hs = @($mine | Where-Object { $_.HostSystem -eq $true })[0]
     $ui.lblSbHostSystem.Text = $(if ($hs) { "letzte Host-System-Sicherung: $($hs.Date) auf $($hs.Disk)" } else { 'noch keine Host-System-Sicherung' })
     Update-HMSbHostSysInfo
@@ -758,7 +810,7 @@ function Start-HMSbBackup {
     $ctx = @{
         Profile = $pName; DiskPrefix = $(if ($p) { $p.DiskPrefix } else { '' }); Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
         VMs = $vms; Volumes = $vols; HostConfig = $hc; HostSystem = $hs; Verify = [bool]$ui.chkSbVerify.IsChecked
-        LocalHistory = $script:SbHistFile; LocalReportDir = $script:SbReportDir; Version = $script:Version
+        LocalHistory = $script:SbHistFile; LocalHealth = $script:SbHealthFile; LocalReportDir = $script:SbReportDir; Version = $script:Version
         ProfileData = $(if ($p) { $p } else { $null }); After = $after
     }
     $script:SbAfterRun = $after
@@ -1359,6 +1411,7 @@ function Initialize-HMServerBackupTab {
     $ui.dgSbHistory.ToolTip = 'Doppelklick = Bericht des Laufs oeffnen - Rechtsklick = Laeufe aus dem Verlauf entfernen'
     $ui.dgSbHistory.SelectionMode = 'Extended' 
     $ui.btnSbOverview.Add_Click({ Show-HMSbOverview })
+    if ($ui.btnSbHealth) { $ui.btnSbHealth.Add_Click({ Start-HMSbHealthRead -Manual }) }
     $ui.btnSbOverview.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMSbAllRuns })
     $ui.btnSbHostOnly.Add_Click({ Start-HMSbHostOnly })
     $ui.btnSbSchedule.Add_Click({ New-HMSbSchedule })

@@ -27,6 +27,8 @@ try { New-Item -ItemType Directory -Path $repDir -Force | Out-Null } catch { }
 $script:TaskLog = Join-Path $repDir ('Aufgabe_{0}_{1}.log' -f (Get-Date -Format 'yyyy-MM-dd_HHmm'), ($ProfileName -replace '[^\w\-]', '_'))
 
 . (Join-Path $PSScriptRoot 'ServerBackup-Engine.ps1')
+. (Join-Path $PSScriptRoot 'Core-Notify.ps1')
+. (Join-Path $PSScriptRoot 'UI-Status.ps1')   # nur Get-HMStatusData (Erinnerungen Plattenwechsel/Archiv)
 
 # Protokoll direkt in die Datei (ueberschreibt die Queue-Variante der Engine)
 function Write-HMSbLog([string]$Msg, [string]$Lvl = 'Info') {
@@ -35,6 +37,7 @@ function Write-HMSbLog([string]$Msg, [string]$Lvl = 'Info') {
 }
 
 $localHist = Join-Path $cfgDir 'ServerBackup\history.json'
+$localHealth = Join-Path $cfgDir 'ServerBackup\disk-health.json'
 $version = ''
 try { $version = "$((Get-Content -LiteralPath (Join-Path $root 'Config\version.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version)".Trim() } catch { }
 if (-not $version) { try { if ((Get-Content -LiteralPath (Join-Path $root 'HUMig.ps1') -Raw -Encoding UTF8) -match "\`$script:Version\s*=\s*'([0-9\.]+)'") { $version = $Matches[1] } } catch { } }
@@ -49,6 +52,8 @@ function Add-HMSbTaskError([string]$Note, [string]$Disk = '') {
             HostVersionId = ''; Note = "Geplante Aufgabe: $Note"; Tool = "HUMig $version"
         })
     } catch { }
+    $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME FEHLGESCHLAGEN" -Lines @($Note, "Protokoll: $($script:TaskLog)") -Level 'Error'
+    if ($n) { Write-HMSbLog $n 'Info' }
 }
 
 Write-HMSbLog "Geplantes Server-Backup - Profil '$ProfileName' - Host $env:COMPUTERNAME - Konto $env:USERDOMAIN\$env:USERNAME - HUMig $version" 'Header'
@@ -90,7 +95,7 @@ if ($Explicit) {
 $ctx = @{
     Profile = $ProfileName; DiskPrefix = $prefix; Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
     VMs = @($list); Volumes = @($volList); HostConfig = [bool]$HostConfig; HostSystem = [bool]$HostSystem; Verify = -not $NoVerify
-    LocalHistory = $localHist; LocalReportDir = $repDir; Version = $version; ProfileData = $prof
+    LocalHistory = $localHist; LocalHealth = $localHealth; LocalReportDir = $repDir; Version = $version; ProfileData = $prof
     After = (Get-HMSbAfterMode $prof "$($d.Label)")
 }
 if ($ctx.After) { Write-HMSbLog "Nach der Sicherung: Platte $($d.Label) $(Format-HMSbAfterMode $ctx.After)" 'Info' }
@@ -103,5 +108,21 @@ try {
     exit 2
 }
 $st = "$($Job.Result.Status)"
+# Benachrichtigung (Teams, wenn auf diesem Server eingetragen): Fehler/Warnung, Plattenzustand, Erinnerungen Plattenwechsel/Archiv
+try {
+    $rem = @()
+    try {
+        $sd = Get-HMStatusData -SbProfiles @($prof) -SbHistory @(Read-HMSbHistory $localHist)
+        $rem = @(@($sd.Warnings) | Where-Object { "$($_.Area)" -eq 'Server-Backup' -and "$($_.Text)" -notmatch 'letzter Lauf fehlgeschlagen|keine erfolgreiche Sicherung|letzte erfolgreiche Sicherung vor' } | ForEach-Object { "$($_.Text)" })
+    } catch { }
+    $lvl = if ($st -eq 'Error') { 'Error' } elseif ($st -eq 'Warning' -or $rem.Count) { 'Warning' } else { 'OK' }
+    $stTxt = switch ($st) { 'OK' { 'erfolgreich' } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }
+    $lines = @("Platte: $($d.Label)") + @(@($Job.Result.Notes) | Where-Object { "$_" } | ForEach-Object { "Hinweis: $_" })
+    if ("$($Job.Result.HealthText)") { $lines += "Plattenzustand: $($Job.Result.HealthText)" }
+    $lines += @($rem | ForEach-Object { "Erinnerung: $_" })
+    if ("$($Job.Result.Report)") { $lines += "Bericht: $(Join-Path "$($Job.Result.Report)" 'Bericht.html')" }
+    $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME $stTxt" -Lines $lines -Level $lvl
+    if ($n) { Write-HMSbLog $n 'Info' }
+} catch { Write-HMSbLog "Benachrichtigung: $($_.Exception.Message)" 'Warning' }
 Write-HMSbLog "Ende - Status $st" $(if ($st -eq 'OK') { 'Success' } elseif ($st -eq 'Warning') { 'Warning' } else { 'Error' })
 if ($st -eq 'OK') { exit 0 } elseif ($st -eq 'Warning') { exit 1 } else { exit 2 }

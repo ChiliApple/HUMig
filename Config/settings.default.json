@@ -60,7 +60,9 @@
     "FastBootOff": false,
     "PostScript": "",
     "OneDriveToFolder": false,
-    "KeepNewer": false
+    "KeepNewer": false,
+    "OfferApps": true,
+    "VerifyAfter": true
   },
   "Shares": [],
   "Links": [

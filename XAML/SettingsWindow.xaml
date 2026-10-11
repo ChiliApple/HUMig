@@ -31,6 +31,7 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Text="Backup-Ordner:" Style="{DynamicResource Lbl}"/>
                         <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,8">
@@ -99,6 +100,17 @@
                             <TextBox x:Name="txtFeedbackMail" Style="{DynamicResource DarkTextBox}" ToolTip="Optional: E-Mail-Adresse fuer Rueckmeldungen zu ungeprueften Programmen (z.B. Systembetreuung). Leer = nur GitHub-Issue"/>
                             <TextBlock Text="Knopf 'Rueckmeldung': leer = GitHub-Issue im Browser (GitHub-Konto noetig); mit Adresse wahlweise E-Mail ueber das Mailprogramm (ohne Konto)" Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
                         </StackPanel>
+                        <TextBlock Grid.Row="14" Text="Teams-Benachrichtigung:" Style="{DynamicResource Lbl}" VerticalAlignment="Top" Margin="0,14,6,0"/>
+                        <StackPanel Grid.Row="14" Grid.Column="1" Margin="0,12,0,0">
+                            <DockPanel>
+                                <Button x:Name="btnTeamsDel" DockPanel.Dock="Right" Content="Entfernen" Style="{DynamicResource BtnRed}" Margin="4,0,0,0" ToolTip="Webhook-Adresse auf diesem PC loeschen"/>
+                                <Button x:Name="btnTeamsTest" DockPanel.Dock="Right" Content="Test senden" Style="{DynamicResource BtnMauve}" Margin="4,0,0,0" ToolTip="Testnachricht an den Kanal senden (eingetragene oder gespeicherte Adresse)"/>
+                                <PasswordBox x:Name="pwdTeams" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF45475A" Padding="4,3" ToolTip="Adresse aus der Teams-App Workflows: Kanal > ... > Workflows > Vorlage 'Send webhook alerts to a channel' (bzw. 'Bei Eingang einer Teams-Webhookanforderung im Kanal posten') > Adresse kopieren. Leer lassen = gespeicherte Adresse behalten"/>
+                            </DockPanel>
+                            <TextBlock x:Name="lblTeams" Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                            <CheckBox x:Name="chkTeamsOk" Content="Auch erfolgreiche geplante Server-Backups melden (sonst nur Fehler, Warnungen und Erinnerungen)" Margin="0,4,0,0"/>
+                            <TextBlock Text="Gemeldet werden: geplante Server-Backups (Fehler, Warnungen, Plattenzustand, Plattenwechsel/Archiv faellig) und Massenloeschung bei Backups, die in HUMig als Administrator laufen. Die Adresse wird nur auf diesem PC gespeichert (verschluesselt, nur Administratoren/SYSTEM) - auf dem Server, auf dem die Zeitplaene laufen, eintragen. Geplante Profil-Backups im Benutzerkonto melden sich nur lokal." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                        </StackPanel>
                     </Grid>
                 </ScrollViewer>
             </TabItem>
@@ -111,6 +123,9 @@
                     <CheckBox x:Name="chkRNum" Content="NumLock beim Start an"/>
                     <CheckBox x:Name="chkRFav" Content="Explorer: alte 'Favoriten' einblenden"/>
                     <CheckBox x:Name="chkRFast" Content="Schnellstart (Fast Boot) aus"/>
+                    <TextBlock Text="Vor und nach dem Restore:" Style="{DynamicResource Lbl}" Margin="0,10,0,4"/>
+                    <CheckBox x:Name="chkROfferApps" Content="Fehlende Programme vor dem Restore anbieten (zuerst installieren, dann zurueckspielen - Empfehlung von Microsoft)"/>
+                    <CheckBox x:Name="chkRVerify" Content="Nach dem Restore Backup und Ziel vergleichen (fehlende Dateien im Protokoll)"/>
                     <TextBlock Text="Nach-Skript (.ps1, wird am Ziel-PC als Administrator ausgefuehrt):" Style="{DynamicResource Lbl}" Margin="0,10,0,4"/>
                     <DockPanel>
                         <Button x:Name="btnRScript" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0"/>

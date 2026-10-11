@@ -60,7 +60,7 @@ Details: [INSTALL.md](INSTALL.md) und die [Anleitung](https://chiliapple.github.
 |---|---|
 | **1 · Verbinden** | Computer wählen (dieser PC, Name/IP oder **Geräte (AD)**) → **Verbinden** → Benutzer wählen. Installierte Programme werden dabei erkannt. |
 | **2 · Backup** | Vorlage wählen oder Module anhaken → *Vorab-Prüfung* (Größe, freier Platz) → **Backup starten** |
-| **3 · Restore** | am neuen PC Backup markieren → optional *Vorschau* → **Restore starten** → *Fehlende Programme installieren* → Checkliste |
+| **3 · Restore** | am neuen PC Backup markieren → optional *Vorschau* → **Restore starten** (fehlende Programme werden zuerst angeboten) → Checkliste |
 | **4 · Werkzeuge** | Fernwartung, Diagnose, Profil-Reparatur, Verteilung – für den gewählten PC und Benutzer |
 
 - Linksklick = Hauptfunktion, Rechtsklick = Zweitfunktion (steht im Tooltip)
@@ -115,7 +115,10 @@ Aufbau der Einträge mit allen Feldern: Anleitung, Kapitel *Programme*.
 |---|---|
 | Vorschau | je Datei: neu / überschreibt / Ziel neuer / gleich |
 | Neuere Dateien am Ziel behalten | Robocopy `/XO` |
-| Fehlende Programme installieren | Vergleich Backup ↔ neuer PC, Installation aus der Softwareverteilung, sonst WinGet |
+| Fehlende Programme installieren | Vergleich Backup ↔ neuer PC, Installation aus der Softwareverteilung, sonst WinGet – beim Restore automatisch angeboten (zuerst installieren, dann zurückspielen) |
+| Programm-Module ohne Programm | werden ausgelassen und für einen 2. Lauf nach der Installation angehakt |
+| Kontrolle | nach dem Restore Backup ↔ Ziel vergleichen, fehlende Dateien als Liste |
+| Live-Anzeige | Lesen/Schreiben (MB/s), CPU, Arbeitsspeicher – auch bei Backup und Server-Backup |
 | Checkliste | Nacharbeiten abhaken, Stand landet im Protokoll |
 | Backup prüfen · Vergleichen | gegen den Prüfsummen-Katalog · zwei Backups gegenüberstellen |
 | Alte Backups | Aufbewahrung je PC und Benutzer, Löschen immer mit Rückfrage |
@@ -152,6 +155,8 @@ Hyper-V-VMs oder die Laufwerke eines Servers mit der Windows Server-Sicherung au
 - Profile je Schule/Standort, Platten werden an ihrer Bezeichnung erkannt
 - Online-Sicherung der VMs, optional Host-System, Host-Konfiguration mit Skript zum Wiederherstellen der Switches
 - Zeitplan, Verlauf, Bericht je Lauf, Einträge in der Ereignisanzeige
+- **Plattenzustand (SMART)** je Platte, automatisch gelesen und gemerkt
+- **Teams-Benachrichtigung** über einen Workflow (Fehler, Warnungen, Platte wechseln, Archiv fällig)
 - **Archiv-Platten** gegen Verschlüsselungstrojaner; Platte danach auswerfen oder offline schalten
 - Wiederherstellung auch ohne HUMig (`wbadmin`, Installationsmedium)
 
