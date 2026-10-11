@@ -1,5 +1,18 @@
 ﻿# Changelog
 
+## v2.0.122 - 2026-10-11
+### Softwareverteilung: Testinstallation in der Windows Sandbox
+- Neuer Knopf *Testinstallation in der Sandbox*: installiert das Paket in der Windows Sandbox mit genau demselben Code wie bei der Verteilung, optional mit Deinstallationstest - Ergebnis OK / mit Hinweisen / fehlgeschlagen mit Exitcode, Dauer, sichtbaren Fenstern, Desktop-Verknuepfungen, Installation ins Benutzerprofil, neuen Eintraegen und Protokollen
+- Vorschlag fuer Erkennung und stille Deinstallation zum Uebernehmen; Testergebnis wird beim Paket gespeichert (gilt fuer alle Admins), Kennzeichen in der Liste (getestet / Hinweise / fehlgeschlagen / ungetestet / veraltet), Hinweis in der Bestaetigung vor dem Verteilen
+- Sandbox fehlt: HUMig bietet das Aktivieren an (Windows Pro/Education/Enterprise); Fenstergroesse und -lage der Sandbox werden gemerkt; grosse Pakete und Pakete auf Freigaben werden im Hintergrund lokal gespiegelt
+### Softwareverteilung: weitere Funktionen
+- Neue Paketfelder: Deinstallation, Erkennung per Registry-Schluessel oder Datei/Ordner, *Keine Desktop-Verknuepfung*, Abhaengigkeiten, WinGet-ID
+- Abhaengigkeiten werden beim Verteilen vorher installiert (vorhandene uebersprungen, Kreislaeufe abgelehnt)
+- *Deinstallieren ...* (gewaehlter PC oder mehrere PCs), *Status auf PCs ...* (installiert/Version je PC, letztes Ergebnis in `Softwareverteilung\_status`)
+- *Neue Version (WinGet) ...* laedt den neuesten Installer ins Paket und passt Silent-Schalter und Erkennung an
+- Setup-Dateien und Ordner koennen auf die Paketliste gezogen werden (nur aus einem Explorer mit Administratorrechten)
+- Selbsttest (Test-HUMig.ps1) prueft das Sandbox-Skript und ob die Windows Sandbox aktiviert ist
+
 ## v2.0.121 - 2026-10-11
 ### Sicherheit
 - **Ordnerrechte beim Start:** die Pruefung (HUMig-Ordner, Config, Functions, XAML, BIN, Tools) laeuft jetzt **bevor** HUMig etwas aus dem Ordner laedt - gleiche Rueckfrage wie bisher (Absichern / Trotzdem / Nie mehr fragen). *Nie mehr fragen* gilt nur, wenn `settings.json` einem Administrator gehoert und fuer Benutzer nicht beschreibbar ist. Absichern setzt zusaetzlich den Besitzer Administratoren

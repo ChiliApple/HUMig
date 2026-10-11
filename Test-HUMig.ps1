@@ -242,6 +242,12 @@ T 'Werkzeug: Inventar lokal (v0.0.5)' { $r = & $script:RS_Inventory $false; if (
 
 # 5. Softwareverteilung / Starter
 . (Join-Path $root 'Functions\Tools-Software.ps1')
+T 'Softwareverteilung: Sandbox-Skript und Windows Sandbox (v2.0.122)' {
+    . (Join-Path $root 'Functions\Tools-Sandbox.ps1')
+    $e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput((Get-HMSandboxScriptText), [ref]$null, [ref]$e)
+    if (@($e).Count) { throw "Sandbox-Skript: $($e[0].Message)" }
+    if (Test-HMSandboxAvailable) { 'Windows Sandbox aktiviert' } else { 'Windows Sandbox nicht aktiviert (Testinstallation bietet das Aktivieren an)' }
+}
 T 'Treiberverteilung: INF lesen (v2.0.30)' {
     . (Join-Path $root 'Functions\Tools-Drivers.ps1')
     $inf = @(Get-ChildItem (Join-Path $env:windir 'INF') -Filter 'machine.inf' -ErrorAction SilentlyContinue)[0]

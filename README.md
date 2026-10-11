@@ -135,8 +135,8 @@ OneDrive-Dateien werden nie in den Sync-Ordner zurückgeschrieben.
 | Ordner | `Softwareverteilung\` | `Treiberverteilung\` |
 | Paket | MSI/EXE/MSP oder ein Unterordner | Unterordner mit INF-Dateien oder Hersteller-Setup (ZIP/CAB werden entpackt) |
 | Installation | Silent-Parameter werden aus dem Installer erkannt | INF über `pnputil` oder Setup mit Parametern |
-| Prüfung | bereits installierte Programme werden übersprungen | nur PCs mit passender Hardware und anderer Version |
-| Extras | – | Treiber **erzwingen**, **vor Windows Update schützen** |
+| Prüfung | bereits installierte Programme werden übersprungen (Erkennung per ProductCode, Name, Registry-Schlüssel oder Datei) | nur PCs mit passender Hardware und anderer Version |
+| Extras | **Testinstallation in der Windows Sandbox** (ermittelt Erkennung und stille Deinstallation), Abhängigkeiten, Paket-Deinstallation, Status je PC, neue Version per WinGet | Treiber **erzwingen**, **vor Windows Update schützen** |
 
 Ziel ist der gewählte PC oder viele PCs aus dem AD (bis zu 8 gleichzeitig). *Installierte Software* zeigt die Programme eines PCs und deinstalliert still.
 
