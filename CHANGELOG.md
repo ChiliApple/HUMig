@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.108 - 2026-10-11
+### Kleinigkeiten
+- Reiter Restore: *Ordner oeffnen* oeffnet ohne markiertes Backup den Backup-Ordner (bisher passierte nichts)
+- Ausgabe/HUMig.log: Zusaetzliche Ordner stehen nur noch einmal (eingerueckt unter dem Eintrag) statt doppelt
+
 ## v2.0.107 - 2026-10-11
 ### Browser vor Backup/Restore schliessen
 - Edge, Chrome und Firefox stehen jetzt in der Abfrage *Programme geoeffnet* (schliessen, notfalls beenden, ueberspringen, trotzdem kopieren). Bisher wurden sie nicht gefragt, gesperrte Dateien (Cookies, Sitzungen) fehlten und das Modul stand auf Fehler

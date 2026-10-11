@@ -1238,7 +1238,11 @@ $ui.dgBackups.Add_SelectionChanged({
     Update-RestoreTargetLabel
 })
 $ui.btnRefreshBackups.Add_Click({ Update-BackupList; Update-BackupRootInfo })
-$ui.btnOpenBackup.Add_Click({ if ($script:SelectedBackup) { Start-Process explorer.exe -ArgumentList "`"$($script:SelectedBackup.Path)`"" } })
+# markiertes Backup oeffnen, sonst den Backup-Ordner
+$ui.btnOpenBackup.Add_Click({
+    $f = if ($script:SelectedBackup -and (Test-Path -LiteralPath "$($script:SelectedBackup.Path)")) { "$($script:SelectedBackup.Path)" } else { Get-BackupRoot }
+    if ($f -and (Test-Path -LiteralPath $f)) { Start-Process explorer.exe -ArgumentList "`"$f`"" } else { Out-Console "Backup-Ordner nicht erreichbar: $f" 'Warning' }
+})
 $ui.btnReport.Add_Click({
     $b = $script:SelectedBackup
     if (-not $b) { Out-Console 'Bitte zuerst ein Backup waehlen.' 'Warning'; return }

@@ -2045,7 +2045,6 @@ function Backup-HMBuiltin {
                 $idx = [int]$fx.Index; $p = "$($fx.Path)"
                 $fake = [pscustomobject]@{ Name = "FOLDER$idx"; Path = $p; Type = 'Folder' }
                 $r = Backup-HMFolderItem $Ctx $Job $Module $fake $TEnv
-                Write-HMLog $Job ("   Ordner {0}: {1} - {2}" -f $idx, $p, $r.Msg) $(if ($r.Status -eq 'OK') { 'Debug' } else { 'Warning' })
                 $meta += [pscustomobject]@{ Index = $idx; Path = $p; Status = $r.Status }
                 $lines += "$p - $($r.Msg)"
                 $bytes += $r.Bytes
@@ -2484,7 +2483,7 @@ function Start-HMBackup {
                     $r = [pscustomobject]@{ Name = "$($it.Name)$($it.Handler)"; Status = 'Error'; Msg = $_.Exception.Message; Bytes = 0; Source = '' }
                 }
                 $lvl = switch ($r.Status) { 'OK' { 'Success' } 'Skip' { 'Debug' } 'Warning' { 'Warning' } default { 'Error' } }
-                Write-HMLog $Job ("   {0}: {1}" -f $r.Name, $r.Msg) $lvl
+                Write-HMLog $Job ("   {0}: {1}" -f $r.Name, ("$($r.Msg)" -replace "`r?`n", "`n      ")) $lvl
                 $mres.Items += [pscustomobject]@{ Name = $r.Name; Status = $r.Status; Msg = $r.Msg; Bytes = [long]$r.Bytes; Source = $r.Source }
                 $mres.Bytes += [long]$r.Bytes
                 if ($r.Status -in @('Error', 'Cancel')) { $mres.Status = 'Error' } elseif ($r.Status -eq 'Warning' -and $mres.Status -eq 'OK') { $mres.Status = 'Warning' }
@@ -2903,7 +2902,6 @@ function Restore-HMBuiltin {
                 $fake = [pscustomobject]@{ Name = $(if ($e.Key) { $e.Key } else { $leaf }); Type = 'Folder'; Path = $dest }
                 $r = Restore-HMFolderItem $Ctx $Job $Module $fake $TEnv -SourceOverride $e.Src -DestOverride $dest
                 if ($note -and $r.Status -eq 'OK') { $r.Status = 'Warning' }
-                Write-HMLog $Job "   $($e.Path): $($r.Msg)$note" $(if ($r.Status -eq 'OK') { 'Debug' } else { 'Warning' })
                 $lines += "$($e.Path) - $($r.Msg)$note"
                 if ($r.Status -in @('Error', 'Cancel')) { $worst = $r.Status } elseif ($r.Status -ne 'OK' -and $worst -eq 'OK') { $worst = $r.Status }
             }
@@ -3305,7 +3303,7 @@ function Start-HMRestore {
                 } catch { $r = [pscustomobject]@{ Name = "$($it.Name)$($it.Handler)"; Status = 'Error'; Msg = $_.Exception.Message } }
                 if ($r.Status -ne 'Skip' -or $r.Msg) {
                     $lvl = switch ($r.Status) { 'OK' { 'Success' } 'Skip' { 'Debug' } 'Warning' { 'Warning' } default { 'Error' } }
-                    Write-HMLog $Job ("   {0}: {1}" -f $r.Name, $r.Msg) $lvl
+                    Write-HMLog $Job ("   {0}: {1}" -f $r.Name, ("$($r.Msg)" -replace "`r?`n", "`n      ")) $lvl
                     $itemLog += [pscustomobject]@{ Name = $r.Name; Status = $r.Status; Msg = $r.Msg }
                 }
                 if ($r.Status -in @('Error', 'Cancel')) { $worst = 'Error' } elseif ($r.Status -eq 'Warning' -and $worst -eq 'OK') { $worst = 'Warning' }
