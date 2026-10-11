@@ -2182,6 +2182,46 @@ $script:Window.Add_Closing({
     Remove-HMNotification
     try { Close-AsyncPool } catch { }
 })
+# Fenster beim Start in den Vordergrund holen. Windows verhindert das sonst oft (Start ueber UAC-Abfrage, Starter,
+# Neustart nach Update): kurz "immer im Vordergrund", Eingabe-Thread des aktiven Fensters anhaengen, SetForegroundWindow.
+function Set-HMForeground($Win) {
+    try {
+        if (-not ('HMFg' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class HMFg {
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+    public static bool Bring(IntPtr h) {
+        if (IsIconic(h)) ShowWindow(h, 9);   // SW_RESTORE
+        IntPtr fg = GetForegroundWindow();
+        if (fg == h) return true;
+        uint fgT = GetWindowThreadProcessId(fg, IntPtr.Zero), me = GetCurrentThreadId();
+        bool att = fgT != 0 && fgT != me && AttachThreadInput(me, fgT, true);
+        BringWindowToTop(h);
+        bool ok = SetForegroundWindow(h);
+        if (att) AttachThreadInput(me, fgT, false);
+        return ok;
+    }
+}
+'@ -ErrorAction Stop
+        }
+        $h = (New-Object System.Windows.Interop.WindowInteropHelper($Win)).Handle
+        if ($Win.WindowState -eq 'Minimized') { $Win.WindowState = 'Normal' }
+        $Win.Topmost = $true
+        [void][HMFg]::Bring($h)
+        $Win.Activate() | Out-Null
+        $Win.Topmost = $false
+        [void]$Win.Focus()
+    } catch { try { $Win.Activate() | Out-Null } catch { } }
+}
 $script:Window.Add_ContentRendered({
     if ($script:Splash) {
         $rest = 1500 - ((Get-Date) - $script:SplashShown).TotalMilliseconds
@@ -2189,7 +2229,12 @@ $script:Window.Add_ContentRendered({
         try { $script:Splash.Close() } catch { }
         $script:Splash = $null
     }
-    $script:Window.Activate() | Out-Null
+    Set-HMForeground $script:Window
+    # nach einer UAC-Abfrage liegt der Fokus manchmal noch kurz woanders - einmal nachfassen
+    $script:FgTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:FgTimer.Interval = [TimeSpan]::FromMilliseconds(700)
+    $script:FgTimer.Add_Tick({ $script:FgTimer.Stop(); Set-HMForeground $script:Window })
+    $script:FgTimer.Start()
     if (-not $script:AclChecked) { $script:AclChecked = $true; try { Test-HMAppFolderSecurity } catch { } }
     # Benutzer-Registry, die ein hart beendetes HUMig an diesem PC geladen gelassen hat, entladen (nur wenn der Benutzer nicht angemeldet ist)
     if ($isAdmin -and -not $script:UserMode -and -not $script:HiveChecked) {
