@@ -21,7 +21,7 @@ function Show-SettingsDialog {
     if ($script:LogoImage) { $w.FindName('imgLogo').Source = $script:LogoImage }
     $w.Owner = $script:Window; Set-HMWindowScale $w
     $f = @{}
-    foreach ($n in @('lblPath', 'btnOpenConfig', 'btnSave', 'btnCancel', 'tabs', 'txtRoot', 'btnRoot', 'cmbThreads', 'txtRetention', 'txtRetentionKeep', 'txtDeletedKeep', 'txtDeletedMass', 'txtFeedbackMail', 'cmbUiScale', 'chkOverviewAuto', 'txtChecklist', 'chkChecklistAuto', 'tabSchools', 'dgSchools', 'btnSchoolAdd', 'btnSchoolDel', 'txtUsmt', 'btnUsmt', 'btnUsmtAdk', 'lblUsmt',
+    foreach ($n in @('lblPath', 'btnOpenConfig', 'btnSave', 'btnCancel', 'tabs', 'txtRoot', 'btnRoot', 'cmbThreads', 'txtRetention', 'txtRetentionKeep', 'txtDeletedKeep', 'txtDeletedMass', 'txtFeedbackMail', 'cmbUiScale', 'chkOverviewAuto', 'chkStatusPage', 'txtChecklist', 'chkChecklistAuto', 'tabSchools', 'dgSchools', 'btnSchoolAdd', 'btnSchoolDel', 'txtUsmt', 'btnUsmt', 'btnUsmtAdk', 'lblUsmt',
         'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtDrvDir', 'btnDrvDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript',
         'tabExceptions', 'btnExcDefault', 'txtExPF', 'txtExPFi', 'txtExPMin', 'txtExSF', 'txtExSFi', 'txtExSMin', 'tabModules', 'txtNmName', 'cmbNmGroup',
         'cmbNmType', 'txtNmFilter', 'txtNmPath', 'btnNmAdd', 'btnModDel', 'btnModJson', 'btnAppEditor', 'dgModules', 'btnLinkAdd', 'btnLinkDel', 'dgLinks',
@@ -40,6 +40,7 @@ function Show-SettingsDialog {
     $f.txtDeletedKeep.Text = "$(if ($null -ne $s.DeletedKeepDays) { [int]$s.DeletedKeepDays } else { 90 })"
     $f.txtDeletedMass.Text = "$(if ($null -ne $s.DeletedMassPercent) { [int]$s.DeletedMassPercent } else { 20 })"
     $f.chkOverviewAuto.IsChecked = ($s.OverviewAuto -ne $false)
+    $f.chkStatusPage.IsChecked = ($s.ShowStatusPage -ne $false)
     $f.txtFeedbackMail.Text = "$($s.FeedbackMail)"
     foreach ($t in @('Automatisch', '70 %', '80 %', '90 %', '100 %', '110 %', '125 %', '140 %', '160 %')) { [void]$f.cmbUiScale.Items.Add($t) }
     $cur = if ($script:UiScaleAuto) { 'Automatisch' } else { '{0} %' -f [int][Math]::Round([double]$script:UiScale * 100) }
@@ -282,6 +283,7 @@ function Show-SettingsDialog {
         $h.DeletedKeepDays = $delKeep
         $h.DeletedMassPercent = $delMass
         $h.OverviewAuto = [bool]$F.chkOverviewAuto.IsChecked
+        $h.ShowStatusPage = [bool]$F.chkStatusPage.IsChecked
         $fm = "$($F.txtFeedbackMail.Text)".Trim()
         if ($fm -and $fm -notmatch '^[^@\s;,]+@[^@\s;,]+\.[^@\s;,]+$') { [void][System.Windows.MessageBox]::Show($W, 'Rueckmeldung: ungueltige E-Mail-Adresse', 'Einstellungen', 'OK', 'Warning'); return }
         $h.FeedbackMail = $fm

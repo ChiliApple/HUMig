@@ -116,7 +116,9 @@ function Show-TaskNotification([string]$Title, [string]$Text, [string]$Kind, [st
 function Complete-Task([string]$Status, [string]$Msg, [string]$BackupPath = '') {
     $st = switch ($Status) { 'OK' { 'OK' } 'Warning' { 'Warnung' } 'Skipped' { 'uebersprungen' } default { 'Fehler' } }
     Write-TaskLog "Ende - $st$(if ($Msg) { ": $Msg" })" $(if ($Status -eq 'OK') { 'Success' } elseif ($Status -eq 'Warning') { 'Warning' } else { 'Error' })
-    Save-TaskState @{ LastRun = (Get-Date).ToString('yyyy-MM-dd HH:mm'); LastStatus = $Status; LastMessage = $Msg; LastBackup = $BackupPath; LastLog = $script:TaskLog }
+    $state = @{ LastRun = (Get-Date).ToString('yyyy-MM-dd HH:mm'); LastStatus = $Status; LastMessage = $Msg; LastBackup = $BackupPath; LastLog = $script:TaskLog }
+    if ($Status -in @('OK', 'Warning')) { $state.LastSuccess = $state.LastRun }   # fuer die Warnung "seit X Tagen kein erfolgreicher Lauf"
+    Save-TaskState $state
     # alte Protokolle dieses Zeitplans aufraeumen (neueste 30 bleiben)
     try { Get-ChildItem -LiteralPath $logDir -Filter "*_$Id.log" -File | Sort-Object Name -Descending | Select-Object -Skip 30 | Remove-Item -Force -ErrorAction SilentlyContinue } catch { }
     $always = $true

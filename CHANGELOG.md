@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.0.103 - 2026-10-11
+### Neu: Reiter Status (Startseite)
+- Alles auf einen Blick: offene Hinweise, Backup-Zeitplaene (letzter Lauf, letzter Erfolg, naechster Lauf), letzte Backups je PC und Benutzer, Server-Backup (letzte Sicherung, Alter je Platte, Archiv faellig), App-Updates der letzten 7 Tage. Abschaltbar unter Einstellungen > Allgemein
+- Hinweise beim Start (auch bei ausgeblendetem Reiter in der Ausgabe): Backup-Zeitplan seit 8 Tagen ohne Erfolg, fehlgeschlagen oder Aufgabe fehlt; Server-Backup-Platte laenger nicht gesichert als die Warnfrist des Profils (Plattenwechsel-Erinnerung); Archiv faellig; Massenloeschung erkannt
+- Zeitplaene merken sich den letzten erfolgreichen Lauf (`LastSuccess`)
+### Benutzer-Auswahl
+- Ungefaehre Profilgroesse hinter dem Benutzer (aus dem letzten Backup oder der letzten Messung) und Ampel daneben: gross, knapp, passt nicht aufs Backup-Ziel
+### Behoben
+- Nach *Markierte ausschliessen* (Grosse Dateien) oder geaenderten Ausnahmen zeigten Vorab-Pruefung und Summe noch die alte Groesse. Jetzt gilt die Messung als veraltet und wird bei der Vorab-Pruefung neu ermittelt
+- Text der Summe beim Messen: Registry, Windows-Einstellungen (USMT), Treiber und Schriftarten werden mitgesichert, nur ihre Groesse ist vorab nicht messbar (bisher stand "ohne USMT")
+### Automatische Tests
+- Startseite/Hinweise: Zeitplaene, Server-Platten, Archiv, Massenloeschung, App-Updates
+
 ## v2.0.102 - 2026-10-11
 ### Schutz vor Massenloeschung (Verschluesselungstrojaner)
 - Fehlen in einem gesicherten Ordner auf einmal ungewoehnlich viele Dateien (Standard: mehr als 20 % und mindestens 50), legt das fortlaufende Backup dort nichts beiseite und warnt deutlich - das ist ein typisches Zeichen fuer einen Verschluesselungstrojaner (oder einen verschobenen Ordner). Warnung im Protokoll, als Benachrichtigung des Zeitplans, in der Backup-Liste und beim Restore. Schwelle: Einstellungen > Allgemein (0 = aus)

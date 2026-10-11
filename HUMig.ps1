@@ -153,7 +153,7 @@ $script:SplashShown = Get-Date
 # ============================================================================
 # FUNKTIONEN LADEN
 # ============================================================================
-foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1', 'AppUpdates-Engine.ps1', 'UI-AppUpdates.ps1')) {
+foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1', 'AppUpdates-Engine.ps1', 'UI-AppUpdates.ps1', 'UI-Status.ps1')) {
     $mp = Join-Path $script:AppRoot "Functions\$mod"
     try { . $mp } catch { [System.Windows.MessageBox]::Show("$mod konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null; exit 1 }
 }
@@ -272,7 +272,7 @@ if ($script:AppIcon) { $script:Window.Icon = $script:AppIcon }
 
 function Get-UI([string]$n) { $e = $script:Window.FindName($n); if (-not $e) { Write-Host "[WARN] UI '$n' fehlt" -ForegroundColor Yellow }; return $e }
 $ui = @{}
-foreach ($n in @('imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
+foreach ($n in @('tabStatus', 'pnlStatus', 'btnStatusRefresh', 'lblStatusTime', 'imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
     'txtBackupRoot', 'btnBrowseRoot', 'btnOpenRoot', 'lblFree', 'tabMain', 'cmbPreset', 'btnAllOn', 'btnAllOff', 'btnPresetSave', 'pnlBackupModules', 'lstExtra', 'btnExtraAdd',
     'btnExtraDel', 'chkMinProfileExc', 'chkNoProfileFileExc', 'chkMinSystemExc', 'chkNoSystemFileExc', 'btnEditExceptions', 'cmbThreads', 'btnPrecheck',
     'btnProfileSize', 'btnBackup', 'btnCancel', 'btnRefreshBackups', 'btnOpenBackup', 'btnDeleteBackup', 'btnCleanupBackups', 'btnEmptyDeleted', 'dgBackups', 'lblRestoreInfo',
@@ -444,7 +444,18 @@ function Get-SizeKey {
     if (-not $p -or -not $p.SID) { return '' }
     $c = Get-TargetComputer
     if (Test-HMIsLocal $c) { $c = $env:COMPUTERNAME }
-    return ("{0}|{1}" -f $c, $p.SID).ToUpperInvariant()
+    # Ausschluesse, Zusaetzliche Ordner und Ausnahme-Optionen gehoeren zum Schluessel: aendern sie sich, ist die gemessene
+    # Groesse veraltet (sonst zeigte z. B. die Vorab-Pruefung nach "Markierte ausschliessen" noch die alte Summe)
+    $o = @(
+        @($ui.lstExtra.Items | ForEach-Object { "$_" }) -join ';'
+        @($ui.lstExclude.Items | ForEach-Object { "$_" }) -join ';'
+        "$([bool]$ui.chkMinProfileExc.IsChecked)$([bool]$ui.chkNoProfileFileExc.IsChecked)$([bool]$ui.chkMinSystemExc.IsChecked)$([bool]$ui.chkNoSystemFileExc.IsChecked)$([bool]$ui.chkOneDriveLocal.IsChecked)"
+    ) -join '|'
+    return ("{0}|{1}|{2}" -f $c, $p.SID, $o).ToUpperInvariant()
+}
+# Aendern sich Ausschluesse/Optionen, verschwinden die gemessenen Groessen (Anzeige "veraltet" statt falscher Summe)
+function Update-SizeDisplayIfStale {
+    if ($script:SizeCache -and -not (Test-SizeCacheValid)) { Show-ModuleSizes; if ($ui.lblSizeTotal) { $ui.lblSizeTotal.Text = 'Groesse veraltet (Ausschluesse/Optionen geaendert) - Groesse ermitteln' } }
 }
 function Test-SizeCacheValid { return [bool]($script:SizeCache -and $script:SizeCache.Key -and $script:SizeCache.Key -eq (Get-SizeKey)) }
 function Get-BackupFree { try { return (Get-HMFreeSpace (Get-BackupRoot)) } catch { return [long]-1 } }
@@ -644,6 +655,9 @@ $ui.btnExclAdd.Add_MouseRightButtonUp({
     if ($p -and -not (Add-ExcludePath $p)) { Out-Console "Ungueltiger oder doppelter Pfad: $p (vollstaendiger Pfad mit Laufwerk, z.B. C:\...)" 'Warning' }
 })
 $ui.btnExclDel.Add_Click({ if ($ui.lstExclude.SelectedItem) { $ui.lstExclude.Items.Remove($ui.lstExclude.SelectedItem) } })
+# Gemessene Groesse wird ungueltig, sobald sich Ausschluesse, Zusaetzliche Ordner oder Ausnahme-Optionen aendern
+foreach ($lst in @($ui.lstExclude, $ui.lstExtra)) { ([System.Collections.Specialized.INotifyCollectionChanged]$lst.Items).add_CollectionChanged({ Update-SizeDisplayIfStale }) }
+foreach ($cb in @($ui.chkMinProfileExc, $ui.chkNoProfileFileExc, $ui.chkMinSystemExc, $ui.chkNoSystemFileExc, $ui.chkOneDriveLocal)) { if ($cb) { $cb.Add_Checked({ Update-SizeDisplayIfStale }); $cb.Add_Unchecked({ Update-SizeDisplayIfStale }) } }
 $ui.btnBigFiles.Add_Click({
     if (-not (Test-SizeCacheValid)) { Out-Console 'Zuerst "Groesse ermitteln" fuer diesen Benutzer.' 'Warning'; return }
     $rows = New-Object System.Collections.Generic.List[object]
@@ -654,7 +668,7 @@ $ui.btnBigFiles.Add_Click({
             param($rows, $win, $ctx)
             $n = 0
             foreach ($r in @($rows)) { if (Add-ExcludePath "$($r.Pfad)") { $n++ } }
-            Out-Console "$n Pfad(e) ausgeschlossen - 'Groesse ermitteln' zeigt die neue Summe." 'Success'
+            Out-Console "$n Pfad(e) ausgeschlossen - die bisher gemessene Groesse ist damit veraltet; 'Groesse ermitteln' (oder die Vorab-Pruefung) misst neu." 'Success'
             [void][System.Windows.MessageBox]::Show($win, "$n Pfad(e) in 'Pfade ausschliessen' eingetragen.", 'Ausschliessen', 'OK', 'Information')
         } })
 })
@@ -712,17 +726,41 @@ function Get-TargetComputer {
     if (-not $c) { $c = $env:COMPUTERNAME }
     return $c
 }
-function Format-ProfileEntry($p) {
+function Format-ProfileEntry($p, [switch]$NoSize) {
     $s = $p.Folder
     if ($p.Account -and ($p.Account.Split('\')[-1] -ne $p.Folder)) { $s += "  ($($p.Account))" } elseif ($p.Account) { $s += "  ($($p.Account.Split('\')[0]))" }
     if ($p.Interactive) { $s += '  [angemeldet]' } elseif ($p.Loaded) { $s += '  [aktiv]' }
+    if (-not $NoSize) { $h = Get-HMProfileSizeHint $p; if ($h) { $s += "  $([char]0x00B7) ~$(Format-HMSize $h.Bytes)" } }
     return $s
+}
+# Profilgroesse ohne zu messen: zuletzt gemessene Groesse (Groesse ermitteln) oder Groesse des neuesten brauchbaren Backups
+function Get-HMProfileSizeHint($p) {
+    if (-not $p -or -not $p.SID) { return $null }
+    $c = Get-TargetComputer; if (Test-HMIsLocal $c) { $c = $env:COMPUTERNAME }
+    $k = ("{0}|{1}" -f $c, $p.SID).ToUpperInvariant()
+    if ($script:ProfileMeasured -and $script:ProfileMeasured.ContainsKey($k)) { return $script:ProfileMeasured[$k] }
+    $short = ($c -split '\.')[0]
+    $b = @(@($script:BackupInfos) | Where-Object { $_ -and "$($_.Sid)" -eq "$($p.SID)" -and ("$($_.Computer)" -split '\.')[0] -ieq $short -and "$($_.Status)" -in @('OK', 'Warning') -and [long]$_.SizeBytes -gt 0 } | Sort-Object { "$($_.Created)" } -Descending)[0]
+    if ($b) { return [pscustomobject]@{ Bytes = [long]$b.SizeBytes; Source = "letztes Backup $("$($b.Created)".Substring(0, [Math]::Min(10, "$($b.Created)".Length)))" } }
+    return $null
+}
+# Ampel: Profilgroesse gegen freien Platz am Backup-Ziel. Rueckgabe Text + Farbe (oder $null)
+function Get-HMProfileSizeAmpel($p) {
+    $h = Get-HMProfileSizeHint $p
+    if (-not $h) { return $null }
+    $free = Get-BackupFree
+    $t = "Profil ~$(Format-HMSize $h.Bytes) ($($h.Source))"
+    if ($free -lt 0) { return [pscustomobject]@{ Text = $t; Color = '' } }
+    if ($h.Bytes -gt $free) { return [pscustomobject]@{ Text = "$t - passt NICHT aufs Backup-Ziel (frei $(Format-HMSize $free))"; Color = '#FFF38BA8' } }
+    if ($h.Bytes -gt ($free * 0.8)) { return [pscustomobject]@{ Text = "$t - knapp (frei $(Format-HMSize $free))"; Color = '#FFFAB387' } }
+    if ($h.Bytes -ge 20GB) { return [pscustomobject]@{ Text = "$t - grosses Profil"; Color = '#FFF9E2AF' } }
+    return [pscustomobject]@{ Text = $t; Color = '' }
 }
 # Gewaehltes Profil (oder eingegebenes Konto ohne Profil)
 function Get-SelectedProfile {
     $i = $ui.cmbUser.SelectedIndex
-    $t = "$($ui.cmbUser.Text)".Trim()
-    if ($i -ge 0 -and $i -lt $script:Profiles.Count -and (Format-ProfileEntry $script:Profiles[$i]) -eq $t) { return $script:Profiles[$i] }
+    $t = ("$($ui.cmbUser.Text)" -replace "\s+$([char]0x00B7)\s+~.*$", '').Trim()   # Groessen-Hinweis abschneiden
+    if ($i -ge 0 -and $i -lt $script:Profiles.Count -and (Format-ProfileEntry $script:Profiles[$i] -NoSize) -eq $t) { return $script:Profiles[$i] }
     $hit = @($script:Profiles | Where-Object { $_.Folder -eq $t -or $_.Account -eq $t })
     if ($hit.Count) { return $hit[0] }
     if ($t) { return [pscustomobject]@{ SID = $null; LocalPath = $null; Folder = $t.Split('\')[-1]; Account = $t; Loaded = $false; LastUse = ''; NoProfile = $true } }
@@ -735,6 +773,8 @@ function Update-SidLabel {
     else {
         $ui.lblSid.Text = "$($p.LocalPath)$(if ($p.LastUse) { "   zuletzt $($p.LastUse)" })$(if ($p.Interactive) { '   (angemeldet)' } elseif ($p.Loaded) { '   (aktiv - Registry geladen, z.B. getrennte Sitzung)' })"
         $ui.lblSid.Foreground = Get-ConsoleBrush $(if ($p.Loaded) { '#FFF9E2AF' } else { '#FFA6ADC8' })
+        $amp = $null; try { $amp = Get-HMProfileSizeAmpel $p } catch { }
+        if ($amp) { $ui.lblSid.Text += "   |   $($amp.Text)"; if ($amp.Color) { $ui.lblSid.Foreground = Get-ConsoleBrush $amp.Color } }
     }
     $ui.lblSid.ToolTip = "Konto: $($p.Account)`nSID: $($p.SID)`nProfil: $($p.LocalPath)$(if ($p.LastUse) { "`nZuletzt verwendet: $($p.LastUse)" })`n`nKlick = SID kopieren"
     Update-RestoreTargetLabel
@@ -1026,6 +1066,10 @@ function Start-SizeMeasure([bool]$All) {
         if (-not $r -or $r.Cancelled -or -not $r.Modules) { return }
         if (-not $script:SizeCache -or $script:SizeCache.Key -ne $script:MeasureKey) { $script:SizeCache = @{ Key = $script:MeasureKey; Modules = @{}; Top = @() } }
         foreach ($id in @($r.Modules.Keys)) { $script:SizeCache.Modules[$id] = [long]$r.Modules[$id] }
+        # gemessene Profilgroesse fuer die Ampel in der Benutzerauswahl merken (diese Sitzung)
+        if ($r.Total -and -not $script:ProfileMeasured) { $script:ProfileMeasured = @{} }
+        try { $mk = "$($script:MeasureKey)".Split('|'); if ($r.Total -and $mk.Count -ge 2) { $script:ProfileMeasured[("{0}|{1}" -f $mk[0], $mk[1])] = [pscustomobject]@{ Bytes = [long]$r.Total; Source = "gemessen $(Get-Date -Format 'HH:mm')" } } } catch { }
+        try { Update-SidLabel } catch { }
         $script:SizeCache.Top = @($r.Top)
         Show-ModuleSizes
         $free = Get-BackupFree
@@ -1585,6 +1629,7 @@ function Open-Settings([string]$Tab = '') {
         $script:UiScaleAuto = ($v -le 0); Set-HMUiScale $(if ($v -le 0) { Get-HMAutoScale } else { $v }) -Quiet
         foreach ($e in $script:ConfigErrors) { Out-Console "Konfigurationsfehler: $e" 'Error' }
         Update-UiFromConfig
+        try { Set-HMStatusTabVisibility; Update-HMStatusPage } catch { }
         if (-not $script:UserMode) { Invoke-UpdateCheck }
     }
 }
@@ -2061,7 +2106,11 @@ function Restore-HMLastTab {
         if ($t) { $ui.tabMain.SelectedItem = $t }
     } catch { }
 }
-$script:Window.Add_Loaded({ Restore-HMLastTab })
+$script:Window.Add_Loaded({
+    Restore-HMLastTab
+    # Startseite + Hinweise beim Start erst nach dem Anzeigen (Fenster erscheint sofort)
+    [void]$script:Window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [action]{ try { Update-HMStatusPage -StartUp } catch { Out-Console "Status: $($_.Exception.Message)" 'Warning' } })
+})
 $script:Window.Add_Closing({
     param($s, $e)
     if ($script:JobRunning -and "$($script:JobTitle)" -like 'Server-Backup*') {
@@ -2118,6 +2167,7 @@ if ($script:ActiveSchool) { Out-Console "Standort: $($script:ActiveSchool.Name) 
 if ($script:UserMode) { Set-HMUserModeUi }
 Initialize-HMServerBackupTab -IsAdmin $isAdmin
 Initialize-HMAppUpdatesTab -IsAdmin $isAdmin
+Initialize-HMStatusTab
 try { Update-HMBsLabel } catch { }
 Update-BackupList
 Connect-Target

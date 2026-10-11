@@ -581,3 +581,52 @@ Describe 'Schutz vor Massenloeschung, Zaehler, Originalort' {
         Get-HMOriginalPath $b 'Registry\HKCU.reg' | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Startseite Status und Hinweise beim Start' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\UI-Status.ps1')
+        $script:Now = [datetime]'2026-10-20 10:00'
+        function D([int]$Ago) { $script:Now.AddDays(-$Ago).ToString('yyyy-MM-dd HH:mm') }
+        function Row($Name, $Def, $Zustand = 'bereit') { [pscustomobject]@{ Name = $Name; Wann = 'taeglich 12:00'; Last = "$($Def.LastRun)"; Result = ''; Next = ''; Zustand = $Zustand; Def = $Def } }
+    }
+    It 'Zeitplaene: ohne Erfolg seit X Tagen, fehlgeschlagen, fehlende Aufgabe, alter Zeitplan ohne LastSuccess' {
+        $rows = @(
+            (Row 'Alt'    ([pscustomobject]@{ LastRun = (D 10); LastStatus = 'Error'; LastSuccess = (D 10) })),
+            (Row 'Gut'    ([pscustomobject]@{ LastRun = (D 1); LastStatus = 'OK'; LastSuccess = (D 1) })),
+            (Row 'Fehler' ([pscustomobject]@{ LastRun = (D 0); LastStatus = 'Error'; LastSuccess = (D 2) })),
+            (Row 'Weg'    ([pscustomobject]@{ LastRun = (D 0); LastStatus = 'OK' }) 'fehlt'),
+            (Row 'Frueher' ([pscustomobject]@{ LastRun = (D 3); LastStatus = 'Warning' })))
+        $s = Get-HMStatusData -BsRows $rows -Now $script:Now -StaleDays 8
+        ($s.Schedules | Where-Object Name -eq 'Alt').Level | Should -Be 'Error'
+        ($s.Schedules | Where-Object Name -eq 'Gut').Level | Should -Be 'OK'
+        ($s.Schedules | Where-Object Name -eq 'Fehler').Note | Should -Match 'fehlgeschlagen'
+        ($s.Schedules | Where-Object Name -eq 'Weg').Note | Should -Match 'fehlt'
+        ($s.Schedules | Where-Object Name -eq 'Frueher').Level | Should -Be 'OK'
+        @($s.Warnings | Where-Object { $_.Text -match "'Alt'" }).Count | Should -Be 1
+        (@($s.Warnings | Where-Object { $_.Text -match "'Alt'" })[0].Text) | Should -Match 'fehlgeschlagen|kein erfolgreicher'
+    }
+    It 'Server-Backup: Platte seit X Tagen nicht gesichert, Archiv faellig' {
+        $p = [pscustomobject]@{ Name = 'Gym'; DiskPrefix = 'HUMIG-GYM'; Disks = 2; WarnDays = 14; ArchiveDisks = 1; ArchiveDays = 30 }
+        $h = @([pscustomobject]@{ Date = (D 1); Profile = 'Gym'; Disk = 'HUMIG-GYM-1'; Status = 'OK' }, [pscustomobject]@{ Date = (D 20); Profile = 'Gym'; Disk = 'HUMIG-GYM-2'; Status = 'OK' }, [pscustomobject]@{ Date = (D 40); Profile = 'Gym'; Disk = 'HUMIG-GYM-A1'; Status = 'OK' })
+        $s = Get-HMStatusData -SbProfiles @($p) -SbHistory $h -Now $script:Now
+        $t = @($s.Warnings | ForEach-Object { $_.Text }) -join ' | '
+        $t | Should -Match 'Platte HUMIG-GYM-2 seit 20 Tagen'
+        $t | Should -Match 'Archiv-Sicherung faellig'
+        $t | Should -Not -Match 'HUMIG-GYM-1 seit'
+        $s.Server[0].Level | Should -Be 'OK'
+    }
+    It 'Backups: neuestes je PC/Benutzer, Massenloeschung als Hinweis; App-Updates mit Fehlern' {
+        $b = @(
+            [pscustomobject]@{ Computer = 'PC1'; Sid = 'S-1'; User = 'max'; Created = (D 5); Status = 'OK'; SizeBytes = 10; Manifest = $null },
+            [pscustomobject]@{ Computer = 'PC1'; Sid = 'S-1'; User = 'max'; Created = (D 1); Status = 'Warning'; SizeBytes = 10; Manifest = [pscustomobject]@{ MassDeleteAlert = @('x') } },
+            [pscustomobject]@{ Computer = 'PC2'; Sid = 'S-2'; User = 'eva'; Created = (D 2); Status = 'OK'; SizeBytes = 10; Manifest = $null })
+        $a = @([pscustomobject]@{ Date = (D 1); Computer = 'PC1'; Name = '7-Zip'; Status = 'OK' }, [pscustomobject]@{ Date = (D 2); Computer = 'PC1'; Name = 'VLC'; Status = 'Error' }, [pscustomobject]@{ Date = (D 30); Computer = 'PC3'; Name = 'Alt'; Status = 'Error' })
+        $s = Get-HMStatusData -Backups $b -AuHistory $a -Now $script:Now
+        @($s.Backups).Count | Should -Be 2
+        ($s.Backups | Where-Object Computer -eq 'PC1').Mass | Should -BeTrue
+        @($s.Warnings | Where-Object { $_.Text -match 'Verschluesselungstrojaner' }).Count | Should -Be 1
+        @($s.Apps).Count | Should -Be 1
+        $s.Apps[0].Failed | Should -Be 1
+        $s.Apps[0].FailedNames | Should -Contain 'VLC'
+    }
+}
