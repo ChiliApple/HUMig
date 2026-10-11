@@ -4,6 +4,7 @@
   "Threads": 32,
   "RetentionDays": 30,
   "RetentionKeepPerUser": 3,
+  "DeletedKeepDays": 90,
   "UsmtPath": "",
   "SoftwareFolder": "",
   "DriverFolder": "",

@@ -448,3 +448,62 @@ Describe 'Aufbewahrung, Backup-Ordner und Platte einrichten (Code-Pruefung H1, H
         }
     }
 }
+
+Describe 'Fortlaufendes Backup: an der Quelle geloeschte Dateien beiseitelegen' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        function New-HMTestFile([string]$Path, [string]$Text = 'x') {
+            $d = Split-Path $Path -Parent; if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+            [System.IO.File]::WriteAllText($Path, $Text)
+        }
+    }
+    It 'Robocopy-Zusammenfassung: Ordner-Extras deutsch und englisch' {
+        $de = (Get-HMRobocopySummary "   Verzeich.:         3         1         2         0         0         4`r`n    Dateien:        10         2         8         0         0         5")
+        $de.HaveDirs | Should -BeTrue; $de.DirsExtra | Should -Be 4; $de.FilesExtra | Should -Be 5
+        $en = (Get-HMRobocopySummary "    Dirs :         3         1         2         0         0         2`r`n   Files :        10         2         8         0         0         0")
+        $en.HaveDirs | Should -BeTrue; $en.DirsExtra | Should -Be 2
+    }
+    It 'verschiebt nur sicher geloeschte Dateien; Ausgeschlossenes, Cloud-Ordner und Vorhandenes bleiben' {
+        $src = Join-Path $TestDrive 'Quelle'; $bk = Join-Path $TestDrive 'BACKUPS\PC_max_1'; $dst = Join-Path $bk 'Dokumente\Eigene'
+        New-HMTestFile "$src\bleibt.txt"; New-HMTestFile "$src\sub\bleibt2.txt"; New-HMTestFile "$src\geaendert.txt" 'neu'
+        New-HMTestFile "$src\OneDrive\cloud.txt"
+        # Backup-Stand (aelter): alles von damals + inzwischen an der Quelle geloeschte Dateien
+        New-HMTestFile "$dst\bleibt.txt"; New-HMTestFile "$dst\sub\bleibt2.txt"; New-HMTestFile "$dst\geaendert.txt" 'alt'
+        New-HMTestFile "$dst\weg.txt"; New-HMTestFile "$dst\sub\weg2.txt"; New-HMTestFile "$dst\ordnerweg\a.txt"; New-HMTestFile "$dst\ordnerweg\tief\b.txt"
+        New-HMTestFile "$dst\Temp\ausgeschlossen.txt"      # per Ordnername ausgeschlossen
+        New-HMTestFile "$dst\alt.tmp"                      # per Dateimuster ausgeschlossen
+        New-HMTestFile "$dst\OneDrive\nurimbackup.txt"     # Cloud-Ordner (voller Quellpfad ausgeschlossen)
+        $ctx = @{ BackupPath = $bk }
+        $r = Move-HMDeletedFromBackup -Ctx $ctx -Job $null -Src $src -Dst $dst -XD @('Temp', "$src\OneDrive") -XF @('*.tmp')
+        $r.Error | Should -BeNullOrEmpty
+        $r.Moved | Should -Be 4
+        $g = $ctx.DeletedDir
+        $g | Should -Match '_GELOESCHT\\\d{8}_\d{6}$'
+        foreach ($x in 'weg.txt', 'sub\weg2.txt', 'ordnerweg\a.txt', 'ordnerweg\tief\b.txt') {
+            Test-Path -LiteralPath "$dst\$x" | Should -BeFalse
+            Test-Path -LiteralPath "$g\Dokumente\Eigene\$x" | Should -BeTrue
+        }
+        Test-Path -LiteralPath "$dst\ordnerweg" | Should -BeFalse   # leer gewordene Ordner werden entfernt
+        foreach ($x in 'bleibt.txt', 'sub\bleibt2.txt', 'geaendert.txt', 'Temp\ausgeschlossen.txt', 'alt.tmp', 'OneDrive\nurimbackup.txt') { Test-Path -LiteralPath "$dst\$x" | Should -BeTrue }
+        # Suche/Katalog sehen _GELOESCHT nicht als Teil des Backups
+        . (Join-Path $script:Root 'Functions\Migration-Quality.ps1')
+        @(Get-HMBackupFiles $bk | Where-Object { $_.Rel -like '_GELOESCHT*' }).Count | Should -Be 0
+    }
+    It 'Quelle nicht erreichbar: nichts wird verschoben' {
+        $bk = Join-Path $TestDrive 'BACKUPS\PC_max_2'; $dst = Join-Path $bk 'Dokumente\Eigene'
+        New-HMTestFile "$dst\datei.txt"
+        $ctx = @{ BackupPath = $bk }
+        $r = Move-HMDeletedFromBackup -Ctx $ctx -Job $null -Src (Join-Path $TestDrive 'gibtsnicht') -Dst $dst
+        $r.Moved | Should -Be 0
+        Test-Path -LiteralPath "$dst\datei.txt" | Should -BeTrue
+    }
+    It 'entfernt beiseitegelegte Laeufe erst nach der eingestellten Zahl von Tagen' {
+        $bk = Join-Path $TestDrive 'BACKUPS\PC_max_3'
+        New-HMTestFile "$bk\_GELOESCHT\20200101_120000\Mod\alt.txt"
+        $neu = (Get-Date).ToString('yyyyMMdd_HHmmss'); New-HMTestFile "$bk\_GELOESCHT\$neu\Mod\neu.txt"
+        (Remove-HMDeletedExpired $bk 0).Removed | Should -Be 0
+        (Remove-HMDeletedExpired $bk 90).Removed | Should -Be 1
+        Test-Path -LiteralPath "$bk\_GELOESCHT\20200101_120000" | Should -BeFalse
+        Test-Path -LiteralPath "$bk\_GELOESCHT\$neu\Mod\neu.txt" | Should -BeTrue
+    }
+}

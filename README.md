@@ -73,7 +73,7 @@ Details: [INSTALL.md](INSTALL.md) und die [Anleitung](https://chiliapple.github.
 
 | Bereich | Technik |
 |---|---|
-| Dateien | Robocopy mit bis zu 128 Threads, inkrementell, Ausnahmelisten |
+| Dateien | Robocopy mit bis zu 128 Threads, inkrementell (an der Quelle gelöschte Dateien werden beiseitegelegt, nicht zurückgespielt), Ausnahmelisten |
 | Benutzer-Einstellungen | Registry-Export aus dem Benutzer-Hive, beim Restore auf den Zielbenutzer umgeschrieben |
 | Windows-Einstellungen | Microsoft USMT – legt beim Restore auch das Profil an |
 | Sicherheit | Platzprüfung, Prüfung nach dem Backup (SHA-256), optional Prüfsummen-Katalog; Nur-Cloud-Dateien werden nie heruntergeladen |

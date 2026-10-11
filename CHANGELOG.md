@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.0.101 - 2026-10-11
+### Fortlaufendes Backup: geloeschte Dateien
+- Am Quell-PC geloeschte Dateien werden im weitergefuehrten Backup nach `_GELOESCHT\<Datum_Zeit>` verschoben (beiseitegelegt). Der Restore bringt damit nur noch den aktuellen Stand zurueck, verloren geht nichts. Bisher blieben sie im Backup und kamen beim Restore wieder
+- Erkennung per Robocopy-Vergleich (nur auflisten) mit denselben Ausschluessen wie beim Backup - ausgeschlossene Dateien, Nur-Cloud-Dateien und Cloud-Ordner werden nie angefasst. Nur nach fehlerfreiem Kopieren; jede Datei wird an der Quelle einzeln nachgeprueft, bei jedem Zweifel (kein Zugriff, Netzwerkfehler) bleibt sie
+- Beiseitegelegte Dateien werden nach 90 Tagen entfernt (Einstellungen > Allgemein, 0 = nie)
+- Reiter Restore: neuer Knopf *Geloeschte leeren* (mit Rueckfrage, zeigt Anzahl, Groesse und Zeitraum)
+- *Im Backup suchen*: Haekchen *Mit geloeschten*, Spalte *Geloescht (erkannt)*
+- Pruefsummen-Katalog, *Backup pruefen* und *Vergleichen* zaehlen `_GELOESCHT` nicht zum Backup
+### Oberflaeche
+- Der zuletzt gewaehlte Reiter wird gemerkt und beim naechsten Start wieder geoeffnet (pro Windows-Benutzer)
+### Automatische Tests
+- Neue Tests: Erkennen und Beiseitelegen geloeschter Dateien (inkl. Ausschluesse und Cloud-Ordner), nicht erreichbare Quelle, Aufbewahrung, Robocopy-Zusammenfassung deutsch/englisch
+
 ## v2.0.100 - 2026-10-10
 ### Update (Pull.ps1)
 - Wiederherstellung nach einem abgebrochenen Update funktionierte unter Windows PowerShell 5.1 nicht, sobald mehr als eine Datei im Journal stand (`ConvertFrom-Json` gibt ein Array als ein einziges Objekt aus - die Schleife lief einmal mit allen Pfaden zusammen und stellte nichts zurueck, das Journal wurde trotzdem geloescht). Jetzt wird jede Datei einzeln zurueckgestellt; das Journal wird nur geloescht, wenn das gelungen ist.

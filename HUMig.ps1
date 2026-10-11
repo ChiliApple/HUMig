@@ -275,7 +275,7 @@ $ui = @{}
 foreach ($n in @('imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
     'txtBackupRoot', 'btnBrowseRoot', 'btnOpenRoot', 'lblFree', 'tabMain', 'cmbPreset', 'btnAllOn', 'btnAllOff', 'btnPresetSave', 'pnlBackupModules', 'lstExtra', 'btnExtraAdd',
     'btnExtraDel', 'chkMinProfileExc', 'chkNoProfileFileExc', 'chkMinSystemExc', 'chkNoSystemFileExc', 'btnEditExceptions', 'cmbThreads', 'btnPrecheck',
-    'btnProfileSize', 'btnBackup', 'btnCancel', 'btnRefreshBackups', 'btnOpenBackup', 'btnDeleteBackup', 'btnCleanupBackups', 'dgBackups', 'lblRestoreInfo',
+    'btnProfileSize', 'btnBackup', 'btnCancel', 'btnRefreshBackups', 'btnOpenBackup', 'btnDeleteBackup', 'btnCleanupBackups', 'btnEmptyDeleted', 'dgBackups', 'lblRestoreInfo',
     'pnlRestoreModules', 'lblRestoreTarget', 'chkGpUpdate', 'chkWUDrivers', 'chkNumLock', 'chkFavorites', 'chkFastBoot', 'txtPostScript', 'btnPostScript',
     'btnRestore', 'btnCancelRestore', 'btnToolCredWiz', 'btnToolCredList', 'btnToolUserAppData', 'btnToolUserStartup', 'btnToolProfileFolder', 'pnlSysTools',
     'pnlLinks', 'rtbConsole', 'pbMain', 'lblStatus', 'lblElapsed', 'rowConsole', 'btnToolSoftDeploy', 'btnToolDrvDeploy', 'btnToolSoftList', 'lblSizeTotal', 'lstExclude',
@@ -823,7 +823,7 @@ $ui.btnADDevices.Add_Click({ Show-HMMultiDialog })
 # ============================================================================
 function Set-JobUi([bool]$Running) {
     $script:JobRunning = $Running
-    foreach ($b in @($ui.btnBackup, $ui.btnRestore, $ui.btnProfileSize, $ui.btnConnect, $ui.btnLocal, $ui.btnDeleteBackup, $ui.btnCleanupBackups, $ui.btnUpdate, $ui.btnPrecheck)) { $b.IsEnabled = -not $Running }
+    foreach ($b in @($ui.btnBackup, $ui.btnRestore, $ui.btnProfileSize, $ui.btnConnect, $ui.btnLocal, $ui.btnDeleteBackup, $ui.btnCleanupBackups, $ui.btnEmptyDeleted, $ui.btnUpdate, $ui.btnPrecheck)) { $b.IsEnabled = -not $Running }
     $ui.btnCancel.IsEnabled = $Running
     $ui.btnCancelRestore.IsEnabled = $Running
     $ui.cmbComputer.IsEnabled = -not $Running -and -not $script:UserMode
@@ -1199,6 +1199,31 @@ $ui.btnDeleteBackup.Add_Click({
     }
 })
 $ui.btnCleanupBackups.Add_Click({ Start-HMRetentionCleanup })
+# Beiseitegelegte (an der Quelle geloeschte) Dateien eines fortlaufenden Backups endgueltig loeschen
+$ui.btnEmptyDeleted.Add_Click({
+    $b = $script:SelectedBackup
+    if (-not $b) { Out-Console 'Zuerst ein Backup markieren.' 'Warning'; return }
+    $gd = Join-Path $b.Path '_GELOESCHT'
+    if (-not (Test-Path -LiteralPath $gd)) { Out-Console "Backup '$($b.Name)': keine beiseitegelegten (geloeschten) Dateien." 'Info'; return }
+    $script:EmptyDelCtx = [pscustomobject]@{ Dir = $gd; Name = $b.Name }
+    Invoke-AsyncCommand -ScriptBlock {
+        param($gd)
+        $n = 0; $s = [long]0
+        foreach ($f in @(Get-ChildItem -LiteralPath $gd -Recurse -File -Force -ErrorAction SilentlyContinue)) { $n++; $s += [long]$f.Length }
+        $runs = @(Get-ChildItem -LiteralPath $gd -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d{8}_\d{6}$' } | Sort-Object Name)
+        [pscustomobject]@{ Files = $n; Bytes = $s; Runs = $runs.Count; First = $(if ($runs.Count) { $runs[0].Name } else { '' }); Last = $(if ($runs.Count) { $runs[-1].Name } else { '' }) }
+    } -ArgumentList @($gd) -TimeoutSec 600 -OnComplete {
+        param($r)
+        $c = $script:EmptyDelCtx
+        if (-not $r -or $r -is [string]) { Out-Console "Beiseitegelegte nicht lesbar: $r" 'Error'; return }
+        $fmt = { param($x) if ("$x" -match '^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})') { "$($Matches[3]).$($Matches[2]).$($Matches[1]) $($Matches[4]):$($Matches[5])" } else { "$x" } }
+        if (-not (Confirm-Action "Backup '$($c.Name)': $($r.Files) beiseitegelegte Datei(en) ($(Format-HMSize $r.Bytes)) aus $($r.Runs) Lauf/Laeufen$(if ($r.First) { " ($(& $fmt $r.First) bis $(& $fmt $r.Last))" }).`n`nDas sind Dateien, die am Quell-PC geloescht wurden. Endgueltig loeschen?`n`nDanach sind sie auch ueber 'Im Backup suchen' nicht mehr auffindbar. Der aktuelle Stand des Backups bleibt unveraendert." 'Geloeschte leeren')) { return }
+        Out-Console "Loesche beiseitegelegte Dateien in $($c.Name) ..." 'Warning'
+        Invoke-AsyncCommand -ScriptBlock { param($eng, $p) . $eng; Remove-HMBackupFolder $p } -ArgumentList @($script:Engine, $c.Dir) -TimeoutSec 3600 -OnComplete {
+            param($r2) Out-Console $(if ($r2 -eq 'OK') { 'Beiseitegelegte Dateien geloescht' } else { "$r2" }) $(if ($r2 -eq 'OK') { 'Success' } else { 'Error' }); Update-BackupRootInfo
+        }
+    }
+})
 $ui.btnPostScript.Add_Click({
     $d = New-Object Microsoft.Win32.OpenFileDialog
     $d.Filter = 'PowerShell (*.ps1)|*.ps1'
@@ -1925,7 +1950,7 @@ $ui.btnUpdate.ContextMenu = $cmUpd
 function Set-HMUserModeUi {
     $hide = { param($c) if ($c) { $c.Visibility = 'Collapsed' } }
     # Kopfzeile / Ziel: fest dieser PC und der angemeldete Benutzer
-    foreach ($c in @($ui.btnSettings, $ui.btnConnect, $ui.btnLocal, $ui.btnADDevices, $ui.btnBitLocker, $ui.btnDeleteBackup)) { & $hide $c }
+    foreach ($c in @($ui.btnSettings, $ui.btnConnect, $ui.btnLocal, $ui.btnADDevices, $ui.btnBitLocker, $ui.btnDeleteBackup, $ui.btnEmptyDeleted)) { & $hide $c }
     # Update bleibt sichtbar (wird gelb bei neuer Version) - Installation mit Admin-Anmeldung (UAC), kein Rechtsklick-Menue
     $ui.btnUpdate.ContextMenu = $null
     $ui.btnUpdate.ToolTip = 'Neue Version installieren - braucht die Anmeldung eines Administrators (Windows fragt nach). Danach startet HUMig wieder im Benutzer-Modus.'
@@ -1996,6 +2021,33 @@ function Test-HMAppFolderSecurity {
         if ($rest) { Out-Console "Ordnerrechte: noch beschreibbar fuer $rest" 'Warning' } else { Out-Console "Ordnerrechte abgesichert: $root (Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen)" 'Success' }
     } catch { Out-Console "Ordnerrechte konnten nicht gesetzt werden: $($_.Exception.Message)" 'Error' }
 }
+# Zuletzt gewaehlten Reiter merken (pro Windows-Benutzer, %APPDATA%\HUMig\ui-state.json - nicht im Programmordner)
+$script:UiStateFile = Join-Path $env:APPDATA 'HUMig\ui-state.json'
+function Save-HMUiState {
+    try {
+        $t = $ui.tabMain.SelectedItem
+        if (-not $t) { return }
+        $o = $null
+        if (Test-Path -LiteralPath $script:UiStateFile) { try { $o = Get-Content -LiteralPath $script:UiStateFile -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $o = $null } }
+        $h = [ordered]@{}
+        if ($o) { foreach ($x in $o.PSObject.Properties) { $h[$x.Name] = $x.Value } }
+        $h.LastTab = "$($t.Header)"
+        $d = Split-Path $script:UiStateFile -Parent
+        if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+        [pscustomobject]$h | ConvertTo-Json | Set-Content -LiteralPath $script:UiStateFile -Encoding UTF8
+    } catch { }
+}
+function Restore-HMLastTab {
+    try {
+        if (-not (Test-Path -LiteralPath $script:UiStateFile)) { return }
+        $want = "$((Get-Content -LiteralPath $script:UiStateFile -Raw -Encoding UTF8 | ConvertFrom-Json).LastTab)"
+        if (-not $want) { return }
+        # nur sichtbare, verfuegbare Reiter (Benutzer-Modus blendet einige aus)
+        $t = @($ui.tabMain.Items | Where-Object { $_ -is [System.Windows.Controls.TabItem] -and "$($_.Header)" -eq $want -and $_.Visibility -eq 'Visible' -and $_.IsEnabled })[0]
+        if ($t) { $ui.tabMain.SelectedItem = $t }
+    } catch { }
+}
+$script:Window.Add_Loaded({ Restore-HMLastTab })
 $script:Window.Add_Closing({
     param($s, $e)
     if ($script:JobRunning -and "$($script:JobTitle)" -like 'Server-Backup*') {
@@ -2063,4 +2115,5 @@ if (-not $script:UserMode -and -not (Test-Path -LiteralPath (Join-Path $script:A
 }
 
 [void]$script:Window.ShowDialog()
+Save-HMUiState
 if ($script:InstanceMutex) { try { $script:InstanceMutex.ReleaseMutex() } catch { }; try { $script:InstanceMutex.Dispose() } catch { } }

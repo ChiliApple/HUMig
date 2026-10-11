@@ -435,6 +435,203 @@ function Remove-HMBackupFolder([string]$Path) {
     return 'OK'
 }
 
+# ============================================================================
+# FORTLAUFENDES BACKUP: AN DER QUELLE GELOESCHTE DATEIEN BEISEITELEGEN
+# ============================================================================
+# Ein fortlaufendes Backup kopiert nur Neues/Geaendertes. Am Quell-PC geloeschte Dateien wuerden im Backup bleiben und beim
+# Restore zurueckkommen. Sie werden deshalb nach <Backup>\_GELOESCHT\<Zeitpunkt>\<Modul>\... verschoben: nichts geht verloren
+# (Im Backup suchen > "mit geloeschten"), der Restore bringt aber nur den aktuellen Stand. Nach X Tagen (Einstellung) entfernt.
+$script:HMDeletedDirName = '_GELOESCHT'
+$script:HMFsMoveCs = @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace HMFs
+{
+    public static class Mover
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct WIN32_FIND_DATA
+        {
+            public uint dwFileAttributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME c, a, w;
+            public uint nFileSizeHigh, nFileSizeLow, r0, r1;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string cFileName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 14)] public string cAlternateFileName;
+        }
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr FindFirstFileW(string n, out WIN32_FIND_DATA fd);
+        [DllImport("kernel32.dll")] static extern bool FindClose(IntPtr h);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern uint GetFileAttributesW(string n);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool MoveFileExW(string a, string b, uint flags);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool CreateDirectoryW(string n, IntPtr sa);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool RemoveDirectoryW(string n);
+        static readonly IntPtr INVALID = new IntPtr(-1);
+        const uint NOATTR = 0xFFFFFFFFu;
+
+        static string L(string p)
+        {
+            if (p.StartsWith(@"\\?\")) return p;
+            if (p.StartsWith(@"\\")) return @"\\?\UNC\" + p.Substring(2);
+            return @"\\?\" + p;
+        }
+        static string Parent(string p)
+        {
+            p = p.TrimEnd('\\');
+            int i = p.LastIndexOf('\\');
+            return i > 2 ? p.Substring(0, i) : null;
+        }
+        static bool Under(string p, string root)
+        {
+            return p.Length > root.Length && p.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Gibt es den Pfad an der Quelle? 1 = vorhanden, 0 = sicher nicht vorhanden (der naechste vorhandene Ordner darueber
+        // ist lesbar), -1 = unsicher (kein Zugriff, Netzwerkfehler, ...). Nur bei 0 darf die Backup-Kopie beiseitegelegt werden.
+        public static int Probe(string path, string stopAt)
+        {
+            stopAt = stopAt.TrimEnd('\\');
+            path = path.TrimEnd('\\');
+            if (!Under(path, stopAt)) return -1;
+            if (GetFileAttributesW(L(path)) != NOATTR) return 1;
+            int err = Marshal.GetLastWin32Error();
+            if (err != 2 && err != 3) return -1;
+            string d = Parent(path);
+            while (d != null && d.Length >= stopAt.Length)
+            {
+                uint a = GetFileAttributesW(L(d));
+                if (a != NOATTR)
+                {
+                    if ((a & 0x10) == 0) return -1;
+                    WIN32_FIND_DATA fd;
+                    IntPtr h = FindFirstFileW(L(d) + @"\*", out fd);
+                    if (h == INVALID) return -1;
+                    FindClose(h);
+                    return 0;
+                }
+                int e = Marshal.GetLastWin32Error();
+                if (e != 2 && e != 3) return -1;
+                if (d.Length == stopAt.Length) return -1;   // nicht einmal der Quellordner ist erreichbar
+                d = Parent(d);
+            }
+            return -1;
+        }
+        static void EnsureDir(string d)
+        {
+            if (d == null || GetFileAttributesW(L(d)) != NOATTR) return;
+            EnsureDir(Parent(d));
+            CreateDirectoryW(L(d), IntPtr.Zero);
+        }
+        // Datei verschieben (lange Pfade, schreibgeschuetzt ok, nie ueberschreiben). Rueckgabe 0 = OK, sonst Win32-Fehler
+        public static int Move(string src, string dst)
+        {
+            EnsureDir(Parent(dst));
+            if (MoveFileExW(L(src), L(dst), 0x8)) return 0;   // MOVEFILE_WRITE_THROUGH, kein REPLACE_EXISTING
+            return Marshal.GetLastWin32Error();
+        }
+        // leere Ordner nach oben entfernen (nur unterhalb von stopAt; nicht leere bleiben - RemoveDirectory schlaegt dann fehl)
+        public static void RemoveEmptyUp(string dir, string stopAt)
+        {
+            stopAt = stopAt.TrimEnd('\\');
+            string d = dir.TrimEnd('\\');
+            while (d != null && Under(d, stopAt))
+            {
+                if (!RemoveDirectoryW(L(d))) break;
+                d = Parent(d);
+            }
+        }
+    }
+}
+'@
+function Initialize-HMFsMove { if (-not ('HMFs.Mover' -as [type])) { Add-Type -TypeDefinition $script:HMFsMoveCs -ErrorAction Stop } }
+
+# Dateien im Backup finden, die es an der Quelle nicht (mehr) gibt: Robocopy in GEGENRICHTUNG (Backup -> Quelle), nur auflisten (/L).
+# /XO /XN /XC schliessen an beiden Seiten vorhandene Dateien aus, /XX die nur an der Quelle vorhandenen - uebrig bleiben genau die
+# Dateien, die nur im Backup liegen. Gleiche Ausschluesse wie beim Backup (Robocopy schuetzt per /XF und /XD ausgeschlossene Dateien
+# auch auf der Gegenseite), damit Ausgeschlossenes, Nur-Cloud- und Cloud-Ordner nie als "geloescht" gelten.
+# Ausgabe mit /FP /NC /NS: nur volle Pfade, ohne Klassen-Text -> unabhaengig von der Windows-Sprache.
+function Find-HMDeletedInBackup {
+    param([string]$Backup, [string]$Source, [string[]]$Files = @(), [string[]]$XD = @(), [string[]]$XF = @(), [switch]$NoRecurse, [switch]$NoHidden, $Job)
+    $q = { param($p) $p = $p.TrimEnd('\'); if ($p -match '^[A-Za-z]:$') { $p += '\.' }; '"' + $p + '"' }
+    $a = New-Object System.Collections.Generic.List[string]
+    $a.Add((& $q $Backup)); $a.Add((& $q $Source))
+    foreach ($f in $Files) { $a.Add('"' + $f + '"') }
+    if (-not $NoRecurse) { $a.Add('/E') }
+    foreach ($o in @('/L', '/XO', '/XN', '/XC', '/XX', '/XJ', '/R:0', '/W:0', '/NP', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/FP')) { $a.Add($o) }
+    if ($NoHidden) { $a.Add('/XA:SHO') } else { $a.Add('/XA:O') }
+    if (@($XD).Count) { $a.Add('/XD'); foreach ($x in $XD) { $a.Add('"' + "$x".TrimEnd('\') + '"') } }
+    if (@($XF).Count) { $a.Add('/XF'); foreach ($x in $XF) { $a.Add('"' + $x + '"') } }
+    $tmpLog = [System.IO.Path]::Combine($env:TEMP, "HMdel_$([guid]::NewGuid().ToString('N')).log")
+    $a.Add("/UNILOG:`"$tmpLog`"")
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = Join-Path $env:windir 'System32\Robocopy.exe'
+    $psi.Arguments = ($a -join ' ')
+    if ($psi.Arguments.Length -gt 30000) { return [pscustomobject]@{ ExitCode = 16; Paths = @() } }
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    while (-not $proc.WaitForExit(400)) { if ($Job -and (Test-HMCancel $Job)) { try { $proc.Kill() } catch { }; break } }
+    $proc.WaitForExit()
+    $code = $proc.ExitCode
+    if ($Job -and (Test-HMCancel $Job)) { $code = 16 }
+    $text = ''
+    if (Test-Path -LiteralPath $tmpLog) {
+        try { $text = [System.IO.File]::ReadAllText($tmpLog, [System.Text.Encoding]::Unicode) } catch { $code = 16 }
+        Remove-Item -LiteralPath $tmpLog -Force -ErrorAction SilentlyContinue
+    }
+    $root = $Backup.TrimEnd('\') + '\'
+    $paths = @(foreach ($line in ($text -split "`r?`n")) { $t = $line.Trim(); if ($t.Length -gt $root.Length -and $t.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { $t } })
+    return [pscustomobject]@{ ExitCode = $code; Paths = $paths }
+}
+
+# An der Quelle geloeschte Dateien eines Eintrags im Backup beiseitelegen. Jede Datei wird vorher einzeln an der Quelle geprueft:
+# nur wenn sie dort sicher fehlt (Ordner darueber lesbar), wird sie verschoben - bei jedem Zweifel bleibt sie liegen.
+function Move-HMDeletedFromBackup {
+    param([hashtable]$Ctx, $Job, [string]$Src, [string]$Dst, [string[]]$Files = @(), [string[]]$XD = @(), [string[]]$XF = @(), [switch]$NoRecurse, [switch]$NoHidden)
+    $res = [pscustomobject]@{ Moved = 0; Kept = 0; Failed = 0; Error = '' }
+    try { Initialize-HMFsMove } catch { $res.Error = "Pruefung nicht moeglich: $($_.Exception.Message)"; return $res }
+    $s0 = $Src.TrimEnd('\'); $d0 = $Dst.TrimEnd('\')
+    # Ausschluesse mit vollem Quellpfad auf die Backup-Seite umschreiben (Namen/Muster gelten unveraendert)
+    $map = {
+        param($p)
+        $t = "$p".TrimEnd('\')
+        if ($t -notmatch '[\*\?]' -and ($t -ieq $s0 -or $t.StartsWith($s0 + '\', [StringComparison]::OrdinalIgnoreCase))) { return $d0 + $t.Substring($s0.Length) }
+        return "$p"
+    }
+    $xd2 = @($XD | Where-Object { $_ } | ForEach-Object { & $map $_ })
+    $xf2 = @($XF | Where-Object { $_ } | ForEach-Object { & $map $_ })
+    $f = Find-HMDeletedInBackup -Backup $d0 -Source $s0 -Files $Files -XD $xd2 -XF $xf2 -NoRecurse:$NoRecurse -NoHidden:$NoHidden -Job $Job
+    if ($f.ExitCode -ge 8) { $res.Error = "Vergleich mit der Quelle nicht moeglich (Robocopy-Code $($f.ExitCode))"; return $res }
+    $bp = "$($Ctx.BackupPath)".TrimEnd('\')
+    foreach ($p in @($f.Paths)) {
+        if ($Job -and (Test-HMCancel $Job)) { break }
+        $rel = $p.Substring($d0.Length).TrimStart('\')
+        if (-not $rel -or -not $p.StartsWith($bp + '\', [StringComparison]::OrdinalIgnoreCase)) { $res.Kept++; continue }
+        if ([HMFs.Mover]::Probe("$s0\$rel", $s0) -ne 0) { $res.Kept++; continue }
+        if (-not $Ctx.DeletedDir) { $Ctx.DeletedDir = "$bp\$($script:HMDeletedDirName)\$(Get-Date -Format 'yyyyMMdd_HHmmss')" }
+        $e = [HMFs.Mover]::Move($p, "$($Ctx.DeletedDir)\$($p.Substring($bp.Length + 1))")
+        if ($e -eq 0) { $res.Moved++; [HMFs.Mover]::RemoveEmptyUp((Split-Path $p -Parent), $d0) } else { $res.Failed++ }
+    }
+    return $res
+}
+
+# Beiseitegelegte Dateien aelter als $Days Tage entfernen (0 = nie). Rueckgabe: Anzahl entfernter Laeufe bzw. Fehlertexte
+function Remove-HMDeletedExpired([string]$BackupPath, [int]$Days) {
+    $out = [pscustomobject]@{ Removed = 0; Errors = @() }
+    if ($Days -le 0) { return $out }
+    $g = Join-Path $BackupPath $script:HMDeletedDirName
+    if (-not (Test-Path -LiteralPath $g)) { return $out }
+    $limit = (Get-Date).AddDays(-$Days)
+    foreach ($d in @(Get-ChildItem -LiteralPath $g -Directory -Force -ErrorAction SilentlyContinue)) {
+        $t = [datetime]::MinValue
+        if ($d.Name -notmatch '^\d{8}_\d{6}$' -or -not [datetime]::TryParseExact($d.Name, 'yyyyMMdd_HHmmss', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$t)) { continue }
+        if ($t -ge $limit) { continue }
+        $r = Remove-HMBackupFolder $d.FullName
+        if ($r -eq 'OK') { $out.Removed++ } else { $out.Errors += "$($d.Name): $r" }
+    }
+    if (-not @(Get-ChildItem -LiteralPath $g -Force -ErrorAction SilentlyContinue).Count) { try { [System.IO.Directory]::Delete($g, $false) } catch { } }
+    return $out
+}
+
 # Eintrag schreibt beim Restore ausserhalb des Profils (Programme, Windows, HKLM) -> braucht Administratorrechte
 function Test-HMItemNeedsAdmin($Item) {
     switch ("$($Item.Type)") {
@@ -940,8 +1137,14 @@ function Exit-HMModule([hashtable]$Ctx, $Job, [hashtable]$State) {
 # ROBOCOPY
 # ============================================================================
 function Get-HMRobocopySummary([string]$Text) {
-    $s = [ordered]@{ FilesTotal = 0; FilesCopied = 0; FilesSkipped = 0; FilesFailed = 0; FilesExtra = 0; BytesTotal = [long]0; BytesCopied = [long]0; BytesSkipped = [long]0 }
+    $s = [ordered]@{ FilesTotal = 0; FilesCopied = 0; FilesSkipped = 0; FilesFailed = 0; FilesExtra = 0; BytesTotal = [long]0; BytesCopied = [long]0; BytesSkipped = [long]0; DirsExtra = 0; HaveDirs = $false }
     foreach ($line in ($Text -split "`r?`n")) {
+        # Ordner-Zeile (deutsch "Verzeich.:", englisch "Dirs :"), Spalte 6 = Extras (Ordner nur im Ziel)
+        if ($line -match '^\s*(Verzeich\.?|Dirs)\s*:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?') {
+            $s.HaveDirs = $true
+            if ($Matches[7]) { $s.DirsExtra = [int]$Matches[7] }
+            continue
+        }
         # Spalten: Gesamt, Kopiert, Uebersprungen, Keine Uebereinstimmung, FEHLER, Extras (Extras = nur am Ziel vorhanden)
         if ($line -match '^\s*(Dateien|Files)\s*:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\d+))?') {
             $s.FilesTotal = [int]$Matches[2]; $s.FilesCopied = [int]$Matches[3]; $s.FilesSkipped = [int]$Matches[4]; $s.FilesFailed = [int]$Matches[6]
@@ -1010,7 +1213,7 @@ function Invoke-HMRobocopy {
     $lvl = if (Test-HMCancel $Job) { 'Cancel' } elseif ($code -ge 8) { 'Error' } elseif ($code -ge 4) { 'Warning' } else { 'OK' }
     return [pscustomobject]@{ ExitCode = $code; Level = $lvl; FilesTotal = $sum.FilesTotal; FilesCopied = $sum.FilesCopied
         FilesSkipped = $sum.FilesSkipped; FilesFailed = $sum.FilesFailed; BytesTotal = $sum.BytesTotal; BytesCopied = $sum.BytesCopied
-        BytesSkipped = $sum.BytesSkipped; FilesExtra = $sum.FilesExtra; Args = $psi.Arguments; FailedFiles = @($failed) }
+        BytesSkipped = $sum.BytesSkipped; FilesExtra = $sum.FilesExtra; DirsExtra = $sum.DirsExtra; HaveDirs = $sum.HaveDirs; Args = $psi.Arguments; FailedFiles = @($failed) }
 }
 
 # ============================================================================
@@ -1641,8 +1844,22 @@ function Backup-HMFolderItem {
         if (@($rc.FailedFiles).Count) { $msg += ': ' + (@($rc.FailedFiles | ForEach-Object { ConvertFrom-HMPath "$_" }) -join '; ') }
         if ($st -ne 'Cancel') { $st = 'Error' }   # nicht gesicherte Dateien = Fehler (rot), nie nur Warnung
     }
-    # Backup ergaenzt: Dateien, die nur noch im Backup liegen (an der Quelle geloescht/verschoben) - bleiben im Backup und kaemen beim Restore zurueck
-    if (-not $fresh -and -not $Ctx.ListOnly -and [int]$rc.FilesExtra -gt 0) { $msg += " | $($rc.FilesExtra) Datei(en) nur noch im Backup (an der Quelle geloescht/verschoben - Restore spielt sie wieder ein)" }
+    # Backup ergaenzt: Dateien, die nur noch im Backup liegen (an der Quelle geloescht/verschoben) -> beiseitelegen (_GELOESCHT),
+    # damit der Restore nur den aktuellen Stand bringt. Nur nach fehlerfreiem Kopieren; jede Datei wird an der Quelle nachgeprueft.
+    $hasExtra = ([int]$rc.FilesExtra -gt 0 -or [int]$rc.DirsExtra -gt 0 -or -not $rc.HaveDirs)
+    if (-not $fresh -and -not $Ctx.ListOnly -and $hasExtra -and $st -in @('OK', 'Warning') -and [int]$rc.ExitCode -lt 8 -and [int]$rc.FilesFailed -eq 0 -and -not (Test-HMCancel $Job)) {
+        $mv = $null
+        try { $mv = Move-HMDeletedFromBackup -Ctx $Ctx -Job $Job -Src $src -Dst $dst -Files $files -XD $xd -XF $xf -NoRecurse:$noRec -NoHidden:([bool]$Item.NoHidden) }
+        catch { $mv = [pscustomobject]@{ Moved = 0; Kept = 0; Failed = 0; Error = "$($_.Exception.Message)" } }
+        if ($mv.Moved) {
+            $msg += " | $($mv.Moved) an der Quelle geloeschte Datei(en) beiseitegelegt ($($script:HMDeletedDirName)\$(Split-Path "$($Ctx.DeletedDir)" -Leaf) - werden nicht zurueckgespielt)"
+            $Ctx.DeletedMoved = [int]$Ctx.DeletedMoved + [int]$mv.Moved
+        }
+        if ($mv.Error) { $msg += " | Geloeschte nicht beiseitegelegt: $($mv.Error)" }
+        if ($mv.Kept + $mv.Failed -gt 0) { $msg += " | $($mv.Kept + $mv.Failed) Datei(en) nur noch im Backup, an der Quelle nicht sicher pruefbar - bleiben (Restore spielt sie ein)" }
+    } elseif (-not $fresh -and -not $Ctx.ListOnly -and [int]$rc.FilesExtra -gt 0) {
+        $msg += " | $($rc.FilesExtra) Datei(en) nur noch im Backup (an der Quelle geloescht/verschoben - nicht beiseitegelegt, weil das Kopieren nicht fehlerfrei war; Restore spielt sie ein)"
+    }
     if ($rc.Level -eq 'Error') { $msg += " (Robocopy-Code $($rc.ExitCode))" }
 
     # Cloud-Ordner innerhalb der Quelle: auslassen (Standard) oder nur lokal vorhandene Dateien sichern
@@ -2199,6 +2416,18 @@ function Start-HMBackup {
                 if ($verify.DiffFiles) { Write-HMLog $Job ("   Seit dem Kopieren neu/geaendert: {0} Dateien ({1}) - normal, wenn der Benutzer angemeldet ist" -f $verify.DiffFiles, (Format-HMSize $verify.DiffBytes)) 'Info' }
                 else { Write-HMLog $Job '   Vergleich: Backup ist vollstaendig (keine fehlenden/abweichenden Dateien)' 'Success' }
             } catch { Write-HMLog $Job "   Pruefung fehlgeschlagen: $($_.Exception.Message)" 'Warning' }
+        }
+
+        # ---- Beiseitegelegte (an der Quelle geloeschte) Dateien: Zusammenfassung, abgelaufene entfernen ----
+        if ($prev -and -not (Test-HMCancel $Job)) {
+            if ([int]$Ctx.DeletedMoved -gt 0) { Write-HMLog $Job "Fortlaufend: $($Ctx.DeletedMoved) an der Quelle geloeschte Datei(en) nach $($script:HMDeletedDirName)\$(Split-Path "$($Ctx.DeletedDir)" -Leaf) verschoben - werden beim Restore nicht zurueckgespielt (Im Backup suchen > mit geloeschten)" 'Info' }
+            $kd = 90
+            if ($Ctx.Settings -and $null -ne $Ctx.Settings.DeletedKeepDays) { $kd = [int]$Ctx.Settings.DeletedKeepDays }
+            try {
+                $ex = Remove-HMDeletedExpired $Ctx.BackupPath $kd
+                if ($ex.Removed) { Write-HMLog $Job "Beiseitegelegte Dateien aelter als $kd Tage entfernt ($($ex.Removed) Lauf/Laeufe)" 'Info' }
+                foreach ($er in @($ex.Errors)) { Write-HMLog $Job "   Beiseitegelegte nicht entfernt: $er" 'Warning' }
+            } catch { Write-HMLog $Job "   Beiseitegelegte nicht entfernt: $($_.Exception.Message)" 'Warning' }
         }
 
         # ---- Pruefsummen-Katalog (spaetere Pruefung des Backups moeglich) ----

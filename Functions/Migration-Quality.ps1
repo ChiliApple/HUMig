@@ -16,7 +16,8 @@ function Get-HMBackupFiles([string]$BackupPath) {
     $root = $BackupPath.TrimEnd('\')
     $list = New-Object System.Collections.Generic.List[object]
     $stack = New-Object System.Collections.Generic.Stack[string]
-    foreach ($d in @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue)) { $stack.Push($d.FullName) }
+    # _GELOESCHT (beiseitegelegte, an der Quelle geloeschte Dateien) gehoert nicht zum Backup-Stand
+    foreach ($d in @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne '_GELOESCHT' })) { $stack.Push($d.FullName) }
     while ($stack.Count) {
         $dir = $stack.Pop()
         try {

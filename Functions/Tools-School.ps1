@@ -480,18 +480,20 @@ function Start-HMBackupSearch {
     if (-not $b) { Out-Console 'Bitte im Reiter Restore zuerst ein Backup markieren.' 'Warning'; return }
     $f = Show-HMFormDialog -Title "Im Backup suchen - $($b.Name)" -OkText 'Suchen' -Fields @(
         @{ Name = 'Q'; Label = 'Dateiname (* und ? erlaubt, z.B. *Zeugnis*.docx):'; Type = 'Text'; Default = '*' }
+        @{ Name = 'Del'; Label = 'Mit geloeschten (beim fortlaufenden Backup beiseitegelegte, an der Quelle geloeschte Dateien)'; Type = 'Check'; Default = $false }
         @{ Type = 'Info'; Label = 'Treffer koennen einzeln herauskopiert werden (z.B. versehentlich geloeschte Datei nach dem Restore).' }
     )
     if (-not $f) { return }
+    $withDel = [bool]$f.Del
     $q = "$($f.Q)".Trim(); if (-not $q) { $q = '*' }
     if ($q -notmatch '[\*\?]') { $q = "*$q*" }
     Out-Console "Suche '$q' in $($b.Name) ..." 'Info'
     Invoke-AsyncCommand -ScriptBlock {
-        param($root, $q)
+        param($root, $q, $withDel)
         $wp = New-Object System.Management.Automation.WildcardPattern ($q, [System.Management.Automation.WildcardOptions]::IgnoreCase)
         $r0 = $root.TrimEnd('\')
         $stack = New-Object System.Collections.Generic.Stack[string]
-        foreach ($d in @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue)) { $stack.Push($d.FullName) }
+        foreach ($d in @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $withDel -or $_.Name -ne '_GELOESCHT' })) { $stack.Push($d.FullName) }
         $n = 0
         while ($stack.Count -and $n -lt 20000) {
             $d = $stack.Pop()
@@ -503,12 +505,18 @@ function Start-HMBackupSearch {
                 }
             } catch { }
         }
-    } -ArgumentList @($b.Path, $q) -TimeoutSec 900 -State @{ Backup = $b } -OnComplete {
+    } -ArgumentList @($b.Path, $q, $withDel) -TimeoutSec 900 -State @{ Backup = $b } -OnComplete {
         param($r, $st)
         $rows = [System.Collections.Generic.List[object]]::new()
-        foreach ($x in @($r)) { if ($x -and $x.Rel) { $rows.Add(@("$($x.Rel)", [long]$x.Size, [datetime]$x.Time)) } }
+        foreach ($x in @($r)) {
+            if (-not $x -or -not $x.Rel) { continue }
+            # beiseitegelegt: _GELOESCHT\<yyyyMMdd_HHmmss>\... -> Spalte "Geloescht am"
+            $del = ''
+            if ("$($x.Rel)" -match '^_GELOESCHT\\(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})\d{2}\\') { $del = "$($Matches[3]).$($Matches[2]).$($Matches[1]) $($Matches[4]):$($Matches[5])" }
+            $rows.Add(@("$($x.Rel)", [long]$x.Size, [datetime]$x.Time, $del))
+        }
         if (-not $rows.Count) { Out-Console 'Keine Treffer im Backup.' 'Info'; return }
-        Show-DataGridWindow -Title "Suche im Backup - $($st.Backup.Name)" -Columns @('Pfad', 'Groesse', 'Geaendert') -ColumnTypes @{ Groesse = [long]; Geaendert = [datetime] } -Rows $rows.ToArray() `
+        Show-DataGridWindow -Title "Suche im Backup - $($st.Backup.Name)" -Columns @('Pfad', 'Groesse', 'Geaendert', 'Geloescht (erkannt)') -ColumnTypes @{ Groesse = [long]; Geaendert = [datetime] } -Rows $rows.ToArray() `
             -Sort 'Pfad ASC' -CountText "$($rows.Count) Treffer$(if ($rows.Count -ge 20000) { ' (nach 20000 beendet)' })" -Width 1200 -Height 600 -ActionContext @{ Root = $st.Backup.Path } -Actions @(
                 @{ Text = 'Markierte kopieren nach ...'; Color = '#FFA6E3A1'; Handler = {
                     param($rows, $win, $ctx)

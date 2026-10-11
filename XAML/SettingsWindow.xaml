@@ -40,11 +40,17 @@
                         <TextBlock Grid.Row="1" Text="Robocopy-Threads (Standard):" Style="{DynamicResource Lbl}"/>
                         <ComboBox x:Name="cmbThreads" Grid.Row="1" Grid.Column="1" Width="90" HorizontalAlignment="Left" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="2" Text="Backups aufbewahren (Tage):" Style="{DynamicResource Lbl}"/>
-                        <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
-                            <TextBox x:Name="txtRetention" Style="{DynamicResource DarkTextBox}" Width="60" ToolTip="Aeltere Backups werden erst nach so vielen Tagen zum Loeschen vorgeschlagen. 0 = nur die Anzahl zaehlt"/>
-                            <TextBlock Text="neueste" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="14,0,6,0"/>
-                            <TextBox x:Name="txtRetentionKeep" Style="{DynamicResource DarkTextBox}" Width="50" ToolTip="Je PC + Benutzer werden die neuesten N Backups nie geloescht (0 = keine Mindestanzahl)"/>
-                            <TextBlock Text="je PC + Benutzer immer behalten (Knopf 'Alte Backups ...', vor dem Loeschen wird immer gefragt)" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="6,0,0,0" TextWrapping="Wrap"/>
+                        <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,0,8">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBox x:Name="txtRetention" Style="{DynamicResource DarkTextBox}" Width="60" ToolTip="Aeltere Backups werden erst nach so vielen Tagen zum Loeschen vorgeschlagen. 0 = nur die Anzahl zaehlt"/>
+                                <TextBlock Text="neueste" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="14,0,6,0"/>
+                                <TextBox x:Name="txtRetentionKeep" Style="{DynamicResource DarkTextBox}" Width="50" ToolTip="Je PC + Benutzer werden die neuesten N Backups nie geloescht (0 = keine Mindestanzahl)"/>
+                                <TextBlock Text="je PC + Benutzer immer behalten (Knopf 'Alte Backups ...', vor dem Loeschen wird immer gefragt)" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="6,0,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <TextBox x:Name="txtDeletedKeep" Style="{DynamicResource DarkTextBox}" Width="60" ToolTip="Fortlaufendes Backup: an der Quelle geloeschte Dateien liegen im Backup unter _GELOESCHT und werden nach so vielen Tagen entfernt. 0 = nie automatisch entfernen"/>
+                                <TextBlock Text="Tage: an der Quelle geloeschte Dateien im fortlaufenden Backup aufheben (_GELOESCHT, 0 = nie entfernen)" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="6,0,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
                         </StackPanel>
                         <TextBlock Grid.Row="3" Text="USMT-Ordner (scanstate.exe):" Style="{DynamicResource Lbl}"/>
                         <DockPanel Grid.Row="3" Grid.Column="1" Margin="0,0,0,2">
