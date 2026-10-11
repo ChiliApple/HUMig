@@ -1749,7 +1749,7 @@ function Show-HMManual {
         else { Out-Console "Anleitung nicht verfuegbar: $("$r" -replace '^ERR:', '')" 'Error'; return }
         # ueber den Explorer oeffnen: Browser startet im Kontext des angemeldeten Benutzers (nicht erhoeht);
         # laeuft HUMig unter einem anderen Konto: Standard-Browser des Desktop-Benutzers (sonst fragt Windows jedes Mal)
-        try { if (Get-HMDesktopUserSid) { Open-HMFile $f } else { Start-Process -FilePath explorer.exe -ArgumentList "`"$f`"" } } catch { Out-Console "Anleitung konnte nicht geoeffnet werden: $($_.Exception.Message)" 'Error' }
+        try { Open-HMFile $f } catch { Out-Console "Anleitung konnte nicht geoeffnet werden: $($_.Exception.Message)" 'Error' }
     }
 }
 $ui.btnAbout.Add_Click({ Show-About })

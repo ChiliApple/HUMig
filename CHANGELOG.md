@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.109 - 2026-10-11
+### Behoben
+- Protokolle, Berichte und Anleitung: Windows 11 fragte trotz 2.0.107 weiter "Waehlen Sie eine App aus". HTML-Dateien werden jetzt direkt mit dem Standard-Browser gestartet (Browser-Zuordnung https, auch neuere Windows-11-Speicherung), nicht mehr ueber die .html-Zuordnung; Rueckfall Edge
+### Automatische Tests
+- Befehlszeile zum Oeffnen im Browser
+
 ## v2.0.108 - 2026-10-11
 ### Kleinigkeiten
 - Reiter Restore: *Ordner oeffnen* oeffnet ohne markiertes Backup den Backup-Ordner (bisher passierte nichts)
