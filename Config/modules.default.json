@@ -15,19 +15,19 @@
       "Hint": "Beliebige Ordner (auch USB/andere Laufwerke). Der Originalpfad wird im Backup gespeichert und beim Restore wiederverwendet.",
       "Items": [ { "Type": "Builtin", "Handler": "ExtraFolders" } ] },
 
-    { "Id": "Edge", "Name": "Edge-Profil", "Group": "Browser", "Default": true, "Scope": "User", "Remote": true,
+    { "Id": "Edge", "Name": "Edge-Profil", "Group": "Browser", "Default": true, "Scope": "User", "Remote": true, "CloseProcess": [ "msedge" ], "CloseDefault": "Copy",
       "Hint": "Favoriten, Einstellungen, Erweiterungen. Gespeicherte Kennwoerter/Cookies werden durch Windows-Verschluesselung meist NICHT uebertragen -> Edge-Sync mit dem Microsoft-Konto verwenden.",
       "Items": [
         { "Type": "Folder", "Name": "EDGE", "Path": "{LOCALAPPDATA}\\Microsoft\\Edge", "XD": [ "*Cache*", "Crashpad", "GrShaderCache", "ShaderCache" ], "Legacy": "EDGE" },
         { "Type": "Reg", "Name": "EdgePreferenceMACs", "Key": "HKCU\\Software\\Microsoft\\Edge\\PreferenceMACs", "Legacy": "REGBACKUP\\EdgeProfile.reg" }
       ] },
-    { "Id": "Chrome", "Name": "Chrome-Profil", "Group": "Browser", "Default": true, "Scope": "User", "Remote": true,
+    { "Id": "Chrome", "Name": "Chrome-Profil", "Group": "Browser", "Default": true, "Scope": "User", "Remote": true, "CloseProcess": [ "chrome" ], "CloseDefault": "Copy",
       "Hint": "Lesezeichen, Einstellungen, Erweiterungen. Kennwoerter/Cookies meist NICHT uebertragbar -> Chrome-Sync verwenden.",
       "Items": [
         { "Type": "Folder", "Name": "CHROME", "Path": "{LOCALAPPDATA}\\Google\\Chrome", "XD": [ "*Cache*", "Crashpad", "GrShaderCache", "ShaderCache" ], "Legacy": "CHROME" },
         { "Type": "Reg", "Name": "ChromePreferenceMACs", "Key": "HKCU\\Software\\Google\\Chrome\\PreferenceMACs", "Legacy": "REGBACKUP\\ChromeProfile.reg" }
       ] },
-    { "Id": "Firefox", "Name": "Firefox-Profil", "Group": "Browser", "Default": true, "Scope": "User", "Remote": true,
+    { "Id": "Firefox", "Name": "Firefox-Profil", "Group": "Browser", "Default": true, "Scope": "User", "Remote": true, "CloseProcess": [ "firefox" ], "CloseDefault": "Copy",
       "Hint": "Komplettes Firefox-Profil (Lesezeichen, Kennwoerter mit Hauptpasswort, Erweiterungen).",
       "Items": [
         { "Type": "Folder", "Name": "FIREFOX_ROAMING", "Path": "{APPDATA}\\Mozilla\\Firefox" },

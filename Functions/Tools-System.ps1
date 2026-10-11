@@ -757,7 +757,7 @@ function Start-HMBatteryReport {
                 $remote = "$l".Substring(5)
                 $src = if (Test-HMIsLocal $comp) { $remote } else { Convert-HMPath @{ IsRemote = $true; Computer = $comp } $remote }
                 $dst = Join-Path $script:LogDir ("Akku_{0}_{1}.html" -f ($comp -replace '[^\w\-]', '_'), (Get-Date -Format 'yyyyMMdd_HHmmss'))
-                try { Copy-Item -LiteralPath $src -Destination $dst -Force -ErrorAction Stop; Out-Console "   Bericht: $dst" 'Success'; Start-Process $dst } catch { Out-Console "   Bericht nicht kopierbar: $($_.Exception.Message)" 'Warning' }
+                try { Copy-Item -LiteralPath $src -Destination $dst -Force -ErrorAction Stop; Out-Console "   Bericht: $dst" 'Success'; Open-HMFile $dst } catch { Out-Console "   Bericht nicht kopierbar: $($_.Exception.Message)" 'Warning' }
             } else { Write-HMToolResult $l }
         }
     }
@@ -1178,7 +1178,7 @@ function Start-HMGpResult {
                 try {
                     if (-not (Test-Path -LiteralPath $script:LogDir)) { New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null }
                     Copy-Item -LiteralPath $src -Destination $dst -Force -ErrorAction Stop; Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
-                    Out-Console "   Bericht: $dst" 'Success'; Start-Process -FilePath explorer.exe -ArgumentList "`"$dst`""
+                    Out-Console "   Bericht: $dst" 'Success'; Open-HMFile $dst
                 } catch { Out-Console "   Bericht nicht kopierbar ($src): $($_.Exception.Message)" 'Error' }
             } else { Write-HMToolResult $l }
         }

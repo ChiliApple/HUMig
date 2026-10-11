@@ -1244,12 +1244,12 @@ $ui.btnReport.Add_Click({
     if (-not $b) { Out-Console 'Bitte zuerst ein Backup waehlen.' 'Warning'; return }
     $reps = @(Get-ChildItem -LiteralPath $b.Path -Filter 'Bericht_*.html' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
     if (-not $reps.Count) { Out-Console 'Kein Protokoll in diesem Backup (erst ab Version 0.0.3).' 'Info'; return }
-    if ($reps.Count -eq 1) { Start-Process $reps[0].FullName; return }
+    if ($reps.Count -eq 1) { Open-HMFile $reps[0].FullName; return }
     $m = New-Object System.Windows.Controls.ContextMenu
     foreach ($r in $reps) {
         $mi = New-Object System.Windows.Controls.MenuItem
         $mi.Header = "$($r.BaseName -replace '_', ' ')  ($($r.LastWriteTime.ToString('dd.MM.yyyy HH:mm')))"; $mi.Tag = $r.FullName
-        $mi.Add_Click({ param($src) Start-Process "$($src.Tag)" })
+        $mi.Add_Click({ param($src) Open-HMFile "$($src.Tag)" })
         [void]$m.Items.Add($mi)
     }
     $m.PlacementTarget = $ui.btnReport; $m.IsOpen = $true
@@ -1743,8 +1743,9 @@ function Show-HMManual {
         if ("$r" -match '^OK:(.+)$') { $f = $Matches[1]; Out-Console 'Anleitung geoeffnet (aktuelle Fassung von GitHub)' 'Debug' }
         elseif (Test-Path -LiteralPath $script:ManualLocal) { $f = $script:ManualLocal; Out-Console "Aktuelle Anleitung nicht ladbar ($("$r" -replace '^ERR:', '')) - lokale Anleitung geoeffnet" 'Warning' }
         else { Out-Console "Anleitung nicht verfuegbar: $("$r" -replace '^ERR:', '')" 'Error'; return }
-        # ueber den Explorer oeffnen: Browser startet im Kontext des angemeldeten Benutzers (nicht erhoeht)
-        try { Start-Process -FilePath explorer.exe -ArgumentList "`"$f`"" } catch { Out-Console "Anleitung konnte nicht geoeffnet werden: $($_.Exception.Message)" 'Error' }
+        # ueber den Explorer oeffnen: Browser startet im Kontext des angemeldeten Benutzers (nicht erhoeht);
+        # laeuft HUMig unter einem anderen Konto: Standard-Browser des Desktop-Benutzers (sonst fragt Windows jedes Mal)
+        try { if (Get-HMDesktopUserSid) { Open-HMFile $f } else { Start-Process -FilePath explorer.exe -ArgumentList "`"$f`"" } } catch { Out-Console "Anleitung konnte nicht geoeffnet werden: $($_.Exception.Message)" 'Error' }
     }
 }
 $ui.btnAbout.Add_Click({ Show-About })
