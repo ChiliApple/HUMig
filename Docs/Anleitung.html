@@ -96,6 +96,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <div class="card p"><b>Werkzeuge</b>Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot, BitLocker, Profil-Reparatur, Diagnose</div>
     <div class="card m"><b>Softwareverteilung</b>MSI/EXE still installieren – auf einem oder vielen PCs</div>
     <div class="card t"><b>Treiberverteilung</b>eigene Treiber (INF oder Setup) mit Hardware-Prüfung ausrollen – auch erzwungen</div>
+    <div class="card r"><b>Server-Backup + Teams</b>Hyper-V auf rotierende USB-Platten sichern, Meldungen nach <a href="#teams">Teams</a></div>
   </div>
   <div class="note tip"><b class="h">Diese Anleitung passt zur installierten Version</b>Der Knopf <span class="ui">Anleitung</span> (oder <kbd>F1</kbd>) lädt sie jedes Mal neu aus dem Repository – in der Fassung der installierten Version. Ohne Internet öffnet sich die mitgelieferte Kopie <code>Docs\Anleitung.html</code>.</div>
 </section>
@@ -653,16 +654,77 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <div class="note warn"><b class="h">Gut zu wissen</b>Updates im Benutzer-Bereich laufen ohne Administratorrechte – verlangt ein Installer trotzdem welche, erscheint beim Benutzer eine UAC-Abfrage; wird sie nicht bestätigt, bricht HUMig dieses Programm nach 15 Minuten ab und macht mit den übrigen weiter. Abhilfe: das Programm als Administrator für alle Benutzer installieren. Manche Hersteller blockieren den Download über WinGet (Download-Fehler). <i>Prüfsumme des Installers passt nicht</i>: der Hersteller hat die Datei getauscht, die WinGet-Paketliste ist noch nicht nachgezogen – WinGet installiert dann aus Sicherheitsgründen nicht; in einigen Tagen erneut versuchen. Findet WinGet ein Programm als SYSTEM nicht (nur für einen Benutzer installiert), versucht HUMig es automatisch noch einmal im Konto des angemeldeten Benutzers. WinGet-Fehlercodes stehen als Klartext im Ergebnis (z.&nbsp;B. <i>Datei in Benutzung</i>). Meldet ein Programm <i>aktualisiert</i>, taucht aber bei der nächsten Suche wieder auf, hat es meist einen eigenen Updater (z.&nbsp;B. Autodesk Fusion) – dann als Ausnahme eintragen. Braucht ein Programm einen Neustart, steht das im Ergebnis. Windows Server 2019/2022 unterstützt WinGet nicht.</div>
 </section>
 
+<section id="teams">
+  <h2><span class="n">13</span>Teams-Benachrichtigung</h2>
+  <p class="lead">HUMig meldet geplante Server-Backups, geplante Profil-Backups und Warnungen (Plattenzustand, Plattenwechsel, Speicherplatz, Massenlöschung) in einen Teams-Chat oder -Kanal – als Karte mit Farbe nach Dringlichkeit. Mehrere Ziele mit je eigenen Kategorien: nicht jeder bekommt alles.</p>
+  <div class="flow"><span>1 · Workflow in Teams anlegen</span><i>→</i><span>2 · Adresse kopieren</span><i>→</i><span>3 · in HUMig als Ziel eintragen</span><i>→</i><span>4 · Kategorien wählen, Test senden</span></div>
+
+  <h3 id="teams-einrichten">In Teams einrichten</h3>
+  <ol class="steps">
+    <li><b>Wohin sollen die Meldungen?</b> Ein <b>Gruppenchat</b> oder ein <b>Standardkanal</b>. <b>Private Kanäle gehen nicht</b> – der Workflow-Bot kann dort nicht posten. Sollen nur bestimmte Personen mitlesen: ein <b>privates Team</b> anlegen (z. B. „IT-Meldungen“, Datenschutz <i>Privat</i>) und dort einen Standardkanal nehmen – den sehen nur die Team-Mitglieder.</li>
+    <li>In Teams links die App <b>Workflows</b> öffnen (oder am Kanal <i>…</i> › <i>Workflows</i>). Fehlt sie: siehe <a href="#teams-probleme">Probleme</a>.</li>
+    <li>Vorlage suchen: „webhook“ – <i>Webhookbenachrichtigungen an einen Chat</i> bzw. <i>Webhookbenachrichtigungen an einen Kanal</i> (englisch <i>Send webhook alerts to a chat/channel</i>). Chat bzw. Team und Kanal wählen, <b>Speichern</b>.</li>
+    <li>Die angezeigte <b>Webhook-Adresse kopieren</b>. Sie ist ein Geheimnis: wer sie kennt, kann in den Chat/Kanal schreiben – nicht per Mail verschicken, nicht in Dateien ablegen.</li>
+  </ol>
+
+  <h3 id="teams-humig">In HUMig eintragen</h3>
+  <ol class="steps">
+    <li>HUMig <b>als Administrator</b> starten – auf dem PC, der melden soll: beim Server-Backup der Hyper-V-Host, bei geplanten Profil-Backups der PC des Benutzers. Die Adressen gelten nur auf diesem PC.</li>
+    <li><span class="ui">Einstellungen</span> › Allgemein › <b>Teams-Benachrichtigung</b> › <span class="ui">Neues Ziel</span>. Namen vergeben (z. B. „Kanal HyperV Backup“, „nur ich“), Adresse einfügen.</li>
+    <li>Unter <b>An dieses Ziel melden</b> die Kategorien anhaken (Tabelle unten).</li>
+    <li><span class="ui">Test senden</span> – die Testnachricht muss im Chat/Kanal erscheinen. Dann <span class="ui g">Speichern</span>.</li>
+    <li>Weitere Ziele (bis 10) mit <span class="ui">Neues Ziel</span>. Ziel in der Auswahlliste wählen, um es zu bearbeiten. Eine neue Adresse eintragen ersetzt die alte dieses Ziels.</li>
+  </ol>
+  <div class="note tip"><b class="h">Beispiel</b>Ziel „Kanal HyperV Backup“ (Team mit den Kollegen): nur <i>fehlgeschlagen</i>, <i>Warnungen</i>, <i>Plattenzustand</i>, <i>Erinnerungen</i>, <i>Speicherplatz</i>. Ziel „nur ich“ (eigener Chat): zusätzlich <i>erfolgreich</i> und <i>Details</i>.</div>
+
+  <h3 id="teams-kategorien">Was gemeldet wird</h3>
+  <table>
+    <tr><th style="width:330px">Kategorie (Standard)</th><th>Wann</th></tr>
+    <tr><td>Server-Backup fehlgeschlagen / abgebrochen (an)</td><td>Geplantes Server-Backup mit Fehler, keine Platte angesteckt, Profil fehlt</td></tr>
+    <tr><td>Server-Backup mit Warnungen (an)</td><td>Fertig, aber mit Hinweisen (z. B. Prüfung, Host-System)</td></tr>
+    <tr><td>Server-Backup erfolgreich (aus)</td><td>Jeder erfolgreiche geplante Lauf</td></tr>
+    <tr><td>Geplantes Profil-Backup fehlgeschlagen (an)</td><td>Zeitplan im Reiter Backup endet mit Fehler</td></tr>
+    <tr><td>Geplantes Profil-Backup übersprungen (an)</td><td>Ziel nicht erreichbar, z. B. USB-Laufwerk nicht angesteckt</td></tr>
+    <tr><td>Geplantes Profil-Backup mit Warnungen (an)</td><td>Fertig mit Warnung</td></tr>
+    <tr><td>Geplantes Profil-Backup erfolgreich (aus)</td><td>Jeder erfolgreiche Lauf – gesperrte Browser-Dateien (Cookies, Sitzung) sind nur ein Hinweis</td></tr>
+    <tr><td>Plattenzustand (SMART) auffällig (an)</td><td>Backup-Platte meldet Warnung/Fehler, zu heiß, steigende Lesefehler (<a href="#plattenzustand">Plattenzustand</a>)</td></tr>
+    <tr><td>Erinnerungen: Plattenwechsel / Archiv-Platte (an)</td><td>Platte zu lange nicht gewechselt, Archiv fällig oder angesteckt</td></tr>
+    <tr><td>Speicherplatz knapp (an)</td><td>Weniger frei als die nächste Sicherung braucht oder unter 10 % – die Windows Server-Sicherung löscht dann bald die ältesten Versionen</td></tr>
+    <tr><td>Massenlöschung erkannt (an)</td><td>An der Quelle sind auf einmal sehr viele Dateien verschwunden – Verdacht auf Verschlüsselungstrojaner (geplante Profil-Backups und Backups, die in HUMig als Administrator laufen)</td></tr>
+    <tr><td>Details mitsenden (an)</td><td>Was gesichert wurde, Dauer, Datenmenge, freier Platz der Backup-Platte, Versionen auf der Platte (Anzahl, älteste, neueste), Plattenzustand, Pfad zum Bericht</td></tr>
+  </table>
+  <p>Ein geplanter Lauf schickt je Ziel <b>eine Nachricht</b> mit allen dort eingeschalteten Punkten; die Farbe richtet sich nach dem schlimmsten Punkt (grün/orange/rot). Hat keine eingeschaltete Kategorie etwas zu melden, kommt nichts. Das Ergebnis je Ziel steht im Protokoll der Aufgabe. Als Absender steht „&lt;Ersteller des Workflows&gt; über Workflows“.</p>
+
+  <h3 id="teams-profilbackup">Geplante Profil-Backups</h3>
+  <p>Profil-Backups laufen im Konto des Benutzers und dürfen die Adressen nicht lesen (sonst könnte jeder Benutzer sie auslesen). Sie schreiben deshalb nur ein Ereignis ins Anwendungsprotokoll (Quelle <code>HUMig</code>: 1100 OK, 1101 Warnung, 1102 Fehler, 1103 übersprungen). Ist bei einem Ziel eine Profil-Backup-Kategorie an, richtet HUMig beim <span class="ui g">Speichern</span> der Einstellungen die Aufgabe <code>\HUMig\Teams-Meldung Profil-Backups</code> ein: sie läuft als SYSTEM, startet beim Ereignis und zusätzlich stündlich, liest das Ergebnis aus der Zeitplan-Datei des Benutzers und meldet neue Läufe (jünger als 2 Stunden, je Zeitplan höchstens alle 10 Minuten). Das Skript liegt geschützt in <code>%ProgramData%\HUMig\Notify\relay.ps1</code>, das Protokoll <code>relay.log</code> daneben. Sind alle Profil-Backup-Kategorien aus, wird die Aufgabe entfernt. <b>Unsicher:</b> ob ein Standardbenutzer ins Anwendungsprotokoll schreiben darf, hängt von Windows ab – klappt es nicht, kommt die Meldung über die stündliche Prüfung etwas später.</p>
+
+  <h3 id="teams-sicherheit">Sicherheit und Entfernen</h3>
+  <ul>
+    <li>Die Adressen werden <b>nur auf diesem PC</b> gespeichert, verschlüsselt (DPAPI) in <code>HKLM\SOFTWARE\HUMig\Notify</code>, lesbar nur für Administratoren und SYSTEM – nie im Tool-Ordner, in <code>settings.json</code>, Logs oder Support-Paketen. Wer den HUMig-Ordner weitergibt, gibt keine Adressen weiter.</li>
+    <li><span class="ui r">Entfernen</span> löscht nur das gewählte Ziel, sofort. <b>Danach in Teams den Workflow löschen oder ausschalten</b> – sonst bleibt die Adresse gültig.</li>
+    <li>Adresse versehentlich weitergegeben: Workflow in Teams löschen, neuen anlegen, neue Adresse in HUMig eintragen.</li>
+  </ul>
+
+  <h3 id="teams-probleme">Probleme</h3>
+  <table>
+    <tr><th style="width:280px">Problem</th><th>Lösung</th></tr>
+    <tr><td>App <b>Workflows</b> fehlt in Teams</td><td>Teams Admin Center › <i>Teams-Apps › Apps verwalten</i> › „Workflows“ (Herausgeber Microsoft): Status <i>Zugelassen</i>? Dann in Teams über <i>Apps</i> hinzufügen oder im Admin Center für die gewünschten Konten installieren (kann dauern). Fremd-Apps wie „Autopilot Workflows“ werden nicht gebraucht.</td></tr>
+    <tr><td>Testnachricht kommt nicht an</td><td>Adresse vollständig kopiert? Workflow eingeschaltet (Workflows-App › Ihre Workflows)? Ausgehendes HTTPS am PC/Server erlaubt (Firewall, Proxy)? Die Meldung in HUMig nennt den Grund.</td></tr>
+    <tr><td>Privater Kanal als Ziel</td><td>Geht nicht – Gruppenchat oder Standardkanal eines privaten Teams verwenden.</td></tr>
+    <tr><td>Kollegen bekommen keine Benachrichtigung</td><td>Jeder stellt am Kanal <i>… › Kanalbenachrichtigungen</i> auf „Alle Aktivitäten“.</td></tr>
+    <tr><td>Meldungen im Kanal lassen sich nicht löschen</td><td>Sie stammen vom Workflow-Bot. Besitzer können sie nur löschen, wenn ihre Nachrichtenrichtlinie (Teams Admin Center › <i>Nachrichten › Nachrichtenrichtlinien</i>) „Besitzer können gesendete Nachrichten löschen“ erlaubt – Richtlinie dem eigenen Konto zuweisen; ein Benutzer hat nur eine Nachrichtenrichtlinie. <b>Unsicher:</b> ob das für Bot-Nachrichten gilt, ist nicht geprüft.</td></tr>
+    <tr><td>Profil-Backup meldet nichts</td><td>Ziel auf <b>dem PC des Benutzers</b> eingetragen und gespeichert (HUMig als Administrator)? Aufgabe <code>\HUMig\Teams-Meldung Profil-Backups</code> vorhanden? Grund steht in <code>%ProgramData%\HUMig\Notify\relay.log</code>.</td></tr>
+    <tr><td>Meldung „alte Office-365-Connector-Adresse“</td><td>Adressen mit <code>webhook.office.com</code> sind abgeschaltet – Workflow anlegen.</td></tr>
+  </table>
+</section>
+
 <section id="einstellungen">
-  <h2><span class="n">13</span>Einstellungen</h2>
+  <h2><span class="n">14</span>Einstellungen</h2>
   <table>
     <tr><th style="width:170px">Reiter</th><th>Inhalt</th></tr>
     <tr><td>Allgemein</td><td>Backup-Ordner, Threads, Aufbewahrung (Tage + Anzahl je PC/Benutzer), gelöschte Dateien im fortlaufenden Backup aufheben (Tage, Standard 90), Warnung bei Massenlöschung (Prozent, Standard 20), USMT-Pfad (<span class="ui">Aus ADK einrichten</span>), Softwareverteilung, Treiberverteilung, WLAN-Schlüssel im Klartext, Übersicht automatisch aktualisieren, Skalierung, HUMig.exe neu erstellen, Desktop-Verknüpfung</td></tr>
     <tr><td>Restore</td><td>Standard-Nacharbeiten, <i>Fehlende Programme vor dem Restore anbieten</i>, <i>Nach dem Restore Backup und Ziel vergleichen</i>, Checkliste (Punkte, automatisch anzeigen)</td></tr>
-    <tr><td id="teams">Allgemein › Teams-Benachrichtigung</td><td>Meldungen in einen Teams-Chat oder -Kanal über einen <b>Workflow</b> (die alten Office-365-Connectors sind abgeschaltet). Anlegen: in Teams die App <b>Workflows</b> öffnen (fehlt sie, im Teams Admin Center unter <i>Teams-Apps › Apps verwalten › Workflows</i> prüfen, ob sie zugelassen ist, und in Teams über <i>Apps</i> hinzufügen) › Vorlage <i>Webhookbenachrichtigungen an einen Chat</i> bzw. <i>… an einen Kanal</i> (engl. <i>Send webhook alerts to a chat/channel</i>) › Speichern › Adresse kopieren und hier eintragen, <span class="ui">Test senden</span>. <b>Private Kanäle gehen nicht</b> (der Workflow-Bot kann dort nicht posten) – stattdessen einen Gruppenchat oder einen Standardkanal in einem <b>privaten Team</b> nehmen; den sehen nur die Team-Mitglieder. Als Absender steht „&lt;Ersteller&gt; über Workflows“. Damit Mitglieder bei neuen Meldungen benachrichtigt werden, am Kanal <i>… › Kanalbenachrichtigungen</i> einstellen.<br>
-<b>Mehrere Ziele</b> (bis 10): <span class="ui">Neues Ziel</span> legt ein weiteres Ziel an – je Ziel ein Name (z. B. „Kanal HyperV Backup“, „nur ich“), eine eigene Adresse und eigene Kategorien. So bekommt nicht jeder alles: z. B. Fehler, Plattenzustand und Erinnerungen an den Kanal des Teams, erfolgreiche Läufe mit Details nur an den eigenen Chat. Ziel in der Auswahlliste wählen, um es zu bearbeiten; <span class="ui">Test senden</span> schickt an das gewählte Ziel. <span class="ui">Entfernen</span> löscht nur das gewählte Ziel, sofort – danach in Teams den Workflow löschen oder ausschalten, sonst bleibt die Adresse gültig. Eine neue Adresse eintragen ersetzt die alte dieses Ziels. Ein Ziel aus Version 2.0.115 wird als „Standard“ übernommen.<br>
-<b>An dieses Ziel melden</b> – jede Kategorie je Ziel einzeln ein-/ausschaltbar: <i>Server-Backup fehlgeschlagen/abgebrochen</i> (an), <i>mit Warnungen</i> (an), <i>erfolgreich</i> (aus), <i>Geplantes Profil-Backup fehlgeschlagen</i> (an), <i>übersprungen</i> (an – Ziel nicht erreichbar, z. B. USB nicht angesteckt), <i>mit Warnungen</i> (an), <i>erfolgreich</i> (aus), <i>Plattenzustand (SMART) auffällig</i> (an), <i>Erinnerungen Plattenwechsel/Archiv-Platte</i> (an), <i>Speicherplatz auf der Backup-Platte knapp</i> (an – weniger frei als die nächste Sicherung braucht oder unter 10 %), <i>Massenlöschung erkannt</i> (an, bei Backups, die in HUMig als Administrator laufen) und <i>Details mitsenden</i> (an: was gesichert wurde, Dauer, Datenmenge, freier Platz der Backup-Platte, Zahl der Versionen auf der Platte mit ältester/neuester, Plattenzustand). Ein geplantes Server-Backup schickt je Ziel <b>eine Nachricht je Lauf</b> mit allen dort eingeschalteten Punkten, Farbe nach dem schlimmsten Punkt; hat keine eingeschaltete Kategorie etwas zu melden, kommt nichts.<br>
-Die Adressen sind Geheimnisse (wer sie kennt, kann in den Chat/Kanal schreiben): sie werden <b>nur auf diesem PC</b> gespeichert, verschlüsselt (DPAPI) in <code>HKLM\SOFTWARE\HUMig\Notify</code>, lesbar nur für Administratoren und SYSTEM – nie im Tool-Ordner, in Logs oder Support-Paketen. Darum auf dem Server eintragen, auf dem die Zeitpläne laufen. <b>Geplante Profil-Backups</b> laufen im Konto des Benutzers und dürfen die Adressen nicht lesen. Sie schreiben darum nur ein Ereignis ins Anwendungsprotokoll (Quelle <code>HUMig</code>, 1100 OK, 1101 Warnung, 1102 Fehler, 1103 übersprungen). Ist bei einem Ziel eine Profil-Backup-Kategorie an, richtet HUMig beim Speichern die Aufgabe <code>\HUMig\Teams-Meldung Profil-Backups</code> ein (läuft als SYSTEM, startet beim Ereignis und zusätzlich stündlich). Sie liest den Stand aus den Zeitplan-Dateien der Benutzer und meldet neue Läufe (jünger als 2 Stunden, je Zeitplan höchstens alle 10 Minuten) an die Ziele. Das Skript liegt geschützt in <code>%ProgramData%\HUMig\Notify\relay.ps1</code> (nur Administratoren/SYSTEM schreiben, wird beim Start von HUMig als Administrator aktualisiert), Protokoll <code>relay.log</code> daneben. Darum die Ziele <b>auf dem PC eintragen, auf dem die Profil-Backups geplant sind</b> (HUMig dort einmal als Administrator). Sind alle Profil-Backup-Kategorien aus, wird die Aufgabe entfernt. <b>Unsicher:</b> ob ein Standardbenutzer ins Anwendungsprotokoll schreiben darf, hängt von der Windows-Einstellung ab – klappt es nicht, meldet die stündliche Prüfung den Lauf etwas später.</td></tr>
+    <tr><td>Allgemein › Teams-Benachrichtigung</td><td>Ziele (Chat/Kanal) mit Webhook-Adresse und Kategorien – siehe <a href="#teams">Teams-Benachrichtigung</a></td></tr>
     <tr><td id="standorte">Standorte</td><td>Beliebig viele Standorte (Standort 1, 2, … frei benennbar): je Standort Backup-Ordner, Softwareverteilung, Treiberverteilung, USMT-Ordner, Domäne/DC, Subnetz, DNS-Server, Notiz. Umschalten oben im Hauptfenster.</td></tr>
     <tr><td>Ausnahmen</td><td>Ordner und Dateitypen, die im Profil und auf C:\ nicht gesichert werden · Standard wiederherstellen</td></tr>
     <tr><td>Module</td><td>Module ein-/ausblenden, eigene Module anlegen/löschen, <code>modules.json</code> für Experten</td></tr>
@@ -699,7 +761,7 @@ Die Adressen sind Geheimnisse (wer sie kennt, kann in den Chat/Kanal schreiben):
 </section>
 
 <section id="update">
-  <h2><span class="n">14</span>Installation und Update</h2>
+  <h2><span class="n">15</span>Installation und Update</h2>
   <ol class="steps">
     <li><b>Neu installieren:</b> <code>Pull.ps1</code> in den Zielordner legen und ausführen: <code>powershell -ExecutionPolicy Bypass -File Pull.ps1</code></li>
     <li><b>Update:</b> Knopf <span class="ui">Update</span> – lädt die neueste Version im gewählten Kanal, prüft sie und startet neu. BACKUPS, Config, Software-/Treiberverteilung und HUMig.exe bleiben erhalten (Details unten).</li>
@@ -724,7 +786,7 @@ Die Adressen sind Geheimnisse (wer sie kennt, kann in den Chat/Kanal schreiben):
 </section>
 
 <section id="faq">
-  <h2><span class="n">15</span>Fragen und Probleme</h2>
+  <h2><span class="n">16</span>Fragen und Probleme</h2>
   <h3>„Übersprungen“ im Robocopy.log – fehlt etwas?</h3>
   <p>Nein. Versteckte/System-Dateien (z. B. <code>pagefile.sys</code>), Nur-Cloud-Platzhalter und Ausschlussmuster werden bewusst nicht kopiert. Das HUMig-Protokoll zeigt sie getrennt als <i>absichtlich ausgelassen</i>. Echte Fehler stehen unter <i>FAILED</i> und als Warnung im Protokoll.</p>
   <h3>Windows meldet „Robocopy lädt Dateien herunter“</h3>
@@ -746,7 +808,7 @@ Die Adressen sind Geheimnisse (wer sie kennt, kann in den Chat/Kanal schreiben):
 </section>
 
 <section id="tasten">
-  <h2><span class="n">16</span>Tastenkürzel</h2>
+  <h2><span class="n">17</span>Tastenkürzel</h2>
   <table>
     <tr><td style="width:230px"><kbd>F1</kbd></td><td>Anleitung</td></tr>
     <tr><td><kbd>Enter</kbd> im Feld Computer</td><td>Verbinden</td></tr>

@@ -1,4 +1,4 @@
-# Installation
+﻿# Installation
 
 ## Portabel (USB-Laufwerk) oder lokal
 1. Ordner auf das Laufwerk kopieren bzw. `Pull.ps1` in den Zielordner legen und ausfuehren:
@@ -55,5 +55,8 @@ Nur bei einem privaten Repository: einmalig einen Nur-Lese-Token eingeben (Recht
 ## Anleitung
 Knopf **Anleitung** oder **F1** - wird bei jedem Aufruf aktuell aus dem Repository geladen, ohne Internet die lokale Kopie `Docs\Anleitung.html`.
 
+## Optional: Teams-Benachrichtigung
+Meldungen geplanter Server- und Profil-Backups in einen Teams-Chat/-Kanal: in Teams App *Workflows* > Vorlage *Webhookbenachrichtigungen an einen Chat/Kanal* > Adresse kopieren; HUMig als Administrator auf dem meldenden PC > Einstellungen > Allgemein > *Teams-Benachrichtigung* > *Neues Ziel*. Details: Anleitung, Kapitel *Teams-Benachrichtigung*. Die Adressen liegen nur verschluesselt in der Registry dieses PCs, nicht im Tool-Ordner.
+
 ## Selbsttest
-`powershell -NoProfile -ExecutionPolicy Bypass -File .\Test-HUMig.ps1` - Ergebnis in `Test-HUMig.result.txt`.
+`powershell -NoProfile -ExecutionPolicy Bypass -File .\Test-HUMig.ps1` - Ergebnis in `Test-HUMig.result.txt` (enthaelt Daten dieses PCs - Seriennummer, Netzwerk, Freigaben - vor dem Weitergeben des Ordners loeschen).

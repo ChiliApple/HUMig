@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## v2.0.120 - 2026-10-11
+### Dokumentation
+- Anleitung: eigenes Kapitel **Teams-Benachrichtigung** (im Inhaltsverzeichnis) - Einrichten in Teams Schritt fuer Schritt, Eintragen in HUMig, alle Kategorien als Tabelle, geplante Profil-Backups, Sicherheit/Entfernen, Probleme (App fehlt, private Kanaele, Kollegen ohne Benachrichtigung, Bot-Nachrichten loeschen, relay.log)
+- README und INSTALL: Abschnitt Teams-Benachrichtigung; INSTALL: Hinweis, dass Test-HUMig.result.txt Daten des PCs enthaelt
+
 ## v2.0.119 - 2026-10-11
 ### Dokumentation
 - Anleitung, Zeitplan > Meldung: Ereignisse 1100-1103, Weitergabe nach Teams, Browser-Sperren nur als Hinweis
