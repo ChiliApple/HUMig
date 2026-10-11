@@ -1707,7 +1707,7 @@ function New-HMReport {
         foreach ($m in @($Modules)) {
             $mc = if ($col.ContainsKey("$($m.Status)")) { $col["$($m.Status)"] } else { '#222' }
             $mt = if ($stTxt.ContainsKey("$($m.Status)")) { $stTxt["$($m.Status)"] } else { "$($m.Status)" }
-            $det = @(foreach ($i in @($m.Items)) { if ($i -and $i.Msg) { (ConvertTo-HMHtml "$($i.Name): $($i.Msg)") } }) -join '<br>'
+            $det = @(foreach ($i in @($m.Items)) { if ($i -and $i.Msg) { (ConvertTo-HMHtml "$($i.Name): $($i.Msg)") -replace "`r?`n", '<br>&nbsp;&nbsp;&nbsp;' } }) -join '<br>'
             [void]$sb.Append('<tr><td>' + (ConvertTo-HMHtml $m.Name) + '</td><td class="st" style="color:' + $mc + '">' + (ConvertTo-HMHtml $mt) + '</td><td>' + $det + '</td></tr>')
         }
         [void]$sb.Append('</table>')
@@ -1957,18 +1957,20 @@ function Backup-HMBuiltin {
         'ExtraFolders' {
             $list = @($Ctx.Options.ExtraFolders | Where-Object { $_ })
             if (-not $list.Count) { return (& $res 'Skip' 'keine Ordner ausgewaehlt') }
-            $idx = 0; $meta = @(); $bytes = [long]0; $worst = 'OK'
+            $idx = 0; $meta = @(); $bytes = [long]0; $worst = 'OK'; $lines = @()
             foreach ($p in $list) {
                 $idx++
                 $fake = [pscustomobject]@{ Name = "FOLDER$idx"; Path = $p; Type = 'Folder' }
                 $r = Backup-HMFolderItem $Ctx $Job $Module $fake $TEnv
                 Write-HMLog $Job ("   Ordner {0}: {1} - {2}" -f $idx, $p, $r.Msg) $(if ($r.Status -eq 'OK') { 'Debug' } else { 'Warning' })
                 $meta += [pscustomobject]@{ Index = $idx; Path = $p; Status = $r.Status }
+                $lines += "$p - $($r.Msg)"
                 $bytes += $r.Bytes
                 if ($r.Status -in @('Error', 'Cancel')) { $worst = $r.Status } elseif ($r.Status -eq 'Warning' -and $worst -eq 'OK') { $worst = 'Warning' }
             }
             $meta | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $dir 'folders.json') -Encoding UTF8
-            return (& $res $worst "$($list.Count) Ordner, $(Format-HMSize $bytes)" $bytes)
+            # je Ordner eine Zeile im Protokoll (Pfad am Quell-PC, Dateien, Groesse)
+            return (& $res $worst ("$($list.Count) Ordner, $(Format-HMSize $bytes)`n" + ($lines -join "`n")) $bytes)
         }
 
         'Wlan' {
@@ -2772,7 +2774,7 @@ function Restore-HMBuiltin {
                 }
             }
             if (-not $entries.Count) { return (& $res 'Skip' 'keine Ordner im Backup') }
-            $worst = 'OK'
+            $worst = 'OK'; $lines = @()
             # Sync-Ordner (OneDrive/SharePoint) des ZIELbenutzers am Ziel-PC - dorthin nie direkt schreiben
             $tRoots = @()
             try { $tRoots = @(Get-HMSyncRoots $Ctx $Ctx.UserSid $Ctx.ProfilePath | Where-Object { $_ }) } catch { Write-HMLog $Job "   OneDrive-Ordner am Ziel nicht ermittelbar: $($_.Exception.Message)" 'Debug' }
@@ -2798,9 +2800,10 @@ function Restore-HMBuiltin {
                 $r = Restore-HMFolderItem $Ctx $Job $Module $fake $TEnv -SourceOverride $e.Src -DestOverride $dest
                 if ($note -and $r.Status -eq 'OK') { $r.Status = 'Warning' }
                 Write-HMLog $Job "   $($e.Path): $($r.Msg)$note" $(if ($r.Status -eq 'OK') { 'Debug' } else { 'Warning' })
+                $lines += "$($e.Path) - $($r.Msg)$note"
                 if ($r.Status -in @('Error', 'Cancel')) { $worst = $r.Status } elseif ($r.Status -ne 'OK' -and $worst -eq 'OK') { $worst = $r.Status }
             }
-            return (& $res $worst "$($entries.Count) Ordner")
+            return (& $res $worst ("$($entries.Count) Ordner`n" + ($lines -join "`n")))
         }
 
         'Wlan' {

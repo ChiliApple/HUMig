@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.105 - 2026-10-11
+### Protokoll: Zusaetzliche Ordner
+- Backup- und Restore-Protokoll nennen je zusaetzlichem Ordner den Pfad mit Dateien und Groesse (bisher nur "1 Ordner, 954,5 MB"); mehrzeilige Details werden im Protokoll als eigene Zeilen dargestellt
+
 ## v2.0.104 - 2026-10-11
 ### Restore: zuerst Programme, dann Einstellungen
 - *Restore starten* prueft zuerst die Programme am Ziel. Fehlen installierbare Programme aus dem Backup (Softwareverteilung oder WinGet), fragt HUMig: zuerst installieren und danach automatisch zurueckspielen, nur Restore oder abbrechen. Microsoft empfiehlt, Programme vor dem Zurueckspielen der Einstellungen zu installieren
