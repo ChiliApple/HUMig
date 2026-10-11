@@ -64,6 +64,8 @@ $rel = @(Get-HMReleases $Owner $Repo '' | Where-Object { $_.Version -eq (Convert
 if (-not $rel) { throw "Release $Version nicht gefunden ($Owner/$Repo)." }
 if (-not $rel.ManifestUrl) { throw "Release $($rel.Tag) hat noch keine HUMig-files.sha256 (automatische Tests noch nicht fertig oder fehlgeschlagen)." }
 $man = Get-HMReleaseAsset $rel.ManifestUrl $rel.ManifestApi ''
+$why = Test-HMManifestRelease ([System.Text.Encoding]::UTF8.GetString($man)) $rel.Version
+if ($why) { throw "Pruefsummen-Datei passt nicht zum Release: $why" }
 $sig = New-HMManifestSignature $man $cert
 $why = Test-HMManifestSignature $man $sig $cert.Thumbprint
 if ($why) { throw "Signatur-Pruefung fehlgeschlagen: $why" }

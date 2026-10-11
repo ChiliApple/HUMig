@@ -1173,6 +1173,12 @@ function Exit-HMModule([hashtable]$Ctx, $Job, [hashtable]$State) {
 # ============================================================================
 # ROBOCOPY
 # ============================================================================
+# Win32-Fehlercodes der Robocopy-Fehlerzeilen, sprachneutral: "... ERROR 32 (0x00000020) ..." / "... FEHLER 5 (0x00000005) ..."
+function Get-HMRobocopyErrorCodes([string]$Text) {
+    if (-not $Text) { return @() }
+    return @([regex]::Matches($Text, '\s\d+ \(0x([0-9A-Fa-f]{8})\)') | ForEach-Object { [Convert]::ToInt64($_.Groups[1].Value, 16) } | Select-Object -Unique)
+}
+
 function Get-HMRobocopySummary([string]$Text) {
     $s = [ordered]@{ FilesTotal = 0; FilesCopied = 0; FilesSkipped = 0; FilesFailed = 0; FilesExtra = 0; BytesTotal = [long]0; BytesCopied = [long]0; BytesSkipped = [long]0; DirsExtra = 0; HaveDirs = $false }
     foreach ($line in ($Text -split "`r?`n")) {
@@ -1247,10 +1253,11 @@ function Invoke-HMRobocopy {
             if ($line -match '\(0x[0-9A-Fa-f]{8}\)\s+.*?\s((?:[A-Za-z]:\\|\\\\).+?)\s*$') { $Matches[1] }
         }) | Select-Object -Unique | Select-Object -First 5
     }
+    $errCodes = @(Get-HMRobocopyErrorCodes $text)
     $lvl = if (Test-HMCancel $Job) { 'Cancel' } elseif ($code -ge 8) { 'Error' } elseif ($code -ge 4) { 'Warning' } else { 'OK' }
     return [pscustomobject]@{ ExitCode = $code; Level = $lvl; FilesTotal = $sum.FilesTotal; FilesCopied = $sum.FilesCopied
         FilesSkipped = $sum.FilesSkipped; FilesFailed = $sum.FilesFailed; BytesTotal = $sum.BytesTotal; BytesCopied = $sum.BytesCopied
-        BytesSkipped = $sum.BytesSkipped; FilesExtra = $sum.FilesExtra; DirsExtra = $sum.DirsExtra; HaveDirs = $sum.HaveDirs; Args = $psi.Arguments; FailedFiles = @($failed) }
+        BytesSkipped = $sum.BytesSkipped; FilesExtra = $sum.FilesExtra; DirsExtra = $sum.DirsExtra; HaveDirs = $sum.HaveDirs; Args = $psi.Arguments; FailedFiles = @($failed); ErrorCodes = $errCodes }
 }
 
 # ============================================================================
@@ -1291,9 +1298,10 @@ function Read-HMRegFile([string]$Path) {
 # Schluesselpfade (alter SID / HKCU) und Profilpfade auf den Zielbenutzer umschreiben, dann importieren
 function Convert-HMRegText {
     param([string]$Text, [string]$TargetSid, [string]$SourceSid, [string]$SourceProfile, [string]$TargetProfile)
-    $t = [regex]::Replace($Text, '(?im)^(\[-?)HKEY_CURRENT_USER', ('${1}HKEY_USERS\' + $TargetSid))
+    $t = [regex]::Replace($Text, '(?im)^([ \t]*\[-?)HKEY_CURRENT_USER(?=\\|\])', ('${1}HKEY_USERS\' + $TargetSid))
     if ($SourceSid -and $SourceSid -ne $TargetSid) {
-        $t = [regex]::Replace($t, '(?im)^(\[-?)HKEY_USERS\\' + [regex]::Escape($SourceSid), ('${1}HKEY_USERS\' + $TargetSid))
+        # nur die ganze SID ersetzen (nicht ...-1001 in ...-10011)
+        $t = [regex]::Replace($t, '(?im)^([ \t]*\[-?)HKEY_USERS\\' + [regex]::Escape($SourceSid) + '(?=\\|_Classes|\])', ('${1}HKEY_USERS\' + $TargetSid))
     }
     if ($SourceProfile -and $TargetProfile -and ($SourceProfile.TrimEnd('\') -ne $TargetProfile.TrimEnd('\'))) {
         $srcEsc = $SourceProfile.TrimEnd('\').Replace('\', '\\')
@@ -1303,9 +1311,49 @@ function Convert-HMRegText {
     return $t
 }
 
+# Schutz vor manipulierten .reg-Dateien im Backup: nach Convert-HMRegText darf jeder Abschnitt (auch [-...] = loeschen) nur
+# unter HKEY_USERS\<ZielSID> (bzw. <ZielSID>_Classes) liegen, bei HKLM-Eintraegen zusaetzlich unter genau diesem Schluessel.
+# Legacy = Backup der Vorgaengerversion: ganze Hive des Eintrags erlaubt. Rueckgabe: erster unzulaessiger Schluessel oder ''.
+function Get-HMRegScopeViolation {
+    param([string]$Text, [string]$TargetSid, [string]$ItemKey, [switch]$Legacy)
+    $norm = {
+        param($k)
+        $k = "$k".Trim().TrimEnd('\')
+        $k = $k -replace '^HKLM(?=\\|$)', 'HKEY_LOCAL_MACHINE' -replace '^HKU(?=\\|$)', 'HKEY_USERS' -replace '^HKCU(?=\\|$)', 'HKEY_CURRENT_USER' -replace '^HKCR(?=\\|$)', 'HKEY_CLASSES_ROOT'
+        return $k
+    }
+    $allowed = New-Object System.Collections.Generic.List[string]
+    if ("$TargetSid".Trim()) {
+        $allowed.Add(('HKEY_USERS\' + "$TargetSid".Trim()))
+        $allowed.Add(('HKEY_USERS\' + "$TargetSid".Trim() + '_Classes'))
+    }
+    $ik = & $norm $ItemKey
+    if ($ik -match '^HKEY_LOCAL_MACHINE(\\|$)') {
+        if ($Legacy) { $allowed.Add('HKEY_LOCAL_MACHINE') } else { $allowed.Add($ik) }
+    }
+    foreach ($line in ("$Text" -split "`r?`n")) {
+        $l = $line.Trim()
+        if (-not $l.StartsWith('[')) { continue }
+        $k = $l.Substring(1)
+        if ($k.StartsWith('-')) { $k = $k.Substring(1) }
+        # bis zur LETZTEN ] der Zeile (Schluesselnamen duerfen ] enthalten)
+        $e = $k.LastIndexOf(']'); if ($e -ge 0) { $k = $k.Substring(0, $e) }
+        $k = & $norm $k
+        $ok = $false
+        foreach ($a in $allowed) {
+            if ($k -ieq $a -or $k.StartsWith(($a + '\'), [StringComparison]::OrdinalIgnoreCase)) { $ok = $true; break }
+        }
+        if (-not $ok) { return $k }
+    }
+    return ''
+}
+
 function Import-HMReg {
-    param([hashtable]$Ctx, $Job, [string]$File, [string]$SourceSid, [string]$SourceProfile)
+    param([hashtable]$Ctx, $Job, [string]$File, [string]$SourceSid, [string]$SourceProfile, $Item)
     $text = Convert-HMRegText -Text (Read-HMRegFile $File) -TargetSid $Ctx.UserSid -SourceSid $SourceSid -SourceProfile $SourceProfile -TargetProfile $Ctx.ProfilePath
+    $ik = if ($Item) { "$($Item.Key)" } else { '' }
+    $bad = Get-HMRegScopeViolation -Text $text -TargetSid $Ctx.UserSid -ItemKey $ik -Legacy:([bool]($Ctx.Backup -and $Ctx.Backup.Legacy))
+    if ($bad) { return "FEHLER: .reg enthaelt Schluessel ausserhalb von $(if ($ik) { $ik } else { 'HKEY_USERS\' + $Ctx.UserSid }): $bad - nicht importiert" }
     $name = "HMimp_$([guid]::NewGuid().ToString('N')).reg"
     $env0 = Invoke-HMTarget $Ctx { $env:windir }
     $targetLocal = Join-Path $env0 "Temp\$name"
@@ -1538,7 +1586,16 @@ function Get-HMCloudFolderContent {
                 foreach ($i in (New-Object System.IO.DirectoryInfo $d).EnumerateFileSystemInfos()) {
                     $a = [int]$i.Attributes
                     $rel = if ($pre) { "$pre\$($i.Name)" } else { $i.Name }
-                    if ($a -band 0x10) { $stack.Push(@($i.FullName, ($lvl + 1), $rel)); continue }
+                    if ($a -band 0x10) {
+                        # Junction/symbolischer Link: nie folgen (wie Robocopy /XJ); andere Reparse-Ordner (OneDrive) normal durchlaufen.
+                        # LinkType nicht ermittelbar -> wie normaler Ordner weiter (Tiefe/Pfadlaenge oben begrenzt)
+                        if ($a -band 0x400) {
+                            $lt = ''
+                            try { $lt = "$((Get-Item -LiteralPath $i.FullName -Force -ErrorAction Stop).LinkType)" } catch { $lt = '' }
+                            if ($lt -in @('Junction', 'SymbolicLink')) { continue }
+                        }
+                        $stack.Push(@($i.FullName, ($lvl + 1), $rel)); continue
+                    }
                     if (($a -band 0x400000) -or ($a -band 0x40000) -or ($a -band 0x1000)) { $cloudN++; $cloudB += $i.Length; continue }
                     $files.Add(('{0}|{1}|{2}' -f $i.Length, $i.LastWriteTimeUtc.Ticks, $rel))
                 }
@@ -1879,7 +1936,10 @@ function Backup-HMFolderItem {
     $lockHint = $false
     if ($rc.FilesFailed -gt 0) {
         $fl = if (@($rc.FailedFiles).Count) { ': ' + (@($rc.FailedFiles | ForEach-Object { ConvertFrom-HMPath "$_" }) -join '; ') } else { '' }
-        if ($Ctx.LockedHint -and $st -ne 'Cancel' -and [int]$rc.ExitCode -lt 16) {
+        # nur Sperrfehler (32/33) und waehrend der Kopie verschwundene Dateien/Pfade (2/3, Browser raeumt Temp/Journal weg)
+        # gelten als "vom laufenden Programm gesperrt"; ohne erkannte Codes wie bisher
+        $onlyLocks = (@($rc.ErrorCodes).Count -eq 0) -or (@($rc.ErrorCodes | Where-Object { $_ -notin 2, 3, 32, 33 }).Count -eq 0)
+        if ($Ctx.LockedHint -and $onlyLocks -and $st -ne 'Cancel' -and [int]$rc.ExitCode -lt 16) {
             # Browser lief (Modul mit CloseDefault Copy): gesperrte Dateien nur als Hinweis
             $lockHint = $true
             $msg += ", Hinweis: $($rc.FilesFailed) Datei(en) vom laufenden Programm gesperrt und nicht gesichert (z.B. Cookies, Sitzung - fuer eine vollstaendige Sicherung das Programm vorher schliessen)$fl"
@@ -2432,6 +2492,10 @@ function Start-HMBackup {
             catch { Write-HMLog $Job "Backup-Ordner konnte nicht umbenannt werden ($($_.Exception.Message)) - alter Name bleibt" 'Warning' }
         }
         New-Item -ItemType Directory -Path $Ctx.BackupPath -Force | Out-Null
+        # Admin-Backup eines Benutzers: der Benutzer darf sein eigenes Backup lesen (BACKUPS ist sonst nur fuer den Ersteller lesbar)
+        if (-not $Ctx.UserMode -and "$($Ctx.UserSid)" -match '^S-1-5-21-' -and "$($Ctx.BackupPath)" -notlike '\\*') {
+            try { $null = & icacls.exe "$($Ctx.BackupPath)" /grant "*$($Ctx.UserSid):(OI)(CI)RX" /C /Q 2>&1 } catch { Write-HMLog $Job "Leserecht fuer den Benutzer nicht gesetzt: $($_.Exception.Message)" 'Debug' }
+        }
         $Job.LogFile = Join-Path $Ctx.BackupPath 'HUMig.log'
         $Ctx.RoboLog = Join-Path $Ctx.BackupPath 'Robocopy.log'
         try {
@@ -2725,6 +2789,95 @@ function Get-HMRestoreSource {
     return (Get-HMItemTargetPath $Ctx.Backup.Path $Module $Item)
 }
 
+# Zielpfad unter Windows, Programme, ProgramData oder dem Tool-Ordner? Rueckgabe: getroffener Ordner oder ''.
+# Ohne TEnv (z.B. Werkzeuge ohne Zielumgebung): Standardnamen auf jedem Laufwerk. Pfade mit . / .. / 8.3-Kurznamen /
+# \\?\ / Admin-Freigaben (C$) gelten ebenfalls als geschuetzt (sonst waere die Pruefung umgehbar).
+function Get-HMProtectedTargetRoot([string]$Path, [hashtable]$TEnv, [string]$AppRoot) {
+    $p = "$Path".Trim().TrimEnd('\')
+    if (-not $p) { return '' }
+    if ($p -match '^\\\\[?.]\\') { return $p }
+    if ($p -match '^\\\\[^\\]+\\[A-Za-z]\$(\\|$)') { return $p }
+    if ($p -match '(^|\\)\.{1,2}(\\|$)') { return $p }
+    # 8.3-Kurzname (z.B. PROGRA~1) koennte einen Systemordner verbergen -> wie Systemziel behandeln.
+    # Nur echte 8.3-Segmente (max. 6 Zeichen vor ~), "Version~2" o.ae. bleibt normal
+    foreach ($seg in $p.Split('\')) { if ($seg -match '^[^\\.~]{1,6}~\d{1,6}(\.[^\\.]{0,3})?$') { return $p } }
+    $roots = New-Object System.Collections.Generic.List[string]
+    if ($TEnv) { foreach ($k in 'WINDIR', 'PROGRAMFILES', 'PROGRAMFILESX86', 'PROGRAMDATA') { if ("$($TEnv[$k])".Trim()) { $roots.Add("$($TEnv[$k])".Trim().TrimEnd('\')) } } }
+    if ("$AppRoot".Trim()) { $roots.Add("$AppRoot".Trim().TrimEnd('\')) }
+    foreach ($r in $roots) {
+        if ($p -ieq $r -or $p.StartsWith($r + '\', [StringComparison]::OrdinalIgnoreCase)) { return $r }
+    }
+    if ($p -match '^([A-Za-z]:\\(Windows|Program Files|Program Files \(x86\)|ProgramData))(\\|$)') { return $Matches[1] }
+    return ''
+}
+
+# SIDs der direkten Mitglieder der lokalen Administratorgruppe (einmal je Sitzung ermittelt; Fehler -> leere Liste)
+function Get-HMLocalAdminSids {
+    if ($null -eq $script:HMLocalAdminSidCache) {
+        $l = @()
+        try { $l = @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop | ForEach-Object { "$($_.SID)" } | Where-Object { $_ }) } catch { $l = @() }
+        $script:HMLocalAdminSidCache = $l
+    }
+    return @($script:HMLocalAdminSidCache)
+}
+
+# Maschinen-Module, die Dateien aus dem Backup mit Administratorrechten verarbeiten (Aufgaben, Treiber, Drucker, ...):
+# Besitzer dieser Dateien pruefen. Vertrauenswuerdig: Administratoren, SYSTEM, TrustedInstaller, das aktuelle Konto und
+# direkte Mitglieder der lokalen Administratorgruppe. Zusaetzliche Ordner (ExtraFolders) werden nicht geprueft -
+# Systemziele werden dort ohnehin umgeleitet (Get-HMProtectedTargetRoot).
+# Rueckgabe: je betroffenem Modul Id, Name, Owner (Kontoname/SID), File. Ohne ACL (z.B. Linux) oder bei Fehlern: leere Liste.
+function Get-HMUntrustedBackupItems($BackupPath, $Modules) {
+    $out = New-Object System.Collections.Generic.List[object]
+    try {
+        if (-not "$BackupPath" -or -not (Test-Path -LiteralPath "$BackupPath")) { return @() }
+        $trusted = @('S-1-5-32-544', 'S-1-5-18', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+        try { $trusted += [Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { }
+        $trusted += @(Get-HMLocalAdminSids)
+        # Modul-Id -> Dateien/Ordner im Backup (neues Format und Vorgaengerversion)
+        $legacyOf = @{ Tasks = 'TASKSHEDULLER'; Fonts = 'FONTS'; Drivers = 'DRIVERS'; PrintersFull = 'PRINTERScomplete.printerExport' }
+        foreach ($m in @($Modules)) {
+            if (-not $m) { continue }
+            $id = if ($m -is [string]) { $m } else { "$($m.Id)" }
+            $mname = if ($m -is [string]) { $m } elseif ("$($m.Name)") { "$($m.Name)" } else { $id }
+            if ($id -notin @('Tasks', 'Fonts', 'Drivers', 'PrintersFull', 'Shares')) { continue }
+            $dir = Join-Path "$BackupPath" $id
+            $paths = New-Object System.Collections.Generic.List[string]
+            $addDir = {
+                param($d, [string]$filter, [switch]$Recurse)
+                if (-not (Test-Path -LiteralPath $d)) { return }
+                $paths.Add($d)
+                foreach ($f in @(Get-ChildItem -LiteralPath $d -Filter $filter -File -Recurse:$Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 500)) { $paths.Add($f.FullName) }
+            }
+            switch ($id) {
+                'Tasks'        { $paths.Add((Join-Path $dir 'tasks.json')); & $addDir $dir '*.xml' }
+                'Fonts'        { $paths.Add((Join-Path $dir 'fonts.json')); & $addDir (Join-Path $dir 'FONTS') '*' }
+                'Drivers'      { & $addDir (Join-Path $dir 'DRIVERS') '*.inf' -Recurse }
+                'PrintersFull' { $paths.Add((Join-Path $dir 'Printers.printerExport')) }
+                'Shares'       { $paths.Add((Join-Path $dir 'shares.json')) }
+            }
+            $lg = $legacyOf[$id]
+            if ($lg) {
+                $lp = Join-Path "$BackupPath" $lg
+                if ($id -eq 'PrintersFull') { $paths.Add($lp) }
+                elseif ($id -eq 'Tasks') { & $addDir $lp '*.xml' }
+                elseif ($id -eq 'Drivers') { & $addDir $lp '*.inf' -Recurse }
+                else { & $addDir $lp '*' }
+            }
+            foreach ($p in @($paths | Select-Object -Unique)) {
+                if (-not (Test-Path -LiteralPath $p)) { continue }
+                $sid = ''
+                try { $sid = (Get-Acl -LiteralPath $p -ErrorAction Stop).GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { continue }
+                if (-not $sid -or $trusted -contains $sid) { continue }
+                $who = $sid
+                try { $who = (New-Object Security.Principal.SecurityIdentifier($sid)).Translate([Security.Principal.NTAccount]).Value } catch { }
+                $out.Add([pscustomobject]@{ Id = $id; Name = $mname; Owner = $who; File = $p })
+                break
+            }
+        }
+    } catch { return @() }
+    return $out.ToArray()
+}
+
 function Restore-HMFolderItem {
     param([hashtable]$Ctx, $Job, $Module, $Item, [hashtable]$TEnv, [string]$SourceOverride, [string]$DestOverride)
     $src = if ($SourceOverride) { $SourceOverride } else { Get-HMRestoreSource $Ctx $Module $Item }
@@ -2805,7 +2958,7 @@ function Restore-HMRegItem {
     if (-not $src -or -not (Test-Path -LiteralPath $src)) { return [pscustomobject]@{ Name = $Item.Name; Status = 'Skip'; Msg = 'nicht im Backup' } }
     $isUser = $Item.Key -match '^HK(CU|EY_CURRENT_USER)'
     if ($isUser -and -not $Ctx.HiveReady) { return [pscustomobject]@{ Name = $Item.Name; Status = 'Error'; Msg = 'Benutzer-Registry am Ziel nicht verfuegbar' } }
-    $r = Import-HMReg $Ctx $Job $src $Ctx.Backup.Sid $Ctx.Backup.ProfilePath
+    $r = Import-HMReg $Ctx $Job $src $Ctx.Backup.Sid $Ctx.Backup.ProfilePath $Item
     if ($r -eq 'OK') { return [pscustomobject]@{ Name = $Item.Name; Status = 'OK'; Msg = 'Registry importiert' } }
     return [pscustomobject]@{ Name = $Item.Name; Status = 'Error'; Msg = $r }
 }
@@ -2832,7 +2985,7 @@ function Register-HMLogonTask {
     $runId = [guid]::NewGuid().ToString('N')
     $body = "`$ErrorActionPreference = 'Continue'`r`n`$marker = Join-Path `$env:LOCALAPPDATA 'HUMig_FirstLogon_$runId.done'`r`nif (Test-Path -LiteralPath `$marker) { Remove-Item -LiteralPath `$MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue; return }`r`nSet-Content -LiteralPath `$marker -Value (Get-Date) -ErrorAction SilentlyContinue`r`n`$log = Join-Path `$env:TEMP 'HUMig_FirstLogon.log'`r`nStart-Transcript -Path `$log -Append | Out-Null`r`n" +
         ($Ctx.LogonActions -join "`r`n") +
-        "`r`nStop-Transcript | Out-Null`r`nUnregister-ScheduledTask -TaskName '$name' -Confirm:`$false -ErrorAction SilentlyContinue`r`nRemove-Item -LiteralPath `$MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue"
+        "`r`nStop-Transcript | Out-Null`r`nUnregister-ScheduledTask -TaskName '$($name -replace "'", "''")' -Confirm:`$false -ErrorAction SilentlyContinue`r`nRemove-Item -LiteralPath `$MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue"
     try {
     $r = Invoke-HMTargetProtected $Ctx {
         param($n, $acct, $code, $rid)
@@ -2908,6 +3061,18 @@ function Restore-HMBuiltin {
                 elseif ($usersRoot -and (& $under $dest $usersRoot) -and -not (& $under $dest $Ctx.ProfilePath)) {
                     $dest = Join-Path $Ctx.ProfilePath (Join-Path 'Zusaetzliche Ordner' $leaf)
                     $note = " (Originalpfad $($e.Path) liegt im Profil eines anderen Benutzers - stattdessen hierher)"
+                }
+                # Windows, Programme, ProgramData, Tool-Ordner: nie dorthin (Restore laeuft mit Adminrechten) -> ins Profil des Zielbenutzers
+                $pr = Get-HMProtectedTargetRoot $dest $TEnv $(if (-not $Ctx.IsRemote) { "$($Ctx.ToolRoot)" } else { '' })
+                if ($pr) {
+                    if (-not $Ctx.ProfilePath) {
+                        $lines += "$($e.Path) - nicht zurueckgeschrieben: Ziel liegt in einem Systemordner ($pr) und der Zielbenutzer hat kein Profil. Die Daten liegen im Backup: $($e.Src)"
+                        if ($worst -eq 'OK') { $worst = 'Warning' }
+                        continue
+                    }
+                    $lf = if ($leaf -and $leaf -notmatch '^\.+$' -and $leaf -notmatch '[:\\]') { $leaf } else { 'Ordner' }
+                    $dest = Join-Path $Ctx.ProfilePath (Join-Path 'Zusaetzliche Ordner' $lf)
+                    $note = " (Originalpfad $($e.Path) liegt in einem Systemordner ($pr) - aus Sicherheitsgruenden stattdessen hierher; bei Bedarf von Hand verschieben)"
                 }
                 # liegt im OneDrive-/SharePoint-Ordner des Zielbenutzers -> eigener Ordner, sonst wuerden neuere Cloud-Versionen ueberschrieben
                 $hitRoot = @($tRoots | Where-Object { & $under $dest $_ })[0]
@@ -3183,6 +3348,69 @@ function Invoke-HMPostRestore {
 # Nach dem Restore: Besitzer der wiederhergestellten Ordner im Profil auf den Zielbenutzer setzen (kopiert hat der Administrator -
 # Besitzer waere sonst 'Administratoren'; stoert z.B. SSH StrictModes, manche Browser-Profile, Lizenzpruefungen). Rechte (ACL) bleiben
 # unveraendert - kein pauschales Grant. Danach Schreibprobe ueber die ACL: Desktop, AppData\Roaming, ein wiederhergestellter Programm-Ordner.
+# Links (Junction/symbolische Verknuepfung) unter $Root, deren Ziel ausserhalb von $Root liegt (icacls /T folgt Junctions).
+# Links selbst werden nicht durchlaufen; andere Reparse-Ordner (OneDrive) schon. Eigenstaendig (wird auch am Ziel-PC
+# per Definition ausgefuehrt). Rueckgabe: "<link> -> <ziel>" (hoechstens $Max).
+# $Bound (optional): zusaetzlich erlaubte Grenze (z.B. Profilordner) - Links mit Ziel innerhalb $Root oder der Grenze sind ok;
+# liegt das Ziel ausserhalb von $Root, wird es mit durchsucht, da icacls /T ihnen folgt.
+function Find-HMOutsideLinks {
+    param([string]$Root, [int]$Max = 20, [string]$Bound = '')
+    $hits = New-Object System.Collections.Generic.List[string]
+    if (-not $Root) { return @() }
+    $isIn = {
+        param([string]$p, [string]$r)
+        $p = $p.TrimEnd('\', '/'); $r = $r.TrimEnd('\', '/')
+        return ($p -ieq $r -or $p.StartsWith($r + '\', [StringComparison]::OrdinalIgnoreCase) -or $p.StartsWith($r + '/', [StringComparison]::OrdinalIgnoreCase))
+    }
+    $linkTarget = {
+        param([string]$p)
+        $it = Get-Item -LiteralPath $p -Force -ErrorAction Stop
+        if ("$($it.LinkType)" -notin @('Junction', 'SymbolicLink')) { return $null }
+        $t = "$(@($it.Target)[0])"
+        if ($t.StartsWith('\??\')) { $t = $t.Substring(4) }
+        if (-not $t) { return '?' }
+        if ($t -match '^(Volume\{|\\\\\?\\)') { return $t }   # Laufwerks-Bereitstellungspunkt: immer ausserhalb
+        try {
+            if (-not [System.IO.Path]::IsPathRooted($t)) { $t = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($p.TrimEnd('\', '/')), $t) }
+            $t = [System.IO.Path]::GetFullPath($t)
+        } catch { }
+        return $t
+    }
+    try { $rootFull = [System.IO.Path]::GetFullPath($Root) } catch { $rootFull = $Root }
+    $boundFull = ''
+    if ("$Bound".Trim()) { try { $boundFull = [System.IO.Path]::GetFullPath($Bound) } catch { $boundFull = $Bound } }
+    $stack = New-Object System.Collections.Generic.Stack[string]
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    # Wurzel selbst ein Link? (Ziel innerhalb der Grenze: Ziel durchsuchen)
+    try {
+        $t0 = & $linkTarget $Root
+        if ($null -ne $t0) {
+            if (-not $boundFull -or -not (& $isIn $t0 $boundFull)) { $hits.Add("$Root -> $t0"); return $hits.ToArray() }
+            $rootFull = $t0
+        }
+    } catch { }
+    [void]$seen.Add($rootFull.TrimEnd('\', '/'))
+    $stack.Push($Root)
+    while ($stack.Count -gt 0 -and $hits.Count -lt $Max) {
+        $d = $stack.Pop()
+        $subs = @()
+        try { $subs = [System.IO.Directory]::GetDirectories($d) } catch { continue }
+        foreach ($s in $subs) {
+            $attr = 0
+            try { $attr = [int][System.IO.File]::GetAttributes($s) } catch { continue }
+            if (($attr -band 0x400) -eq 0) { $stack.Push($s); continue }
+            $t = $null
+            try { $t = & $linkTarget $s } catch { $hits.Add("$s -> ? ($($_.Exception.Message))"); if ($hits.Count -ge $Max) { break }; continue }
+            if ($null -eq $t) { $stack.Push($s); continue }   # Reparse ohne Link (z.B. OneDrive): weiter durchlaufen
+            if (& $isIn $t $rootFull) { continue }
+            if (-not $boundFull -or -not (& $isIn $t $boundFull)) { $hits.Add("$s -> $t"); if ($hits.Count -ge $Max) { break }; continue }
+            # Ziel innerhalb der Grenze, aber ausserhalb von $Root: dort ebenfalls suchen (je Ziel nur einmal, keine Schleifen)
+            if ($seen.Add($t.TrimEnd('\', '/'))) { $stack.Push($t) }
+        }
+    }
+    return $hits.ToArray()
+}
+
 function Repair-HMRestoredOwner([hashtable]$Ctx, $Job, [hashtable]$TEnv) {
     if ($Ctx.UserMode -or -not $Ctx.UserSid -or $null -eq $Ctx.RestoredUserDirs -or -not $Ctx.RestoredUserDirs.Count) { return }
     $dirs = @($Ctx.RestoredUserDirs | Select-Object -Unique | Sort-Object Length)
@@ -3192,11 +3420,18 @@ function Repair-HMRestoredOwner([hashtable]$Ctx, $Job, [hashtable]$TEnv) {
     $probe = @((Join-Path $Ctx.ProfilePath 'Desktop'), "$($TEnv.APPDATA)") + $app | Where-Object { $_ } | Select-Object -Unique
     Write-HMLog $Job "Besitzer der wiederhergestellten Profil-Ordner auf $($Ctx.Account) setzen ($($top.Count) Ordner) ..." 'Info'
     $r = Invoke-HMTarget $Ctx {
-        param($dirs, $sid, $acct, $probe)
+        param($dirs, $sid, $acct, $probe, $linkDef, $prof)
         $who = if ("$acct".Trim()) { "$acct" } else { "*$sid" }
         $ok = 0; $bad = @()
+        $findLinks = $null; try { $findLinks = [scriptblock]::Create($linkDef) } catch { }
         foreach ($d in @($dirs)) {
             if (-not (Test-Path -LiteralPath $d)) { continue }
+            # icacls /T folgt Junctions: Ordner mit Link nach ausserhalb nicht anfassen
+            if ($findLinks) {
+                # Grenze = Profilordner: Links innerhalb des Profils (z.B. Documents\My Music -> Music) sind ok
+                $lk = @(); try { $lk = @(& $findLinks $d 5 "$prof") } catch { }
+                if ($lk.Count) { foreach ($x in $lk) { "OWNSKIP|Link nach ausserhalb ($x) - Besitzer nicht gesetzt: $d" }; continue }
+            }
             $o = & icacls.exe "$d" /setowner "$who" /T /C /Q 2>&1
             if ($LASTEXITCODE -eq 0) { $ok++ } else { $bad += "${d}: $(@($o | Where-Object { "$_".Trim() }) | Select-Object -First 2)" }
         }
@@ -3219,13 +3454,14 @@ function Repair-HMRestoredOwner([hashtable]$Ctx, $Job, [hashtable]$TEnv) {
             } catch { "PROBE|$p|nicht lesbar: $($_.Exception.Message)"; continue }
             "PROBE|$p|$(if ($allow -and -not $deny) { 'ja' } else { 'NEIN' })|$(if ($owner -eq $sid) { 'Besitzer ok' } else { 'Besitzer: ' + $a.Owner })"
         }
-    } @($top.ToArray(), $Ctx.UserSid, "$($Ctx.Account)", $probe)
+    } @($top.ToArray(), $Ctx.UserSid, "$($Ctx.Account)", $probe, "${function:Find-HMOutsideLinks}", "$($Ctx.ProfilePath)")
     $warn = $false
     foreach ($l in @($r | Where-Object { $_ })) {
         $x = "$l".Split('|')
         switch ($x[0]) {
             'OWN' { Write-HMLog $Job "   Besitzer gesetzt: $($x[1]) von $($x[2]) Ordner(n) (Rechte unveraendert)" $(if ([int]$x[1] -lt [int]$x[2]) { 'Warning' } else { 'Success' }) }
             'OWNERR' { $warn = $true; Write-HMLog $Job "   Besitzer nicht gesetzt: $($x[1..($x.Count - 1)] -join '|')" 'Warning' }
+            'OWNSKIP' { $warn = $true; Write-HMLog $Job "   $($x[1..($x.Count - 1)] -join '|')" 'Warning' }
             'PROBE' {
                 if ($x[2] -eq 'fehlt') { Write-HMLog $Job "   Schreibprobe $(ConvertFrom-HMPath $x[1]): Ordner fehlt" 'Debug'; break }
                 if ($x[2] -eq 'NEIN') { $warn = $true }
@@ -3293,6 +3529,15 @@ function Start-HMRestore {
             if (Test-HMCancel $Job) { break }
             Write-HMLog $Job $mod.Name 'Info'
             $Job.Status = $mod.Name
+            # Backup nicht von einem Administrator angelegt und Uebernahme nicht bestaetigt -> Modul mit Adminrechten auslassen
+            if (@($Ctx.SkipUntrustedMachine) -contains "$($mod.Id)") {
+                $sm = 'ausgelassen: Backup wurde nicht von einem Administrator angelegt (Uebernahme nicht bestaetigt)'
+                Write-HMLog $Job "   $sm" 'Warning'
+                $results += [pscustomobject]@{ Id = $mod.Id; Name = $mod.Name; Status = 'Warning'; Items = @([pscustomobject]@{ Name = 'Hinweis'; Status = 'Warning'; Msg = $sm }); Process = $null; Service = $null }
+                $done += @($mod.Items).Count
+                $Job.Progress = [int](100 * $done / $total)
+                continue
+            }
             $worst = 'OK'
             $itemLog = @()
             $pre = Enter-HMModule $Ctx $Job $mod $tenv 'Restore'

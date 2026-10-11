@@ -515,8 +515,13 @@ function Restore-HMSearchHitsToOrigin($Rows, $Backup, $Win) {
         $plan += [pscustomobject]@{ Src = (Join-Path $Backup.Path "$($x.Pfad)"); Dst = $o }
     }
     if (-not $plan.Count) { [void][System.Windows.MessageBox]::Show($Win, 'Fuer die markierten Dateien ist kein Originalort bekannt (z. B. Registry-Export oder Backup der Vorgaengerversion). "Markierte kopieren nach ..." verwenden.', 'An Originalort zurueck', 'OK', 'Information'); return }
-    $list = (@($plan | Select-Object -First 12 | ForEach-Object { $_.Dst }) -join "`n") + $(if ($plan.Count -gt 12) { "`n..." } else { '' })
-    $q = "$($plan.Count) Datei(en) an den Originalort auf $comp zurueckkopieren?`n`n$list`n`nVorhandene Dateien werden NICHT ueberschrieben - dann entsteht '<Name> (wiederhergestellt $(Get-Date -Format 'yyyy-MM-dd'))'.$(if ($noMap) { "`n$noMap Datei(en) ohne bekannten Originalort werden ausgelassen." })"
+    # Ziele unter Windows/Programme/ProgramData kennzeichnen (Kopie laeuft mit Adminrechten)
+    $sysHits = @($plan | Where-Object { Get-HMProtectedTargetRoot $_.Dst $null '' })
+    $sysFirst = @($sysHits | Select-Object -First 12)
+    $show = @($sysFirst) + @($plan | Where-Object { $sysHits -notcontains $_ } | Select-Object -First ([Math]::Max(0, 12 - $sysFirst.Count)))
+    $list = (@($show | ForEach-Object { if ($sysHits -contains $_) { "ACHTUNG Systemordner: $($_.Dst)" } else { $_.Dst } }) -join "`n") + $(if ($plan.Count -gt 12) { "`n..." } else { '' })
+    $sysTxt = if ($sysHits.Count) { "ACHTUNG: $($sysHits.Count) Datei(en) liegen unter Windows, Programme oder ProgramData - nur zurueckkopieren, wenn du dem Backup vertraust.`n`n" } else { '' }
+    $q = "$sysTxt$($plan.Count) Datei(en) an den Originalort auf $comp zurueckkopieren?`n`n$list`n`nVorhandene Dateien werden NICHT ueberschrieben - dann entsteht '<Name> (wiederhergestellt $(Get-Date -Format 'yyyy-MM-dd'))'.$(if ($noMap) { "`n$noMap Datei(en) ohne bekannten Originalort werden ausgelassen." })"
     if ("$([System.Windows.MessageBox]::Show($Win, $q, 'An Originalort zurueck', 'YesNo', 'Question'))" -ne 'Yes') { return }
     $ok = 0; $bad = 0; $ren = 0
     foreach ($p in $plan) {

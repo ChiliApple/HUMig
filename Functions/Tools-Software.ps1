@@ -205,13 +205,18 @@ $script:RS_SwInstall = {
         $dirEsc = $Dir.TrimEnd('\')
         function Get-HUPkgProcs { @(Get-CimInstance Win32_Process | Where-Object { ("$($_.ExecutablePath)" -like "$dirEsc\*") -or ("$($_.CommandLine)" -like "*$dirEsc\*") }) }
         # Windows Installer belegt: Mutex existiert UND ist gehalten
+        # Freigeben braucht das Recht Modify - ohne Freigabe bliebe der Mutex belegt und blockierte msiexec.
+        # Modify verweigert: Zustand unbekannt -> "nicht belegt" (nie WaitOne ohne moegliche Freigabe)
         function Test-HUMsiBusy {
-            $m = $null
+            $m = $null; $own = $false
             try {
-                if (-not [System.Threading.Mutex]::TryOpenExisting('Global\_MSIExecute', [System.Security.AccessControl.MutexRights]::Synchronize, [ref]$m)) { return $false }
-                try { if ($m.WaitOne(0)) { $m.ReleaseMutex(); return $false } else { return $true } }
-                catch [System.Threading.AbandonedMutexException] { return $false }
-            } catch { return $false } finally { if ($m) { $m.Dispose() } }
+                $ok = $false
+                try { $ok = [System.Threading.Mutex]::TryOpenExisting('Global\_MSIExecute', [System.Security.AccessControl.MutexRights]'Synchronize, Modify', [ref]$m) }
+                catch [System.UnauthorizedAccessException] { $m = $null; return $false }
+                if (-not $ok) { return $false }
+                try { if ($m.WaitOne(0)) { $own = $true; return $false } else { return $true } }
+                catch [System.Threading.AbandonedMutexException] { $own = $true; return $false }
+            } catch { return $false } finally { if ($m) { if ($own) { try { $m.ReleaseMutex() } catch { } }; $m.Dispose() } }
         }
         $sw = [Diagnostics.Stopwatch]::StartNew()
         $proc = [System.Diagnostics.Process]::Start($psi)
@@ -249,7 +254,7 @@ $script:RS_SwInstall = {
 }
 # Worker je PC: eigener PC direkt, andere per PSSession
 $script:SwWorkerText = @'
-param($h, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $sizeMB, $timeoutMin)
+param($h, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $sizeMB, $timeoutMin, $cred)
 $isLocal = ($h -eq '.' -or $h -eq 'localhost' -or $h -ieq $env:COMPUTERNAME -or $h -ilike "$($env:COMPUTERNAME).*")
 $s = $null; $remote = ''; $done = $false
 try {
@@ -257,7 +262,9 @@ try {
         $prep = "$(& ([scriptblock]::Create($prepText)))".Trim()
     } else {
         $opt = New-PSSessionOption -OpenTimeout 15000 -OperationTimeout ([int](($timeoutMin + 10) * 60000))
-        $s = New-PSSession -ComputerName $h -SessionOption $opt -ErrorAction Stop
+        # zuerst mit dem eigenen Konto, nur bei Fehler mit den hinterlegten Remote-Anmeldedaten
+        try { $s = New-PSSession -ComputerName $h -SessionOption $opt -ErrorAction Stop }
+        catch { if (-not $cred) { throw }; $s = New-PSSession -ComputerName $h -SessionOption $opt -Credential $cred -ErrorAction Stop }
         $prep = "$(Invoke-Command -Session $s -ErrorAction Stop -ScriptBlock ([scriptblock]::Create($prepText)))".Trim()
     }
     if ($prep -notmatch '^READY\|([^|]+)\|(\d*)$') { return "RES:$h|FEHLER|Vorbereitung: $prep" }
@@ -295,12 +302,12 @@ function Start-SoftwareDeploy {
     $tmo = [int]$s.TimeoutMin; if ($tmo -lt 1) { $tmo = 30 }
     $jobSec = [int][Math]::Max(1800, ([Math]::Ceiling($Hosts.Count / 8.0) * (($tmo + 15) * 60 + [double]$Package.SizeMB)))
     Invoke-AsyncCommand -ScriptBlock {
-        param($hostStr, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $workerText, $sizeMB, $timeoutMin, $deadlineSec)
+        param($hostStr, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $workerText, $sizeMB, $timeoutMin, $deadlineSec, $cred)
         $list = @($hostStr -split '\|' | Where-Object { $_ })
         $deadline = (Get-Date).AddSeconds($deadlineSec)
         $pool = [runspacefactory]::CreateRunspacePool(1, 8); $pool.Open()
         $jobs = foreach ($h in $list) {
-            $ps = [PowerShell]::Create().AddScript($workerText).AddArgument($h).AddArgument($src).AddArgument($isDir).AddArgument($pkgJson).AddArgument($force).AddArgument($prepText).AddArgument($instText).AddArgument($cleanText).AddArgument($sizeMB).AddArgument($timeoutMin)
+            $ps = [PowerShell]::Create().AddScript($workerText).AddArgument($h).AddArgument($src).AddArgument($isDir).AddArgument($pkgJson).AddArgument($force).AddArgument($prepText).AddArgument($instText).AddArgument($cleanText).AddArgument($sizeMB).AddArgument($timeoutMin).AddArgument($cred)
             $ps.RunspacePool = $pool
             [pscustomobject]@{ PS = $ps; Handle = $ps.BeginInvoke(); Host = $h }
         }
@@ -320,7 +327,7 @@ function Start-SoftwareDeploy {
         }
         if ($stuck -eq 0) { try { $pool.Close(); $pool.Dispose() } catch { } }
         $out -join "`n"
-    } -ArgumentList @(($Hosts -join '|'), $Package.SrcPath, [bool]$Package.IsDir, $pkgJson, $Force, $script:RS_SwPrep.ToString(), $script:RS_SwInstall.ToString(), $script:RS_SwCleanup.ToString(), $script:SwWorkerText, [double]$Package.SizeMB, $tmo, ($jobSec - 60)) `
+    } -ArgumentList @(($Hosts -join '|'), $Package.SrcPath, [bool]$Package.IsDir, $pkgJson, $Force, $script:RS_SwPrep.ToString(), $script:RS_SwInstall.ToString(), $script:RS_SwCleanup.ToString(), $script:SwWorkerText, [double]$Package.SizeMB, $tmo, ($jobSec - 60), $script:RemoteCred) `
       -TimeoutSec $jobSec -State @{ Name = "$($s.Name)"; Hosts = $Hosts; Package = $Package; Force = $Force } -OnComplete {
         param($result, $st)
         $r = "$result".Trim()

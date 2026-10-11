@@ -151,6 +151,217 @@ try {
 $script:SplashShown = Get-Date
 
 # ============================================================================
+# ORDNERRECHTE DES PROGRAMMORDNERS - VOR dem Laden der Funktionen
+# ============================================================================
+# HUMig laeuft als Administrator. Wer im Programmordner Dateien anlegen/aendern kann (z.B. Functions\*.ps1 oder
+# Config\settings.json mit Nach-Skript), koennte Code mit Administratorrechten ausfuehren lassen. Darum wird geprueft,
+# BEVOR Code aus dem Ordner geladen wird - nur mit eingebauten Befehlen (Bereich HMAppAcl, identisch in Pull.ps1).
+#region HMAppAcl
+# Ordnerrechte des Programmordners - identisch in HUMig.ps1 und Pull.ps1 (die automatischen Tests pruefen das)
+# Darf jemand ausser Administratoren/SYSTEM/TrustedInstaller/Ersteller-Besitzer hier schreiben oder anlegen?
+# Rueckgabe: '' = sicher, sonst Text (Konto: Recht). Gleiche Regeln wie Get-HMWritableByNonAdmins (Migration-Engine).
+# Mitglieder der lokalen Gruppe Administratoren (SIDs) - einmal je Lauf abgefragt (auch ein Fehler wird gemerkt:
+# dann zaehlt ein einzelnes Konto wie bisher als Nicht-Administrator und wird gemeldet)
+function Get-HMAppAdminSids {
+    if ($null -eq $script:HMAppAdmSids) {
+        $c = @{ Ok = $false; M = @() }
+        try { $c = @{ Ok = $true; M = @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop | ForEach-Object { "$($_.SID)" }) } } catch { }
+        $script:HMAppAdmSids = $c
+    }
+    return @($script:HMAppAdmSids.M)
+}
+function Get-HMAppWritable([string]$Path) {
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $safe = @('S-1-5-18', 'S-1-5-32-544', 'S-1-3-0', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $w = [System.Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteExtendedAttributes, WriteAttributes, Delete, ChangePermissions, TakeOwnership'
+    $out = @()
+    foreach ($r in @($acl.Access)) {
+        if ("$($r.AccessControlType)" -ne 'Allow') { continue }
+        if (([int]$r.FileSystemRights -band [int]$w) -eq 0) { continue }
+        $sid = ''
+        try { $sid = $r.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $sid = "$($r.IdentityReference)" }
+        if ($safe -contains $sid) { continue }
+        # einzelnes Konto, das selbst Administrator ist (z.B. der Installierende), ist unkritisch
+        try { $nt = $r.IdentityReference.Translate([System.Security.Principal.NTAccount]).Value } catch { $nt = "$($r.IdentityReference)" }
+        if ($sid -like 'S-1-5-21-*' -and $sid -notmatch '-(513|515|545)$') {
+            if (@(Get-HMAppAdminSids) -contains $sid) { continue }
+        }
+        $out += "$nt`: $($r.FileSystemRights)"
+    }
+    return (@($out | Select-Object -Unique) -join '; ')
+}
+# Wurzel und die Ordner, deren Inhalt HUMig als Administrator laedt/liest/startet (Config, Functions, XAML, BIN, Tools).
+# Logs und Backup-Ordner sind absichtlich fuer den Benutzer-Modus beschreibbar und werden nicht geprueft.
+# Rueckgabe: '' = sicher, sonst je Ordner eine Zeile "<Ordner>: <Konto: Recht>". Wurzel nicht lesbar (z.B. FAT/exFAT): Fehler.
+function Get-HMAppAclFindings([string]$Root) {
+    $rt = $Root.TrimEnd('\')
+    $out = @()
+    $w = Get-HMAppWritable $rt
+    if ($w) { $out += "${rt}: $w" }
+    foreach ($nm in @('Config', 'Functions', 'XAML', 'BIN', 'Tools')) {
+        $p = Join-Path $rt $nm
+        if (-not (Test-Path -LiteralPath $p -PathType Container)) { continue }
+        $w = ''
+        try { $w = Get-HMAppWritable $p } catch { $w = "Rechte nicht lesbar ($($_.Exception.Message))" }
+        if ($w) { $out += "${p}: $w" }
+    }
+    return ($out -join "`n")
+}
+# "AclCheckOff" in Config\settings.json (nie mehr fragen) gilt nur, wenn die Datei Administratoren, SYSTEM oder dem
+# angemeldeten Konto gehoert UND Nicht-Administratoren sie nicht aendern duerfen - sonst koennte jemand, der dort schreiben
+# kann, die Pruefung selbst abschalten
+function Test-HMAclCheckOff([string]$ConfigDir) {
+    $f = Join-Path $ConfigDir 'settings.json'
+    try {
+        if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { return $false }
+        $own = "$((Get-Acl -LiteralPath $f -ErrorAction Stop).GetOwner([System.Security.Principal.SecurityIdentifier]).Value)"
+        $me = ''
+        try { $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { }
+        if (-not $own -or @(@('S-1-5-32-544', 'S-1-5-18', $me) | Where-Object { $_ }) -notcontains $own) { return $false }
+        if (Get-HMAppWritable $f) { return $false }
+        $j = Get-Content -LiteralPath $f -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+        return [bool]($j -and $j.PSObject.Properties['AclCheckOff'] -and [bool]$j.AclCheckOff)
+    } catch { return $false }
+}
+# Backup-Ordner laut Einstellungen (wie Get-BackupRoot: settings.json ueber settings.default.json, aktives Standort-Profil)
+function Get-HMAppBackupRoot([string]$Root) {
+    $br = ''; $ap = ''; $pr = @()
+    foreach ($nm in @('settings.default.json', 'settings.json')) {
+        $f = Join-Path $Root "Config\$nm"
+        if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { continue }
+        try {
+            $j = Get-Content -LiteralPath $f -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+            if (-not $j) { continue }
+            if ($j.PSObject.Properties['BackupRoot'] -and $null -ne $j.BackupRoot) { $br = "$($j.BackupRoot)".Trim() }
+            if ($j.PSObject.Properties['ActiveProfile'] -and $null -ne $j.ActiveProfile) { $ap = "$($j.ActiveProfile)".Trim() }
+            if ($j.PSObject.Properties['Profiles'] -and $null -ne $j.Profiles) { $pr = @($j.Profiles) }
+        } catch { }
+    }
+    if ($ap) {
+        $p = @($pr | Where-Object { $_ -and "$($_.Name)" -eq $ap })[0]
+        if ($p -and "$($p.BackupRoot)".Trim()) { $br = "$($p.BackupRoot)".Trim() }
+    }
+    if (-not $br) { $br = Join-Path $Root 'BACKUPS' }
+    return $br
+}
+# Backup-Ordner schon "privat"? (Vererbung aus, Benutzer-Gruppen ohne vererbbare Rechte = sehen fremde Backups nicht)
+function Test-HMAppBackupPrivate([string]$Dir) {
+    try {
+        $a = Get-Acl -LiteralPath $Dir -ErrorAction Stop
+        if (-not $a.AreAccessRulesProtected) { return $false }
+        foreach ($r in @($a.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) {
+            if ("$($r.AccessControlType)" -ne 'Allow') { continue }
+            if (@('S-1-5-32-545', 'S-1-1-0', 'S-1-5-11', 'S-1-5-4') -contains $r.IdentityReference.Value -and "$($r.InheritanceFlags)" -ne 'None') { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+# Absichern: Wurzel Vererbung aus, Administratoren + SYSTEM Vollzugriff, Benutzer Lesen. Code/Einstellungen: nur geerbte Rechte,
+# Besitzer Administratoren (ein anderer Besitzer koennte die Rechte selbst wieder aendern).
+# Daten-Ordner: Logs (Benutzer legen eigene Dateien an) und Backup-Ordner im Programmordner (Benutzer legen eigene
+# Backup-Ordner an und lesen nur diese, Administratoren alle). $BackupDirs: eingestellte Backup-Ordner (werden angelegt).
+# -BackupsOnly: nur Schritt 4 (Backup-Ordner privat), Wurzel/Code/Logs bleiben unveraendert (Pull.ps1 nach dem Update).
+# Rueckgabe: Meldungen (Text, Level). Wurzel nicht aenderbar: Fehler.
+function Protect-HMAppFolder([string]$Root, [string[]]$BackupDirs = @(), [switch]$BackupsOnly) {
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    $rt = [System.IO.Path]::GetFullPath($Root).TrimEnd($sep)
+    $pre = $rt + $sep
+    $msgs = New-Object System.Collections.Generic.List[object]
+    $code = @('Config', 'Functions', 'XAML', 'Tools', 'Assets', 'BIN', 'Docs')
+    $logs = Join-Path $rt 'Logs'
+    # Backup-Ordner: nur innerhalb des Programmordners und nie ein Code-Ordner (Schutz vor manipulierten Einstellungen)
+    $bk = New-Object System.Collections.Generic.List[object]
+    foreach ($d in @(@($BackupDirs | ForEach-Object { @{ P = "$_"; New = $true } }) + @(@{ P = (Join-Path $rt 'BACKUPS'); New = $false }))) {
+        $x = "$($d.P)".Trim()
+        if (-not $x) { continue }
+        try { $x = [System.IO.Path]::GetFullPath($x).TrimEnd($sep) } catch { continue }
+        if (-not $x.StartsWith($pre, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $top = $x.Substring($pre.Length).Split($sep)[0]
+        if ($code -contains $top -or $top -ieq 'Logs') { continue }
+        if (@($bk | Where-Object { $_.P -ieq $x }).Count) { continue }
+        $bk.Add(@{ P = $x; New = $d.New; Top = $top })
+    }
+    if (-not $BackupsOnly) {
+        # 1. Wurzel: Vererbung aus, Administratoren + SYSTEM Vollzugriff, Benutzer Lesen/Ausfuehren, Besitzer Administratoren
+        $o1 = & icacls.exe "$rt" /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "icacls: $($o1 -join ' ')" }
+        $o1 = & icacls.exe "$rt" /setowner '*S-1-5-32-544' /C /Q 2>&1
+        if ($LASTEXITCODE -ne 0) { $msgs.Add([pscustomobject]@{ Text = "Besitzer ${rt}: $(@($o1) -join ' ')"; Level = 'Warning' }) }
+        # 2. Code und Einstellungen: nur noch die geerbten Rechte (entfernt auch Rechte auf Dateien, die Benutzer angelegt haben),
+        #    Besitzer Administratoren. Daten-Ordner werden ausgelassen (grosse Backup-Ordner wuerden sonst lange dauern, kein Code).
+        $skip = @(@($bk | ForEach-Object { $_.P.ToLower() }) + $logs.ToLower())
+        $nested = @($bk | Where-Object { $_.P -ine (Join-Path $rt $_.Top) } | ForEach-Object { $_.Top.ToLower() })
+        foreach ($c in @(Get-ChildItem -LiteralPath $rt -Force -ErrorAction SilentlyContinue)) {
+            if ($skip -contains $c.FullName.TrimEnd($sep).ToLower()) { continue }
+            $o2 = if ($c.PSIsContainer) { & icacls.exe "$($c.FullName)" /reset /T /C /Q 2>&1 } else { & icacls.exe "$($c.FullName)" /reset /C /Q 2>&1 }
+            if ($LASTEXITCODE -ne 0) { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte $($c.Name): $(@($o2) -join ' ')"; Level = 'Warning' }) }
+            # Ordner mit einem Backup-Ordner darin: Besitzer nicht aendern (Benutzer-Backups behalten ihren Besitzer)
+            if ($nested -contains $c.Name.ToLower()) { continue }
+            $o3 = if ($c.PSIsContainer) { & icacls.exe "$($c.FullName)" /setowner '*S-1-5-32-544' /T /C /Q 2>&1 } else { & icacls.exe "$($c.FullName)" /setowner '*S-1-5-32-544' /C /Q 2>&1 }
+            if ($LASTEXITCODE -ne 0) { $msgs.Add([pscustomobject]@{ Text = "Besitzer $($c.Name): $(@($o3) -join ' ')"; Level = 'Warning' }) }
+        }
+        # 3. Protokolle: Benutzer-Modus legt dort eigene Dateien an (Ersteller-Besitzer), lesen duerfen alle (wie bisher)
+        try {
+            if (-not (Test-Path -LiteralPath $logs)) { New-Item -ItemType Directory -Path $logs -Force | Out-Null }
+            $null = & icacls.exe "$logs" /setowner '*S-1-5-32-544' /C /Q 2>&1
+            $o4 = & icacls.exe "$logs" /grant '*S-1-5-32-545:(CI)(AD)' '*S-1-5-32-545:(CI)(WD)' '*S-1-3-0:(OI)(CI)(IO)F' 2>&1
+            if ($LASTEXITCODE -ne 0) { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte ${logs}: $(@($o4) -join ' ')"; Level = 'Warning' }) }
+            else { $msgs.Add([pscustomobject]@{ Text = "   Daten-Ordner fuer Benutzer-Modus beschreibbar (nur eigene Dateien): $logs"; Level = 'Info' }) }
+        } catch { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte ${logs}: $($_.Exception.Message)"; Level = 'Warning' }) }
+    }
+    # 4. Backup-Ordner: Vererbung aus; Benutzer duerfen nur den Ordner selbst auflisten und darin Unterordner anlegen
+    #    (ohne Vererbung) - ihre eigenen Backups erreichen sie ueber Ersteller-Besitzer, fremde nicht. Administratoren/SYSTEM alles.
+    foreach ($d in $bk) {
+        try {
+            if (-not (Test-Path -LiteralPath $d.P)) {
+                if (-not $d.New) { continue }
+                New-Item -ItemType Directory -Path $d.P -Force | Out-Null
+            }
+            $null = & icacls.exe "$($d.P)" /setowner '*S-1-5-32-544' /C /Q 2>&1
+            if (Test-HMAppBackupPrivate $d.P) { $msgs.Add([pscustomobject]@{ Text = "   Backup-Ordner: jeder Benutzer sieht nur seine eigenen Backups (Administratoren alle): $($d.P)"; Level = 'Info' }); continue }
+            $o5 = & icacls.exe "$($d.P)" /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-545:(RD,AD,X,RA,REA,RC,S)' '*S-1-3-0:(OI)(CI)(IO)F' 2>&1
+            if ($LASTEXITCODE -ne 0) { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte $($d.P): $(@($o5) -join ' ')"; Level = 'Warning' }); continue }
+            foreach ($g in @('*S-1-1-0', '*S-1-5-11', '*S-1-5-4')) { $null = & icacls.exe "$($d.P)" /remove:g $g 2>&1 }
+            $msgs.Add([pscustomobject]@{ Text = "   Backup-Ordner: jeder Benutzer sieht nur seine eigenen Backups (Administratoren alle): $($d.P)"; Level = 'Info' })
+        } catch { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte $($d.P): $($_.Exception.Message)"; Level = 'Warning' }) }
+    }
+    if ($BackupsOnly) { return $msgs }
+    $rest = ''
+    try { $rest = Get-HMAppAclFindings $rt } catch { $rest = "$($_.Exception.Message)" }
+    if ($rest) { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte: noch beschreibbar fuer $($rest -replace "`n", ' | ')"; Level = 'Warning' }) }
+    else { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte abgesichert: $rt (Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen)"; Level = 'Success' }) }
+    return $msgs
+}
+#endregion HMAppAcl
+
+# Pruefen und bei Bedarf fragen (Ja = absichern, Nein = diesmal nicht, Abbrechen = nie mehr fragen).
+# Rueckgabe: Meldungen fuer die Konsole und CheckOff (= AclCheckOff in settings.json merken). $Owner: Fenster fuer die Frage.
+function Invoke-HMAppFolderCheck($Owner = $null) {
+    $r = [pscustomobject]@{ Msgs = (New-Object System.Collections.Generic.List[object]); CheckOff = $false }
+    if (-not $isAdmin -or $script:UserMode) { return $r }
+    $root = $script:AppRoot
+    if ($root -like '\\*') { return $r }   # Netzwerkfreigabe: Rechte verwaltet der Server
+    if (Test-HMAclCheckOff (Join-Path $root 'Config')) { return $r }
+    $w = ''
+    try { $w = Get-HMAppAclFindings $root } catch { return $r }   # z.B. FAT/exFAT-USB-Stick: keine Rechte
+    if (-not $w) { return $r }
+    $m = "Im HUMig-Ordner duerfen auch Nicht-Administratoren schreiben bzw. Dateien anlegen:`n$w`n`n" +
+        "HUMig laeuft als Administrator. Wer hier Dateien anlegen kann (z.B. Einstellungen mit einem Nach-Skript), koennte Code mit Administratorrechten ausfuehren lassen.`n`n" +
+        "Ja = absichern: Vererbung aus, Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen (gilt fuer alle Dateien darin; Protokolle und Backup-Ordner bleiben fuer den Benutzer-Modus beschreibbar - nur eigene Dateien)`n" +
+        "Nein = diesmal nicht`nAbbrechen = nie mehr fragen"
+    $a = if ($Owner) { "$([System.Windows.MessageBox]::Show($Owner, $m, 'HUMig - Ordnerrechte', 'YesNoCancel', 'Warning', 'Yes'))" } else { "$([System.Windows.MessageBox]::Show($m, 'HUMig - Ordnerrechte', 'YesNoCancel', 'Warning', 'Yes'))" }
+    if ($a -eq 'Cancel') { $r.CheckOff = $true; $r.Msgs.Add([pscustomobject]@{ Text = 'Ordnerrechte: Pruefung abgeschaltet (Einstellung AclCheckOff in settings.json).'; Level = 'Warning' }); return $r }
+    if ($a -ne 'Yes') { $r.Msgs.Add([pscustomobject]@{ Text = "Ordnerrechte: Nicht-Administratoren duerfen in $root schreiben/anlegen ($($w -replace "`n", ' | '))."; Level = 'Warning' }); return $r }
+    try { foreach ($x in @(Protect-HMAppFolder $root @(Get-HMAppBackupRoot $root))) { $r.Msgs.Add($x) } }
+    catch { $r.Msgs.Add([pscustomobject]@{ Text = "Ordnerrechte konnten nicht gesetzt werden: $($_.Exception.Message)"; Level = 'Error' }) }
+    return $r
+}
+# Frueh pruefen (Frage ueber dem Startbildschirm). Meldungen und "nie mehr fragen" werden nach dem Laden nachgeholt.
+$script:AclChecked = $false
+$script:AclEarly = $null
+try { $script:AclEarly = Invoke-HMAppFolderCheck $script:Splash; $script:AclChecked = $true } catch { $script:AclEarly = $null }
+
+# ============================================================================
 # FUNKTIONEN LADEN
 # ============================================================================
 foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Core-Notify.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1', 'AppUpdates-Engine.ps1', 'UI-AppUpdates.ps1', 'UI-Status.ps1', 'UI-Monitor.ps1', 'UI-Wizard.ps1')) {
@@ -167,11 +378,36 @@ function Read-JsonFile([string]$Path) {
     catch { Write-Host "[WARN] $Path fehlerhaft: $_" -ForegroundColor Yellow; $script:ConfigErrors += "$(Split-Path $Path -Leaf): $($_.Exception.Message)"; return $null }
 }
 function Write-JsonFile([string]$Path, $Data, [int]$Depth = 6) {
+    # erst vollstaendig in eine Hilfsdatei schreiben, dann ersetzen: ein Abbruch (Absturz, voller Datentraeger) hinterlaesst
+    # nie eine halb geschriebene Datei
+    $tmp = "$Path.tmp"
     try {
         $dir = Split-Path $Path -Parent
         if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        $Data | ConvertTo-Json -Depth $Depth | Set-Content -LiteralPath $Path -Encoding UTF8 -Force
-    } catch { Write-Host "[WARN] $Path nicht gespeichert: $_" -ForegroundColor Yellow }
+        $Data | ConvertTo-Json -Depth $Depth | Set-Content -LiteralPath $tmp -Encoding UTF8 -Force -ErrorAction Stop
+        Move-Item -LiteralPath $tmp -Destination $Path -Force -ErrorAction Stop
+    } catch {
+        Write-Host "[WARN] $Path nicht gespeichert: $_" -ForegroundColor Yellow
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+# JSON-Datei vorhanden, aber nicht lesbar/beschaedigt? Rueckgabe: '' = in Ordnung (oder fehlt/leer), sonst Fehlertext
+# -AnyValue: auch Liste/Wert zulassen (z.B. computer_history.json), sonst muss es ein JSON-Objekt sein
+function Test-HMJsonBroken([string]$Path, [switch]$AnyValue) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    try {
+        $t = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 -ErrorAction Stop
+        if (-not "$t".Trim()) { return '' }
+        $j = $t | ConvertFrom-Json -ErrorAction Stop
+        if (-not $AnyValue -and $null -ne $j -and -not ($j -is [System.Management.Automation.PSCustomObject])) { return 'kein JSON-Objekt' }
+        return ''
+    } catch { return "$($_.Exception.Message)" }
+}
+# Warnung zu einer Einstellungsdatei: Konsole (sobald das Fenster da ist), sonst Liste der Konfigurationsfehler
+function Write-HMConfigWarning([string]$Text) {
+    Write-Host "[WARN] $Text" -ForegroundColor Yellow
+    if ($script:Window -and (Get-Command Out-Console -ErrorAction SilentlyContinue)) { try { Out-Console $Text 'Warning' } catch { } }
+    else { $script:ConfigErrors += $Text }
 }
 # Lokale Werte ueber Standardwerte legen (rekursiv fuer Objekte, Arrays/Werte ersetzen)
 function Merge-Config($Default, $Local) {
@@ -247,6 +483,9 @@ function Import-AppConfig {
 }
 function Save-LocalSetting([string]$Name, $Value) {
     $p = Join-Path $script:ConfigDir 'settings.json'
+    # beschaedigte settings.json nicht ueberschreiben (alle anderen Einstellungen gingen verloren) - Einstellungsfenster bietet Reparatur an
+    $bad = Test-HMJsonBroken $p
+    if ($bad) { Write-HMConfigWarning "settings.json ist fehlerhaft - '$Name' nicht gespeichert (Datei bleibt unveraendert; Einstellungen > Speichern bietet Reparatur an): $bad"; return }
     $cur = Read-JsonFile $p
     $h = [ordered]@{}
     if ($cur) { foreach ($x in $cur.PSObject.Properties) { $h[$x.Name] = $x.Value } }
@@ -255,6 +494,8 @@ function Save-LocalSetting([string]$Name, $Value) {
     Import-AppConfig
 }
 Import-AppConfig
+# Ordnerrechte-Frage beim Start: "nie mehr fragen" jetzt in settings.json merken
+if ($script:AclEarly -and $script:AclEarly.CheckOff) { Save-LocalSetting 'AclCheckOff' $true }
 
 # ============================================================================
 # XAML
@@ -509,6 +750,9 @@ function Test-HMBuiltinPreset([string]$Name) { return [bool](@($script:BuiltinPr
 # Eigene Vorlagen in Config\modules.json schreiben (andere Inhalte der Datei bleiben erhalten)
 function Save-HMOwnPresets([object[]]$Presets) {
     $mp = Join-Path $script:ConfigDir 'modules.json'
+    # beschaedigte modules.json nicht ueberschreiben (eigene Module gingen verloren). Rueckgabe: $true = gespeichert
+    $bad = Test-HMJsonBroken $mp
+    if ($bad) { Write-HMConfigWarning "modules.json ist fehlerhaft - Vorlagen nicht gespeichert (Datei bleibt unveraendert): $bad"; return $false }
     $cur = Read-JsonFile $mp
     $h = [ordered]@{}
     if ($cur) { foreach ($x in $cur.PSObject.Properties) { $h[$x.Name] = $x.Value } }
@@ -516,11 +760,12 @@ function Save-HMOwnPresets([object[]]$Presets) {
     if (-not $h.Contains('Modules')) { $h['Modules'] = @() }
     $h['Presets'] = @($Presets | Where-Object { $_ })
     Write-JsonFile $mp ([pscustomobject]$h) 8
+    return $true
 }
 function Get-HMCheckedBackupIds { return @($script:BackupChecks.Keys | Where-Object { $script:BackupChecks[$_].IsChecked -eq $true } | ForEach-Object { "$_" } | Sort-Object) }
 # Vorlage speichern/umbenennen/loeschen, danach neu laden und $Select waehlen
 function Complete-HMPresetChange([object[]]$Own, [string]$Select) {
-    Save-HMOwnPresets $Own
+    if (-not (Save-HMOwnPresets $Own)) { return }
     Save-LocalSetting 'LastPreset' $Select
     Update-PresetList
 }
@@ -734,8 +979,13 @@ function Initialize-ComputerList {
 }
 function Add-ComputerHistory([string]$Name) {
     if (-not $Name -or (Test-HMIsLocal $Name)) { return }
-    $h = @(@($Name) + @(Read-JsonFile $script:ComputerHistoryFile | Where-Object { $_ -and $_ -ne $Name }) | Select-Object -First 25)
-    Write-JsonFile $script:ComputerHistoryFile $h
+    # beschaedigte Datei nicht ueberschreiben (bisheriger Verlauf ginge verloren)
+    $bad = Test-HMJsonBroken $script:ComputerHistoryFile -AnyValue
+    if ($bad) { Write-HMConfigWarning "computer_history.json ist fehlerhaft - Verlauf nicht gespeichert (Datei bleibt unveraendert): $bad" }
+    else {
+        $h = @(@($Name) + @(Read-JsonFile $script:ComputerHistoryFile | Where-Object { $_ -and $_ -ne $Name }) | Select-Object -First 25)
+        Write-JsonFile $script:ComputerHistoryFile $h
+    }
     if (-not $ui.cmbComputer.Items.Contains($Name)) { $ui.cmbComputer.Items.Insert(1, $Name) }
 }
 function Get-TargetComputer {
@@ -1384,6 +1634,19 @@ $ui.btnRestore.Add_Click({
     }
     $ctx = New-HMRestoreCtx
     if (-not $ctx) { return }
+    # Maschinen-Module (Aufgaben, Treiber, Drucker ...) laufen mit Adminrechten: Backup nicht von einem Administrator angelegt -> nachfragen
+    $ctx.SkipUntrustedMachine = @()
+    if (-not $script:UserMode) {
+        $ut = @(Get-HMUntrustedBackupItems $b.Path $ctx.Modules)
+        if ($ut.Count) {
+            $own = @($ut | ForEach-Object { "$($_.Owner)" } | Select-Object -Unique) -join ', '
+            $um = "Dieses Backup wurde nicht von einem Administrator angelegt (Besitzer: $own).`n`nFolgende Teile laufen mit Adminrechten:`n$(@($ut | ForEach-Object { "  $($_.Name)" }) -join "`n")`n`nNur uebernehmen, wenn du dem Backup vertraust. Uebernehmen?`n`nNein = diese Teile auslassen, Rest wiederherstellen"
+            if ("$([System.Windows.MessageBox]::Show($script:Window, $um, 'Restore - Backup pruefen', 'YesNo', 'Warning', 'No'))" -ne 'Yes') {
+                $ctx.SkipUntrustedMachine = @($ut | ForEach-Object { "$($_.Id)" })
+                Out-Console "Ausgelassen (Backup nicht von einem Administrator angelegt, Besitzer: $own): $(@($ut | ForEach-Object { $_.Name }) -join ', ')" 'Warning'
+            } else { Out-Console "Backup-Besitzer $own - Uebernahme der Admin-Teile bestaetigt." 'Warning' }
+        }
+    }
     Out-Separator
     $script:RestoreBackupForChecklist = $b
     # Zuerst fehlende Programme (Angebot: installieren, dann Restore), Programm-Module ohne Programm auslassen,
@@ -2083,47 +2346,12 @@ function Wait-HMJobEnd($Job, [int]$Seconds) {
     $t0 = Get-Date
     while (-not $Job.Done -and ((Get-Date) - $t0).TotalSeconds -lt $Seconds) { Start-Sleep -Milliseconds 300 }
 }
-# HUMig-Ordner: duerfen Nicht-Administratoren dort schreiben/anlegen? HUMig laeuft als Administrator -> wer hier Dateien
-# anlegen kann (z.B. Config\settings.json mit Nach-Skript), koennte Code mit Adminrechten ausfuehren lassen. Einmal anbieten abzusichern.
+# HUMig-Ordner: duerfen Nicht-Administratoren dort schreiben/anlegen? Laeuft normalerweise schon vor dem Laden der Funktionen
+# (Invoke-HMAppFolderCheck, oben) - hier nur, falls die fruehe Pruefung nicht gelaufen ist.
 function Test-HMAppFolderSecurity {
-    if (-not $isAdmin -or $script:UserMode) { return }
-    if ([bool]$script:Settings.AclCheckOff) { return }
-    $root = $script:AppRoot
-    if ($root -like '\\*') { return }   # Netzwerkfreigabe: Rechte verwaltet der Server
-    $w = ''
-    try { $w = Get-HMWritableByNonAdmins $root } catch { return }   # z.B. FAT/exFAT-USB-Stick: keine Rechte
-    if (-not $w) { return }
-    $m = "Im HUMig-Ordner duerfen auch Nicht-Administratoren schreiben bzw. Dateien anlegen:`n$root`n$w`n`n" +
-        "HUMig laeuft als Administrator. Wer hier Dateien anlegen kann (z.B. Einstellungen mit einem Nach-Skript), koennte Code mit Administratorrechten ausfuehren lassen.`n`n" +
-        "Ja = absichern: Vererbung aus, Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen (gilt fuer alle Dateien darin; Protokolle und Backup-Ordner bleiben fuer den Benutzer-Modus beschreibbar - nur eigene Dateien)`n" +
-        "Nein = diesmal nicht`nAbbrechen = nie mehr fragen"
-    $a = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'HUMig - Ordnerrechte', 'YesNoCancel', 'Warning', 'Yes'))"
-    if ($a -eq 'Cancel') { Save-LocalSetting 'AclCheckOff' $true; Out-Console 'Ordnerrechte: Pruefung abgeschaltet (Einstellung AclCheckOff in settings.json).' 'Warning'; return }
-    if ($a -ne 'Yes') { Out-Console "Ordnerrechte: Nicht-Administratoren duerfen in $root schreiben/anlegen ($w)." 'Warning'; return }
-    try {
-        $o1 = & icacls.exe "$root" /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "icacls: $($o1 -join ' ')" }
-        # Daten-Ordner (kein Code): Benutzer-Modus muss dort weiter Backups/Protokolle anlegen koennen - wie bisher nur eigene (Ersteller-Besitzer)
-        $data = @($script:LogDir)
-        try { $br = Get-BackupRoot; if ($br -and $br.StartsWith($root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { $data += $br } } catch { }
-        # Code und Einstellungen: nur noch die vererbten Rechte (entfernt auch Rechte auf Dateien, die Benutzer angelegt haben).
-        # Daten-Ordner werden ausgelassen (grosse Backup-Ordner wuerden sonst lange dauern, enthalten keinen Code).
-        $skip = @($data | ForEach-Object { "$_".TrimEnd('\').ToLower() })
-        foreach ($c in @(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue)) {
-            if ($skip -contains $c.FullName.TrimEnd('\').ToLower()) { continue }
-            $o2 = if ($c.PSIsContainer) { & icacls.exe "$($c.FullName)" /reset /T /C /Q 2>&1 } else { & icacls.exe "$($c.FullName)" /reset /C /Q 2>&1 }
-            if ($LASTEXITCODE -ne 0) { Out-Console "Ordnerrechte $($c.Name): $(@($o2) -join ' ')" 'Warning' }
-        }
-        foreach ($d in @($data | Select-Object -Unique)) {
-            try {
-                if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
-                $o3 = & icacls.exe "$d" /grant '*S-1-5-32-545:(CI)(AD)' '*S-1-5-32-545:(CI)(WD)' '*S-1-3-0:(OI)(CI)(IO)F' 2>&1
-                if ($LASTEXITCODE -ne 0) { Out-Console "Ordnerrechte ${d}: $(@($o3) -join ' ')" 'Warning' } else { Out-Console "   Daten-Ordner fuer Benutzer-Modus beschreibbar (nur eigene Dateien): $d" 'Info' }
-            } catch { }
-        }
-        $rest = Get-HMWritableByNonAdmins $root
-        if ($rest) { Out-Console "Ordnerrechte: noch beschreibbar fuer $rest" 'Warning' } else { Out-Console "Ordnerrechte abgesichert: $root (Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen)" 'Success' }
-    } catch { Out-Console "Ordnerrechte konnten nicht gesetzt werden: $($_.Exception.Message)" 'Error' }
+    $r = Invoke-HMAppFolderCheck $script:Window
+    if ($r.CheckOff) { Save-LocalSetting 'AclCheckOff' $true }
+    foreach ($x in @($r.Msgs)) { Out-Console "$($x.Text)" "$($x.Level)" }
 }
 # Zuletzt gewaehlten Reiter merken (pro Windows-Benutzer, %APPDATA%\HUMig\ui-state.json - nicht im Programmordner)
 $script:UiStateFile = Join-Path $env:APPDATA 'HUMig\ui-state.json'
@@ -2253,6 +2481,8 @@ Update-SchoolUi
 Update-BackupRootInfo
 Out-Console "HUMig v$($script:Version) - $env:USERDOMAIN\$env:USERNAME auf $env:COMPUTERNAME$(if ($script:UserMode) { ' (Benutzer-Modus)' } elseif ($isAdmin) { ' (Administrator)' } else { ' (OHNE Administratorrechte)' })" 'Header'
 foreach ($e in $script:ConfigErrors) { Out-Console "Konfigurationsfehler: $e" 'Error' }
+# Ergebnis der Ordnerrechte-Pruefung beim Start (lief vor dem Fenster)
+if ($script:AclEarly) { foreach ($x in @($script:AclEarly.Msgs)) { Out-Console "$($x.Text)" "$($x.Level)" } }
 if ($script:ActiveSchool) { Out-Console "Standort: $($script:ActiveSchool.Name) - Backup-Ordner $(Get-BackupRoot)" 'Info' }
 if ($script:UserMode) { Set-HMUserModeUi }
 Initialize-HMServerBackupTab -IsAdmin $isAdmin
@@ -2260,6 +2490,8 @@ Initialize-HMAppUpdatesTab -IsAdmin $isAdmin
 Initialize-HMStatusTab
 Initialize-HMMonitor
 try { Update-HMBsLabel } catch { }
+# Ereignisquelle HUMig im Anwendungsprotokoll (geplante Backups ohne Adminrechte schreiben dort; anlegen geht nur als Administrator)
+if ($isAdmin -and -not $script:UserMode) { try { if (-not [System.Diagnostics.EventLog]::SourceExists('HUMig')) { New-EventLog -LogName Application -Source 'HUMig' -ErrorAction Stop } } catch { } }
 # Teams-Meldung der Profil-Backups: vorhandenes SYSTEM-Skript auf den Stand dieser Version bringen
 if ($isAdmin -and -not $script:UserMode) { try { $rr = Update-HMNotifyRelay -RefreshOnly; if ($rr) { Out-Console $rr 'Info' } } catch { Out-Console "Teams-Meldung Profil-Backups: $($_.Exception.Message)" 'Warning' } }
 Update-BackupList

@@ -11,8 +11,10 @@
 
 ## Ordnerrechte (wichtig auf Servern und gemeinsam genutzten PCs)
 HUMig laeuft als Administrator. Liegt der Tool-Ordner z. B. unter `C:\Tools`, duerfen normale Benutzer dort standardmaessig Dateien anlegen.
-HUMig prueft das beim Start und bietet an abzusichern: Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen; `Logs` und ein
-Backup-Ordner im Tool-Ordner bleiben fuer den Benutzer-Modus beschreibbar (nur eigene Dateien). Pruefen: `icacls C:\Tools\HUMig`.
+HUMig prueft das beim Start, bevor es etwas aus dem Ordner laedt, und bietet an abzusichern: Besitzer Administratoren,
+Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen; `Logs` bleibt fuer den Benutzer-Modus beschreibbar. Im Backup-Ordner
+`BACKUPS` im Tool-Ordner legt jeder Benutzer eigene Backups an und oeffnet nur diese (Administratoren sehen alle).
+`Pull.ps1` stellt `BACKUPS` bei Installation/Update als Administrator so ein. Pruefen: `icacls C:\Tools\HUMig`.
 HUMig nicht im persoenlichen Ordner (OneDrive, Desktop) eines Benutzers betreiben, wenn es dort als Administrator gestartet wird.
 
 ## USMT (optional)

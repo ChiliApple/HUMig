@@ -518,7 +518,9 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
             $names["$k|$($it.Id)"] = $it
         }
         if ($todo.Count) {
-            $byPc[$k] = @{ UserSid = "$($Ctx.ByPc[$k].UserSid)"; Items = @($todo | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown; Scope = "$($_.Scope)" } }) }
+            # Name + Ausnahmen: am Ziel-PC werden die Ausnahmen vor dem Update noch einmal geprueft
+            $byPc[$k] = @{ UserSid = "$($Ctx.ByPc[$k].UserSid)"; Items = @($todo | ForEach-Object { @{ Id = "$($_.Id)"; Name = "$($_.Name)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown; Scope = "$($_.Scope)" } })
+                Exclude = @(@($Ctx.ByPc[$k].Exclude) | Where-Object { $_ } | ForEach-Object { @{ Pattern = "$($_.Pattern)"; Reason = "$($_.Reason)" } }) }
         }
     }
     $st = @{ Job = $Job; Names = $names; Done = 0; Total = [Math]::Max(1, $names.Count); Logged = @{}; Multi = ($pcs.Count -gt 1); Verb = $verb }
@@ -538,9 +540,16 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
         } elseif ($p[0] -eq 'DONE') {
             if ($st.Logged.ContainsKey("$pc|$($p[1])")) { return }   # Zeile schon verarbeitet
             $st.Done++
+            $st.Job.Progress = [Math]::Min(100, [int]($st.Done * 100 / $st.Total))
             # Ergebnis sofort zeigen (DONE|Id|Status|Code|InstallerCode|ExtendedCode|Reboot)
             $c = $null
             if ($p.Count -ge 7) {
+                if ($p[2] -eq 'Excluded') {
+                    # Ausnahme am Ziel-PC (vor dem Update erneut geprueft): wie uebersprungen anzeigen
+                    Write-HMLog $st.Job "  $pre$($x.Name): Ausnahme - nicht aktualisiert" 'Warning'
+                    $st.Logged["$pc|$($p[1])"] = $true
+                    return
+                }
                 if ($p[2] -eq 'Cli') { $c = Format-HMAuCliResult ([int64]$p[3]) '' }
                 elseif ($p[2] -ne 'Exception') { $t = Format-HMAuResult $p[2] $p[4] $p[5] ($p[6] -eq 'True'); $c = @{ Ok = ($p[2] -eq 'Ok'); Text = $t } }
             }
@@ -563,7 +572,8 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
                 $cn = [bool](Test-HMCancel $Job)
                 $e.Status = $(if ($cn) { 'Skipped' } else { 'Error' })
                 $e.Text = $(if ($cn) { 'abgebrochen' } elseif (@($v.Errors).Count) { "nicht ausgefuehrt: $(@($v.Errors)[0])" } else { 'kein Ergebnis' })
-            } elseif ("$($x.Status)" -eq 'Exception') { $e.Status = 'Error'; $e.Text = "$($x.Text)" }
+            } elseif ("$($x.Status)" -eq 'Excluded') { $e.Status = 'Skipped'; $e.Text = $(if ("$($x.Text)") { "$($x.Text)" } else { 'Ausnahme - nicht aktualisiert' }) }
+            elseif ("$($x.Status)" -eq 'Exception') { $e.Status = 'Error'; $e.Text = "$($x.Text)" }
             elseif ("$($x.Status)" -eq 'Cli') {
                 $c = Format-HMAuCliResult ([int64]$x.Code) "$($x.Text)"
                 $e.Status = $(if ($c.Ok) { 'OK' } else { 'Error' }); $e.Reboot = [bool]$c.Reboot

@@ -108,13 +108,30 @@ function Get-HMReleaseAsset([string]$Url, [string]$ApiUrl, [string]$Token) {
     if ($last) { throw $last }
     throw 'keine Download-Adresse'
 }
-# Pruefsummen-Datei (sha256sum-Format: "<hash>  <pfad>") -> Hashtable Pfad -> Hash (klein)
+# Pruefsummen-Datei (sha256sum-Format: "<hash>  <pfad>") -> Hashtable Pfad -> Hash (klein). Andere Zeilen (z.B. die
+# Versionszeile "# HUMig-Release <Tag>") werden ignoriert.
 function ConvertFrom-HMManifest([string]$Text) {
     $m = @{}
     foreach ($ln in ("$Text" -split "`r?`n")) {
         if ($ln -match '^([0-9a-fA-F]{64}) [ \*](.+?)\s*$') { $m[$Matches[2]] = $Matches[1].ToLower() }
     }
     return $m
+}
+# Versionszeile der (signierten) Pruefsummen-Datei: "# HUMig-Release <Tag>" in der ersten Zeile.
+# Verhindert, dass die signierte Pruefsummen-Datei eines anderen Releases (mit dessen Dateien) untergeschoben wird.
+# Rueckgabe: '' = passt, sonst Grund. Ohne Versionszeile nur fuer Releases vor 2.0.121 zulaessig.
+function Test-HMManifestRelease([string]$Text, $Version) {
+    $want = ConvertTo-HMVersion "$Version"
+    if (-not $want) { return "Version unbekannt ($Version)" }
+    $first = @("$Text".TrimStart([char]0xFEFF) -split "`r?`n")[0]
+    if ($first -match '^#\s*HUMig-Release\s+(\S+)\s*$') {
+        $tag = $Matches[1]
+        $have = ConvertTo-HMVersion $tag
+        if (-not $have -or $have -ne $want) { return "Signierte Pruefsummen-Datei gehoert zu $tag, nicht zu $want - Update abgelehnt." }
+        return ''
+    }
+    if ($want -ge [Version]'2.0.121') { return "Signierte Pruefsummen-Datei ohne Versionszeile (Pflicht ab 2.0.121) - Update abgelehnt." }
+    return ''
 }
 function Get-HMFileSha256([string]$Path) {
     $s = [System.Security.Cryptography.SHA256]::Create()
@@ -192,6 +209,9 @@ function Invoke-HMReleaseSigning([string]$Owner, [string]$Repo, [string]$Thumbpr
             if (-not $r.ManifestUrl) { throw 'keine Pruefsummen-Datei (automatische Tests noch nicht fertig?)' }
             $man = Get-HMReleaseAsset $r.ManifestUrl $r.ManifestApi $Token
             if (-not (ConvertFrom-HMManifest ([System.Text.Encoding]::UTF8.GetString($man))).Count) { throw 'Pruefsummen-Datei leer oder beschaedigt' }
+            # Versionszeile muss zum Tag passen - sonst wuerde eine fremde/falsche Pruefsummen-Datei signiert
+            $why = Test-HMManifestRelease ([System.Text.Encoding]::UTF8.GetString($man)) $r.Version
+            if ($why) { throw "nicht signiert: $why" }
             $sig = New-HMManifestSignature $man $cert
             $why = Test-HMManifestSignature $man $sig $cert.Thumbprint
             if ($why) { throw "Signatur-Pruefung fehlgeschlagen: $why" }
@@ -217,6 +237,8 @@ function Publish-HMRelease([string]$Owner, [string]$Repo, [string]$Tag, [string]
     $sig = Get-HMReleaseAsset $r.SignatureUrl $r.SignatureApi $Token
     $why = Test-HMManifestSignature $man $sig $Thumbprint
     if ($why) { throw "Signatur von $Tag ungueltig ($why) - nicht freigegeben" }
+    $why = Test-HMManifestRelease ([System.Text.Encoding]::UTF8.GetString($man)) $r.Version
+    if ($why) { throw "$Tag nicht freigegeben: $why" }
     $rel = Invoke-RestMethod "https://api.github.com/repos/$Owner/$Repo/releases/tags/$Tag" -Headers $h -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
     $body = @{ prerelease = $false; make_latest = 'true' } | ConvertTo-Json -Compress
     Invoke-RestMethod "https://api.github.com/repos/$Owner/$Repo/releases/$($rel.id)" -Method Patch -Headers $h -ContentType 'application/json' -Body $body -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop | Out-Null

@@ -219,6 +219,31 @@ try {
         { $_ -in 'Update', 'Install' } {
             $all = @($My.Items | Where-Object { $_ })
             $res = @()
+            # vor dem Weiterreichen an SYSTEM/Benutzer: Paket-ID pruefen (keine Optionen/Leerzeichen) und Ausnahmen des
+            # Standorts erneut anwenden (Muster mit * ? auf Paket-ID oder Programmname, wie Find-HMAuExclusion)
+            $exl = @(@($My.Exclude) | Where-Object { $_ -and "$($_.Pattern)".Trim() })
+            $keepIt = @()
+            foreach ($it in $all) {
+                $iid = "$($it.Id)"
+                if ($iid -notmatch '^[^\s-]\S{0,254}$') {
+                    $res += [pscustomobject]@{ Id = $iid; Status = 'Exception'; Code = 0; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = 'ungueltige Paket-ID - nicht ausgefuehrt' }
+                    Out-L "ungueltige Paket-ID '$iid' - nicht ausgefuehrt"
+                    Out-L "#DONE|$iid|Exception|0|0|0|False"   # Fortschritt wie bei ausgefuehrten Programmen
+                    continue
+                }
+                if ($Op -eq 'Update') {
+                    $hit = $null
+                    foreach ($xe in $exl) { $xp = "$($xe.Pattern)".Trim(); if ($iid -like $xp -or "$($it.Name)" -like $xp) { $hit = $xe; break } }
+                    if ($hit) {
+                        $res += [pscustomobject]@{ Id = $iid; Status = 'Excluded'; Code = 0; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = 'Ausnahme - nicht aktualisiert' }
+                        Out-L "$iid`: Ausnahme ($("$($hit.Pattern)".Trim())) - nicht aktualisiert"
+                        Out-L "#DONE|$iid|Excluded|0|0|0|False"   # Fortschritt wie bei ausgefuehrten Programmen
+                        continue
+                    }
+                }
+                $keepIt += $it
+            }
+            $all = $keepIt
             $mach = @($all | Where-Object { $Op -eq 'Install' -or "$($_.Scope)" -ne 'User' })
             $usr = @($all | Where-Object { $Op -ne 'Install' -and "$($_.Scope)" -eq 'User' })
             if ($mach.Count) {

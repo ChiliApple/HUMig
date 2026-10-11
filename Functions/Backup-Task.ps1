@@ -112,8 +112,38 @@ function Show-TaskNotification([string]$Title, [string]$Text, [string]$Kind, [st
     } catch { Write-TaskLog "Meldung nicht moeglich: $($_.Exception.Message)" 'Debug' }
 }
 
+# Auswerfen (USB-Laufwerk, Schutz vor Verschluesselungstrojanern) - nur einmal je Lauf, auch nach einem Fehler.
+# Gibt den Text fuer die Meldung zurueck ('' = nichts zu tun); $script:EjectFailed = Auswerfen nicht moeglich
+$script:EjectDone = $false
+$script:EjectFailed = $false
+$script:TargetRoot = $null
+function Invoke-TaskEject {
+    if ($script:EjectDone) { return '' }
+    if (-not $script:Def -or -not [bool]$script:Def.EjectAfter -or "$($script:Def.Target.Type)" -ne 'Drive' -or -not "$($script:TargetRoot)") { return '' }
+    $script:EjectDone = $true
+    $ejL = "$($script:TargetRoot)".Substring(0, 1).ToUpper()
+    try { Set-Location -LiteralPath $env:SystemRoot } catch { }
+    [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+    $ejR = ''
+    try { $ejR = Invoke-HMDriveEject $ejL } catch { $ejR = $_.Exception.Message }
+    if ($ejR) {
+        $script:EjectFailed = $true
+        Write-TaskLog "Laufwerk ${ejL}: nicht ausgeworfen - $ejR" 'Warning'
+        return " - Auswerfen nicht moeglich: $ejR"
+    }
+    Write-TaskLog "Laufwerk ${ejL}: ausgeworfen - kann abgezogen werden; vor dem naechsten Lauf wieder anstecken" 'Success'
+    return ' - Laufwerk ausgeworfen'
+}
+
 # Ende: Status speichern, ggf. Meldung, Exitcode
 function Complete-Task([string]$Status, [string]$Msg, [string]$BackupPath = '') {
+    # vorzeitiges Ende (Ausnahme, zu wenig Platz, keine Module): Laufwerk trotzdem auswerfen, Ergebnis in Meldung/Status
+    $ej = ''
+    try { $ej = Invoke-TaskEject } catch { Write-TaskLog "Auswerfen fehlgeschlagen: $($_.Exception.Message)" 'Warning' }
+    if ($ej) {
+        $Msg = "$Msg$ej"
+        if ($script:EjectFailed -and $Status -eq 'OK') { $Status = 'Warning' }
+    }
     $st = switch ($Status) { 'OK' { 'OK' } 'Warning' { 'Warnung' } 'Skipped' { 'uebersprungen' } default { 'Fehler' } }
     Write-TaskLog "Ende - $st$(if ($Msg) { ": $Msg" })" $(if ($Status -eq 'OK') { 'Success' } elseif ($Status -eq 'Warning') { 'Warning' } else { 'Error' })
     $state = @{ LastRun = (Get-Date).ToString('yyyy-MM-dd HH:mm'); LastStatus = $Status; LastMessage = $Msg; LastBackup = $BackupPath; LastLog = $script:TaskLog; LastMassDelete = [bool]$script:MassDelete }
@@ -208,6 +238,7 @@ switch ("$($t.Type)") {
     default { $why = 'Backup-Ziel in der Zeitplan-Datei fehlt' }
 }
 if (-not $targetRoot) { Complete-Task 'Skipped' "$why - Backup nicht ausgefuehrt" }
+$script:TargetRoot = $targetRoot   # ab hier wird bei jedem Ende ausgeworfen (falls eingestellt)
 Write-TaskLog "Backup-Ziel: $targetRoot" 'Info'
 
 # ---- eigenes Profil ----
@@ -304,39 +335,33 @@ if ($ret -and [bool]$ret.Enabled -and $st -in @('OK', 'Warning')) {
     try {
         $all = Get-HMBackupList -Root $targetRoot -Modules $script:Modules
         $mine = @(@($all) | Where-Object { $_ -and -not $_.Legacy -and "$($_.Sid)" -eq $sid -and ("$($_.Computer)" -ieq $env:COMPUTERNAME -or "$($_.Computer)".Split('.')[0] -ieq $env:COMPUTERNAME) })
-        $bad = @($mine | Where-Object { "$($_.Status)" -notin @('OK', 'Warning') }).Count
-        if ($bad) { Write-TaskLog "Aufbewahrung: $bad unvollstaendige/fehlerhafte Backup(s) zaehlen nicht mit (werden nur entfernt, wenn ein neueres brauchbares existiert)" 'Info' }
-        $cand = @(Get-HMRetentionCandidates -Backups $mine -Days 0 -Keep $keep)
-        $cur = "$($ctx.BackupPath)".TrimEnd('\')
-        $del = 0
-        foreach ($c in $cand) {
-            $bp = "$($c.Backup.Path)".TrimEnd('\')
-            if (-not $bp -or $bp -ieq $cur -or (Split-Path $bp -Parent).TrimEnd('\') -ine $targetRoot.TrimEnd('\')) { continue }
-            $r = Remove-HMBackupFolder $bp
-            if ($r -eq 'OK') { $del++; Write-TaskLog "Aufbewahrung: altes Backup geloescht: $($c.Backup.Name)" 'Info' }
-            else { Write-TaskLog "Aufbewahrung: $($c.Backup.Name): $r" 'Warning' }
+        # Massenloeschung in diesem Lauf oder in einem Backup der letzten 14 Tage: alte Staende sind evtl. die einzigen sauberen
+        $recentAlert = @($mine | Where-Object { $_.Manifest -and $_.Manifest.MassDeleteAlert -and ((Get-Date) - (Get-HMBackupDate $_)).TotalDays -le 14 }).Count
+        if ($script:MassDelete -or $recentAlert) {
+            Write-TaskLog 'Aufbewahrung ausgesetzt: Massenloeschung erkannt (letzte 14 Tage) - alte Backups bleiben erhalten' 'Warning'
+            $msg += ' - Aufbewahrung ausgesetzt (Massenloeschung)'
+        } else {
+            $bad = @($mine | Where-Object { "$($_.Status)" -notin @('OK', 'Warning') }).Count
+            if ($bad) { Write-TaskLog "Aufbewahrung: $bad unvollstaendige/fehlerhafte Backup(s) zaehlen nicht mit (werden nur entfernt, wenn ein neueres brauchbares existiert)" 'Info' }
+            $cand = @(Get-HMRetentionCandidates -Backups $mine -Days 0 -Keep $keep)
+            $cur = "$($ctx.BackupPath)".TrimEnd('\')
+            $del = 0
+            foreach ($c in $cand) {
+                $bp = "$($c.Backup.Path)".TrimEnd('\')
+                if (-not $bp -or $bp -ieq $cur -or (Split-Path $bp -Parent).TrimEnd('\') -ine $targetRoot.TrimEnd('\')) { continue }
+                $r = Remove-HMBackupFolder $bp
+                if ($r -eq 'OK') { $del++; Write-TaskLog "Aufbewahrung: altes Backup geloescht: $($c.Backup.Name)" 'Info' }
+                else { Write-TaskLog "Aufbewahrung: $($c.Backup.Name): $r" 'Warning' }
+            }
+            Write-TaskLog "Aufbewahrung: neueste $keep brauchbare behalten, $del geloescht" 'Info'
+            if ($del) { $msg += " - $del alte(s) Backup(s) geloescht" }
         }
-        Write-TaskLog "Aufbewahrung: neueste $keep brauchbare behalten, $del geloescht" 'Info'
-        if ($del) { $msg += " - $del alte(s) Backup(s) geloescht" }
     } catch { Write-TaskLog "Aufbewahrung fehlgeschlagen: $($_.Exception.Message)" 'Warning' }
 }
 
 # ---- Auswerfen (USB-Laufwerk, Schutz vor Verschluesselungstrojanern) - auch nach einem Fehler ----
-if ([bool]$script:Def.EjectAfter -and "$($t.Type)" -eq 'Drive') {
-    $ejL = $targetRoot.Substring(0, 1).ToUpper()
-    try { Set-Location -LiteralPath $env:SystemRoot } catch { }
-    [GC]::Collect(); [GC]::WaitForPendingFinalizers()
-    $ejR = ''
-    try { $ejR = Invoke-HMDriveEject $ejL } catch { $ejR = $_.Exception.Message }
-    if ($ejR) {
-        Write-TaskLog "Laufwerk ${ejL}: nicht ausgeworfen - $ejR" 'Warning'
-        $msg += " - Auswerfen nicht moeglich: $ejR"
-        if ($st -eq 'OK') { $st = 'Warning' }
-    } else {
-        Write-TaskLog "Laufwerk ${ejL}: ausgeworfen - kann abgezogen werden; vor dem naechsten Lauf wieder anstecken" 'Success'
-        $msg += ' - Laufwerk ausgeworfen'
-    }
-}
+$msg += Invoke-TaskEject
+if ($script:EjectFailed -and $st -eq 'OK') { $st = 'Warning' }
 
 switch ($st) {
     'OK'        { Complete-Task 'OK' $msg "$($ctx.BackupPath)" }

@@ -65,8 +65,10 @@ function Start-HMVerifyBackup([bool]$CreateCatalog) {
 # ----------------------------------------------------------------------------
 function Get-HMBackupDate($b) {
     $d = [datetime]::MinValue
+    if ($null -eq $b) { return [datetime]::MinValue }
     if ($b.Created -and [datetime]::TryParse("$($b.Created)", [ref]$d)) { return $d }
-    try { return (Get-Item -LiteralPath $b.Path).LastWriteTime } catch { return [datetime]::MinValue }
+    if (-not "$($b.Path)") { return [datetime]::MinValue }
+    try { return (Get-Item -LiteralPath $b.Path -ErrorAction Stop).LastWriteTime } catch { return [datetime]::MinValue }
 }
 function Start-HMCompareBackups {
     $a = $script:SelectedBackup

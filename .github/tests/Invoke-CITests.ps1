@@ -6,7 +6,7 @@
     1. Syntax aller PowerShell-Dateien (Parser), UTF-8-BOM
     2. XAML-Fenster laden; alle im Code verwendeten Steuerelemente vorhanden ($ui-Liste HUMig.ps1, Einstellungsfenster)
     3. Konfigurationsdateien (JSON) lesbar
-    4. Update-Bibliothek in Pull.ps1 und Functions\Core-Update.ps1 identisch
+    4. Update-Bibliothek in Pull.ps1 und Functions\Core-Update.ps1 identisch, Ordnerrechte-Bibliothek in HUMig.ps1 und Pull.ps1 identisch
     5. PSScriptAnalyzer: keine Fehler (Schweregrad Error)
     6. Pester-Tests (.github\tests\*.Tests.ps1)
 .NOTES
@@ -90,6 +90,14 @@ Step 'Update-Bibliothek Pull.ps1 = Functions\Core-Update.ps1' {
     if ($a -ne $b) { throw 'Bereich HMUpdateLib unterscheidet sich - beide Dateien gleich halten' }
     "$(($a -split "`n").Count) Zeilen"
 }
+Step 'Ordnerrechte-Bibliothek HUMig.ps1 = Pull.ps1' {
+    $re = '(?s)#region HMAppAcl.*?#endregion HMAppAcl'
+    $a = [regex]::Match((Get-Content (Join-Path $root 'HUMig.ps1') -Raw -Encoding UTF8), $re).Value -replace "`r`n", "`n"
+    $b = [regex]::Match((Get-Content (Join-Path $root 'Pull.ps1') -Raw -Encoding UTF8), $re).Value -replace "`r`n", "`n"
+    if (-not $a -or -not $b) { throw 'Bereich HMAppAcl fehlt' }
+    if ($a -ne $b) { throw 'Bereich HMAppAcl unterscheidet sich - beide Dateien gleich halten' }
+    "$(($a -split "`n").Count) Zeilen"
+}
 
 # 5. PSScriptAnalyzer
 function Install-HMModule([string]$Name, [string]$Max = '') {
@@ -117,7 +125,10 @@ Step 'Pester-Tests' {
     $cfg.Run.PassThru = $true
     $cfg.Output.Verbosity = 'Detailed'
     $res = Invoke-Pester -Configuration $cfg
-    if ($res.FailedCount -gt 0) { throw "$($res.FailedCount) von $($res.TotalCount) Tests fehlgeschlagen" }
+    # auch Fehler ausserhalb einzelner Tests (BeforeAll, Datei nicht ladbar) und "keine Tests gelaufen" zaehlen als Fehler
+    if ($res.FailedCount -gt 0 -or $res.FailedContainersCount -gt 0 -or "$($res.Result)" -ne 'Passed' -or $res.TotalCount -lt 1) {
+        throw "Pester: $($res.FailedCount) von $($res.TotalCount) Tests fehlgeschlagen, $($res.FailedContainersCount) Testdatei(en)/Bloecke fehlerhaft, Ergebnis '$($res.Result)'"
+    }
     "$($res.PassedCount) Tests bestanden"
 }
 

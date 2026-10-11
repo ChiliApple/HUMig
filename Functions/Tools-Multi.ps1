@@ -560,7 +560,21 @@ function Show-HMSharesFromBackup([string]$Computer) {
 function New-HMSharesOnTarget($Win, [string]$Computer, [string[]]$Names, [bool]$Ntfs) {
     $sel = @($script:BackupShares | Where-Object { $Names -contains "$($_.Name)" })
     if (-not $sel.Count) { return }
-    $q = "$($sel.Count) Freigabe(n) an $Computer anlegen?$(if ($Ntfs) { "`n`nNTFS-Rechte werden auf die Ordner GESETZT (ersetzt die vorhandenen). Konten, die am Ziel unbekannt sind (lokale Konten des alten PCs), fallen weg." })`n`n$(($sel | ForEach-Object { "$($_.Name)  ->  $($_.Path)" }) -join "`n")"
+    # Kennzeichnen: Ordner unter Windows/Programme/ProgramData, Vollzugriff fuer Jeder/Benutzer (Freigabe- bzw. NTFS-Rechte)
+    $wide = @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545')
+    $wideName = '^(.*\\)?(Jeder|Everyone|Benutzer|Users|Authentifizierte Benutzer|Authenticated Users|Dom.nen-Benutzer|Domain Users)$'
+    $isWide = { param($e) ($wide -contains "$($e.Sid)") -or ("$($e.Sid)" -match '^S-1-5-21-.+-513$') -or ("$($e.Account)" -match $wideName) }
+    $warnOf = {
+        param($x)
+        $w = @()
+        if (Get-HMProtectedTargetRoot "$($x.Path)" $null '') { $w += 'Systemordner' }
+        if (@($x.Access | Where-Object { "$($_.Type)" -ne 'Deny' -and "$($_.Right)" -eq 'Full' -and (& $isWide $_) }).Count) { $w += 'Freigabe Vollzugriff fuer Jeder/Benutzer' }
+        if ($Ntfs -and @($x.Ntfs | Where-Object { "$($_.Type)" -ne 'Deny' -and "$($_.Rights)" -match 'FullControl' -and (& $isWide $_) }).Count) { $w += 'NTFS Vollzugriff fuer Jeder/Benutzer' }
+        return ($w -join ', ')
+    }
+    $lines = @(foreach ($x in $sel) { $w = & $warnOf $x; "$(if ($w) { "ACHTUNG ($w): " })$($x.Name)  ->  $($x.Path)" })
+    $nWarn = @($lines | Where-Object { $_ -like 'ACHTUNG*' }).Count
+    $q = "$(if ($nWarn) { "ACHTUNG: $nWarn Freigabe(n) mit Systemordner oder Vollzugriff fuer Jeder/Benutzer - nur anlegen, wenn du dem Backup vertraust.`n`n" })$($sel.Count) Freigabe(n) an $Computer anlegen?$(if ($Ntfs) { "`n`nNTFS-Rechte werden auf die Ordner GESETZT (ersetzt die vorhandenen). Konten, die am Ziel unbekannt sind (lokale Konten des alten PCs), fallen weg." })`n`n$($lines -join "`n")"
     if ("$([System.Windows.MessageBox]::Show($Win, $q, 'Freigaben uebernehmen', 'YesNo', 'Question'))" -ne 'Yes') { return }
     $json = ConvertTo-Json -InputObject @($sel) -Depth 5 -Compress
     Invoke-HMTool -Title 'Freigaben anlegen' -Computer $Computer -ArgumentList @($json, $Ntfs) -Script $script:HMShareCreateScript

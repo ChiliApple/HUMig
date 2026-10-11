@@ -173,7 +173,8 @@ function Update-HMStatusPage([switch]$StartUp) {
     $sd = 8
     try { if ($null -ne $script:Settings.StatusStaleDays -and [int]$script:Settings.StatusStaleDays -gt 0) { $sd = [int]$script:Settings.StatusStaleDays } } catch { }
     $bs = @(); $sbp = @(); $sbh = @(); $au = @(); $sbHealth = @{}
-    try { $bs = @(Get-HMBsRows) } catch { }
+    # erst zuweisen: Get-HMBsRows gibt die Liste als EIN Objekt zurueck (return ,$rows)
+    try { $tmpBs = Get-HMBsRows; $bs = @($tmpBs) } catch { }
     if (-not $script:UserMode) {
         try { $sbp = @((Get-HMSbConfig).Profiles) } catch { }
         # erst zuweisen: Get-HMSbAllHistory gibt die Liste als EIN Objekt zurueck (return ,@()) - @(Aufruf) haette sonst nur 1 Element
