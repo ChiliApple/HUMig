@@ -235,8 +235,8 @@ function Get-HMAppAclFindings([string]$Root) {
     $out = @()
     $w = Get-HMAppWritable $rt
     if ($w) { $out += "${rt}: $w" }
-    foreach ($n in @('Config', 'Functions', 'XAML', 'BIN', 'Tools')) {
-        $p = Join-Path $rt $n
+    foreach ($nm in @('Config', 'Functions', 'XAML', 'BIN', 'Tools')) {
+        $p = Join-Path $rt $nm
         if (-not (Test-Path -LiteralPath $p -PathType Container)) { continue }
         $w = ''
         try { $w = Get-HMAppWritable $p } catch { $w = "Rechte nicht lesbar ($($_.Exception.Message))" }
@@ -263,8 +263,8 @@ function Test-HMAclCheckOff([string]$ConfigDir) {
 # Backup-Ordner laut Einstellungen (wie Get-BackupRoot: settings.json ueber settings.default.json, aktives Standort-Profil)
 function Get-HMAppBackupRoot([string]$Root) {
     $br = ''; $ap = ''; $pr = @()
-    foreach ($n in @('settings.default.json', 'settings.json')) {
-        $f = Join-Path $Root "Config\$n"
+    foreach ($nm in @('settings.default.json', 'settings.json')) {
+        $f = Join-Path $Root "Config\$nm"
         if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { continue }
         try {
             $j = Get-Content -LiteralPath $f -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
