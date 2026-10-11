@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HUMig Funktionen</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: Kopf mit Name + Kennzahlen, Rangliste Top 10 als zweispaltiges Raster, darunter Kategorien als Kacheln in der Farbe ihres HUMig-Knopfs */
+:root {
+  --bg: #eff1f5; --surface: #ffffff; --surface-2: #e6e9ef; --line: #ccd0da;
+  --fg: #3b3e52; --fg-strong: #1e1e2e; --muted: #6c6f85;
+  --green: #40a02b; --mauve: #8839ef; --yellow: #c78b0a; --teal: #13867f; --blue: #1e66f5; --red: #d20f39; --peach: #e2620e;
+  --tint: 12%;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Figtree", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", Consolas, ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #1e1e2e; --surface: #262637; --surface-2: #313244; --line: #3d3e55;
+  --fg: #cdd6f4; --fg-strong: #ffffff; --muted: #a6adc8;
+  --green: #a6e3a1; --mauve: #cba6f7; --yellow: #f9e2af; --teal: #94e2d5; --blue: #89b4fa; --red: #f38ba8; --peach: #fab387;
+  --tint: 16%; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #1e1e2e; --surface: #262637; --surface-2: #313244; --line: #3d3e55;
+  --fg: #cdd6f4; --fg-strong: #ffffff; --muted: #a6adc8;
+  --green: #a6e3a1; --mauve: #cba6f7; --yellow: #f9e2af; --teal: #94e2d5; --blue: #89b4fa; --red: #f38ba8; --peach: #fab387;
+  --tint: 16%; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 400 15px/1.55 var(--f-body); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 64px; display: grid; gap: 56px; }
+h1, h2, h3 { font-family: var(--f-display); color: var(--fg-strong); text-wrap: balance; margin: 0; }
+p { margin: 0; }
+
+/* Kopf */
+header { display: grid; gap: 22px; }
+.brand { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.logo { width: 52px; height: 52px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); display: grid; place-items: center; font: 800 20px/1 var(--f-display); color: var(--blue); }
+h1 { font-size: clamp(34px, 6vw, 56px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.02; }
+.ver { font: 500 13px/1 var(--f-mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; }
+.lead { font-size: 18px; max-width: 62ch; color: var(--fg); }
+.facts { display: flex; flex-wrap: wrap; gap: 8px; }
+.fact { font: 500 12.5px/1 var(--f-mono); padding: 7px 10px; border-radius: 6px; background: var(--surface-2); color: var(--fg); }
+
+.label { font: 600 12px/1 var(--f-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+section { display: grid; gap: 20px; }
+section > h2 { font-size: clamp(24px, 3.5vw, 32px); font-weight: 700; letter-spacing: -0.01em; }
+
+/* Top 10 */
+.top { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap: 10px; }
+.top li { display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: start; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.rank { font: 800 28px/1 var(--f-display); color: var(--c, var(--blue)); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.top h3 { font-size: 17px; font-weight: 700; margin-bottom: 3px; }
+.top p { color: var(--muted); font-size: 14.5px; }
+.top li:nth-child(-n+3) { border-color: color-mix(in srgb, var(--c) 45%, var(--line)); background: color-mix(in srgb, var(--c) var(--tint), var(--surface)); }
+.top li:nth-child(-n+3) p { color: var(--fg); }
+
+/* Kategorien */
+.cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 16px; align-items: start; }
+.cat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 20px 22px; display: grid; gap: 14px; min-width: 0; }
+.cat-head { display: flex; align-items: center; gap: 10px; }
+.chip { font: 600 12.5px/1 var(--f-body); padding: 7px 11px; border-radius: 6px; background: var(--c); color: #1e1e2e; white-space: nowrap; }
+.cat h3 { font-size: 20px; font-weight: 700; }
+.group { display: grid; gap: 6px; }
+.group h4 { margin: 0; font: 600 12px/1 var(--f-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--c); }
+.cat ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.cat li { position: relative; padding-left: 16px; font-size: 14.5px; }
+.cat li::before { content: ""; position: absolute; left: 2px; top: 0.62em; width: 6px; height: 6px; border-radius: 2px; background: var(--c); }
+.new { font: 600 10.5px/1 var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--c); border: 1px solid var(--c); border-radius: 4px; padding: 2px 5px; margin-left: 4px; vertical-align: 1px; white-space: nowrap; }
+code { font: 500 13px/1.4 var(--f-mono); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+
+footer a { color: var(--blue); text-decoration: none; } footer a:hover, footer a:focus-visible { text-decoration: underline; }
+footer { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 6px 18px; border-top: 1px solid var(--line); padding-top: 18px; }
+@media (max-width: 480px) { .wrap { gap: 44px; padding-block: 28px 48px; } .top li { grid-template-columns: 34px 1fr; padding: 14px; } .rank { font-size: 24px; } }
+</style>
+</head>
+<body style="margin:0">
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo" aria-hidden="true">HU</div>
+      <h1>HUMig</h1>
+      <span class="ver">v2.0.122</span>
+    </div>
+    <p class="lead">Profile von PC zu PC umziehen, automatisch sichern und die tägliche PC-Betreuung an Schulen erledigen – am eigenen PC oder per Fernzugriff auf viele PCs gleichzeitig.</p>
+    <div class="facts">
+      <span class="fact">Windows 10 / 11</span>
+      <span class="fact">Server 2022 / 2025</span>
+      <span class="fact">PowerShell 5.1</span>
+      <span class="fact">Selbst-Update aus GitHub</span>
+      <span class="fact">bis 8 PCs parallel</span>
+    </div>
+  </header>
+
+  <section aria-labelledby="t-top">
+    <span class="label">Die Stärksten zuerst</span>
+    <h2 id="t-top">Top 10</h2>
+    <ol class="top">
+      <li style="--c: var(--green)"><span class="rank">1</span><div><h3>Profil-Umzug Backup → Restore</h3><p>Ganzes Benutzerprofil samt Programm-Einstellungen auf einen neuen PC – lokal oder remote, auch bei anderem Profilnamen.</p></div></li>
+      <li style="--c: var(--mauve)"><span class="rank">2</span><div><h3>Umzugs-Assistent</h3><p>Führt in sechs Schritten durch den kompletten Umzug und macht nach einem Neustart dort weiter.</p></div></li>
+      <li style="--c: var(--blue)"><span class="rank">3</span><div><h3>Programm-Katalog</h3><p>Über 480 Einträge: erkennt installierte Programme und nimmt Einstellungen, Lizenzen und Datenbanken mit.</p></div></li>
+      <li style="--c: var(--teal)"><span class="rank">4</span><div><h3>Geplante Profil-Backups</h3><p>Täglich oder wöchentlich, fortlaufend oder neu; USB wird danach ausgeworfen, Schutz bei Massenlöschung.</p></div></li>
+      <li style="--c: var(--yellow)"><span class="rank">5</span><div><h3>Softwareverteilung mit Sandbox-Test</h3><p>Setup erst in der Windows Sandbox prüfen, dann still auf viele PCs verteilen.</p></div></li>
+      <li style="--c: var(--peach)"><span class="rank">6</span><div><h3>Hyper-V- und Server-Backup</h3><p>Server und VMs auf rotierende USB-Platten, mit SMART-Prüfung und Plattenwechsel-Erinnerung.</p></div></li>
+      <li style="--c: var(--mauve)"><span class="rank">7</span><div><h3>Teams-Benachrichtigung</h3><p>Ergebnisse von Server- und Profil-Backups in Teams-Kanäle, je Ziel eigene Kategorien.</p></div></li>
+      <li style="--c: var(--blue)"><span class="rank">8</span><div><h3>App-Updates per WinGet</h3><p>Ganze EDV-Säle aktualisieren, Prüfungssoftware als Ausnahme, auf Wunsch per Zeitplan.</p></div></li>
+      <li style="--c: var(--green)"><span class="rank">9</span><div><h3>Fehlende Programme installieren</h3><p>Beim Restore zuerst die Programme des alten PCs nachinstallieren, dann die Daten zurückspielen.</p></div></li>
+      <li style="--c: var(--red)"><span class="rank">10</span><div><h3>PC-Werkzeuge und Mehrfachaktionen</h3><p>Profil erneuern, Speicher aufräumen, Inventar, Neustart – an vielen PCs gleichzeitig.</p></div></li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="t-cats">
+    <span class="label">Alle Funktionen</span>
+    <h2 id="t-cats">Nach Bereichen</h2>
+    <div class="cats">
+
+      <article class="cat" style="--c: var(--green)">
+        <div class="cat-head"><span class="chip">Backup</span><h3>Sichern</h3></div>
+        <ul>
+          <li>Benutzerprofil, Daten auf C:\, Zusätzliche Ordner mit Ausschlüssen</li>
+          <li>Edge, Chrome, Firefox; Office-Signaturen, Vorlagen, PST, OneNote</li>
+          <li>Taskleiste, Hintergrund, Desktop-Symbole, Startmenü, Kurznotizen</li>
+          <li>Netzlaufwerke, Drucker, VPN, WLAN, Aufgaben, Treiber, Schriften, Freigaben</li>
+          <li>Windows-Einstellungen per USMT (optional)</li>
+          <li>Fortlaufend: nur Neues, Gelöschtes 90 Tage aufgehoben</li>
+          <li>OneDrive erkannt und ausgelassen, optional lokal mitgesichert</li>
+          <li>Vorab-Prüfung, Platzbedarf, Prüfsummen, Bericht als HTML</li>
+          <li>Benutzer-Modus: Lehrkräfte sichern selbst, ohne Adminrechte</li>
+        </ul>
+      </article>
+
+      <article class="cat" style="--c: var(--blue)">
+        <div class="cat-head"><span class="chip">Restore</span><h3>Zurückspielen</h3></div>
+        <ul>
+          <li>Auf neuen PC oder anderen Benutzer, Pfade und Registry umgeschrieben</li>
+          <li>Restore-Vorschau, Checkliste für Nacharbeiten</li>
+          <li>Kontrolle auf fehlende Dateien nach dem Restore</li>
+          <li>Fehlende Programme zuerst installieren</li>
+          <li>Im Backup suchen, einzelne Dateien an den Originalort</li>
+          <li>Backups vergleichen, prüfen, alte automatisch löschen</li>
+        </ul>
+        <div class="group"><h4>Zeitplan</h4>
+          <ul>
+            <li>Täglich, wöchentlich oder bei Anmeldung – HUMig muss nicht offen sein</li>
+            <li>USB nach Laufwerksbezeichnung, Netzlaufwerk als UNC</li>
+            <li>Meldung in Windows, Ereignisanzeige und Teams</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="cat" style="--c: var(--yellow)">
+        <div class="cat-head"><span class="chip">Software</span><h3>Programme</h3></div>
+        <div class="group"><h4>Softwareverteilung</h4>
+          <ul>
+            <li>MSI/EXE still auf einen oder viele PCs, Silent-Schalter erkannt</li>
+            <li>Testinstallation in der Windows Sandbox <span class="new">neu</span></li>
+            <li>Erkennung per ProductCode, Name, Schlüssel oder Datei</li>
+            <li>Abhängigkeiten, keine Desktop-Verknüpfung</li>
+            <li>Deinstallieren, Status je PC, neue Version per WinGet</li>
+          </ul>
+        </div>
+        <div class="group"><h4>Katalog</h4>
+          <ul>
+            <li>Erkennt Programme, schlägt Module vor</li>
+            <li>Geprüfte Einträge mit Datum, Rückmeldung per GitHub/E-Mail</li>
+            <li>Eigene Einträge per Assistent oder Editor</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="cat" style="--c: var(--teal)">
+        <div class="cat-head"><span class="chip">Updates</span><h3>App-Updates und Treiber</h3></div>
+        <div class="group"><h4>App-Updates (WinGet)</h4>
+          <ul>
+            <li>Ein PC oder ganze EDV-Säle parallel</li>
+            <li>Ausnahmen mit Muster, z. B. Next-Exam, Safe Exam Browser</li>
+            <li>Zeitplan als SYSTEM, PCs wecken, Verlauf</li>
+          </ul>
+        </div>
+        <div class="group"><h4>Treiberverteilung</h4>
+          <ul>
+            <li>INF oder Hersteller-Setup nur bei passender Hardware</li>
+            <li>Treiber erzwingen, vor Windows Update schützen</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="cat" style="--c: var(--peach)">
+        <div class="cat-head"><span class="chip">Server</span><h3>Server-Backup und Teams</h3></div>
+        <div class="group"><h4>Hyper-V</h4>
+          <ul>
+            <li>Server und VMs mit der Windows Server-Sicherung, Profil je Host</li>
+            <li>Plattenrotation mit Archivplatten, Wechsel-Erinnerung</li>
+            <li>SMART-Zustand, Speicherwarnung, Versionen je Platte</li>
+            <li>Danach auswerfen oder offline schalten</li>
+          </ul>
+        </div>
+        <div class="group"><h4>Teams</h4>
+          <ul>
+            <li>Bis zu 10 Ziele, Adressen verschlüsselt nur am PC</li>
+            <li>Je Ziel eigene Kategorien</li>
+            <li>Eine Karte je Lauf mit Stand und Speicherplatz</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="cat" style="--c: var(--red)">
+        <div class="cat-head"><span class="chip">Werkzeuge</span><h3>PC-Werkzeuge</h3></div>
+        <div class="group"><h4>Am gewählten PC</h4>
+          <ul>
+            <li>Profil erneuern, zurückholen, anderem Konto zuweisen</li>
+            <li>Speicher aufräumen bis Windows.old</li>
+            <li>Inventar, Gruppen, Firewall, Energie, Autologon</li>
+            <li>Wichtige Dateien und Datenbanken finden</li>
+          </ul>
+        </div>
+        <div class="group"><h4>Viele PCs gleichzeitig</h4>
+          <ul>
+            <li>PC-Auswahl aus dem AD mit OU und Filter</li>
+            <li>Online-Check, Fernwartung, Inventar als CSV, Autopilot-Hash</li>
+            <li>GPUpdate, Intune-Sync, Neustart, Nachricht senden</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="cat" style="--c: var(--mauve)">
+        <div class="cat-head"><span class="chip">Betrieb</span><h3>Sicherheit und Update</h3></div>
+        <ul>
+          <li>Selbst-Update mit Prüfsummen und Signatur, Kanäle Stabil/Test</li>
+          <li>Ordnerrechte-Prüfung beim Start, Absichern per Klick</li>
+          <li>Backups im HUMig-Ordner sieht jeder nur selbst</li>
+          <li>Abgesicherter Restore: Rückfrage bei fremden Backups</li>
+          <li>Standorte: je Schule eigene Ordner und Domäne</li>
+          <li>Startseite mit Status, Live-Anzeige CPU/RAM</li>
+          <li>Selbsttest <code>Test-HUMig.ps1</code>, Support-Paket, Anleitung</li>
+        </ul>
+      </article>
+
+    </div>
+  </section>
+
+  <footer>
+    <span>Stand 11.10.2026 · Version 2.0.122</span>
+    <a href="Anleitung.html">Anleitung</a>
+    <a href="https://github.com/ChiliApple/HUMig">Projekt auf GitHub</a>
+    <a href="https://github.com/ChiliApple/HUMig/releases">Download (Releases)</a>
+    <a href="https://github.com/ChiliApple/HUMig/blob/main/INSTALL.md">Installation</a>
+  </footer>
+</div>
+</body>
+</html>

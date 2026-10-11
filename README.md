@@ -14,6 +14,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 </p>
 
 <p align="center">
+  <a href="https://chiliapple.github.io/HUMig/Docs/Funktionen.html"><b>Funktionen im Überblick</b></a> ·
   <a href="https://chiliapple.github.io/HUMig/Docs/Anleitung.html"><b>Anleitung</b></a> ·
   <a href="INSTALL.md">Installation</a> ·
   <a href="CHANGELOG.md">Änderungen</a> ·
@@ -27,7 +28,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 | **Backup & Restore** | Dateien, Browser, Office, Windows-Einstellungen, Drucker, WLAN, Netzlaufwerke – Robocopy mit bis zu 128 Threads, inkrementell, mit Prüfung, **Zeitplan** (automatisch auf USB/Netz) |
 | **Programm-Katalog** | erkennt rund 480 Programme, sichert deren Einstellungen, Plug-ins, Datenbanken und **Lizenzdateien** mit, schließt Programme vorher, installiert fehlende am neuen PC nach - mit **Katalog-Editor** |
 | **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
-| **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung |
+| **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung (Setups vorher in der **Windows Sandbox** testen) |
 | **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |
 | **App-Updates** | installierte Programme über **WinGet** aktualisieren - Liste mit Haken, **Ausnahmen** (z. B. Prüfungssoftware) und Quellen je Standort, Verlauf |
 | **Benutzer-Modus** | ohne Administratorrechte: eigenes Profil sichern/wiederherstellen, Dateien aus dem Backup holen |
