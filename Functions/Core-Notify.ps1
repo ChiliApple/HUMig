@@ -15,6 +15,17 @@
 
 $script:HMNotifyKey = 'HKLM:\SOFTWARE\HUMig\Notify'
 $script:HMNotifyEntropy = [System.Text.Encoding]::UTF8.GetBytes('HUMig-Notify-v1')
+# Kategorien (einzeln ein-/ausschaltbar, Registry-Wert Cat_<Name> als DWORD). Wert: Text, Standard
+$script:HMNotifyCats = [ordered]@{
+    SbError    = @('Server-Backup fehlgeschlagen / abgebrochen', $true)
+    SbWarning  = @('Server-Backup mit Warnungen', $true)
+    SbOK       = @('Server-Backup erfolgreich', $false)
+    Health     = @('Plattenzustand (SMART) auffaellig', $true)
+    Reminder   = @('Erinnerungen: Plattenwechsel / Archiv-Platte', $true)
+    Space      = @('Speicherplatz auf der Backup-Platte knapp', $true)
+    MassDelete = @('Massenloeschung erkannt (Verdacht auf Verschluesselungstrojaner)', $true)
+    Details    = @('Details mitsenden: Dauer, Datenmenge, freier Platz, Versionen auf der Platte', $true)
+}
 
 function Protect-HMNotifyText([string]$Text) {
     Add-Type -AssemblyName System.Security
@@ -43,21 +54,45 @@ function Test-HMTeamsWebhookHostKnown([string]$Url) {
     return ($x.Host -match '(?i)(\.logic\.azure\.com|\.powerplatform\.com|\.powerautomate\.com|\.azure-apim\.net)$')
 }
 
-# Einstellungen lesen: Url (entschluesselt, '' wenn keine/nicht lesbar), OnSuccess, Configured, Error
+# Kategorien mit Standardwerten (Hashtable Name -> bool)
+function Get-HMNotifyDefaultCats {
+    $c = @{}
+    foreach ($n in $script:HMNotifyCats.Keys) { $c[$n] = [bool]$script:HMNotifyCats[$n][1] }
+    return $c
+}
+
+# Einstellungen lesen: Url (entschluesselt, '' wenn keine/nicht lesbar), OnSuccess, Cats, Configured, Error
 function Get-HMNotifyConfig {
-    $r = [pscustomobject]@{ Url = ''; OnSuccess = $false; Configured = $false; Error = '' }
+    $r = [pscustomobject]@{ Url = ''; OnSuccess = $false; Cats = (Get-HMNotifyDefaultCats); Configured = $false; Error = '' }
     try {
         if (-not (Test-Path -LiteralPath $script:HMNotifyKey)) { return $r }
         $k = Get-ItemProperty -LiteralPath $script:HMNotifyKey -ErrorAction Stop
         $r.OnSuccess = [bool]([int]"0$($k.OnSuccess)")
+        $r.Cats['SbOK'] = $r.OnSuccess   # aeltere Versionen: nur der Haken 'auch bei Erfolg'
+        foreach ($n in $script:HMNotifyCats.Keys) {
+            $v = $k.PSObject.Properties["Cat_$n"]
+            if ($v) { $r.Cats[$n] = [bool]([int]"0$($v.Value)") }
+        }
+        $r.OnSuccess = [bool]$r.Cats['SbOK']
         if ("$($k.TeamsUrl)") { $r.Configured = $true; $r.Url = Unprotect-HMNotifyText "$($k.TeamsUrl)" }
     } catch { $r.Error = "$($_.Exception.Message)"; $r.Url = '' }
     return $r
 }
 
+# Ist die Kategorie eingeschaltet? (unbekannte Kategorie = ein)
+function Test-HMNotifyCat($Cfg, [string]$Name) {
+    if (-not $Name) { return $true }
+    $c = $null
+    if ($Cfg) { $c = $Cfg.Cats }
+    if ($c -and $c.ContainsKey($Name)) { return [bool]$c[$Name] }
+    if ($script:HMNotifyCats.Contains($Name)) { return [bool]$script:HMNotifyCats[$Name][1] }
+    return $true
+}
+
 # Speichern (Administrator). $Url = $null: Adresse unveraendert lassen, '' = Adresse entfernen
 function Set-HMNotifyConfig {
-    param($Url = $null, [bool]$OnSuccess = $false)
+    param($Url = $null, [bool]$OnSuccess = $false, [hashtable]$Cats = $null)
+    if ($Cats -and $Cats.ContainsKey('SbOK')) { $OnSuccess = [bool]$Cats['SbOK'] }
     if (-not (Test-Path -LiteralPath $script:HMNotifyKey)) { New-Item -Path $script:HMNotifyKey -Force -ErrorAction Stop | Out-Null }
     # Schluessel nur fuer SYSTEM + Administratoren (Vererbung aus) - Benutzer koennen die Adresse nicht lesen
     $acl = New-Object System.Security.AccessControl.RegistrySecurity
@@ -75,6 +110,11 @@ function Set-HMNotifyConfig {
         } else { Remove-ItemProperty -LiteralPath $script:HMNotifyKey -Name 'TeamsUrl' -ErrorAction SilentlyContinue }
     }
     Set-ItemProperty -LiteralPath $script:HMNotifyKey -Name 'OnSuccess' -Value ([int]$OnSuccess) -Type DWord -ErrorAction Stop
+    if ($Cats) {
+        foreach ($n in $script:HMNotifyCats.Keys) {
+            if ($Cats.ContainsKey($n)) { Set-ItemProperty -LiteralPath $script:HMNotifyKey -Name "Cat_$n" -Value ([int][bool]$Cats[$n]) -Type DWord -ErrorAction Stop }
+        }
+    }
 }
 
 # Nachricht als Adaptive Card (Format der Workflows-Vorlage: attachments[].content). Level: OK | Warning | Error | Info
@@ -112,12 +152,14 @@ function Send-HMTeamsMessage {
     }
 }
 
-# Meldung nur wenn eingetragen; Ergebnis als Text fuer das Protokoll ('' = nichts zu melden / nicht eingerichtet)
+# Meldung nur wenn eingetragen und die Kategorie eingeschaltet ist; Ergebnis als Text fuer das Protokoll
+# ('' = nichts zu melden / nicht eingerichtet / Kategorie aus). Ohne Kategorie: OK nur mit 'Server-Backup erfolgreich'
 function Send-HMNotify {
-    param([string]$Title, [string[]]$Lines = @(), [string]$Level = 'Info', [string]$Source = '')
+    param([string]$Title, [string[]]$Lines = @(), [string]$Level = 'Info', [string]$Source = '', [string]$Category = '')
     $c = Get-HMNotifyConfig
     if (-not $c.Configured) { return '' }
-    if ($Level -eq 'OK' -and -not $c.OnSuccess) { return '' }
+    if ($Category) { if (-not (Test-HMNotifyCat $c $Category)) { return '' } }
+    elseif ($Level -eq 'OK' -and -not $c.OnSuccess) { return '' }
     $r = Send-HMTeamsMessage -Title $Title -Lines $Lines -Level $Level -Url $c.Url -Source $Source
     if ($r) { return "Teams-Benachrichtigung: $r" }
     return 'Teams-Benachrichtigung gesendet'

@@ -882,9 +882,88 @@ Describe 'Teams-Benachrichtigung (Workflow-Webhook)' {
         Send-HMNotify -Title 't' -Level 'Error' | Should -BeNullOrEmpty
         Send-HMTeamsMessage -Title 't' | Should -Match 'kein Teams-Webhook'
     }
+    It 'Kategorien: Standardwerte, unbekannte Kategorie = ein, Konfiguration ueberschreibt' {
+        $d = Get-HMNotifyDefaultCats
+        $d['SbError'] | Should -BeTrue
+        $d['SbOK'] | Should -BeFalse
+        $d['MassDelete'] | Should -BeTrue
+        $d.Keys.Count | Should -Be $script:HMNotifyCats.Count
+        Test-HMNotifyCat $null 'SbOK' | Should -BeFalse
+        Test-HMNotifyCat $null 'GibtEsNicht' | Should -BeTrue
+        $cfg = [pscustomobject]@{ Cats = @{ SbOK = $true; Health = $false } }
+        Test-HMNotifyCat $cfg 'SbOK' | Should -BeTrue
+        Test-HMNotifyCat $cfg 'Health' | Should -BeFalse
+        Test-HMNotifyCat ([pscustomobject]@{ Url = '' }) 'Reminder' | Should -BeTrue
+    }
+    It 'ausgeschaltete Kategorie sendet nichts' {
+        Mock Get-HMNotifyConfig { [pscustomobject]@{ Url = 'https://localhost:1/x'; OnSuccess = $false; Cats = @{ MassDelete = $false }; Configured = $true; Error = '' } }
+        Send-HMNotify -Title 't' -Level 'Error' -Category 'MassDelete' | Should -BeNullOrEmpty
+    }
     It 'gibt die Adresse nie in Fehlermeldungen aus' {
         $r = Send-HMTeamsMessage -Title 't' -Url 'https://localhost:1/workflows/geheim?sig=GEHEIM'
         $r | Should -Match 'fehlgeschlagen'
         $r | Should -Not -Match 'GEHEIM'
+    }
+}
+
+Describe 'Teams-Meldung Server-Backup (Kategorien, eine Karte je Lauf)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Core-Notify.ps1')
+        $script:AllOn = Get-HMNotifyDefaultCats; foreach ($k in @($script:AllOn.Keys)) { $script:AllOn[$k] = $true }
+        function New-TestRes([string]$St = 'OK', [string[]]$Notes = @(), [string]$Health = 'OK', [switch]$Low) {
+            [pscustomobject]@{ Status = $St; Notes = $Notes; Health = $Health; HealthText = "Zustand $Health"; Report = 'E:\HUMig-ServerBackup\2026-10-11_Gym'
+                Minutes = 42; SizeBytes = [long]200GB; FreeBytes = $(if ($Low) { [long]50GB } else { [long]1500GB }); TotalBytes = [long]2000GB; LowSpace = [bool]$Low
+                VersionCount = 12; OldestVersion = '01.09.2026 22:00'; NewestVersion = '11.10.2026 22:00'; VMs = 'DC1, FS1'; Volumes = ''; HostSystem = 'ja' }
+        }
+    }
+    It 'Speicherplatz knapp: weniger frei als benoetigt oder unter 10 %' {
+        Test-HMSbLowSpace -Free 50GB -Total 2000GB -Need 200GB | Should -BeTrue
+        Test-HMSbLowSpace -Free 150GB -Total 2000GB -Need 100GB | Should -BeTrue
+        Test-HMSbLowSpace -Free 1500GB -Total 2000GB -Need 200GB | Should -BeFalse
+        Test-HMSbLowSpace -Free 0 -Total 0 -Need 0 | Should -BeFalse
+    }
+    It 'Erfolg mit Standard-Kategorien: keine Meldung' {
+        New-HMSbNotifyMessage -Result (New-TestRes) -ProfileName 'Gym' -Disk 'HUMIG-GYM-1' -Cats (Get-HMNotifyDefaultCats) | Should -BeNullOrEmpty
+    }
+    It 'Erfolg mit SbOK: Details mit Stand und Speicher' {
+        $m = New-HMSbNotifyMessage -Result (New-TestRes) -ProfileName 'Gym' -Disk 'HUMIG-GYM-1' -Cats $script:AllOn -Computer 'HV1'
+        $m.Level | Should -Be 'OK'
+        $m.Title | Should -Be "Server-Backup 'Gym' auf HV1 erfolgreich"
+        ($m.Lines -join '|') | Should -Match 'Versionen auf der Platte: 12'
+        ($m.Lines -join '|') | Should -Match 'frei von'
+        ($m.Lines -join '|') | Should -Match 'Dauer 42 min'
+        ($m.Lines -join '|') | Should -Match 'VMs: DC1, FS1'
+        ($m.Lines -join '|') | Should -Match 'Bericht\.html'
+    }
+    It 'Details aus: nur Platte und Bericht' {
+        $c = $script:AllOn.Clone(); $c['Details'] = $false
+        $m = New-HMSbNotifyMessage -Result (New-TestRes) -ProfileName 'Gym' -Disk 'D1' -Cats $c
+        ($m.Lines -join '|') | Should -Not -Match 'Versionen'
+        @($m.Lines).Count | Should -Be 2
+    }
+    It 'Fehler wird gemeldet, auch wenn Erfolg aus ist' {
+        $m = New-HMSbNotifyMessage -Result (New-TestRes -St 'Error' -Notes @('Fehler: x')) -ProfileName 'Gym' -Disk 'D1' -Cats (Get-HMNotifyDefaultCats)
+        $m.Level | Should -Be 'Error'
+        $m.Title | Should -Match 'FEHLGESCHLAGEN'
+        ($m.Lines -join '|') | Should -Match 'Hinweis: Fehler: x'
+    }
+    It 'nur Plattenzustand auffaellig: Warnung ueber Kategorie Health, abschaltbar' {
+        $r = New-TestRes -St 'Warning' -Notes @('Platte: Warnung') -Health 'Warning'
+        $c = Get-HMNotifyDefaultCats
+        $m = New-HMSbNotifyMessage -Result $r -ProfileName 'Gym' -Disk 'D1' -Cats $c
+        $m.Level | Should -Be 'Warning'
+        ($m.Lines -join '|') | Should -Match 'Plattenzustand: Zustand Warning'
+        ($m.Lines -join '|') | Should -Not -Match 'Hinweis: Platte'
+        $c['Health'] = $false
+        New-HMSbNotifyMessage -Result $r -ProfileName 'Gym' -Disk 'D1' -Cats $c | Should -BeNullOrEmpty
+    }
+    It 'Erinnerung und Speicherplatz als eigene Kategorien' {
+        $c = Get-HMNotifyDefaultCats
+        $m = New-HMSbNotifyMessage -Result (New-TestRes -Low) -ProfileName 'Gym' -Disk 'D1' -Reminders @('Plattenwechsel faellig') -Cats $c
+        $m.Level | Should -Be 'Warning'
+        ($m.Lines -join '|') | Should -Match 'Erinnerung: Plattenwechsel'
+        ($m.Lines -join '|') | Should -Match 'Speicherplatz knapp'
+        $c['Reminder'] = $false; $c['Space'] = $false
+        New-HMSbNotifyMessage -Result (New-TestRes -Low) -ProfileName 'Gym' -Disk 'D1' -Reminders @('x') -Cats $c | Should -BeNullOrEmpty
     }
 }

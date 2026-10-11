@@ -105,11 +105,12 @@
                             <DockPanel>
                                 <Button x:Name="btnTeamsDel" DockPanel.Dock="Right" Content="Entfernen" Style="{DynamicResource BtnRed}" Margin="4,0,0,0" ToolTip="Webhook-Adresse auf diesem PC loeschen"/>
                                 <Button x:Name="btnTeamsTest" DockPanel.Dock="Right" Content="Test senden" Style="{DynamicResource BtnMauve}" Margin="4,0,0,0" ToolTip="Testnachricht an den Kanal senden (eingetragene oder gespeicherte Adresse)"/>
-                                <PasswordBox x:Name="pwdTeams" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF45475A" Padding="4,3" ToolTip="Adresse aus der Teams-App Workflows: Kanal > ... > Workflows > Vorlage 'Send webhook alerts to a channel' (bzw. 'Bei Eingang einer Teams-Webhookanforderung im Kanal posten') > Adresse kopieren. Leer lassen = gespeicherte Adresse behalten"/>
+                                <PasswordBox x:Name="pwdTeams" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF45475A" Padding="4,3" ToolTip="Adresse aus der Teams-App Workflows: Vorlage 'Webhookbenachrichtigungen an einen Chat' bzw. '... an einen Kanal' (engl. 'Send webhook alerts to a chat/channel') > Speichern > Adresse kopieren. Leer lassen = gespeicherte Adresse behalten"/>
                             </DockPanel>
                             <TextBlock x:Name="lblTeams" Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
-                            <CheckBox x:Name="chkTeamsOk" Content="Auch erfolgreiche geplante Server-Backups melden (sonst nur Fehler, Warnungen und Erinnerungen)" Margin="0,4,0,0"/>
-                            <TextBlock Text="Gemeldet werden: geplante Server-Backups (Fehler, Warnungen, Plattenzustand, Plattenwechsel/Archiv faellig) und Massenloeschung bei Backups, die in HUMig als Administrator laufen. Die Adresse wird nur auf diesem PC gespeichert (verschluesselt, nur Administratoren/SYSTEM) - auf dem Server, auf dem die Zeitplaene laufen, eintragen. Geplante Profil-Backups im Benutzerkonto melden sich nur lokal." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                            <TextBlock Text="Melden:" Foreground="#FFCDD6F4" Margin="0,8,0,2"/>
+                            <StackPanel x:Name="pnlTeamsCats" Margin="8,0,0,0"/>
+                            <TextBlock Text="Geplante Server-Backups kommen als eine Nachricht je Lauf mit allen eingeschalteten Punkten. Massenloeschung wird bei Backups gemeldet, die in HUMig als Administrator laufen. Die Adresse wird nur auf diesem PC gespeichert (verschluesselt, nur Administratoren/SYSTEM) - auf dem Server, auf dem die Zeitplaene laufen, eintragen. Geplante Profil-Backups im Benutzerkonto melden sich nur lokal. Teams: App Workflows > Vorlage 'Webhookbenachrichtigungen an einen Chat' bzw. '... an einen Kanal' (private Kanaele gehen nicht - Gruppenchat oder Standardkanal eines privaten Teams verwenden)." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,6,0,0"/>
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>

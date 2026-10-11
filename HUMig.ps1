@@ -1055,7 +1055,7 @@ function Start-BackupJob([hashtable]$Ctx) {
                 $mf = Read-JsonFile (Join-Path $script:LastBackupCtx.BackupPath 'manifest.json')
                 $ma = @(); if ($mf -and $mf.MassDeleteAlert) { $ma = @($mf.MassDeleteAlert | Where-Object { $_ }) }
                 if ($ma.Count) {
-                    $n = Send-HMNotify -Title "HUMig: Massenloeschung erkannt - $($script:LastBackupCtx.Computer) \ $($script:LastBackupCtx.UserFolder)" -Lines (@('An der Quelle fehlen auf einmal sehr viele Dateien - typisches Zeichen fuer einen Verschluesselungstrojaner. Nichts wurde beiseitegelegt, das Backup behaelt den alten Stand.') + @($ma | Select-Object -First 5) + @("Backup: $($script:LastBackupCtx.BackupPath)")) -Level 'Error'
+                    $n = Send-HMNotify -Title "HUMig: Massenloeschung erkannt - $($script:LastBackupCtx.Computer) \ $($script:LastBackupCtx.UserFolder)" -Lines (@('An der Quelle fehlen auf einmal sehr viele Dateien - typisches Zeichen fuer einen Verschluesselungstrojaner. Nichts wurde beiseitegelegt, das Backup behaelt den alten Stand.') + @($ma | Select-Object -First 5) + @("Backup: $($script:LastBackupCtx.BackupPath)")) -Level 'Error' -Category 'MassDelete'
                     if ($n) { Out-Console $n 'Info' }
                 }
             } catch { }

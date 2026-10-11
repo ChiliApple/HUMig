@@ -544,6 +544,73 @@ function Get-HMSbVersions([string]$Target) {
     return [pscustomobject]@{ Versions = $sorted; ExitCode = $r.ExitCode; Text = $r.Text }
 }
 
+# Zeitpunkt einer Sicherungsversion lesbar (dd.MM.yyyy HH:mm, sonst Text von wbadmin)
+function Format-HMSbVersionTime($V) {
+    if ($null -eq $V) { return '' }
+    try { if ($V.When -is [datetime] -and $V.When -gt [datetime]::MinValue) { return $V.When.ToString('dd.MM.yyyy HH:mm') } } catch { }
+    return "$($V.Time)"
+}
+
+# Speicherplatz knapp: weniger frei als die naechste Sicherung braucht oder unter 10 % der Platte
+function Test-HMSbLowSpace([long]$Free, [long]$Total, [long]$Need) {
+    if ($Total -le 0) { return $false }
+    if ($Need -gt 0 -and $Free -lt $Need) { return $true }
+    return ($Free -lt ($Total * 0.1))
+}
+
+# Teams-Meldung eines Server-Backup-Laufs aus den eingeschalteten Kategorien (eine Karte je Lauf).
+# Rueckgabe: Title, Lines, Level - oder $null, wenn keine eingeschaltete Kategorie etwas zu melden hat.
+function New-HMSbNotifyMessage {
+    param($Result, [string]$ProfileName, [string]$Disk, [string[]]$Reminders = @(), $Cats = $null, [string]$Computer = $env:COMPUTERNAME)
+    $on = { param($n) if ($Cats -and $Cats.ContainsKey($n)) { [bool]$Cats[$n] } else { $true } }
+    $st = "$($Result.Status)"
+    $notes = @(@($Result.Notes) | Where-Object { "$_".Trim() } | ForEach-Object { "$_" })
+    $diskNotes = @($notes | Where-Object { $_ -match '^Platte: ' })
+    $other = @($notes | Where-Object { $_ -notmatch '^Platte: ' })
+    # Ergebnis der Sicherung selbst (ohne Plattenzustand, der eine eigene Kategorie hat)
+    $core = if ($st -eq 'Error') { 'Error' } elseif ($st -eq 'Warning' -and ($other.Count -or -not $diskNotes.Count)) { 'Warning' } else { 'OK' }
+    $coreCat = switch ($core) { 'Error' { 'SbError' } 'Warning' { 'SbWarning' } default { 'SbOK' } }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lv = New-Object System.Collections.Generic.List[string]
+    $healthShown = $false
+    if (& $on $coreCat) {
+        $lines.Add("Platte: $Disk")
+        foreach ($n in $other) { $lines.Add("Hinweis: $n") }
+        $lv.Add($core)
+    }
+    $hl = "$($Result.Health)"
+    if ($hl -in @('Warning', 'Error') -and (& $on 'Health')) {
+        $lines.Add("Plattenzustand: $($Result.HealthText)"); $lv.Add($hl); $healthShown = $true
+    }
+    $rem = @(@($Reminders) | Where-Object { "$_".Trim() })
+    if ($rem.Count -and (& $on 'Reminder')) { foreach ($r in $rem) { $lines.Add("Erinnerung: $r") }; $lv.Add('Warning') }
+    if ($Result.LowSpace -and (& $on 'Space')) {
+        $lines.Add(("Speicherplatz knapp: {0:N0} GB frei von {1:N0} GB - die Windows Server-Sicherung loescht bald automatisch die aeltesten Versionen. Groessere Platte oder weniger sichern." -f ([long]$Result.FreeBytes / 1GB), ([long]$Result.TotalBytes / 1GB)))
+        $lv.Add('Warning')
+    }
+    if (-not $lv.Count) { return $null }
+    if (& $on 'Details') {
+        $what = @()
+        if ("$($Result.VMs)") { $what += "VMs: $($Result.VMs)" }
+        if ("$($Result.Volumes)") { $what += "Laufwerke: $($Result.Volumes)" }
+        if ("$($Result.HostSystem)") { $what += "Host-System: $($Result.HostSystem)" }
+        if ($what.Count) { $lines.Add("Gesichert: $($what -join ' | ')") }
+        $dl = @()
+        if ([double]"0$($Result.Minutes)" -gt 0) { $dl += "Dauer $(Format-HMDuration $Result.Minutes)" }
+        if ([long]"0$($Result.SizeBytes)" -gt 0) { $dl += ("Datenmenge ca. {0:N1} GB" -f ([long]$Result.SizeBytes / 1GB)) }
+        if ($dl.Count) { $lines.Add($dl -join ' | ') }
+        if ([long]"0$($Result.TotalBytes)" -gt 0) {
+            $lines.Add(("Backup-Platte: {0:N0} GB frei von {1:N0} GB ({2:N0} % frei)" -f ([long]$Result.FreeBytes / 1GB), ([long]$Result.TotalBytes / 1GB), (100.0 * [long]$Result.FreeBytes / [long]$Result.TotalBytes)))
+        }
+        if ([int]"0$($Result.VersionCount)" -gt 0) { $lines.Add("Versionen auf der Platte: $($Result.VersionCount) (aelteste $($Result.OldestVersion), neueste $($Result.NewestVersion))") }
+        if (-not $healthShown -and "$($Result.HealthText)") { $lines.Add("Plattenzustand: $($Result.HealthText)") }
+    }
+    if ("$($Result.Report)") { $lines.Add("Bericht: $("$($Result.Report)".TrimEnd('\'))\Bericht.html") }   # ohne Join-Path: Laufwerk evtl. schon ausgeworfen
+    $level = if ($lv -contains 'Error') { 'Error' } elseif ($lv -contains 'Warning') { 'Warning' } else { 'OK' }
+    $stTxt = switch ($st) { 'OK' { 'erfolgreich' } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }
+    return [pscustomobject]@{ Title = "Server-Backup '$ProfileName' auf $Computer $stTxt"; Lines = @($lines.ToArray()); Level = $level }
+}
+
 # Verlauf (JSON-Array) lesen / ergaenzen
 function Read-HMSbHistory([string]$Path) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return ,@() }
@@ -1129,7 +1196,8 @@ function Start-HMServerBackup {
     $target = "${L}:"
     $vms = @($Ctx.VMs | Where-Object { "$_".Trim() })
     $vols = @($Ctx.Volumes | Where-Object { "$_".Trim() } | ForEach-Object { ("$_".Trim().TrimEnd('\', ':')).ToUpper() + ':' } | Select-Object -Unique)
-    $res = [ordered]@{ Status = 'Error'; SizeBytes = [long]0; Report = ''; VersionId = ''; HostVersionId = ''; VolVersionId = ''; Notes = @(); Health = ''; HealthText = '' }
+    $res = [ordered]@{ Status = 'Error'; SizeBytes = [long]0; Report = ''; VersionId = ''; HostVersionId = ''; VolVersionId = ''; Notes = @(); Health = ''; HealthText = ''
+        Minutes = 0; FreeBytes = [long]0; TotalBytes = [long]0; LowSpace = $false; VersionCount = 0; OldestVersion = ''; NewestVersion = ''; VMs = ''; Volumes = ''; HostSystem = '' }
     $Job.Result = [pscustomobject]$res
 
     Write-HMSbLog "SERVER-BACKUP $($Ctx.Profile) - Host $env:COMPUTERNAME - Ziel $target $($Ctx.DiskLabel)" 'Header'
@@ -1372,6 +1440,23 @@ function Start-HMServerBackup {
             if (Test-Path -LiteralPath (Join-Path $rep 'Host-Konfiguration')) { Copy-Item -LiteralPath (Join-Path $rep 'Host-Konfiguration') -Destination $ld -Recurse -Force -ErrorAction SilentlyContinue }
         }
     } catch { Write-HMSbLog "Bericht: $($_.Exception.Message)" 'Warning' }
+    # Stand der Platte fuer Meldungen: freier Platz, Versionen (vor dem Auswerfen/Offline-Schalten)
+    $res.Minutes = $dur; $res.VMs = ($vms -join ', '); $res.Volumes = ($vols -join ', ')
+    $res.HostSystem = if ($Ctx.HostSystem) { if ($hostSysOk) { 'ja' } else { 'FEHLER' } } else { '' }
+    try {
+        $vol2 = Get-Volume -DriveLetter $L -ErrorAction Stop
+        $res.FreeBytes = [long]$vol2.SizeRemaining; $res.TotalBytes = [long]$vol2.Size
+        $res.LowSpace = Test-HMSbLowSpace -Free $res.FreeBytes -Total $res.TotalBytes -Need $res.SizeBytes
+        if ($res.LowSpace) { Write-HMSbLog ("Speicherplatz knapp: {0:N0} GB frei von {1:N0} GB - die Windows Server-Sicherung loescht bei Platzmangel automatisch die aeltesten Versionen." -f ($res.FreeBytes / 1GB), ($res.TotalBytes / 1GB)) 'Warning' }
+    } catch { }
+    if ($status -ne 'Error' -or $verId) {
+        try {
+            $vvA = Get-HMSbVersions $target
+            $va = @($vvA.Versions)
+            $res.VersionCount = $va.Count
+            if ($va.Count) { $res.OldestVersion = Format-HMSbVersionTime $va[0]; $res.NewestVersion = Format-HMSbVersionTime $va[$va.Count - 1] }
+        } catch { }
+    }
     # Schreibcache der Platte leeren (sicheres Abziehen)
     try { Write-VolumeCache -DriveLetter $L -ErrorAction Stop } catch { }
 

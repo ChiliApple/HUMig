@@ -1,4 +1,4 @@
-<h1 align="center"><img src="Assets/logo64.png" width="44" alt="" align="absmiddle"/> HUMig v2</h1>
+﻿<h1 align="center"><img src="Assets/logo64.png" width="44" alt="" align="absmiddle"/> HUMig v2</h1>
 
 <p align="center"><b>Benutzerprofil-Migration, PC-Werkzeuge und Hyper-V-Server-Backup für Windows</b><br>
 Profile sichern und auf denselben oder einen neuen PC zurückspielen – per USB-Laufwerk oder über das Netzwerk.<br>
@@ -159,7 +159,7 @@ Hyper-V-VMs oder die Laufwerke eines Servers mit der Windows Server-Sicherung au
 - Online-Sicherung der VMs, optional Host-System, Host-Konfiguration mit Skript zum Wiederherstellen der Switches
 - Zeitplan, Verlauf, Bericht je Lauf, Einträge in der Ereignisanzeige
 - **Plattenzustand (SMART)** je Platte, automatisch gelesen und gemerkt
-- **Teams-Benachrichtigung** über einen Workflow (Fehler, Warnungen, Platte wechseln, Archiv fällig)
+- **Teams-Benachrichtigung** über einen Workflow, Kategorien einzeln schaltbar (Fehler, Warnungen, Erfolg, Plattenzustand, Plattenwechsel/Archiv, Speicherplatz, Massenlöschung, Details mit Stand der Platte)
 - **Archiv-Platten** gegen Verschlüsselungstrojaner; Platte danach auswerfen oder offline schalten
 - Wiederherstellung auch ohne HUMig (`wbadmin`, Installationsmedium)
 
