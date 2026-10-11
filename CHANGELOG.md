@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## v2.0.123 - 2026-10-11
+### Dokumentation
+- Neue Seite **Funktionen im Ueberblick** (`Docs/Funktionen.html`, auch als Webseite ueber GitHub Pages): die zehn wichtigsten Funktionen und alle Funktionen nach Bereichen, verlinkt im README
+
 ## v2.0.122 - 2026-10-11
 ### Softwareverteilung: Testinstallation in der Windows Sandbox
 - Neuer Knopf *Testinstallation in der Sandbox*: installiert das Paket in der Windows Sandbox mit genau demselben Code wie bei der Verteilung, optional mit Deinstallationstest - Ergebnis OK / mit Hinweisen / fehlgeschlagen mit Exitcode, Dauer, sichtbaren Fenstern, Desktop-Verknuepfungen, Installation ins Benutzerprofil, neuen Eintraegen und Protokollen
