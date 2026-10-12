@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## v2.0.125 - 2026-10-12
+### Behoben
+- *Zeit synchronisieren*: nach dem Start des Windows-Zeitdienstes wartet HUMig jetzt, bis er bereit ist, und laedt die Zeit-Einstellungen neu (bisher "nicht synchronisiert, da der Zeitdienst inaktiv war"). "Nicht synchronisiert" wird als FEHLER gemeldet, auch wenn w32tm Exitcode 0 liefert; dann Neustart des Dienstes und zweiter Versuch, sonst Anzeige von Zeitquelle, Einstellungen und moeglichen Ursachen
+
 ## v2.0.124 - 2026-10-12
 ### Behoben
 - Werkzeug *Domaene / Zeit / Kerberos* › *Zeit synchronisieren*: Fehler 0x80070426 ("Dienst wurde nicht gestartet") - der Windows-Zeitdienst (W32Time) wird jetzt vorher gestartet; ein deaktivierter Dienst wird gemeldet, danach ein zweiter Versuch und Anzeige der Zeitquelle

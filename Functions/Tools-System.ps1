@@ -1306,13 +1306,32 @@ function Start-HMDomainRepair {
                 if (-not $svc) { 'FEHLER Zeit: Dienst Windows-Zeitgeber (W32Time) nicht vorhanden - w32tm /register ausfuehren'; return }
                 if ("$($svc.StartType)" -eq 'Disabled') { "FEHLER Zeit: Dienst Windows-Zeitgeber (W32Time) ist deaktiviert - Starttyp auf Manuell/Automatisch setzen (evtl. per GPO deaktiviert)"; return }
                 if ("$($svc.Status)" -ne 'Running') {
-                    try { Start-Service -Name W32Time -ErrorAction Stop; Start-Sleep -Seconds 2; 'INFO Dienst Windows-Zeitgeber (W32Time) gestartet' } catch { "FEHLER Zeit: Dienst W32Time laesst sich nicht starten: $($_.Exception.Message)"; return }
+                    try { Start-Service -Name W32Time -ErrorAction Stop; 'INFO Dienst Windows-Zeitgeber (W32Time) gestartet' } catch { "FEHLER Zeit: Dienst W32Time laesst sich nicht starten: $($_.Exception.Message)"; return }
+                    # frisch gestartet: Zeitanbieter brauchen einige Sekunden, Einstellungen neu laden (sonst "Zeitdienst inaktiv")
+                    Start-Sleep -Seconds 5
+                    $null = & w32tm.exe /config /update 2>&1
                 }
-                $o = & w32tm.exe /resync /force 2>&1; $rc = $LASTEXITCODE
-                # direkt nach dem Start hat der Dienst evtl. noch keine Zeitquelle - einmal nachfassen
-                if ($rc -ne 0) { Start-Sleep -Seconds 5; $o = & w32tm.exe /resync /force 2>&1; $rc = $LASTEXITCODE }
-                "$(if ($rc -eq 0) { 'OK' } else { 'FEHLER' }) Zeit: $(($o | Out-String).Trim())"
-                "INFO $(((& w32tm.exe /query /status 2>&1) | Where-Object { "$_" -match '^(Quelle|Source)' }) -join ' ')"
+                # w32tm meldet "nicht synchronisiert" auch mit Exitcode 0 - darum zusaetzlich den Text pruefen
+                $bad = 'nicht synchronisiert|nicht erneut synchronisiert|did not resync|not resync|inaktiv|inactive|nicht gestartet|not been started|0x8007'
+                $o = & w32tm.exe /resync /force 2>&1; $rc = $LASTEXITCODE; $t = ($o | Out-String).Trim()
+                if ($rc -ne 0 -or $t -match $bad) {
+                    # Dienst neu starten und Einstellungen neu laden (z.B. nach Bedarfsstart wieder beendet), dann noch einmal
+                    'INFO Zeitdienst wird neu gestartet und die Zeit-Einstellungen neu geladen ...'
+                    try { Restart-Service -Name W32Time -Force -ErrorAction Stop } catch { "INFO Neustart W32Time: $($_.Exception.Message)" }
+                    $null = & w32tm.exe /config /update 2>&1
+                    Start-Sleep -Seconds 5
+                    $o = & w32tm.exe /resync /force 2>&1; $rc = $LASTEXITCODE; $t = ($o | Out-String).Trim()
+                }
+                $ok = ($rc -eq 0 -and $t -notmatch $bad)
+                "$(if ($ok) { 'OK' } else { 'FEHLER' }) Zeit: $($t -replace '\s*\r?\n\s*', ' ')"
+                $st = @(& w32tm.exe /query /status 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+                $src = @($st | Where-Object { $_ -match '^(Quelle|Source)\s*:' })
+                "INFO $(if ($src.Count) { $src -join ' ' } else { 'Status: ' + (($st | Select-Object -First 3) -join ' | ') })"
+                if (-not $ok) {
+                    $cfg = @(& w32tm.exe /query /configuration 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ -match '^(Type|NtpServer|Enabled)\s*:' })
+                    "INFO Konfiguration: $(if ($cfg.Count) { $cfg -join ' | ' } else { 'nicht lesbar' })"
+                    'INFO Moegliche Ursachen: Type NoSync (keine Zeitquelle), Zeitanbieter NtpClient deaktiviert (Enabled 0), NTP (UDP 123) blockiert, VM mit Hyper-V-Zeitsynchronisierung. Domaenen-PC: Type NT5DS, Zeitquelle ist der DC.'
+                }
             }
             'Klist' { & klist.exe -li 0x3e7 purge 2>&1 | Out-Null; "$(if ($LASTEXITCODE -eq 0) { 'OK Kerberos-Tickets des Computers geleert (gpupdate holt neue)' } else { "FEHLER klist Code $LASTEXITCODE" })" }
         }
