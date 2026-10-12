@@ -1736,7 +1736,8 @@ Add-ToolButton $tc 'Ordnerfreigaben' 'BtnBlue' 'Freigaben mit Freigabe- und NTFS
 Add-ToolButton $tc 'USMT einrichten (ADK)' 'BtnDefault' 'User State Migration Tool aus dem Windows ADK nach BIN\USMT kopieren - ohne ADK: nur USMT still installieren' { Start-HMUsmtSetup }
 Add-ToolButton $tc 'Inventar (mehrere PCs)' 'BtnMauve' 'Links: Hardware, Windows, BitLocker, TPM, IP/MAC mehrerer PCs parallel (WinRM) - Tabelle + CSV im Backup-Ordner\Inventar | Rechts: zusaetzlich installierte Software' { Start-HMInventory $false } { Start-HMInventory $true }
 Add-ToolButton $tc 'BitLocker-Schluessel' 'BtnBlue' 'Status und Schluesselschutz aller Laufwerke, Wiederherstellungskennwort in AD oder Entra ID sichern' { Show-HMBitLockerKeys }
-Add-ToolButton $tc 'Autopilot-Hash' 'BtnDefault' 'Hardware-Hash fuer Intune/Autopilot als CSV (Backup-Ordner\Autopilot)' { Start-HMAutopilotHash }
+Add-ToolButton $tc 'Autopilot-Hash' 'BtnDefault' 'Hardware-Hash fuer Intune/Autopilot als CSV (Backup-Ordner\Autopilot) - ist HUPilot eingetragen, auf Wunsch auch an HUPilot uebergeben' { Start-HMAutopilotHash }
+Add-ToolButton $tc 'HUPilot ...' 'BtnDefault' 'Links: HUPilot-Setup an diesem PC oeffnen (Autopilot per USB-Stick - eigenes Werkzeug; noch nicht eingetragen: suchen oder Anleitung) | Rechts: HUPilot-Ordner neu waehlen' { Start-HMHUPilot } { Start-HMHUPilot -Choose }
 Add-ToolButton $tc 'Wake-on-LAN' 'BtnDefault' 'PC aufwecken (MAC aus Inventar/Backup) - optional ueber einen PC im Zielnetz senden' { Start-HMWakeOnLan }
 Add-ToolButton $tc 'Laufwerke (C$)' 'BtnBlue' 'Links: Laufwerk C: des gewaehlten PCs im Explorer oeffnen (remote \\PC\C$) | Rechts: Laufwerk oder Freigabe waehlen - auch USB-Sticks am Remote-PC. Der angemeldete Windows-Benutzer braucht Adminrechte am Ziel-PC.' { Open-HMAdminShare } { Show-HMDriveMenu }
 $tp = $ui.pnlToolsProfile
@@ -1775,7 +1776,19 @@ foreach ($t in $sysTools) {
     $b.Add_Click({
         param($src)
         $cmd = $src.Tag[0]; $arg = $src.Tag[1]
-        try { if ($arg) { Start-Process $cmd -ArgumentList $arg } else { Start-Process $cmd } } catch { Out-Console "$cmd : $($_.Exception.Message)" 'Error' }
+        # immer mit Administratorrechten (manche Werkzeuge zeigen/erlauben als Admin mehr) - .msc ueber mmc.exe, .cpl ueber
+        # control.exe, damit "Als Administrator" sicher greift. Laeuft HUMig schon als Administrator, kommt keine Rueckfrage.
+        # ms-settings: (Einstellungen-App) laeuft immer im Benutzerkontext.
+        try {
+            if ($cmd -like 'ms-settings:*') { Start-Process $cmd }
+            else {
+                $exe = $cmd; $al = @()
+                if ($cmd -like '*.msc') { $exe = Join-Path $env:SystemRoot 'System32\mmc.exe'; $al = @($cmd) }
+                elseif ($cmd -like '*.cpl') { $exe = Join-Path $env:SystemRoot 'System32\control.exe'; $al = @($cmd) }
+                if ($arg) { $al += $arg }
+                if ($al.Count) { Start-Process -FilePath $exe -ArgumentList $al -Verb RunAs } else { Start-Process -FilePath $exe -Verb RunAs }
+            }
+        } catch { Out-Console "$cmd : $($_.Exception.Message)" 'Error' }
     })
     [void]$ui.pnlSysTools.Children.Add($b)
 }

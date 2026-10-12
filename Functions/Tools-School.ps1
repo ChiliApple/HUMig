@@ -250,7 +250,85 @@ function Start-HMAutopilotHash {
             Out-Console "Autopilot-Hash von $($x.Computer) (SN $($x.Serial)): $file" 'Success'
             Start-Process explorer.exe -ArgumentList "/select,`"$file`""
         } catch { Out-Console "Autopilot-CSV nicht gespeichert: $($_.Exception.Message)" 'Error' }
+        Add-HMHUPilotHashes @([pscustomobject]@{ Serial = "$($x.Serial)"; Hash = "$($x.Hash)"; Tag = "$($x.Tag)" })
     }
+}
+
+# ----------------------------------------------------------------------------
+# HUPilot (eigenes Werkzeug: Windows Autopilot per USB-Stick) - Setup starten, Hashes aus HUMig uebergeben.
+# HUMig liest nur den Ordner von HUPilot (Config\hupilot.json), Zugangsdaten bleiben in HUPilot.
+# Zielmaschine: dieser PC (Admin-PC mit HUPilot-Setup), nicht der gewaehlte Ziel-PC.
+# ----------------------------------------------------------------------------
+$script:HUPilotDoc = 'https://chiliapple.github.io/HUPilot/Stick/HUPilot/Setup/Anleitung.html'
+$script:HUPilotHdr = 'Device Serial Number,Windows Product ID,Hardware Hash,Group Tag,Assigned User'
+# Ordner ...\HUPilot (enthaelt Setup\HUPilot-Setup.ps1) zu einem Pfad finden: Stick-/Kopie-Ordner, HUPilot-Ordner,
+# HUPilot-Setup.cmd/.ps1 oder Repo (Tools\HUPilot-Setup.cmd). Rueckgabe '' = nicht gefunden
+function Resolve-HMHUPilotDir([string]$Path) {
+    $p = "$Path".Trim().Trim('"').TrimEnd('\')
+    if (-not $p) { return '' }
+    if (Test-Path -LiteralPath $p -PathType Leaf) { $p = Split-Path $p -Parent }
+    if (-not (Test-Path -LiteralPath $p -PathType Container)) { return '' }
+    $up = Split-Path $p -Parent
+    foreach ($c in @($p, (Join-Path $p 'HUPilot'), (Join-Path $p 'Stick\HUPilot'), $up, $(if ($up) { Join-Path $up 'Stick\HUPilot' }))) {
+        if ($c -and (Test-Path -LiteralPath (Join-Path $c 'Setup\HUPilot-Setup.ps1') -PathType Leaf)) { return (Resolve-Path -LiteralPath $c).ProviderPath }
+    }
+    return ''
+}
+function Get-HMHUPilotDir {
+    $c = Read-JsonFile (Join-Path $script:ConfigDir 'hupilot.json')
+    if ($c -and "$($c.Folder)") { return (Resolve-HMHUPilotDir "$($c.Folder)") }
+    return ''
+}
+# HUPilot-Setup auswaehlen und merken. Rueckgabe: Ordner oder ''
+function Select-HMHUPilotDir {
+    $d = New-Object Microsoft.Win32.OpenFileDialog
+    $d.Title = 'HUPilot-Setup.cmd waehlen (im HUPilot-Ordner bzw. am Stick)'
+    $d.Filter = 'HUPilot-Setup (HUPilot-Setup.cmd, HUPilot-Setup.ps1)|HUPilot-Setup.cmd;HUPilot-Setup.ps1|Alle Dateien (*.*)|*.*'
+    $old = Get-HMHUPilotDir
+    if ($old) { $d.InitialDirectory = $old }
+    if ($d.ShowDialog() -ne $true) { return '' }
+    $dir = Resolve-HMHUPilotDir $d.FileName
+    if (-not $dir) { Out-Console "HUPilot: zu $($d.FileName) gehoert kein Ordner HUPilot\Setup\HUPilot-Setup.ps1 - HUPilot-Setup.cmd aus dem HUPilot-Ordner bzw. vom Stick waehlen." 'Warning'; return '' }
+    Write-JsonFile (Join-Path $script:ConfigDir 'hupilot.json') ([pscustomobject]@{ Folder = $dir })
+    Out-Console "HUPilot: Ordner gemerkt - $dir" 'Success'
+    return $dir
+}
+# Links: HUPilot-Setup starten (nicht gefunden: suchen oder Anleitung) | Rechts: Ordner neu waehlen
+function Start-HMHUPilot([switch]$Choose) {
+    $dir = if ($Choose) { Select-HMHUPilotDir } else { Get-HMHUPilotDir }
+    if (-not $dir -and -not $Choose) {
+        $q = "HUPilot-Setup ist auf diesem PC noch nicht eingetragen.`n`nHUPilot ist ein eigenes Werkzeug: Windows Autopilot per USB-Stick (Hash mit Gruppentag hochladen, Geraet ohne Hersteller-Programme zuruecksetzen).`n`nJa = HUPilot-Setup.cmd suchen und merken`nNein = Anleitung oeffnen (Download und Einrichtung)"
+        $a = "$([System.Windows.MessageBox]::Show($script:Window, $q, 'HUPilot', 'YesNoCancel', 'Question'))"
+        if ($a -eq 'No') { try { Open-HMUrl $script:HUPilotDoc } catch { Start-Process $script:HUPilotDoc }; return }
+        if ($a -ne 'Yes') { return }
+        $dir = Select-HMHUPilotDir
+    }
+    if (-not $dir) { return }
+    $ps1 = Join-Path $dir 'Setup\HUPilot-Setup.ps1'
+    try {
+        Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$ps1`"") -WorkingDirectory (Split-Path $ps1 -Parent) -ErrorAction Stop
+        Out-Console "HUPilot-Setup gestartet ($dir)" 'Success'
+    } catch { Out-Console "HUPilot-Setup nicht gestartet: $($_.Exception.Message)" 'Error' }
+}
+# Hashes aus HUMig an HUPilot uebergeben: Eintrag in <HUPilot>\logs\hashes.csv (gleiches Format wie die Offline-Hashes vom Stick),
+# hochladen in HUPilot-Setup > "Hashes importieren". $Rows: Objekte mit Serial, Hash, Tag. Ohne eingetragenes HUPilot: nichts
+function Add-HMHUPilotHashes($Rows) {
+    $dir = Get-HMHUPilotDir
+    if (-not $dir) { return }
+    $list = @(@($Rows) | Where-Object { $_ -and "$($_.Serial)".Trim() -and "$($_.Hash)".Trim() -and "$($_.Serial)" -notmatch ',' })
+    if (-not $list.Count) { return }
+    $f = Join-Path $dir 'logs\hashes.csv'
+    if (-not (Confirm-Action "$($list.Count) Hash(es) auch an HUPilot uebergeben?`n`nEintrag in $f - hochladen in HUPilot-Setup mit '7. Hashes importieren' (ohne Gruppentag gilt der Standard-Tag von HUPilot, vorhandene Geraete bekommen nur den Tag)." 'HUPilot')) { return }
+    try {
+        New-Item -ItemType Directory -Path (Split-Path $f -Parent) -Force | Out-Null
+        $ser = @($list | ForEach-Object { "$($_.Serial)".Trim() })
+        $keep = @()
+        if (Test-Path -LiteralPath $f) { $keep = @(Get-Content -LiteralPath $f -ErrorAction Stop | Where-Object { $l = "$_"; $l -and $l -notlike 'Device Serial Number*' -and -not ($ser | Where-Object { $l.StartsWith($_ + ',') }) }) }
+        $new = @($list | ForEach-Object { '{0},,{1},{2},' -f "$($_.Serial)".Trim(), "$($_.Hash)".Trim(), "$($_.Tag)".Trim() })
+        [System.IO.File]::WriteAllLines($f, [string[]](@($script:HUPilotHdr) + $keep + $new), (New-Object System.Text.UTF8Encoding $false))
+        Out-Console "HUPilot: $($list.Count) Hash(es) eingetragen ($f) - in HUPilot-Setup '7. Hashes importieren'" 'Success'
+        if (Confirm-Action 'HUPilot-Setup jetzt oeffnen?' 'HUPilot') { Start-HMHUPilot }
+    } catch { Out-Console "HUPilot: Hashes nicht eingetragen: $($_.Exception.Message)" 'Error' }
 }
 
 # ----------------------------------------------------------------------------
