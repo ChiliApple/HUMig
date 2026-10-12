@@ -43,7 +43,7 @@ Eine USB-Platte, die schon anders genutzt wird, kann ohne Formatieren uebernomme
 Geplante Sicherungen laufen als Aufgabe unter `\HUMig` in der Aufgabenplanung (SYSTEM) - der Tool-Ordner muss dafuer lokal am Host liegen oder fuer SYSTEM lesbar sein.
 
 ## App-Updates (WinGet)
-Reiter *App-Updates*, HUMig als Administrator. Am Ziel-PC noetig: WinGet (App Installer; Windows 10 1809+/11, Server 2025), Internet
+Reiter *App-Updates*, HUMig als Administrator. Am Ziel-PC noetig: WinGet (App Installer; Windows 10 1809+/11, Server 2025; Server 2022: HUMig richtet es selbst ein, von Microsoft nur eingeschraenkt unterstuetzt), Internet
 (PowerShell Gallery fuer das Modul `Microsoft.WinGet.Client`, GitHub fuer PowerShell 7 und viele Installer). Andere PCs ueber
 PowerShell-Remoting (WinRM). Ohne angemeldeten Benutzer und fuer den Zeitplan legt HUMig eine eigene PowerShell 7 unter
 `C:\Program Files\HUMig\PowerShell7` ab (offizielles ZIP, Pruefsumme geprueft), sofern kein MSI-PowerShell vorhanden ist.

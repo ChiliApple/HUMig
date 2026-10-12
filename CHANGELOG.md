@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## v2.0.127 - 2026-10-12
+### App-Updates
+- **Windows Server 2022:** WinGet wird jetzt unterstuetzt - fehlt es am Ziel-PC, richtet HUMig es beim Suchen fuer alle Benutzer ein (`Repair-WinGetPackageManager -AllUsers`, von Microsoft nur eingeschraenkt unterstuetzt); *WinGet einrichten* an diesem PC ebenso
+- Ist WinGet am Ziel-PC nicht nutzbar (keine Quelle lesbar, z. B. "Klasse nicht registriert"), meldet HUMig den PC als *nicht gelesen* mit Hinweis - bisher "0 Updates"
+- Updates fuer alle Benutzer (als SYSTEM) und Zeitplan: winget.exe findet jetzt die Visual-C++-Laufzeit des App-Pakets (bisher Fehler 0xC0000135 z. B. auf Windows Server 2022); der Fehlercode wird mit Abhilfe erklaert
+- Programme mit Dienst (z. B. Windows Admin Center): Unterprozesse des Dienstes gelten nicht mehr als Fenster; nach dem Stoppen wartet HUMig bis zu 20 s, bis Dienst und Unterprozesse beendet sind (bisher wurde das Update teils uebersprungen - "Programm liess sich nicht schliessen")
+
 ## v2.0.126 - 2026-10-12
 ### Werkzeuge
 - Neuer Knopf *HUPilot ...* (Werkzeuge, Computer): oeffnet HUPilot-Setup an diesem PC (eigenes Werkzeug fuer Windows Autopilot per USB-Stick); beim ersten Mal HUPilot-Setup.cmd waehlen oder Anleitung oeffnen, Rechtsklick waehlt den Ordner neu (`Config\hupilot.json`)

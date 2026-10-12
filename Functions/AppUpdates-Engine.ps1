@@ -78,17 +78,19 @@ function Format-HMAuCliResult([int64]$Code, [string]$Out) {
         '0x8A15010D' { 'andere Version ist schon installiert' }
         '0x8A150003' { 'Befehl fehlgeschlagen (oft: Datei oder Programm in Benutzung - Programm schliessen und erneut versuchen)' }
         '0x8A150103' { 'Datei in Benutzung - Programm schliessen und erneut versuchen' }
+        '0xC0000135' { 'winget.exe startet als SYSTEM nicht (DLL fehlt - Visual C++-Laufzeit). Abhilfe: VC++ Redistributable x64 am PC installieren (Microsoft.VCRedist.2015+.x64)' }
         '0x8A150011' { 'Pruefsumme des Installers passt nicht (Hersteller hat die Datei getauscht, Paketliste noch nicht nachgezogen) - aus Sicherheitsgruenden nicht installiert, in einigen Tagen erneut versuchen' }
         default { 'Fehler' }
     }
     return @{ Ok = $false; Reboot = $false; Text = "$t ($hex)$(if ("$Out".Trim() -and $t -eq 'Fehler') { ": $Out" })" }
 }
-# Windows-Version fuer WinGet: Win10 1809+ / Win11 (Client), Windows Server 2025
+# Windows-Version fuer WinGet: Win10 1809+ / Win11 (Client), Windows Server 2025 (mitgeliefert) und 2022 (nicht mitgeliefert,
+# 'WinGet einrichten' installiert es mit Repair-WinGetPackageManager -AllUsers - von Microsoft nur eingeschraenkt unterstuetzt)
 function Test-HMAuOsSupported {
     $b = [Environment]::OSVersion.Version.Build
     $isServer = $false
     try { $isServer = ([int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).ProductType -ne 1) } catch { }
-    if ($isServer) { return ($b -ge 26100) }
+    if ($isServer) { return ($b -ge 20348) }
     return ($b -ge 17763)
 }
 
@@ -101,7 +103,7 @@ function Get-HMAuState {
     # SYSTEM und andere Benutzer finden das Modul nur, wenn es fuer alle Benutzer installiert ist (Programme\WindowsPowerShell\Modules)
     $s.ModuleAllUsers = (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$($script:HMAuModule)"))
     try { $a = @(Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller' -ErrorAction Stop)[0]; if ($a) { $s.AppInstaller = "$($a.Version)" } } catch { }
-    if (-not $s.OsOk) { $s.Problem = 'WinGet wird auf dieser Windows-Version nicht unterstuetzt (Windows 10 1809+/11, Windows Server 2025).' }
+    if (-not $s.OsOk) { $s.Problem = 'WinGet wird auf dieser Windows-Version nicht unterstuetzt (Windows 10 1809+/11, Windows Server 2022/2025).' }
     elseif (-not $s.Module) { $s.Problem = "PowerShell-Modul $($script:HMAuModule) fehlt - 'WinGet einrichten'." }
     elseif (-not $s.ModuleAllUsers) { $s.Problem = "PowerShell-Modul $($script:HMAuModule) ist nur fuer einzelne Benutzer installiert - SYSTEM und andere Benutzer finden es nicht. 'WinGet einrichten' installiert es fuer alle Benutzer." }
     else {
@@ -146,8 +148,13 @@ function Install-HMAuWinGet($Job) {
         $ready = $false
         try { Assert-WinGetPackageManager -ErrorAction Stop; $ready = $true } catch { & $log "WinGet nicht bereit: $($_.Exception.Message) - wird repariert ..." 'Warning' }
         if (-not $ready) {
-            try { Repair-WinGetPackageManager -Latest -Force -ErrorAction Stop; Assert-WinGetPackageManager -ErrorAction Stop; $ready = $true; & $log 'WinGet repariert' 'Success' }
-            catch { $ok = $false; & $log "WinGet-Reparatur fehlgeschlagen: $($_.Exception.Message)" 'Error' }
+            # -AllUsers (Administrator): App Installer fuer alle Konten inkl. SYSTEM (Zeitplan, Programme fuer alle Benutzer) - z.B. Windows Server 2022
+            $isAdm = $false; try { $isAdm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
+            try {
+                if ($isAdm) { & $log 'WinGet fuer alle Benutzer einrichten (Repair-WinGetPackageManager -AllUsers, Download von GitHub) ...' 'Info'; Repair-WinGetPackageManager -AllUsers -Latest -Force -ErrorAction Stop }
+                else { Repair-WinGetPackageManager -Latest -Force -ErrorAction Stop }
+                Assert-WinGetPackageManager -ErrorAction Stop; $ready = $true; & $log 'WinGet repariert' 'Success'
+            } catch { $ok = $false; & $log "WinGet-Reparatur fehlgeschlagen: $($_.Exception.Message)" 'Error' }
         }
         if ($ready) { try { & $log "WinGet $(Get-WinGetVersion) bereit" 'Success' } catch { } }
     }
@@ -384,6 +391,8 @@ function Get-HMAuRunning($Items) {
     $kindOf = {
         param($pr)
         if ($svc.ContainsKey([int]$pr.Id)) { return 'Service' }
+        # Sitzung 0 hat keine Benutzerfenster: Unterprozess eines Dienstes (z.B. Windows Admin Center) - endet mit dem Dienst
+        if ([int]$pr.SessionId -eq 0) { return 'ServiceChild' }
         if ([int]$pr.SessionId -ne $mySess) { return 'Window' }
         if ([int64]$pr.MainWindowHandle -ne 0) { return 'Window' }
         return 'Background'
@@ -411,7 +420,7 @@ function Get-HMAuRunning($Items) {
                     [pscustomobject]@{ Name = "$($_.ProcessName)"; Id = [int]$_.Id; SessionId = [int]$_.SessionId; Kind = $k; Path = "$($_.Path)"
                         Services = @($(if ($k -eq 'Service') { $svc[[int]$_.Id] })); Owner = $(if ($k -eq 'Background') { & $ownerOf ([int]$_.Id) } else { '' }) }
                 })
-            $kt = @{ Service = 'Dienst'; Window = 'Fenster'; Background = 'Hintergrund' }
+            $kt = @{ Service = 'Dienst'; Window = 'Fenster'; Background = 'Hintergrund'; ServiceChild = 'Dienst-Unterprozess' }
             [pscustomobject]@{
                 Id = "$($it.Id)"; Name = $n; Running = (@($pl | ForEach-Object { "$($_.Name) ($($_.Id), $($kt[$_.Kind])$(if ($_.Kind -eq 'Service') { ': ' + (@($_.Services) -join ',') }))" }) -join ', ')
                 Procs = $pl
@@ -426,9 +435,10 @@ function Get-HMAuRunning($Items) {
 #   Dienst: Dienst stoppen; nach dem Update wieder starten, falls der Installer das nicht selbst getan hat
 # Rueckgabe: Ids, die noch laufen
 function Stop-HMAuRunning([hashtable]$Pc, $Job, $Item, [object[]]$Procs, [bool]$Force, [hashtable]$Restart) {
-    $win = @($Procs | Where-Object { "$($_.Kind)" -ne 'Service' -and "$($_.Kind)" -ne 'Background' })
+    $win = @($Procs | Where-Object { "$($_.Kind)" -notin @('Service', 'Background', 'ServiceChild') })
     $bg = @($Procs | Where-Object { "$($_.Kind)" -eq 'Background' })
     $sv = @($Procs | Where-Object { "$($_.Kind)" -eq 'Service' })
+    $sc = @($Procs | Where-Object { "$($_.Kind)" -eq 'ServiceChild' })
     $left = @()
     foreach ($n in @($sv | ForEach-Object { @($_.Services) } | Where-Object { $_ } | Select-Object -Unique)) {
         try {
@@ -445,9 +455,22 @@ function Stop-HMAuRunning([hashtable]$Pc, $Job, $Item, [object[]]$Procs, [bool]$
         } catch { }
     }
     if ($win.Count) { $left += @(Close-HMProcs $Pc $Job $win $Force 20) }
-    if ($bg.Count -or $sv.Count) {
-        Start-Sleep -Seconds 2
-        $left += @(foreach ($p in @($bg + $sv)) { if (Get-Process -Id ([int]$p.Id) -ErrorAction SilentlyContinue) { [int]$p.Id } })
+    if ($bg.Count -or $sv.Count -or $sc.Count) {
+        # Dienstprozesse und ihre Unterprozesse brauchen nach dem Stoppen etwas, bis sie wirklich beendet sind - bis 20 s warten
+        $ids = @(@($bg + $sv + $sc) | ForEach-Object { [int]$_.Id })
+        $t0 = Get-Date
+        do {
+            Start-Sleep -Seconds 1
+            $alive = @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+        } while ($alive.Count -and ((Get-Date) - $t0).TotalSeconds -lt 20)
+        # was dann noch laeuft und zu einem gestoppten Dienst gehoert (Unterprozess oder haengender Dienstprozess): beenden
+        foreach ($i in $alive) {
+            if (@($sc + $sv | Where-Object { [int]$_.Id -eq $i }).Count) {
+                try { Stop-Process -Id $i -Force -ErrorAction Stop; Write-HMLog $Job "      Prozess $i (zum gestoppten Dienst) beendet" 'Info' } catch { }
+            }
+        }
+        Start-Sleep -Seconds 1
+        $left += @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
     }
     return @($left | Select-Object -Unique)
 }

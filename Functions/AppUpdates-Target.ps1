@@ -64,6 +64,32 @@ function Install-TModule {
     } catch { $script:TErr += "WinGet-Modul nicht installierbar (Internet/Proxy?): $($_.Exception.Message)" }
 }
 
+# WinGet (App Installer) fuer alle Benutzer vorhanden? winget.exe im Paketordner (Programme\WindowsApps)
+function Test-TWinGet {
+    return [bool](@(Get-ChildItem -Path (Join-Path $env:ProgramFiles 'WindowsApps') -Filter 'Microsoft.DesktopAppInstaller_*_8wekyb3d8bbwe' -Directory -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'winget.exe') }).Count)
+}
+# Windows-Version: Windows 10 1809+/11, Windows Server 2022 (eingeschraenkt) / 2025
+function Test-TOsOk {
+    $b = [Environment]::OSVersion.Version.Build
+    $srv = $false; try { $srv = ([int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).ProductType -ne 1) } catch { }
+    if ($srv) { return ($b -ge 20348) }
+    return ($b -ge 17763)
+}
+# Fehlt WinGet (z.B. Windows Server 2022 - dort nicht mitgeliefert), fuer alle Benutzer einrichten: Repair-WinGetPackageManager -AllUsers
+# (laedt App Installer und Abhaengigkeiten von GitHub). Nur mit Modul; Fehler landen in $script:TErr
+function Install-TWinGet {
+    if (Test-TWinGet) { return }
+    if (-not (Test-TOsOk)) { $script:TErr += 'WinGet wird auf dieser Windows-Version nicht unterstuetzt (Windows 10 1809+/11, Windows Server 2022/2025)'; return }
+    Out-L 'WinGet (App Installer) fehlt - wird fuer alle Benutzer eingerichtet (Repair-WinGetPackageManager -AllUsers, Download von GitHub) ...'
+    try {
+        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+        Import-Module (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$ModName") -ErrorAction Stop
+        Repair-WinGetPackageManager -AllUsers -Latest -Force -ErrorAction Stop | Out-Null
+        if (Test-TWinGet) { Out-L 'WinGet eingerichtet' } else { $script:TErr += 'WinGet nach der Einrichtung nicht gefunden' }
+    } catch { $script:TErr += "WinGet nicht einrichtbar: $($_.Exception.Message) - am PC als Administrator: Repair-WinGetPackageManager -AllUsers -Latest -Force" }
+}
+
 # einmalige Aufgabe: $Who = 'SYSTEM' oder Benutzer-SID. Setzt $script:TRes, gibt Protokollzeilen aus.
 # $ItemTimeoutMin > 0: haengt ein Programm laenger (START ohne DONE), Aufgabe beenden -> $script:TTimedOut = Paket-Id;
 # bereits fertige Programme stehen dann in $script:TDone (aus den DONE-Zeilen des Protokolls)
@@ -196,6 +222,7 @@ try {
         'Search' {
             Install-TModule
             if (-not (Test-TModule)) { Out-R ([pscustomobject]@{ Items = @(); Sources = @(); Errors = $script:TErr; ReadAs = ''; UserSid = ''; UserAccount = '' }); break }
+            Install-TWinGet
             $sid = Get-TUserSid
             $req = @{ Mode = 'List'; Sources = @($My.Sources); IncludeUnknown = [bool]$My.IncludeUnknown }
             $readAs = ''; $items = @()
@@ -213,6 +240,12 @@ try {
                     # als SYSTEM sind nur Programme fuer alle Benutzer sichtbar
                     if ($script:TRes) { $items = @($script:TRes.Items | ForEach-Object { $_.Scope = 'Machine'; $_ }) }
                 }
+            }
+            # keine Quelle lesbar (z.B. WinGet fehlt: "Klasse nicht registriert") = nicht gelesen - nicht "0 Updates" melden
+            $srcBad = @(@($script:TErr) | Where-Object { "$_" -match '^Quelle ' }).Count
+            if (-not @($items | Where-Object { $_ }).Count -and $srcBad -and $srcBad -ge [Math]::Max(1, @($My.Sources | Where-Object { $_ }).Count)) {
+                $readAs = ''
+                if (@($script:TErr) -match '80040154|REGDB_E_CLASSNOTREG') { $script:TErr += 'WinGet ist am PC nicht nutzbar (App Installer fehlt bzw. nicht registriert) - am PC als Administrator: Repair-WinGetPackageManager -AllUsers -Latest -Force' }
             }
             Out-R ([pscustomobject]@{ Items = @($items | Where-Object { $_ }); Sources = $(if ($script:TRes) { @($script:TRes.Sources) } else { @() }); Errors = $script:TErr; ReadAs = $readAs; UserSid = $sid; UserAccount = $(if ($sid) { Get-TAccount $sid } else { '' }) })
         }
