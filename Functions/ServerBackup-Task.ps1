@@ -52,7 +52,7 @@ function Add-HMSbTaskError([string]$Note, [string]$Disk = '') {
             HostVersionId = ''; Note = "Geplante Aufgabe: $Note"; Tool = "HUMig $version"
         })
     } catch { }
-    $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME FEHLGESCHLAGEN" -Lines @($Note, "Protokoll: $($script:TaskLog)") -Level 'Error' -Category 'SbError'
+    $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME FEHLGESCHLAGEN" -Lines @($Note, "Protokoll: $($script:TaskLog)") -Level 'Error' -Category 'SbError' -SbProfile $(if ($prof) { $ProfileName } else { '' })
     if ($n) { Write-HMSbLog $n 'Info' }
 }
 
@@ -97,7 +97,9 @@ $ctx = @{
     VMs = @($list); Volumes = @($volList); HostConfig = [bool]$HostConfig; HostSystem = [bool]$HostSystem; Verify = -not $NoVerify
     LocalHistory = $localHist; LocalHealth = $localHealth; LocalReportDir = $repDir; Version = $version; ProfileData = $prof
     After = (Get-HMSbAfterMode $prof "$($d.Label)")
+    Export = (Get-HMSbExportOptions $prof)
 }
+if ($ctx.Export) { Write-HMSbLog "Nach der Sicherung: VM-Export $(@($ctx.Export.VMs) -join ', ') -> $(Get-HMSbExportBase $ctx.Export.Folder $d.Letter) (behalten: $($ctx.Export.Keep))" 'Info' }
 if ($ctx.After) { Write-HMSbLog "Nach der Sicherung: Platte $($d.Label) $(Format-HMSbAfterMode $ctx.After)" 'Info' }
 $q = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
 $Job = [hashtable]::Synchronized(@{ Log = $q; Progress = 0; Status = ''; Cancel = $false; Done = $false; Result = $null; Process = $null; Error = $null; Started = (Get-Date) })
@@ -121,6 +123,7 @@ try {
     $nc = Get-HMNotifyConfig
     if ($nc.Configured) {
         foreach ($tg in @($nc.Targets | Where-Object { $_ })) {
+            if (-not (Test-HMNotifySbProfile $tg $ProfileName)) { Write-HMSbLog "Teams-Benachrichtigung '$($tg.Name)': gilt nicht fuer Profil '$ProfileName'" 'Info'; continue }
             $msg = New-HMSbNotifyMessage -Result $Job.Result -ProfileName $ProfileName -Disk "$($d.Label)" -Reminders $rem -Cats $tg.Cats
             if ($msg) {
                 $r = Send-HMTeamsMessage -Title $msg.Title -Lines $msg.Lines -Level $msg.Level -Url $tg.Url

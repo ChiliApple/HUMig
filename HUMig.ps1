@@ -525,7 +525,7 @@ foreach ($n in @('btnWizard', 'brdMonBackup', 'brdMonRestore', 'brdMonServer', '
     'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnBackupSearch', 'btnFileSearch', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnFeedback', 'btnFeedbackR', 'btnReinstall', 'btnADDevices',
     'tabServerBackup', 'btnSbHealth', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
     'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'cmbSbAfter', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
-    'pnlSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'btnSbConflicts', 'dotSbBusy', 'lblSbBusy', 'dotBusy', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule',
+    'pnlSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbExport', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'btnSbConflicts', 'dotSbBusy', 'lblSbBusy', 'dotBusy', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule',
     'tabAppUpdates', 'btnAuSearch', 'btnAuUpdateSel', 'btnAuUpdateAll', 'btnAuCancel', 'chkAuUnknown', 'btnAuSetup', 'dotAuBusy', 'lblAuBusy', 'lblAuInfo', 'lblAuTarget', 'btnAuPcs', 'btnAuPcTop', 'btnAuSchedule', 'btnAuScheduleView', 'lblAuListTitle', 'dgAu',
     'lblAuLocation', 'pnlAuSources', 'btnAuSourceAdd', 'btnAuExclAdd', 'btnAuExclDel', 'lstAuExcl', 'dgAuHistory')) { $ui[$n] = Get-UI $n }
 Initialize-HMTaskbar
