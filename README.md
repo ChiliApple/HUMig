@@ -28,7 +28,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 | **Backup & Restore** | Dateien, Browser, Office, Windows-Einstellungen, Drucker, WLAN, Netzlaufwerke – Robocopy mit bis zu 128 Threads, inkrementell, mit Prüfung, **Zeitplan** (automatisch auf USB/Netz) |
 | **Programm-Katalog** | erkennt rund 480 Programme, sichert deren Einstellungen, Plug-ins, Datenbanken und **Lizenzdateien** mit, schließt Programme vorher, installiert fehlende am neuen PC nach - mit **Katalog-Editor** |
 | **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
-| **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash, BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung (Setups vorher in der **Windows Sandbox** testen) |
+| **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash (auch an HUPilot), BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung (Setups vorher in der **Windows Sandbox** testen) |
 | **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |
 | **App-Updates** | installierte Programme über **WinGet** aktualisieren - Liste mit Haken, **Ausnahmen** (z. B. Prüfungssoftware) und Quellen je Standort, Verlauf |
 | **Benutzer-Modus** | ohne Administratorrechte: eigenes Profil sichern/wiederherstellen, Dateien aus dem Backup holen |
@@ -145,10 +145,10 @@ Ziel ist der gewählte PC oder viele PCs aus dem AD (bis zu 8 gleichzeitig). *In
 
 | Bereich | Auswahl |
 |---|---|
-| Computer | Fernwartung aktivieren, Umbenennen, IP/DHCP, lokale Gruppen, Autologon, Neustart, **Geräte (AD) / Mehrfach**, Remote-PowerShell, Inventar, BitLocker, Autopilot-Hash, Wake-on-LAN |
+| Computer | Fernwartung aktivieren, Umbenennen, IP/DHCP, lokale Gruppen, Autologon, Neustart, **Geräte (AD) / Mehrfach**, Remote-PowerShell, Inventar, BitLocker, Autopilot-Hash (auf Wunsch an HUPilot übergeben), HUPilot-Setup öffnen, Wake-on-LAN |
 | Benutzerprofil | Profil erneuern/zurückholen, Profil anderem Konto zuweisen, alte Profile löschen, Datenbanken und wichtige Dateien suchen, im Backup suchen |
-| Diagnose / Wartung | Ereignisse, Akku, Aktivierung, Entra ID/Intune, Domäne/Kerberos, Druckwarteschlange, Speicher aufräumen, DISM/SFC |
-| Dieser PC | Systemprogramme, Anmeldedaten, Hersteller-Treiber-Links |
+| Diagnose / Wartung | Ereignisse, Akku, Aktivierung, Entra ID/Intune, Domäne/Zeit/Kerberos (startet den Zeitdienst bei Bedarf), Druckwarteschlange, Speicher aufräumen, DISM/SFC |
+| Dieser PC | Systemprogramme (Taskmanager, Dienste, Registry, Konsolen … – immer mit Administratorrechten), Anmeldedaten, Hersteller-Treiber-Links |
 
 Remote-Werkzeuge brauchen WinRM – *Fernwartung aktivieren* schaltet es über WMI ein. Änderungen immer mit Rückfrage.
 
