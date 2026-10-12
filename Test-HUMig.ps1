@@ -286,6 +286,14 @@ T 'Server-Backup: Archiv-Platten erkennen (v2.0.47)' {
     $ok = (Test-HMSbArchiveLabel 'HUMIG-GYM-A1' 'HUMIG-GYM') -and (Test-HMSbArchiveLabel 'humig-gym-a12' 'HUMIG-GYM') -and -not (Test-HMSbArchiveLabel 'HUMIG-GYM-1' 'HUMIG-GYM') -and -not (Test-HMSbArchiveLabel 'HUMIG-GYMA-1' 'HUMIG-GYM') -and (Test-HMSbArchiveLabel 'X-A2' '')
     if (-not $ok) { throw 'Archiv-Bezeichnung falsch erkannt' }; '<Prefix>-A<n> = Archiv'
 }
+T 'Server-Backup: VM-Export (v2.0.123)' {
+    . (Join-Path $root 'Functions\ServerBackup-Engine.ps1')
+    if ((Get-HMSbExportBase '' 'e') -ne 'E:\HUMig-Export' -or (Get-HMSbExportBase '\\nas\vm\' 'E') -ne '\\nas\vm') { throw 'Export-Ziel falsch' }
+    $c = Get-Command Export-VM -ErrorAction SilentlyContinue
+    if (-not $c) { 'Hyper-V-Modul nicht vorhanden (nur auf Hyper-V-Hosts noetig)' }
+    elseif ($c.Parameters.ContainsKey('CaptureLiveState')) { 'Export-VM mit -CaptureLiveState (laufende VMs anwendungskonsistent)' }
+    else { 'Export-VM ohne -CaptureLiveState - laufende VMs werden mit dem Standard von Hyper-V exportiert' }
+}
 T 'Update: Kanal Stabil/Test, Pruefsumme, Signatur (v2.0.55)' {
     . (Join-Path $root 'Functions\Core-Update.ps1')
     $l = ConvertTo-HMReleaseList @([pscustomobject]@{ tag_name = 'v9.0.2'; prerelease = $true; draft = $false; assets = @() }, [pscustomobject]@{ tag_name = 'v9.0.1'; prerelease = $false; draft = $false; assets = @() })

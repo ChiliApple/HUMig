@@ -13,7 +13,7 @@ function Get-HMTeamsListKey($List) {
     $parts = foreach ($t in @($List | Where-Object { $_ })) {
         $c = ConvertTo-HMNotifyCats $t.Cats
         $bits = foreach ($n in $script:HMNotifyCats.Keys) { [int][bool]$c[$n] }
-        '{0}|{1}|{2}|{3}' -f "$($t.Id)", "$($t.Name)".Trim(), "$($t.Url)".Trim(), ($bits -join '')
+        '{0}|{1}|{2}|{3}|{4}' -f "$($t.Id)", "$($t.Name)".Trim(), "$($t.Url)".Trim(), ($bits -join ''), (@(ConvertTo-HMNotifySbProfiles $t.SbProfiles) -join '/')
     }
     return (@($parts) -join ';')
 }
@@ -24,6 +24,8 @@ function Save-HMSetTeamsCur {
     $t = $S.TeamsList[$S.TeamsCur]
     $t.Name = "$($S.F.txtTeamsName.Text)".Trim()
     foreach ($n in $S.TeamsChk.Keys) { $t.Cats[$n] = [bool]$S.TeamsChk[$n].IsChecked }
+    # Server-Backup-Profile: "alle" oder Auswahl (keine Auswahl = alle)
+    $t.SbProfiles = if ($S.TeamsSbAll.IsChecked) { @() } else { @($S.TeamsSbChk.Keys | Where-Object { $S.TeamsSbChk[$_].IsChecked }) }
     $u = "$($S.F.pwdTeams.Password)".Trim()
     if ($u) { $t.Url = $u; $t.NewUrl = $true }
     $S.F.pwdTeams.Password = ''
@@ -41,16 +43,21 @@ function Update-HMSetTeamsCombo([int]$Select) {
     $F.pwdTeams.Password = ''   # Adresse nie beim naechsten Ziel stehen lassen (Aufrufer haben vorher gespeichert)
     $S.TeamsCur = $Select
     $has = $Select -ge 0
-    foreach ($c in @(@($F.txtTeamsName, $F.pwdTeams, $F.btnTeamsTest, $F.btnTeamsDel) + @($S.TeamsChk.Values))) { if ($isAdmin) { $c.IsEnabled = $has } }
+    foreach ($c in @(@($F.txtTeamsName, $F.pwdTeams, $F.btnTeamsTest, $F.btnTeamsDel, $S.TeamsSbAll) + @($S.TeamsChk.Values))) { if ($isAdmin) { $c.IsEnabled = $has } }
     if (-not $has) {
         $F.txtTeamsName.Text = ''
         foreach ($n in $S.TeamsChk.Keys) { $S.TeamsChk[$n].IsChecked = $false }
+        $S.TeamsSbAll.IsChecked = $true
+        foreach ($cb in @($S.TeamsSbChk.Values)) { $cb.IsChecked = $false; $cb.IsEnabled = $false }
         $F.lblTeams.Text = "Kein Ziel eingerichtet (Benachrichtigung aus) - mit 'Neues Ziel' anlegen."
         return
     }
     $t = $S.TeamsList[$Select]
     $F.txtTeamsName.Text = "$($t.Name)"
     foreach ($n in $S.TeamsChk.Keys) { $S.TeamsChk[$n].IsChecked = [bool](Test-HMNotifyCat $t $n) }
+    $sel = @(ConvertTo-HMNotifySbProfiles $t.SbProfiles)
+    $S.TeamsSbAll.IsChecked = (-not $sel.Count)
+    foreach ($k in @($S.TeamsSbChk.Keys)) { $S.TeamsSbChk[$k].IsChecked = [bool]($sel | Where-Object { $_ -ieq $k }); $S.TeamsSbChk[$k].IsEnabled = ($isAdmin -and $sel.Count -gt 0) }
     $F.lblTeams.Text = if ($t.Saved -and -not $t.NewUrl -and "$($t.Url)") { "Adresse gespeichert - zum Aendern neue Adresse eintragen. $($S.TeamsList.Count) Ziel(e) auf diesem PC." }
         elseif ("$($t.Url)") { 'Adresse eingetragen - wird mit Speichern uebernommen.' }
         else { 'Noch keine Adresse - Adresse aus der Teams-App Workflows eintragen.' }
@@ -81,7 +88,7 @@ function Show-SettingsDialog {
     $w.Owner = $script:Window; Set-HMWindowScale $w
     $f = @{}
     foreach ($n in @('lblPath', 'btnOpenConfig', 'btnSave', 'btnCancel', 'tabs', 'txtRoot', 'btnRoot', 'cmbThreads', 'txtRetention', 'txtRetentionKeep', 'txtDeletedKeep', 'txtDeletedMass', 'txtFeedbackMail', 'cmbUiScale', 'chkOverviewAuto', 'chkStatusPage', 'txtChecklist', 'chkChecklistAuto', 'tabSchools', 'dgSchools', 'btnSchoolAdd', 'btnSchoolDel', 'txtUsmt', 'btnUsmt', 'btnUsmtAdk', 'lblUsmt',
-        'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtDrvDir', 'btnDrvDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript', 'chkROfferApps', 'chkRVerify', 'cmbTeams', 'btnTeamsAdd', 'txtTeamsName', 'pwdTeams', 'btnTeamsTest', 'btnTeamsDel', 'lblTeams', 'pnlTeamsCats',
+        'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtDrvDir', 'btnDrvDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript', 'chkROfferApps', 'chkRVerify', 'cmbTeams', 'btnTeamsAdd', 'txtTeamsName', 'pwdTeams', 'btnTeamsTest', 'btnTeamsDel', 'lblTeams', 'pnlTeamsCats', 'pnlTeamsSbProfiles',
         'tabExceptions', 'btnExcDefault', 'txtExPF', 'txtExPFi', 'txtExPMin', 'txtExSF', 'txtExSFi', 'txtExSMin', 'tabModules', 'txtNmName', 'cmbNmGroup',
         'cmbNmType', 'txtNmFilter', 'txtNmPath', 'btnNmAdd', 'btnModDel', 'btnModJson', 'btnAppEditor', 'dgModules', 'btnLinkAdd', 'btnLinkDel', 'dgLinks',
         'txtOwner', 'txtRepo', 'txtBranch', 'lblToken', 'btnTokenSet', 'btnTokenDel', 'tabUpdate', 'cmbChannel', 'lblInstalled', 'btnVersions', 'chkRequireSig', 'txtSignerThumb', 'chkUseBranch')) { $f[$n] = $w.FindName($n) }
@@ -146,7 +153,7 @@ function Show-SettingsDialog {
     # Teams-Benachrichtigung: mehrere Ziele, je Ziel Name, Adresse, Kategorien (Adressen nur auf diesem PC, verschluesselt in HKLM)
     $st.TeamsCfg = Get-HMNotifyConfig
     $st.TeamsList = New-Object System.Collections.ArrayList
-    foreach ($t in @($st.TeamsCfg.Targets | Where-Object { $_ })) { [void]$st.TeamsList.Add(@{ Id = "$($t.Id)"; Name = "$($t.Name)"; Url = "$($t.Url)"; Cats = (ConvertTo-HMNotifyCats $t.Cats); Saved = $true; NewUrl = $false }) }
+    foreach ($t in @($st.TeamsCfg.Targets | Where-Object { $_ })) { [void]$st.TeamsList.Add(@{ Id = "$($t.Id)"; Name = "$($t.Name)"; Url = "$($t.Url)"; Cats = (ConvertTo-HMNotifyCats $t.Cats); SbProfiles = @(ConvertTo-HMNotifySbProfiles $t.SbProfiles); Saved = $true; NewUrl = $false }) }
     $st.TeamsOrig = Get-HMTeamsListKey $st.TeamsList
     $st.TeamsCur = -1; $st.TeamsLoading = $false
     $st.TeamsChk = [ordered]@{}
@@ -157,9 +164,30 @@ function Show-SettingsDialog {
         [void]$f.pnlTeamsCats.Children.Add($cb)
         $st.TeamsChk[$n] = $cb
     }
+    # Server-Backup-Meldungen je Ziel auf bestimmte Profile beschraenken (Profile aus Config\serverbackup.json + schon gewaehlte)
+    $sbNames = New-Object System.Collections.Generic.List[string]
+    try { $sbc = Read-JsonFile (Join-Path $script:ConfigDir 'serverbackup.json'); foreach ($p in @($sbc.Profiles)) { if ($p -and "$($p.Name)".Trim()) { $sbNames.Add("$($p.Name)".Trim()) } } } catch { }
+    foreach ($t in $st.TeamsList) { foreach ($x in @($t.SbProfiles)) { if (-not ($sbNames | Where-Object { $_ -ieq $x })) { $sbNames.Add("$x") } } }
+    $st.TeamsSbAll = New-Object System.Windows.Controls.CheckBox
+    $st.TeamsSbAll.Content = 'alle Profile'; $st.TeamsSbAll.Margin = [System.Windows.Thickness]::new(0, 2, 14, 0)
+    [void]$f.pnlTeamsSbProfiles.Children.Add($st.TeamsSbAll)
+    $st.TeamsSbChk = [ordered]@{}
+    foreach ($nm in $sbNames) {
+        $cb = New-Object System.Windows.Controls.CheckBox
+        $cb.Content = $nm; $cb.Margin = [System.Windows.Thickness]::new(0, 2, 14, 0)
+        [void]$f.pnlTeamsSbProfiles.Children.Add($cb)
+        $st.TeamsSbChk[$nm] = $cb
+    }
+    if (-not $sbNames.Count) { $tb = New-Object System.Windows.Controls.TextBlock; $tb.Text = '(auf diesem PC keine Server-Backup-Profile)'; $tb.Foreground = New-Brush '#FF6C7086'; $tb.Margin = [System.Windows.Thickness]::new(0, 2, 0, 0); [void]$f.pnlTeamsSbProfiles.Children.Add($tb) }
+    $st.TeamsSbAll.Add_Click({
+        $S = $script:SetDlg
+        $all = [bool]$S.TeamsSbAll.IsChecked
+        foreach ($cb in @($S.TeamsSbChk.Values)) { $cb.IsEnabled = -not $all; if ($all) { $cb.IsChecked = $false } }
+        if (-not $all -and -not $S.TeamsSbChk.Count) { $S.TeamsSbAll.IsChecked = $true }
+    })
     Update-HMSetTeamsCombo 0
     if ($st.TeamsCfg.Error) { $f.lblTeams.Text = "Gespeicherte Ziele nicht lesbar: $($st.TeamsCfg.Error)" }
-    if (-not $isAdmin) { foreach ($c in @(@($f.cmbTeams, $f.btnTeamsAdd, $f.txtTeamsName, $f.pwdTeams, $f.btnTeamsTest, $f.btnTeamsDel) + @($st.TeamsChk.Values))) { $c.IsEnabled = $false }; $f.lblTeams.Text = 'Nur als Administrator einstellbar.' }
+    if (-not $isAdmin) { foreach ($c in @(@($f.cmbTeams, $f.btnTeamsAdd, $f.txtTeamsName, $f.pwdTeams, $f.btnTeamsTest, $f.btnTeamsDel, $st.TeamsSbAll) + @($st.TeamsChk.Values) + @($st.TeamsSbChk.Values))) { $c.IsEnabled = $false }; $f.lblTeams.Text = 'Nur als Administrator einstellbar.' }
     $f.cmbTeams.Add_SelectionChanged({
         $S = $script:SetDlg
         if ($S.TeamsLoading) { return }
@@ -172,7 +200,7 @@ function Show-SettingsDialog {
         if ($S.TeamsList.Count -ge $script:HMNotifyMaxTargets) { [void][System.Windows.MessageBox]::Show($S.Win, "Hoechstens $($script:HMNotifyMaxTargets) Ziele.", 'Teams', 'OK', 'Information'); return }
         Save-HMSetTeamsCur
         $nm = "Ziel $($S.TeamsList.Count + 1)"
-        [void]$S.TeamsList.Add(@{ Id = [guid]::NewGuid().ToString('N').Substring(0, 8); Name = $nm; Url = ''; Cats = (Get-HMNotifyDefaultCats); Saved = $false; NewUrl = $false })
+        [void]$S.TeamsList.Add(@{ Id = [guid]::NewGuid().ToString('N').Substring(0, 8); Name = $nm; Url = ''; Cats = (Get-HMNotifyDefaultCats); SbProfiles = @(); Saved = $false; NewUrl = $false })
         Update-HMSetTeamsCombo ($S.TeamsList.Count - 1)
         $S.F.txtTeamsName.Focus(); $S.F.txtTeamsName.SelectAll()
     })

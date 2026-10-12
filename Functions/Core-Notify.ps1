@@ -21,6 +21,7 @@ $script:HMNotifyCats = [ordered]@{
     SbError    = @('Server-Backup fehlgeschlagen / abgebrochen', $true)
     SbWarning  = @('Server-Backup mit Warnungen', $true)
     SbOK       = @('Server-Backup erfolgreich', $false)
+    SbExport   = @('VM-Export fehlgeschlagen / mit Warnungen (geplanter Export nach dem Server-Backup)', $true)
     PbError    = @('Geplantes Profil-Backup fehlgeschlagen', $true)
     PbSkipped  = @('Geplantes Profil-Backup uebersprungen (Ziel nicht erreichbar, z.B. USB nicht angesteckt)', $true)
     PbWarning  = @('Geplantes Profil-Backup mit Warnungen', $true)
@@ -95,7 +96,7 @@ function Get-HMNotifyConfig {
             $j = (Unprotect-HMNotifyText "$($k.Targets)") | ConvertFrom-Json   # erst zuweisen (PS 5.1: Liste kommt als EIN Objekt)
             foreach ($t in @($j | ForEach-Object { $_ } | Where-Object { $_ })) {
                 if (-not "$($t.Url)") { continue }
-                $list += [pscustomobject]@{ Id = "$($t.Id)"; Name = "$($t.Name)"; Url = "$($t.Url)"; Cats = (ConvertTo-HMNotifyCats $t.Cats) }
+                $list += [pscustomobject]@{ Id = "$($t.Id)"; Name = "$($t.Name)"; Url = "$($t.Url)"; Cats = (ConvertTo-HMNotifyCats $t.Cats); SbProfiles = @(ConvertTo-HMNotifySbProfiles $t.SbProfiles) }
             }
         } else {
             # bis 2.0.115: eine Adresse (TeamsUrl), Kategorien Cat_<Name>, davor nur OnSuccess
@@ -103,13 +104,30 @@ function Get-HMNotifyConfig {
             $c['SbOK'] = [bool]([int]"0$($k.OnSuccess)")
             foreach ($n in @($c.Keys)) { $v = $k.PSObject.Properties["Cat_$n"]; if ($v) { $c[$n] = [bool]([int]"0$($v.Value)") } }
             $r.Cats = $c
-            if ("$($k.TeamsUrl)") { $list += [pscustomobject]@{ Id = 'standard'; Name = 'Standard'; Url = (Unprotect-HMNotifyText "$($k.TeamsUrl)"); Cats = $c } }
+            if ("$($k.TeamsUrl)") { $list += [pscustomobject]@{ Id = 'standard'; Name = 'Standard'; Url = (Unprotect-HMNotifyText "$($k.TeamsUrl)"); Cats = $c; SbProfiles = @() } }
         }
         $r.Targets = @($list)
         if ($list.Count) { $r.Configured = $true; $r.Url = $list[0].Url; $r.Cats = $list[0].Cats }
         $r.OnSuccess = [bool]$r.Cats['SbOK']
     } catch { $r.Error = "$($_.Exception.Message)"; $r.Url = ''; $r.Targets = @(); $r.Configured = $false }
     return $r
+}
+
+# Server-Backup-Profile eines Ziels (leer = alle Profile): Namen bereinigen, doppelte entfernen
+function ConvertTo-HMNotifySbProfiles($Src) {
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($x in @($Src | ForEach-Object { $_ })) {
+        $n = "$x".Trim()
+        if ($n -and -not ($out | Where-Object { $_ -ieq $n })) { $out.Add($n) }
+    }
+    return $out.ToArray()   # Aufrufer: @(ConvertTo-HMNotifySbProfiles ...)
+}
+# Gilt das Ziel fuer dieses Server-Backup-Profil? Ohne Profil (z.B. 'Profil nicht gefunden') oder ohne Auswahl am Ziel: ja
+function Test-HMNotifySbProfile($Target, [string]$ProfileName) {
+    if (-not "$ProfileName".Trim()) { return $true }
+    $l = @(ConvertTo-HMNotifySbProfiles $Target.SbProfiles)
+    if (-not $l.Count) { return $true }
+    return [bool]($l | Where-Object { $_ -ieq "$ProfileName".Trim() })
 }
 
 # Ist die Kategorie eingeschaltet? $Cfg = Konfiguration oder Ziel (mit .Cats). Unbekannte Kategorie = ein
@@ -160,7 +178,7 @@ function Set-HMNotifyTargets {
         $id = "$($t.Id)".Trim(); if (-not $id) { $id = [guid]::NewGuid().ToString('N').Substring(0, 8) }
         $c = ConvertTo-HMNotifyCats $t.Cats
         $co = [ordered]@{}; foreach ($n in $script:HMNotifyCats.Keys) { $co[$n] = [bool]$c[$n] }
-        [ordered]@{ Id = $id; Name = "$($t.Name)".Trim(); Url = "$($t.Url)".Trim(); Cats = $co }
+        [ordered]@{ Id = $id; Name = "$($t.Name)".Trim(); Url = "$($t.Url)".Trim(); Cats = $co; SbProfiles = @(ConvertTo-HMNotifySbProfiles $t.SbProfiles) }
     })
     if ($list.Count) {
         $json = ConvertTo-Json -InputObject @($list) -Depth 5 -Compress
@@ -168,6 +186,20 @@ function Set-HMNotifyTargets {
     } else { Remove-ItemProperty -LiteralPath $script:HMNotifyKey -Name 'Targets' -ErrorAction SilentlyContinue }
     # Werte bis 2.0.115 (eine Adresse) entfernen - sind jetzt in der Liste
     foreach ($v in @(@('TeamsUrl', 'OnSuccess') + @($script:HMNotifyCats.Keys | ForEach-Object { "Cat_$_" }))) { Remove-ItemProperty -LiteralPath $script:HMNotifyKey -Name $v -ErrorAction SilentlyContinue }
+}
+
+# Server-Backup-Profil umbenannt: Auswahl an den Zielen mitnehmen (nur wenn ein Ziel das Profil ausgewaehlt hat).
+# Rueckgabe: Anzahl angepasster Ziele
+function Rename-HMNotifySbProfile([string]$Old, [string]$New) {
+    $c = Get-HMNotifyConfig
+    if ($c.Error -or -not $c.Configured) { return 0 }
+    $n = 0
+    foreach ($t in @($c.Targets)) {
+        $l = @(ConvertTo-HMNotifySbProfiles $t.SbProfiles)
+        if ($l | Where-Object { $_ -ieq $Old }) { $t.SbProfiles = @(ConvertTo-HMNotifySbProfiles (@($l | ForEach-Object { if ($_ -ieq $Old) { $New } else { $_ } }))); $n++ }
+    }
+    if ($n) { Set-HMNotifyTargets -Targets @($c.Targets) }
+    return $n
 }
 
 # Ein Ziel sofort entfernen (nur dieses, die anderen bleiben)
@@ -309,13 +341,15 @@ function Send-HMTeamsMessage {
 }
 
 # Meldung an alle Ziele, bei denen die Kategorie eingeschaltet ist; Ergebnis als Text fuer das Protokoll
-# ('' = nichts zu melden / nicht eingerichtet / Kategorie ueberall aus). Ohne Kategorie: OK nur an Ziele mit 'Server-Backup erfolgreich'
+# ('' = nichts zu melden / nicht eingerichtet / Kategorie ueberall aus). Ohne Kategorie: OK nur an Ziele mit 'Server-Backup erfolgreich'.
+# -SbProfile: nur an Ziele, die fuer dieses Server-Backup-Profil gelten (leer = alle)
 function Send-HMNotify {
-    param([string]$Title, [string[]]$Lines = @(), [string]$Level = 'Info', [string]$Source = '', [string]$Category = '')
+    param([string]$Title, [string[]]$Lines = @(), [string]$Level = 'Info', [string]$Source = '', [string]$Category = '', [string]$SbProfile = '')
     $c = Get-HMNotifyConfig
     if (-not $c.Configured) { return '' }
     $out = @()
     foreach ($t in @($c.Targets | Where-Object { $_ })) {
+        if (-not (Test-HMNotifySbProfile $t $SbProfile)) { continue }
         if ($Category) { if (-not (Test-HMNotifyCat $t $Category)) { continue } }
         elseif ($Level -eq 'OK' -and -not (Test-HMNotifyCat $t 'SbOK')) { continue }
         $r = Send-HMTeamsMessage -Title $Title -Lines $Lines -Level $Level -Url $t.Url -Source $Source

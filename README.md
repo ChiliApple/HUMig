@@ -161,6 +161,7 @@ Hyper-V-VMs oder die Laufwerke eines Servers mit der Windows Server-Sicherung au
 - Zeitplan, Verlauf, Bericht je Lauf, Einträge in der Ereignisanzeige
 - **Plattenzustand (SMART)** je Platte, automatisch gelesen und gemerkt
 - **Teams-Benachrichtigung** über Workflows, mehrere Ziele (Chat/Kanal) mit je eigenen Kategorien - Server-Backups und geplante Profil-Backups (Fehler, Warnungen, Erfolg, Plattenzustand, Plattenwechsel/Archiv, Speicherplatz, Massenlöschung, Details mit Stand der Platte)
+- **VM-Export** per Knopf oder automatisch nach jeder Sicherung (auch im Zeitplan): vollständige Kopie je VM, an jedem Hyper-V-Host importierbar, mit einstellbarer Anzahl je VM
 - **Archiv-Platten** gegen Verschlüsselungstrojaner; Platte danach auswerfen oder offline schalten
 - Wiederherstellung auch ohne HUMig (`wbadmin`, Installationsmedium)
 
@@ -170,7 +171,7 @@ Geplante Server-Backups, geplante Profil-Backups und Warnungen (Plattenzustand, 
 
 1. In Teams die App **Workflows** öffnen › Vorlage *Webhookbenachrichtigungen an einen Chat* bzw. *… an einen Kanal* › Speichern › Adresse kopieren. Private Kanäle gehen nicht – Gruppenchat oder Standardkanal eines privaten Teams nehmen.
 2. HUMig als Administrator auf dem PC, der melden soll (Hyper-V-Host bzw. PC mit Profil-Backup-Zeitplan) › *Einstellungen* › Allgemein › *Teams-Benachrichtigung* › *Neues Ziel*, Adresse einfügen, Kategorien wählen, *Test senden*, Speichern.
-3. Bis zu 10 Ziele mit je eigenen Kategorien – nicht jeder bekommt alles (z. B. Fehler an den Kanal, Erfolg mit Details nur an den eigenen Chat).
+3. Bis zu 10 Ziele mit je eigenen Kategorien – nicht jeder bekommt alles (z. B. Fehler an den Kanal, Erfolg mit Details nur an den eigenen Chat). Server-Backup-Meldungen lassen sich je Ziel auf bestimmte Profile beschränken (z. B. je Standort ein Kanal).
 
 Die Adressen liegen nur verschlüsselt in der Registry des jeweiligen PCs (nur Administratoren/SYSTEM), nie im Tool-Ordner. Details: Anleitung, Kapitel *Teams-Benachrichtigung*.
 
@@ -207,7 +208,7 @@ Alles über **Einstellungen**, gespeichert in `Config\`:
 | `apps.json` | eigene Katalog-Einträge |
 | `exceptions.json` | Ausnahmen für Profil und C:\\ |
 | `appupdates.json` | App-Updates: Ausnahmen und Quellen je Standort |
-| `serverbackup.json` | Server-Backup-Profile |
+| `serverbackup.json` | Server-Backup-Profile (inkl. VM-Export) |
 | `update.json` | Update-Quelle und Kanal |
 
 Die `*.default.json` kommen mit dem Update, eigene Dateien bleiben erhalten.

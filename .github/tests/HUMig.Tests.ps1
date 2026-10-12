@@ -1082,3 +1082,95 @@ Describe 'Teams-Meldung geplanter Profil-Backups (Weitergabe als SYSTEM)' {
         $t | Should -Match 'function Send-HMTeamsMessage'
     }
 }
+
+Describe 'VM-Export (Hyper-V Export-VM) und Teams-Ziele je Server-Backup-Profil' {
+    BeforeAll { . (Join-Path $script:Root 'Functions\Core-Notify.ps1') }
+    It 'Ziel: Platte (Ordner HUMig-Export) oder eigener Ordner' {
+        Get-HMSbExportBase '' 'e' | Should -Be 'E:\HUMig-Export'
+        Get-HMSbExportBase '' 'F:\' | Should -Be 'F:\HUMig-Export'
+        Get-HMSbExportBase '\\nas\vm\' 'E' | Should -Be '\\nas\vm'
+        Get-HMSbExportBase '' '' | Should -Be ''
+        Get-HMSbFreeBytes '\\nas\vm' | Should -Be -1
+    }
+    It 'vorhandene Exporte: nur fertige Ordner mit Kennung dieser VM, aeltester zuerst' {
+        $b = Join-Path $TestDrive 'Exp'
+        $d = Get-HMSbExportVmDir $b 'DC 1'
+        $mk = @{ '2026-10-02_2200' = 'id-1'; '2026-10-01_2200' = 'id-1'; '2026-10-02_2200.unvollstaendig' = 'id-1'; 'Notizen' = 'id-1'; '2026-10-03_220015' = 'id-1'; '2026-10-04_2200' = 'id-2'; '2026-10-05_2200' = '' }
+        foreach ($n in $mk.Keys) {
+            New-Item -ItemType Directory -Path (Join-Path $d $n) -Force | Out-Null
+            if ($mk[$n]) { Set-Content -LiteralPath (Join-Path (Join-Path $d $n) '.humig-export') -Value @($mk[$n], 'DC 1') }
+        }
+        $l = @(Get-HMSbExports $b 'DC 1' 'id-1')
+        $l.Count | Should -Be 3
+        $l[0].Name | Should -Be '2026-10-01_2200'
+        $l[2].Name | Should -Be '2026-10-03_220015'
+        @(Get-HMSbExports $b 'DC 1').Count | Should -Be 4
+        @(Get-HMSbExports $b 'DC 1' 'id-1' -Temp).Name | Should -Be '2026-10-02_2200.unvollstaendig'
+        @(Get-HMSbExports $b 'GibtEsNicht').Count | Should -Be 0
+    }
+    It 'Loeschen eines Export-Ordners entfernt nur den Ordner' {
+        $x = Join-Path $TestDrive 'Del\2026-10-01_2200'
+        New-Item -ItemType Directory -Path (Join-Path $x 'VM\Virtual Hard Disks') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $x 'VM\Virtual Hard Disks\a.vhdx') -Value 'x'
+        Remove-HMSbExportDir $x | Should -BeNullOrEmpty
+        Test-Path -LiteralPath $x | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $TestDrive 'Del') | Should -BeTrue
+        Remove-HMSbExportDir (Join-Path $TestDrive 'GibtEsNicht') | Should -BeNullOrEmpty
+    }
+    It 'Profil: Export-Einstellungen mit Standardwerten, nach der Sicherung nur mit VMs' {
+        $p = ConvertTo-HMSbProfile ([pscustomobject]@{ Name = 'Gym' })
+        $p.ExportAfter | Should -BeFalse
+        $p.ExportKeep | Should -Be 1
+        @($p.ExportVMs).Count | Should -Be 0
+        Get-HMSbExportOptions $p | Should -BeNullOrEmpty
+        $p2 = ConvertTo-HMSbProfile ([pscustomobject]@{ Name = 'Gym'; ExportAfter = $true; ExportVMs = @('DC1', ' ', 'FS1'); ExportKeep = 25; ExportFolder = ' \\nas\vm ' })
+        $o = Get-HMSbExportOptions $p2
+        @($o.VMs) -join ',' | Should -Be 'DC1,FS1'
+        $o.Keep | Should -Be 1
+        $o.Folder | Should -Be '\\nas\vm'
+        Get-HMSbExportOptions (ConvertTo-HMSbProfile ([pscustomobject]@{ Name = 'X'; ExportAfter = $true })) | Should -BeNullOrEmpty
+    }
+    It 'Teams-Meldung: Export-Fehler ueber eigene Kategorie, Sicherung selbst bleibt OK' {
+        $r = [pscustomobject]@{ Status = 'Warning'; Notes = @('Export: DC1 fehlgeschlagen'); Health = 'OK'; HealthText = 'OK'; Report = 'E:\HUMig-ServerBackup\x'
+            Minutes = 10; SizeBytes = [long]10GB; FreeBytes = [long]900GB; TotalBytes = [long]1000GB; LowSpace = $false; VersionCount = 2; OldestVersion = 'a'; NewestVersion = 'b'
+            VMs = 'DC1'; Volumes = ''; HostSystem = ''; Export = 'DC1 -> E:\HUMig-Export (FEHLER)'; ExportStatus = 'Error' }
+        $c = Get-HMNotifyDefaultCats
+        $m = New-HMSbNotifyMessage -Result $r -ProfileName 'Gym' -Disk 'D1' -Cats $c
+        $m.Level | Should -Be 'Error'
+        ($m.Lines -join '|') | Should -Match 'VM-Export FEHLGESCHLAGEN'
+        ($m.Lines -join '|') | Should -Match 'Hinweis: DC1 fehlgeschlagen'
+        $c['SbExport'] = $false
+        New-HMSbNotifyMessage -Result $r -ProfileName 'Gym' -Disk 'D1' -Cats $c | Should -BeNullOrEmpty
+        $c['SbExport'] = $true; $c['SbOK'] = $true
+        $ok = $r.PSObject.Copy(); $ok.Status = 'OK'; $ok.Notes = @(); $ok.ExportStatus = 'OK'; $ok.Export = 'DC1 -> E:\HUMig-Export'
+        $m2 = New-HMSbNotifyMessage -Result $ok -ProfileName 'Gym' -Disk 'D1' -Cats $c
+        $m2.Level | Should -Be 'OK'
+        ($m2.Lines -join '|') | Should -Match 'VM-Export: DC1'
+    }
+    It 'Ziel gilt fuer alle oder ausgewaehlte Server-Backup-Profile' {
+        $all = [pscustomobject]@{ Name = 'A'; SbProfiles = @() }
+        $gym = [pscustomobject]@{ Name = 'B'; SbProfiles = @('Gym', ' gym ', '') }
+        Test-HMNotifySbProfile $all 'EUGym' | Should -BeTrue
+        Test-HMNotifySbProfile ([pscustomobject]@{ Name = 'alt' }) 'EUGym' | Should -BeTrue
+        Test-HMNotifySbProfile $gym 'GYM' | Should -BeTrue
+        Test-HMNotifySbProfile $gym 'EUGym' | Should -BeFalse
+        Test-HMNotifySbProfile $gym '' | Should -BeTrue
+        @(ConvertTo-HMNotifySbProfiles $gym.SbProfiles).Count | Should -Be 1
+    }
+    It 'Send-HMNotify -SbProfile: nur an Ziele dieses Profils' {
+        $a = Get-HMNotifyDefaultCats
+        Mock Get-HMNotifyConfig { [pscustomobject]@{ Configured = $true; Error = ''; Url = 'https://x.logic.azure.com/a'; Cats = $a
+            Targets = @([pscustomobject]@{ Id = 'a'; Name = 'Gym-Kanal'; Url = 'https://x.logic.azure.com/a'; Cats = $a; SbProfiles = @('Gym') }, [pscustomobject]@{ Id = 'b'; Name = 'alle'; Url = 'https://x.logic.azure.com/b'; Cats = $a; SbProfiles = @() }) } }
+        Mock Send-HMTeamsMessage { '' }
+        Send-HMNotify -Title 't' -Level 'Error' -Category 'SbError' -SbProfile 'EUGym' | Should -Be 'Teams-Benachrichtigung: alle: gesendet'
+        Send-HMNotify -Title 't' -Level 'Error' -Category 'SbError' -SbProfile 'Gym' | Should -Match 'Gym-Kanal: gesendet; alle: gesendet'
+        Send-HMNotify -Title 't' -Level 'Error' -Category 'SbError' | Should -Match 'Gym-Kanal: gesendet; alle: gesendet'
+    }
+    It 'Einstellungsfenster erkennt Aenderung der Profil-Auswahl' {
+        . (Join-Path $script:Root 'Functions\UI-Settings.ps1')
+        $l = @(@{ Id = 'a'; Name = 'K'; Url = 'https://x/a'; Cats = (Get-HMNotifyDefaultCats); SbProfiles = @() })
+        $k = Get-HMTeamsListKey $l
+        $l[0].SbProfiles = @('Gym')
+        Get-HMTeamsListKey $l | Should -Not -Be $k
+    }
+}

@@ -96,7 +96,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <div class="card p"><b>Werkzeuge</b>Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot, BitLocker, Profil-Reparatur, Diagnose</div>
     <div class="card m"><b>Softwareverteilung</b>MSI/EXE still installieren – auf einem oder vielen PCs, vorher in der Windows Sandbox testen</div>
     <div class="card t"><b>Treiberverteilung</b>eigene Treiber (INF oder Setup) mit Hardware-Prüfung ausrollen – auch erzwungen</div>
-    <div class="card r"><b>Server-Backup + Teams</b>Hyper-V auf rotierende USB-Platten sichern, Meldungen nach <a href="#teams">Teams</a></div>
+    <div class="card r"><b>Server-Backup + Teams</b>Hyper-V auf rotierende USB-Platten sichern, VMs exportieren, Meldungen nach <a href="#teams">Teams</a></div>
   </div>
   <div class="note tip"><b class="h">Diese Anleitung passt zur installierten Version</b>Der Knopf <span class="ui">Anleitung</span> (oder <kbd>F1</kbd>) lädt sie jedes Mal neu aus dem Repository – in der Fassung der installierten Version. Ohne Internet öffnet sich die mitgelieferte Kopie <code>Docs\Anleitung.html</code>.</div>
 </section>
@@ -601,7 +601,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <li>Rechtsklick auf <span class="ui m">Zeitplan …</span>: alle geplanten Server-Backups mit nächstem und letztem Lauf und Ergebnis – <i>Jetzt starten</i> oder <i>Löschen</i>.</li>
     <li>Rechts im Reiter steht unter dem Plattenstatus, was für das Profil geplant ist.</li>
     <li>Protokoll jedes geplanten Laufs: <code>Logs\ServerBackup\Aufgabe_*.log</code>; Verlauf und Bericht wie bei einer Sicherung aus der Oberfläche.</li>
-    <li><b>Ereignisanzeige:</b> Jeder Server-Backup-Lauf (auch aus der Oberfläche) schreibt ins Protokoll <i>Anwendung</i>, Quelle <b>HUMig</b>: Ereignis-ID <b>1000</b> = erfolgreich, <b>1001</b> = mit Warnungen, <b>1002</b> = fehlgeschlagen (auch „keine Platte angesteckt“). Damit lässt sich überwachen, ob die Nachtsicherung geklappt hat – z. B. mit einem Monitoring-Programm oder in der Ereignisanzeige per Rechtsklick auf das Ereignis › <i>Aufgabe an dieses Ereignis anfügen</i>.</li>
+    <li><b>Ereignisanzeige:</b> Jeder Server-Backup-Lauf (auch aus der Oberfläche) schreibt ins Protokoll <i>Anwendung</i>, Quelle <b>HUMig</b>: Ereignis-ID <b>1000</b> = erfolgreich, <b>1001</b> = mit Warnungen, <b>1002</b> = fehlgeschlagen (auch „keine Platte angesteckt“); ein <a href="#vmexport">VM-Export</a> nach der Sicherung steht im selben Ereignis. Ein VM-Export per Knopf schreibt <b>1010</b> = erfolgreich, <b>1011</b> = mit Warnungen, <b>1012</b> = fehlgeschlagen. Damit lässt sich überwachen, ob die Nachtsicherung geklappt hat – z. B. mit einem Monitoring-Programm oder in der Ereignisanzeige per Rechtsklick auf das Ereignis › <i>Aufgabe an dieses Ereignis anfügen</i>.</li>
     <li>Einmalige Termine werden 7 Tage nach Ablauf automatisch aus der Aufgabenplanung entfernt.</li>
     <li><b>Andere Sicherungsaufgaben:</b> Beim Planen durchsucht HUMig die ganze Aufgabenplanung nach Aufgaben mit Suchwörtern (Standard: <i>backup, sicherung, wbadmin, veeam, acronis</i>, ausgeschlossen <i>RegIdleBackup</i>) und nach Zeitplänen anderer Profile. Überschneidet sich eine aktive Aufgabe in den nächsten 14 Tagen mit dem geplanten Lauf (angenommene Dauer: längster bisheriger Lauf des Profils), fragt HUMig nach (trotzdem planen / nicht planen / Liste anzeigen). Liste jederzeit über <span class="ui">Zeitplan-Pruefung</span> neben <span class="ui m">Zeitplan …</span> (alle Sicherungsaufgaben am Host inkl. HUMig-Zeitpläne aller Profile, mit <i>Suchwörter ändern …</i>) – ein Wort je Zeile, <code>-Wort</code> schließt aus. Gespeichert in <code>Config\serverbackup.json</code> (<code>ConflictWords</code>).</li>
     <li>Wird HUMig während einer Server-Sicherung geschlossen, fragt es: Sicherung stoppen, im Hintergrund weiterlaufen lassen (dann ohne Eintrag in Verlauf/Bericht) oder HUMig offen lassen.</li>
@@ -638,6 +638,18 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <p>Die Windows Server-Sicherung behält mehrere Versionen auf einer Platte und löscht bei Platzmangel automatisch die ältesten. <span class="ui b">Versionen auf der Platte</span> listet sie (<code>wbadmin get versions</code>, Versions-ID in UTC).</p>
   <div class="note tip"><b class="h">Was brauche ich für eine komplette Wiederherstellung?</b>Beides: <b>Host-System</b> (bringt den Host mit Windows, Hyper-V, Switches und Netzwerk zurück) <b>und</b> die <b>VM-Sicherung</b> (bringt die VMs zurück). Beide Haken setzen – HUMig sichert beides nacheinander auf dieselbe Platte. Ob VMs auf C: liegen: <code>Get-VM | Get-VMHardDiskDrive | Select-Object VMName, Path</code> am Host.</div>
   <div class="note tip"><b class="h">Auch ohne HUMig wiederherstellbar</b>Die Sicherungen sind normale Windows-Server-Sicherungen (Ordner <code>WindowsImageBackup</code> auf der Platte). Wiederherstellen geht jederzeit mit Windows-Bordmitteln – <code>wbadmin.msc</code>, <code>wbadmin</code> oder beim Host-System über das Windows-Server-Installationsmedium – auch wenn HUMig nicht vorhanden ist.</div>
+  <h3 id="vmexport">VM-Export (Kopie zum Importieren)</h3>
+  <p>Zusätzlich zur Sicherung kann HUMig einzelne VMs mit Hyper-V <b>exportieren</b>: eine vollständige Kopie je VM (Konfiguration, virtuelle Festplatten, Prüfpunkte), die sich an jedem Hyper-V-Host mit <i>Virtuellen Computer importieren</i> wiederherstellen lässt – ohne Windows Server-Sicherung. Gut z. B. vor größeren Änderungen oder als zweite, einfach lesbare Kopie wichtiger VMs.</p>
+  <ul>
+    <li><span class="ui t">VMs exportieren …</span>: VMs anhaken, Ziel wählen, <b>Exporte je VM behalten</b> (1–10, Standard 1) – <span class="ui g">Jetzt exportieren</span>. Ziel leer = Ordner <code>HUMig-Export</code> auf der gewählten Platte; sonst ein beliebiger Ordner (lokal oder Freigabe).</li>
+    <li><b>Nach jeder Sicherung:</b> im selben Fenster <i>Nach jeder Sicherung dieses Profils automatisch exportieren</i> anhaken und <span class="ui b">Im Profil speichern</span>. Der Export läuft dann nach jedem Server-Backup des Profils – aus der Oberfläche und im <b>Zeitplan</b> (die Einstellung wird beim Lauf aus dem Profil gelesen, bestehende Zeitpläne müssen nicht neu angelegt werden). Rechts im Reiter steht unter dem Zeitplan, welche VMs exportiert werden. <span class="ui g">Jetzt exportieren</span> ändert das Profil nicht.</li>
+    <li>Ordner je Export: <code>&lt;Ziel&gt;\&lt;VM&gt;\&lt;JJJJ-MM-TT_HHMM&gt;\</code> mit dem Hyper-V-Export und <code>Export-Info.txt</code> (Art des Exports, Größe, Anleitung zum Importieren mit Hyper-V-Manager und PowerShell). Ein Export entsteht zuerst als <code>….unvollstaendig</code> und wird erst nach der Prüfung (Konfiguration und alle virtuellen Festplatten vorhanden) umbenannt. Ältere Exporte über der eingestellten Anzahl löscht HUMig <b>erst nach einem erfolgreichen neuen Export</b>. Gelöscht werden nur Ordner, die HUMig selbst angelegt hat (Kennung <code>.humig-export</code> mit der ID der VM) – andere Ordner im Ziel bleiben unberührt.</li>
+    <li><b>Laufende VMs</b> werden anwendungskonsistent exportiert (Produktionsprüfpunkt mit VSS im Gast), die VM läuft weiter. Klappt das nicht, versucht HUMig es absturzkonsistent (wie nach einem Stromausfall) und meldet eine Warnung. Ausgeschaltete VMs werden direkt exportiert.</li>
+    <li><b>Platz:</b> HUMig prüft vorher den freien Platz. Reicht er nicht und gibt es ältere Exporte, fragt HUMig, ob diese vorher gelöscht werden sollen (beim Export nach der Sicherung geschieht das automatisch, mit Eintrag im Protokoll) – aber nur, wenn danach sicher genug Platz ist; sonst wird nichts gelöscht und die VM ausgelassen (Fehler im Bericht). Auf der Sicherungsplatte belegt jeder Export die volle Größe der virtuellen Festplatten – ältere Sicherungsstände der Windows Server-Sicherung fallen dadurch früher weg. Für viele oder große VMs besser eine eigene Platte bzw. einen eigenen Ordner verwenden.</li>
+    <li><b>Freigabe als Ziel:</b> Hyper-V schreibt den Export mit dem <b>Computerkonto des Hosts</b> – Freigabe und Ordner brauchen Schreibrecht für <code>HOSTNAME$</code>. Freien Platz auf Freigaben kann HUMig nicht vorab prüfen.</li>
+    <li>Ergebnis: im Bericht und Verlauf der Sicherung (Zeile <i>VM-Export</i>). Ein Fehler beim Export macht die Sicherung zur <b>Warnung</b> – die Sicherung selbst ist davon nicht betroffen. Ein Export per Knopf schreibt sein Protokoll nach <code>Logs\ServerBackup\Export_*.log</code>.</li>
+    <li>Abbrechen wirkt auf den gerade laufenden Export; der unvollständige Ordner wird entfernt.</li>
+  </ul>
   <h3 id="archiv">Archiv-Platten (Schutz vor Verschlüsselungstrojanern)</h3>
   <p>Verschlüsselungstrojaner warten oft Tage bis Wochen unbemerkt, bevor sie zuschlagen – und versuchen vorher, erreichbare Sicherungen zu löschen. Eine rotierende Platte, die wöchentlich überschrieben wird, reicht dann eventuell nicht weit genug zurück. Deshalb zusätzlich <b>Archiv-Platten</b>:</p>
   <ul>
@@ -648,11 +660,44 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <li><span class="ui m">Statistik / Übersicht</span> zeigt in der Spalte <i>Art</i>, ob eine Platte Rotation oder Archiv ist.</li>
   </ul>
   <div class="note tip"><b class="h">Faustregel 3-2-1-1-0</b>3 Kopien, 2 verschiedene Medien, 1 außer Haus, 1 offline oder unveränderbar, 0 Fehler bei Test-Wiederherstellungen. Zusätzlich hilfreich: Hyper-V-Host und Sicherungsspeicher mit eigenen Zugangsdaten (nicht mit dem Domänen-Admin erreichbar), ein NAS mit unveränderbaren Snapshots als zweite Linie und ab und zu eine VM testweise wiederherstellen – die HUMig-Prüfung sieht nur, dass Version und VMs vorhanden sind, nicht, ob ihr Inhalt schon verschlüsselt war.</div>
+  <h3 id="sicherung-oder-export">HUMig-Sicherung oder VM-Export?</h3>
+  <p>Ein VM-Export (Hyper-V-Manager › <i>Exportieren</i>, <code>Export-VM</code> oder der Knopf <span class="ui t">VMs exportieren …</span>) ist eine andere Art der Sicherung als die Sicherung mit der Windows Server-Sicherung. Beide sichern die VM vollständig, die VM läuft dabei weiter.</p>
+  <table>
+    <tr><th style="width:170px"></th><th><b>VM-Export</b> (Hyper-V-Manager / <code>Export-VM</code> / HUMig)</th><th><b>HUMig Server-Backup</b> (Windows Server-Sicherung, <code>wbadmin</code>)</th></tr>
+    <tr><td>Ergebnis</td><td>Ordner mit VM-Konfiguration, virtuellen Festplatten und Prüfpunkten – eine 1:1-Kopie</td><td>Ordner <code>WindowsImageBackup</code> auf der Platte</td></tr>
+    <tr><td>Laufende VM</td><td>ja, über einen Prüfpunkt</td><td>ja, über VSS im Gast (Online-Sicherung)</td></tr>
+    <tr><td>Versionen</td><td>keine: jeder Export ist eine neue, vollständige Kopie (HUMig behält je VM die eingestellte Anzahl)</td><td>mehrere Sicherungsstände je Platte; ab dem zweiten Lauf werden nur geänderte Blöcke gesichert</td></tr>
+    <tr><td>Platzbedarf</td><td>jedes Mal die volle Größe aller virtuellen Festplatten</td><td>deutlich geringer</td></tr>
+    <tr><td>Wiederherstellen</td><td><i>Virtuellen Computer importieren</i> bzw. <code>Import-VM</code> an jedem Hyper-V-Host</td><td><code>wbadmin.msc</code> › Wiederherstellen › Hyper-V (auch ohne HUMig)</td></tr>
+    <tr><td>Prüfung und Meldung</td><td>von Hand: keine – mit HUMig: Prüfung auf Konfiguration und virtuelle Festplatten, Bericht, Ereignisanzeige, Teams</td><td>Prüfung des Inhalts, Plattenzustand, Bericht, Ereignisanzeige, Teams</td></tr>
+    <tr><td>Zusätzlich</td><td>–</td><td>Host-Konfiguration mit <code>Restore-VMSwitches.ps1</code>, optional Host-System (Bare-Metal), Plattenrotation, Zeitplan</td></tr>
+  </table>
+  <p><b>Welche ist besser?</b> Für die regelmäßige Sicherung die HUMig-Sicherung:</p>
+  <ul>
+    <li><b>Ältere Stände bleiben erhalten.</b> Wird ein Fehler oder eine Verschlüsselung erst nach Tagen bemerkt, gibt es noch einen sauberen Stand. Ein Export wird beim nächsten Mal mit dem beschädigten Stand überschrieben.</li>
+    <li><b>Rotation und Offline-Platten.</b> Eine abgezogene oder von HUMig offline geschaltete Platte ist für Schadsoftware nicht erreichbar.</li>
+    <li><b>Anwendungskonsistent.</b> VSS im Gast sorgt dafür, dass auch Domänencontroller und Datenbanken sauber gesichert werden.</li>
+    <li><b>Kontrolliert.</b> Eine fehlgeschlagene Sicherung wird gemeldet und fällt nicht erst im Ernstfall auf.</li>
+  </ul>
+  <p><b>Grenzen der HUMig-Sicherung:</b></p>
+  <table>
+    <tr><th style="width:170px">Punkt</th><th>Was das bedeutet</th></tr>
+    <tr><td>Format</td><td>Zum Wiederherstellen braucht man einen Windows Server mit dem Feature <i>Windows Server-Sicherung</i>, am besten gleiche oder neuere Version.</td></tr>
+    <tr><td>Versionen auf einer Platte</td><td>Ältere Stände liegen als Schattenkopien auf der Zielplatte. Wird die Platte voll, löscht Windows die ältesten automatisch. Fällt die Platte aus, sind alle ihre Stände weg – deshalb mehrere Platten rotieren.</td></tr>
+    <tr><td>Keine Verschlüsselung</td><td>Weder die Windows Server-Sicherung noch der Export verschlüsseln die Daten. Geht eine Platte verloren, sind die Daten lesbar. Abhilfe: BitLocker auf den Sicherungsplatten (mit HUMig nicht getestet).</td></tr>
+  </table>
+  <p><b>Empfehlung:</b></p>
+  <ol>
+    <li>HUMig als Hauptsicherung, mit mindestens zwei, besser drei Platten in Rotation und einer davon an einem anderen Ort (siehe <a href="#archiv">Archiv-Platten</a>).</li>
+    <li>Einen VM-Export zusätzlich vor größeren Änderungen (Update, Umbau) oder um eine VM auf einen anderen Host zu übertragen – oder für wichtige VMs nach jeder Sicherung auf eine eigene Platte.</li>
+    <li>Die Wiederherstellung einmal testen, zum Beispiel eine VM unter anderem Namen oder auf einem Testhost. Erst dann ist sicher, dass die Sicherung im Ernstfall funktioniert.</li>
+  </ol>
   <h3>Wiederherstellen</h3>
   <ol>
     <li>Neu installierter Host: zuerst <code>Restore-VMSwitches.ps1</code> aus dem Berichtsordner prüfen und als Administrator ausführen (gleiche Switch-Namen – die VMs finden ihr Netzwerk dann selbst).</li>
     <li><span class="ui p">Wiederherstellen …</span> öffnet die Windows Server-Sicherung: <i>Wiederherstellen › an einem anderen Speicherort gespeicherte Sicherung › Lokale Laufwerke</i> › Datum › Typ <b>Hyper-V</b> › VM(s) › ursprünglicher oder anderer Speicherort.</li>
     <li><b>Host komplett ausgefallen</b> (neue Platte/RAID, Windows startet nicht): USB-Platte anstecken, vom Windows-Server-Installationsmedium (gleiche Version) starten › <i>Computerreparaturoptionen › Problembehandlung › Systemimage-Wiederherstellung</i> › die neueste Host-System-Sicherung wählen. Danach Windows starten, Datenlaufwerk für die VMs bereitstellen und die VMs wie oben über die Windows Server-Sicherung zurückholen. Ohne Host-System-Sicherung: Windows Server + Hyper-V neu installieren, <code>Restore-VMSwitches.ps1</code> ausführen, dann die VMs zurückholen.</li>
+    <li><b>Aus einem VM-Export:</b> Hyper-V-Manager › <i>Virtuellen Computer importieren</i> › Ordner <code>&lt;Ziel&gt;\&lt;VM&gt;\&lt;Datum&gt;\&lt;VM-Name&gt;</code> › <i>Virtuellen Computer kopieren (neue eindeutige ID erstellen)</i> › Zielordner auf dem Host. Der PowerShell-Befehl steht in <code>Export-Info.txt</code>. <i>Direkt registrieren</i> startet die VM aus dem Export-Ordner – dann muss die Platte angesteckt bleiben.</li>
   </ol>
   <div class="note warn"><b class="h">Prüfpunkte</b>VMs mit Prüfpunkten werden normal gesichert. Ein älterer Microsoft-Artikel (KB 958662, Server 2008) nennt Einschränkungen beim Wiederherstellen von VMs mit zwei oder mehr Prüfpunkten – für aktuelle Server-Versionen nicht belegt. Nicht mehr benötigte Prüfpunkte zusammenführen und die Wiederherstellung einmal testen (z. B. an einem anderen Speicherort).</div>
   <div class="note warn"><b class="h">„Offline“ gesichert – dynamische Datenträger</b>Steht in der Ausgabe <i>„VM-Name (Offline)“</i>, konnte Hyper-V die VM nicht im laufenden Betrieb sichern: sie wird zu Beginn der Sicherung kurz angehalten (gespeicherter Zustand, meist 1–2 Minuten) und läuft danach normal weiter – die Sicherung ist vollständig (Status <b>OK (Hinweis)</b>). HUMig liest den Grund aus dem Hyper-V-Protokoll und zeigt ihn im Bericht; VMs, die schon einmal nur offline sicherbar waren, sind in der VM-Liste <b>orange</b> markiert und werden vor dem Start gemeldet. Häufigster Grund: <b>dynamische Datenträger im Gast</b> (<code>diskpart</code> › <code>list disk</code>, Spalte „Dyn“ = *). Abhilfe: im Gast auf Basisdatenträger umstellen – Windows kann einen dynamischen Datenträger nur leer zurückwandeln, also neue Basis-VHDX anhängen, Daten kopieren (Robocopy), Laufwerksbuchstaben tauschen (beim Systemlaufwerk aufwendiger, z. B. in den Ferien). Bis dahin solche VMs außerhalb der Unterrichtszeit sichern (Zeitplan).</div>
@@ -699,10 +744,11 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <li>HUMig <b>als Administrator</b> starten – auf dem PC, der melden soll: beim Server-Backup der Hyper-V-Host, bei geplanten Profil-Backups der PC des Benutzers. Die Adressen gelten nur auf diesem PC.</li>
     <li><span class="ui">Einstellungen</span> › Allgemein › <b>Teams-Benachrichtigung</b> › <span class="ui">Neues Ziel</span>. Namen vergeben (z. B. „Kanal HyperV Backup“, „nur ich“), Adresse einfügen.</li>
     <li>Unter <b>An dieses Ziel melden</b> die Kategorien anhaken (Tabelle unten).</li>
+    <li>Unter <b>Server-Backup-Meldungen dieses Ziels gelten für</b>: <i>alle Profile</i> oder nur bestimmte Server-Backup-Profile anhaken – z. B. je Standort ein eigener Kanal, wenn mehrere Profile auf demselben Hyper-V-Host laufen. Das betrifft Server-Backup, VM-Export, Plattenzustand, Erinnerungen und Speicherplatz; Profil-Backups und Massenlöschung kommen unabhängig davon. Wird ein Profil umbenannt, nimmt HUMig die Auswahl mit. „Profil nicht gefunden“ geht an alle Ziele.</li>
     <li><span class="ui">Test senden</span> – die Testnachricht muss im Chat/Kanal erscheinen. Dann <span class="ui g">Speichern</span>.</li>
     <li>Weitere Ziele (bis 10) mit <span class="ui">Neues Ziel</span>. Ziel in der Auswahlliste wählen, um es zu bearbeiten. Eine neue Adresse eintragen ersetzt die alte dieses Ziels.</li>
   </ol>
-  <div class="note tip"><b class="h">Beispiel</b>Ziel „Kanal HyperV Backup“ (Team mit den Kollegen): nur <i>fehlgeschlagen</i>, <i>Warnungen</i>, <i>Plattenzustand</i>, <i>Erinnerungen</i>, <i>Speicherplatz</i>. Ziel „nur ich“ (eigener Chat): zusätzlich <i>erfolgreich</i> und <i>Details</i>.</div>
+  <div class="note tip"><b class="h">Beispiel</b>Ziel „Kanal HyperV Backup“ (Team mit den Kollegen): nur <i>fehlgeschlagen</i>, <i>Warnungen</i>, <i>Plattenzustand</i>, <i>Erinnerungen</i>, <i>Speicherplatz</i>. Ziel „nur ich“ (eigener Chat): zusätzlich <i>erfolgreich</i> und <i>Details</i>. Zwei Profile am selben Host (z. B. zwei Standorte): je Standort ein Ziel, das nur für sein Profil gilt.</div>
 
   <h3 id="teams-kategorien">Was gemeldet wird</h3>
   <table>
@@ -710,6 +756,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>Server-Backup fehlgeschlagen / abgebrochen (an)</td><td>Geplantes Server-Backup mit Fehler, keine Platte angesteckt, Profil fehlt</td></tr>
     <tr><td>Server-Backup mit Warnungen (an)</td><td>Fertig, aber mit Hinweisen (z. B. Prüfung, Host-System)</td></tr>
     <tr><td>Server-Backup erfolgreich (aus)</td><td>Jeder erfolgreiche geplante Lauf</td></tr>
+    <tr><td>VM-Export fehlgeschlagen / mit Warnungen (an)</td><td><a href="#vmexport">VM-Export</a> nach einem geplanten Server-Backup schlägt fehl oder ist nur absturzkonsistent – als eigene Zeile in der Karte des Laufs; die Sicherung selbst zählt dann nicht als Warnung</td></tr>
     <tr><td>Geplantes Profil-Backup fehlgeschlagen (an)</td><td>Zeitplan im Reiter Backup endet mit Fehler</td></tr>
     <tr><td>Geplantes Profil-Backup übersprungen (an)</td><td>Ziel nicht erreichbar, z. B. USB-Laufwerk nicht angesteckt</td></tr>
     <tr><td>Geplantes Profil-Backup mit Warnungen (an)</td><td>Fertig mit Warnung</td></tr>
@@ -766,7 +813,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><code>Config\exceptions.json</code></td><td>Ausnahmen Ordner/Dateitypen</td></tr>
     <tr><td><code>Config\modules.json</code></td><td>eigene Module und Vorlagen</td></tr>
     <tr><td><code>Config\appupdates.json</code></td><td>App-Updates: Ausnahmen und Quellen je Standort (Vorlage <code>appupdates.default.json</code>), Verlauf in <code>Config\AppUpdates\history.json</code></td></tr>
-    <tr><td><code>Config\serverbackup.json</code></td><td>Server-Backup-Profile (VMs, Platten, Optionen), Suchwörter der Zeitplan-Prüfung (<code>ConflictWords</code>)</td></tr>
+    <tr><td><code>Config\serverbackup.json</code></td><td>Server-Backup-Profile (VMs, Platten, Optionen, VM-Export: <code>ExportVMs</code>, <code>ExportFolder</code>, <code>ExportKeep</code>, <code>ExportAfter</code>), Suchwörter der Zeitplan-Prüfung (<code>ConflictWords</code>)</td></tr>
     <tr><td><code>Config\update.json</code></td><td>Update-Einstellungen: Quelle (<code>Owner</code>, <code>Repo</code>), <code>Channel</code> (<code>Stable</code>/<code>Test</code>), <code>SignerThumbprint</code> (nur eigene Quelle), <code>AllowUnsigned</code> (Signaturprüfung aus – nicht empfohlen), Entwicklung: <code>Branch</code>, <code>UseBranch</code> (nur ohne Signaturpflicht). Daneben <code>installed.json</code>: installierte Version, Kanal und Prüfung.</td></tr>
   </table>
   <p>Die <code>*.default.json</code> kommen mit jedem Update, eigene Dateien bleiben erhalten.</p>

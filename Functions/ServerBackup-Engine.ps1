@@ -566,10 +566,12 @@ function New-HMSbNotifyMessage {
     $st = "$($Result.Status)"
     $notes = @(@($Result.Notes) | Where-Object { "$_".Trim() } | ForEach-Object { "$_" })
     $diskNotes = @($notes | Where-Object { $_ -match '^Platte: ' })
-    $other = @($notes | Where-Object { $_ -notmatch '^Platte: ' })
+    $expNotes = @($notes | Where-Object { $_ -match '^Export: ' })
+    $other = @($notes | Where-Object { $_ -notmatch '^(Platte|Export): ' })
     $warnNotes = @($other | Where-Object { $_ -notmatch '^Hinweis: ' })   # reine Hinweise (z.B. VM offline gesichert) machen keine Warnung
-    # Ergebnis der Sicherung selbst (ohne Plattenzustand, der eine eigene Kategorie hat)
-    $core = if ($st -eq 'Error') { 'Error' } elseif ($st -eq 'Warning' -and ($warnNotes.Count -or -not $diskNotes.Count)) { 'Warning' } else { 'OK' }
+    $expSt = "$($Result.ExportStatus)"
+    # Ergebnis der Sicherung selbst (ohne Plattenzustand und VM-Export, die eigene Kategorien haben)
+    $core = if ($st -eq 'Error') { 'Error' } elseif ($st -eq 'Warning' -and ($warnNotes.Count -or (-not $diskNotes.Count -and $expSt -notin @('Warning', 'Error')))) { 'Warning' } else { 'OK' }
     $coreCat = switch ($core) { 'Error' { 'SbError' } 'Warning' { 'SbWarning' } default { 'SbOK' } }
     $lines = New-Object System.Collections.Generic.List[string]
     $lv = New-Object System.Collections.Generic.List[string]
@@ -583,6 +585,11 @@ function New-HMSbNotifyMessage {
     if ($hl -in @('Warning', 'Error') -and (& $on 'Health')) {
         $lines.Add("Plattenzustand: $($Result.HealthText)"); $lv.Add($hl); $healthShown = $true
     }
+    if ($expSt -in @('Warning', 'Error') -and (& $on 'SbExport')) {
+        $lines.Add("VM-Export $(if ($expSt -eq 'Error') { 'FEHLGESCHLAGEN' } else { 'mit Warnungen' }): $($Result.Export)")
+        foreach ($n in $expNotes) { $lines.Add("Hinweis: $($n -replace '^Export: ', '')") }
+        $lv.Add($expSt)
+    }
     $rem = @(@($Reminders) | Where-Object { "$_".Trim() })
     if ($rem.Count -and (& $on 'Reminder')) { foreach ($r in $rem) { $lines.Add("Erinnerung: $r") }; $lv.Add('Warning') }
     if ($Result.LowSpace -and (& $on 'Space')) {
@@ -595,6 +602,7 @@ function New-HMSbNotifyMessage {
         if ("$($Result.VMs)") { $what += "VMs: $($Result.VMs)" }
         if ("$($Result.Volumes)") { $what += "Laufwerke: $($Result.Volumes)" }
         if ("$($Result.HostSystem)") { $what += "Host-System: $($Result.HostSystem)" }
+        if ("$($Result.Export)" -and $expSt -eq 'OK') { $what += "VM-Export: $($Result.Export)" }
         if ($what.Count) { $lines.Add("Gesichert: $($what -join ' | ')") }
         $dl = @()
         if ([double]"0$($Result.Minutes)" -gt 0) { $dl += "Dauer $(Format-HMDuration $Result.Minutes)" }
@@ -1139,6 +1147,7 @@ function Write-HMSbReport {
         @('Sicherungsversion', $(if ($Entry.VersionId) { "$($Entry.VersionId) (UTC) - fuer die Wiederherstellung" } else { '-' })),
         @('Host-Konfiguration', (& $ja $Entry.HostConfig)),
         @('Host-System (Bare-Metal)', "$(& $ja $Entry.HostSystem)$(if ($Entry.HostVersionId) { " - Version $($Entry.HostVersionId) (UTC)" })"),
+        @('VM-Export', $(if ("$($Entry.Export)") { "$($Entry.Export)" } else { '-' })),
         @('Erstellt mit', $Entry.Tool)
     )
     $sb = New-Object System.Text.StringBuilder
@@ -1176,11 +1185,348 @@ function Write-HMSbReport {
     }
     [void]$sb.Append('</table>')
     [void]$sb.Append("<h2>Wiederherstellen</h2><p>Die Sicherung ist eine normale Windows-Server-Sicherung (Ordner <code>WindowsImageBackup</code> auf der Platte) und auch ohne HUMig wiederherstellbar: <code>wbadmin.msc</code> &gt; Wiederherstellen &gt; an einem anderen Speicherort gespeicherte Sicherung &gt; Lokale Laufwerke &gt; Datum &gt; Hyper-V. Neu installierter Host: vorher <code>Restore-VMSwitches.ps1</code> ausfuehren.</p>")
+    if ("$($Entry.Export)") { [void]$sb.Append("<p><b>VM-Export:</b> Die exportierten VMs liegen je VM in einem eigenen Ordner (<code>&lt;Ziel&gt;\&lt;VM&gt;\&lt;Datum&gt;</code>) und lassen sich an jedem Hyper-V-Host mit <i>Virtuellen Computer importieren</i> wiederherstellen - Anleitung in <code>Export-Info.txt</code> im Export-Ordner.</p>") }
     if ($null -ne $script:SbRunLog -and $script:SbRunLog.Count) {
         [void]$sb.Append("<h2>Protokoll des Laufs</h2><details><summary>anzeigen ($($script:SbRunLog.Count) Zeilen)</summary><pre>$(& $e (($script:SbRunLog.ToArray()) -join "`n"))</pre></details>")
     }
     [void]$sb.Append('</body></html>')
     [System.IO.File]::WriteAllText($Path, $sb.ToString(), (New-Object System.Text.UTF8Encoding($true)))
+}
+
+# ----------------------------------------------------------------------------
+# VM-Export (Hyper-V Export-VM): vollstaendige Kopie je VM (Konfiguration, virtuelle Festplatten, Pruefpunkte), an jedem
+# Hyper-V-Host mit "Virtuellen Computer importieren" wiederherstellbar - unabhaengig von der Windows Server-Sicherung.
+# Ordner: <Ziel>\<VM>\<yyyy-MM-dd_HHmm>\<VM-Name>\{Virtual Machines, Virtual Hard Disks, Snapshots} + Export-Info.txt
+# Ziel: leer = <Platte>:\HUMig-Export, sonst frei waehlbarer Ordner (Freigabe: Schreibrecht fuer das Computerkonto des Hosts)
+# ----------------------------------------------------------------------------
+$script:SbExportDirName = 'HUMig-Export'
+$script:SbExportStampRx = '^\d{4}-\d{2}-\d{2}_\d{4}(\d{2})?$'
+$script:SbExportTmpSuffix = '.unvollstaendig'
+$script:SbExportMarker = '.humig-export'   # Kennung in jedem Export-Ordner: nur Ordner mit Kennung DIESER VM werden je geloescht
+
+function Get-HMSbExportBase([string]$Folder, [string]$Drive) {
+    $f = "$Folder".Trim()
+    if ($f) { return $f.TrimEnd('\') }
+    $L = "$Drive".Trim().TrimEnd(':', '\').ToUpper()
+    if (-not $L) { return '' }
+    return "${L}:\$($script:SbExportDirName)"
+}
+# Export-Einstellungen eines Profils fuer den Lauf nach der Sicherung (ExportAfter + ExportVMs), sonst $null
+function Get-HMSbExportOptions($Prof) {
+    if (-not $Prof -or $Prof.ExportAfter -ne $true) { return $null }
+    $v = @(@($Prof.ExportVMs) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
+    if (-not $v.Count) { return $null }
+    $k = 1; try { $k = [int]$Prof.ExportKeep } catch { }
+    if ($k -lt 1 -or $k -gt 10) { $k = 1 }
+    return @{ VMs = $v; Folder = "$($Prof.ExportFolder)".Trim(); Keep = $k }
+}
+# ohne Join-Path: PS 5.1 bricht bei einem in dieser Sitzung unbekannten Laufwerk (z.B. Netzlaufwerk eines anderen Kontos) ab
+function Get-HMSbExportVmDir([string]$Base, [string]$VmName) { return [System.IO.Path]::Combine("$Base", (ConvertTo-HMSbSafeName $VmName)) }
+# VM-Kennung im Export-Ordner (von HUMig angelegt): Id der VM, '' = keine Kennung (fremder Ordner - wird nie geloescht)
+function Get-HMSbExportMarkerId([string]$Dir) {
+    try { return "$((Get-Content -LiteralPath ([System.IO.Path]::Combine($Dir, $script:SbExportMarker)) -TotalCount 1 -ErrorAction Stop))".Trim() } catch { return '' }
+}
+# Exporte einer VM, aeltester zuerst (Aufrufer: @(Get-HMSbExports ...)). Nur Ordner mit HUMig-Kennung dieser VM (VmId);
+# ohne VmId alle Ordner mit Kennung. -Temp: Reste abgebrochener Laeufe (*.unvollstaendig) statt fertiger Exporte
+function Get-HMSbExports([string]$Base, [string]$VmName, [string]$VmId = '', [switch]$Temp) {
+    $dir = Get-HMSbExportVmDir $Base $VmName
+    if (-not (Test-Path -LiteralPath $dir)) { return }
+    $rx = if ($Temp) { '^\d{4}-\d{2}-\d{2}_\d{4}(\d{2})?' + [regex]::Escape($script:SbExportTmpSuffix) + '$' } else { $script:SbExportStampRx }
+    return @(Get-ChildItem -LiteralPath $dir -Directory -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -match $rx -and -not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -and
+            $(if ($VmId) { (Get-HMSbExportMarkerId $_.FullName) -eq $VmId } else { [bool](Get-HMSbExportMarkerId $_.FullName) })
+        } | Sort-Object Name)
+}
+# freier Platz am Ziel in Bytes, -1 = unbekannt (z.B. Freigabe)
+function Get-HMSbFreeBytes([string]$Path) {
+    if ("$Path" -notmatch '^([A-Za-z]):') { return [long]-1 }
+    try { return [long](Get-Volume -DriveLetter $Matches[1] -ErrorAction Stop).SizeRemaining } catch { return [long]-1 }
+}
+# Groesse aller Dateien, die Export-VM kopiert: virtuelle Festplatten samt Elternkette (Pruefpunkte, differenzierende Datentraeger)
+function Get-HMSbExportSize($Vm) {
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $todo = New-Object System.Collections.Generic.List[string]
+    foreach ($d in @(Get-VMHardDiskDrive -VM $Vm -ErrorAction SilentlyContinue)) { if ($d.Path) { $todo.Add("$($d.Path)") } }
+    foreach ($s in @(Get-VMSnapshot -VM $Vm -ErrorAction SilentlyContinue)) { foreach ($d in @(Get-VMHardDiskDrive -VMSnapshot $s -ErrorAction SilentlyContinue)) { if ($d.Path) { $todo.Add("$($d.Path)") } } }
+    $sum = [long]0
+    while ($todo.Count) {
+        $p = $todo[0]; $todo.RemoveAt(0)
+        if (-not $seen.Add($p)) { continue }
+        try { $sum += [long](Get-Item -LiteralPath $p -ErrorAction Stop).Length } catch { }
+        try { $pp = "$((Get-VHD -Path $p -ErrorAction Stop).ParentPath)"; if ($pp) { $todo.Add($pp) } } catch { }
+    }
+    return $sum
+}
+function Get-HMSbFolderBytes([string]$Path) {
+    try { return [long](@(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue) | Measure-Object -Property Length -Sum).Sum } catch { return [long]0 }
+}
+# Export-Ordner loeschen. Directory.Delete folgt keinen Verknuepfungen (Junction/Symlink im Ordner: nur der Link wird entfernt)
+function Remove-HMSbExportDir([string]$Path) {
+    try {
+        $di = New-Object System.IO.DirectoryInfo($Path)
+        if (-not $di.Exists) { return '' }
+        if ($di.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return 'ist eine Verknuepfung - nicht geloescht' }
+        # schreibgeschuetzte Dateien (nur Dateien, ohne Verknuepfungen zu folgen) vorher freigeben - sonst bricht Directory.Delete ab
+        $stack = New-Object System.Collections.Generic.Stack[System.IO.DirectoryInfo]; $stack.Push($di)
+        while ($stack.Count) {
+            $cur = $stack.Pop()
+            foreach ($fi in $cur.GetFiles()) { if ($fi.Attributes -band [System.IO.FileAttributes]::ReadOnly) { $fi.Attributes = [System.IO.FileAttributes]::Normal } }
+            foreach ($sd in $cur.GetDirectories()) { if (-not ($sd.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { $stack.Push($sd) } }
+        }
+        [System.IO.Directory]::Delete($Path, $true)
+        return ''
+    } catch { return "$($_.Exception.Message)" }
+}
+function Format-HMSbExportMode([string]$Mode) {
+    switch ($Mode) {
+        'CaptureDataConsistentState' { 'anwendungskonsistent (Produktionspruefpunkt, VSS im Gast)' }
+        'CaptureCrashConsistentState' { 'absturzkonsistent (wie nach Stromausfall - VSS im Gast war nicht moeglich)' }
+        'Off' { 'VM war ausgeschaltet (vollstaendig konsistent)' }
+        default { 'Standard von Hyper-V' }
+    }
+}
+
+# Eine VM exportieren (in einen neuen Ordner .unvollstaendig, bei Erfolg umbenennen). Rueckgabe: Ok, Mode, Error, Folder, Bytes
+function Invoke-HMSbExportOne {
+    param($Vm, [string]$VmDir, [string]$Mode, [hashtable]$Job, [long]$Need, [int]$PBase, [int]$PSpan)
+    $r = [ordered]@{ Ok = $false; Mode = $Mode; Error = ''; Folder = ''; Bytes = [long]0; Cancelled = $false }
+    $stamp = Get-Date -Format 'yyyy-MM-dd_HHmm'
+    $tmp = [System.IO.Path]::Combine($VmDir, $stamp + $script:SbExportTmpSuffix)
+    for ($t = 0; ((Test-Path -LiteralPath ([System.IO.Path]::Combine($VmDir, $stamp))) -or (Test-Path -LiteralPath $tmp)) -and $t -lt 5; $t++) {
+        Start-Sleep -Seconds 1
+        $stamp = Get-Date -Format 'yyyy-MM-dd_HHmmss'
+        $tmp = [System.IO.Path]::Combine($VmDir, $stamp + $script:SbExportTmpSuffix)
+    }
+    try {
+        New-Item -ItemType Directory -Path $tmp -ErrorAction Stop | Out-Null
+        Set-Content -LiteralPath ([System.IO.Path]::Combine($tmp, $script:SbExportMarker)) -Value @("$($Vm.Id)", "$($Vm.Name)", 'HUMig VM-Export - nicht loeschen (Kennung fuer die Aufbewahrung)') -Encoding UTF8 -ErrorAction Stop
+    } catch { $r.Error = "Export-Ordner nicht anlegbar ($tmp): $($_.Exception.Message)"; [void](Remove-HMSbExportDir $tmp); return [pscustomobject]$r }
+    $ej = $null
+    try {
+        if ($Mode -and $Mode -ne 'Off') { $ej = Export-VM -VM $Vm -Path $tmp -CaptureLiveState $Mode -AsJob -ErrorAction Stop }
+        else { $ej = Export-VM -VM $Vm -Path $tmp -AsJob -ErrorAction Stop }
+        $last = [datetime]::MinValue
+        while ($ej.State -in @('NotStarted', 'Running')) {
+            if ($Job.Cancel) {
+                Write-HMSbLog "Abbruch: Export von '$($Vm.Name)' wird beendet ..." 'Warning'
+                try { Stop-Job -Job $ej -ErrorAction Stop } catch { }
+                $w = (Get-Date).AddSeconds(120)
+                while ($ej.State -in @('NotStarted', 'Running', 'Stopping') -and (Get-Date) -lt $w) { Start-Sleep -Seconds 2 }
+                $r.Cancelled = $true
+                break
+            }
+            if (((Get-Date) - $last).TotalSeconds -ge 5) {
+                $last = Get-Date
+                $done = Get-HMSbFolderBytes $tmp
+                $pc = if ($Need -gt 0) { [Math]::Min(99, [int](100 * $done / $Need)) } else { 0 }
+                $Job.Progress = $PBase + [int]($PSpan * $pc / 100)
+                $Job.Status = ('Export {0}: {1:N1} von ca. {2:N1} GB ({3} %)' -f $Vm.Name, ($done / 1GB), ($Need / 1GB), $pc)
+            }
+            Start-Sleep -Milliseconds 700
+        }
+        $ev = $null
+        try { Receive-Job -Job $ej -ErrorAction SilentlyContinue -ErrorVariable ev | Out-Null } catch { $ev = @($_) }
+        $why = @(@($ev) | Where-Object { $_ } | ForEach-Object { "$($_.Exception.Message)" } | Select-Object -Unique) -join ' | '
+        if ($r.Cancelled) { $r.Error = 'abgebrochen' }
+        elseif ("$($ej.State)" -ne 'Completed') {
+            if (-not $why) { $why = "$(@($ej.ChildJobs)[0].JobStateInfo.Reason.Message)" }
+            $r.Error = $(if ($why) { $why } else { "Auftrag $($ej.State)" })
+        } elseif ($why) { Write-HMSbLog "VM-Export $($Vm.Name): Hyper-V meldet (Auftrag abgeschlossen, Pruefung folgt): $why" 'Warning' }
+    } catch { $r.Error = "$($_.Exception.Message)" }
+    finally { if ($ej) { try { Remove-Job -Job $ej -Force -ErrorAction SilentlyContinue } catch { } } }
+    if ($r.Error) {
+        $e2 = Remove-HMSbExportDir $tmp
+        if ($e2) { Write-HMSbLog "Unvollstaendiger Export konnte nicht geloescht werden ($tmp): $e2 - spaeter von Hand loeschen" 'Warning' }
+        return [pscustomobject]$r
+    }
+    # Pruefung: Konfiguration und alle virtuellen Festplatten im Export
+    $vmRoot = @(Get-ChildItem -LiteralPath $tmp -Directory -ErrorAction SilentlyContinue)[0]
+    $cfg = @(); $vhd = @()
+    if ($vmRoot) {
+        $cfg = @(Get-ChildItem -LiteralPath (Join-Path $vmRoot.FullName 'Virtual Machines') -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.vmcx', '.xml') })
+        $vhd = @(Get-ChildItem -LiteralPath (Join-Path $vmRoot.FullName 'Virtual Hard Disks') -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.vhd', '.vhdx', '.avhd', '.avhdx') })
+    }
+    $want = @(Get-VMHardDiskDrive -VM $Vm -ErrorAction SilentlyContinue | Where-Object { "$($_.Path)" -match '\.(a?vhdx?)$' }).Count   # ohne Pass-Through-Datentraeger
+    if (-not $cfg.Count -or $vhd.Count -lt $want) {
+        $r.Error = "Export unvollstaendig (Konfiguration: $($cfg.Count), virtuelle Festplatten: $($vhd.Count) von $want)"
+        $e2 = Remove-HMSbExportDir $tmp
+        if ($e2) { Write-HMSbLog "Unvollstaendiger Export konnte nicht geloescht werden ($tmp): $e2" 'Warning' }
+        return [pscustomobject]$r
+    }
+    $final = [System.IO.Path]::Combine($VmDir, $stamp)
+    # Hyper-V gibt die Dateien nach dem Auftrag evtl. erst kurz danach frei - bis zu 5 Versuche
+    $rnErr = ''
+    for ($t = 0; $t -lt 5; $t++) {
+        try { Rename-Item -LiteralPath $tmp -NewName $stamp -ErrorAction Stop; $rnErr = ''; break } catch { $rnErr = "$($_.Exception.Message)"; Start-Sleep -Seconds 3 }
+    }
+    if ($rnErr) { $r.Error = "Umbenennen von $tmp fehlgeschlagen: $rnErr (der Export selbst ist vollstaendig - Ordner von Hand umbenennen, sonst entfernt ihn der naechste Export als unvollstaendig)"; return [pscustomobject]$r }
+    $r.Ok = $true; $r.Folder = $final; $r.Bytes = Get-HMSbFolderBytes $final
+    $cfgPath = [System.IO.Path]::Combine($final, $vmRoot.Name, 'Virtual Machines', $cfg[0].Name)
+    $info = @(
+        "VM-Export: $($Vm.Name)"
+        "Hyper-V-Host: $env:COMPUTERNAME"
+        "Zeitpunkt: $(Get-Date -Format 'dd.MM.yyyy HH:mm')"
+        "Art: $(Format-HMSbExportMode $r.Mode)"
+        ("Groesse: {0:N1} GB" -f ($r.Bytes / 1GB))
+        "Erstellt mit: HUMig $($script:SbExportVersion)"
+        ''
+        'Wiederherstellen (an jedem Hyper-V-Host, auch ohne HUMig):'
+        "  Hyper-V-Manager > Virtuellen Computer importieren > Ordner $([System.IO.Path]::Combine($final, $vmRoot.Name))"
+        '  > "Virtuellen Computer kopieren (neue eindeutige ID erstellen)" > Zielordner auf dem Host waehlen.'
+        '  "Direkt registrieren" startet die VM aus diesem Ordner - dann muss die Platte angesteckt bleiben.'
+        ''
+        'PowerShell (als Administrator am Host):'
+        "  Import-VM -Path '$cfgPath' -Copy -GenerateNewId -VirtualMachinePath 'D:\Hyper-V' -VhdDestinationPath 'D:\Hyper-V\$(ConvertTo-HMSbSafeName $Vm.Name)'"
+        '  (Pfade anpassen. Laeuft die urspruengliche VM noch am selben Host, vorher ausschalten oder umbenennen.)'
+        ''
+        'Virtuelle Switches: Die VM erwartet Switches mit demselben Namen wie am Quell-Host (Host-Konfiguration > Restore-VMSwitches.ps1).'
+    )
+    try { Set-Content -LiteralPath ([System.IO.Path]::Combine($final, 'Export-Info.txt')) -Value $info -Encoding UTF8 } catch { }
+    return [pscustomobject]$r
+}
+
+# VMs exportieren. $Opt: VMs (Namen), Folder ('' = Platte), Drive (Buchstabe der Platte), Keep (1-10), PreDelete (aeltere Exporte
+# vorher loeschen, wenn der Platz sonst nicht reicht), Version. Rueckgabe: Status (OK|Warning|Error|''), Notes, Hints, Lines, Bytes, Base
+function Invoke-HMSbExport {
+    param([hashtable]$Opt, [hashtable]$Job, [int]$PBase = 0, [int]$PSpan = 100)
+    $base = Get-HMSbExportBase "$($Opt.Folder)" "$($Opt.Drive)"
+    $script:SbExportVersion = "$($Opt.Version)"
+    $res = [ordered]@{ Status = ''; Notes = @(); Hints = @(); Lines = @(); Bytes = [long]0; Base = $base; Ok = @(); Failed = @() }
+    $seenVm = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $vms = @(@($Opt.VMs) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() } | Where-Object { $seenVm.Add($_) })
+    if (-not $vms.Count) { return [pscustomobject]$res }
+    $keep = 1; try { $keep = [int]$Opt.Keep } catch { }
+    if ($keep -lt 1) { $keep = 1 }; if ($keep -gt 10) { $keep = 10 }
+    $res.Status = 'OK'
+    $warn = { if ($res.Status -eq 'OK') { $res.Status = 'Warning' } }
+    Write-HMSbLog "VM-Export: $($vms -join ', ') -> $base (je VM $keep Export(e) behalten)" 'Header'
+    if (-not $base) { $res.Status = 'Error'; $res.Notes += 'Export: kein Ziel'; $res.Hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'VM-Export: kein Ziel (weder Platte noch Ordner).'; Fix = 'Platte anstecken oder Export-Ordner eintragen.' }; return [pscustomobject]$res }
+    try { New-Item -ItemType Directory -Path $base -Force -ErrorAction Stop | Out-Null }
+    catch {
+        $m = "$($_.Exception.Message)"
+        $res.Status = 'Error'; $res.Notes += "Export: Ziel nicht erreichbar ($m)"
+        $res.Hints += [pscustomobject]@{ Lvl = 'Error'; Text = "VM-Export: Ziel $base nicht erreichbar: $m"; Fix = 'Pfad pruefen. Netzwerkfreigabe: Hyper-V schreibt den Export mit dem Computerkonto des Hosts - Freigabe und Ordner brauchen Schreibrecht fuer HOSTNAME$.' }
+        Write-HMSbLog "VM-Export: Ziel $base nicht erreichbar: $m" 'Error'
+        return [pscustomobject]$res
+    }
+    $hasLive = $false
+    try { $hasLive = (Get-Command Export-VM -ErrorAction Stop).Parameters.ContainsKey('CaptureLiveState') } catch { }
+    $all = @(); try { $all = @(Get-VM -ErrorAction Stop) } catch { }
+    $span = [int]($PSpan / [Math]::Max(1, $vms.Count))
+    $i = 0
+    foreach ($n in $vms) {
+        $pb = $PBase + $i * $span; $i++
+        if ($Job.Cancel) { $res.Status = 'Error'; $res.Notes += 'Export: abgebrochen'; Write-HMSbLog 'VM-Export abgebrochen' 'Warning'; break }
+        $vm = @($all | Where-Object { "$($_.Name)" -eq $n })[0]
+        if (-not $vm) {
+            $res.Status = 'Error'; $res.Failed += $n; $res.Notes += "Export: VM '$n' nicht gefunden"
+            $res.Hints += [pscustomobject]@{ Lvl = 'Error'; Text = "VM-Export: VM '$n' gibt es auf diesem Host nicht."; Fix = 'Auswahl der zu exportierenden VMs im Profil anpassen (Button VMs exportieren).' }
+            Write-HMSbLog "VM-Export: VM '$n' nicht gefunden" 'Error'; continue
+        }
+        $vmDir = Get-HMSbExportVmDir $base $n
+        try { New-Item -ItemType Directory -Path $vmDir -Force -ErrorAction Stop | Out-Null } catch { }
+        # Reste abgebrochener Laeufe entfernen (nur eigene Ordner *.unvollstaendig mit Kennung dieser VM)
+        foreach ($old in @(Get-HMSbExports $base $n "$($vm.Id)" -Temp)) {
+            $e2 = Remove-HMSbExportDir $old.FullName
+            Write-HMSbLog "VM-Export ${n}: Rest eines abgebrochenen Exports $(if ($e2) { "nicht geloescht ($e2)" } else { 'geloescht' }): $($old.Name)" $(if ($e2) { 'Warning' } else { 'Info' })
+        }
+        $need = (Get-HMSbExportSize $vm) + 256MB
+        $free = Get-HMSbFreeBytes $base
+        $prev = @(Get-HMSbExports $base $n "$($vm.Id)")
+        if ($free -ge 0 -and $free -lt $need) {
+            # aeltere Exporte nur loeschen, wenn danach sicher genug Platz ist - sonst nichts loeschen und VM auslassen
+            $reclaim = [long]0; foreach ($o in $prev) { $reclaim += Get-HMSbFolderBytes $o.FullName }
+            if ($Opt.PreDelete -and $prev.Count -and ($free + $reclaim) -ge $need) {
+                foreach ($o in $prev) {
+                    if ($free -ge $need) { break }
+                    $e2 = Remove-HMSbExportDir $o.FullName
+                    if ($e2) { Write-HMSbLog "VM-Export ${n}: aelterer Export $($o.Name) nicht geloescht: $e2" 'Warning'; break }
+                    Write-HMSbLog "VM-Export ${n}: aelterer Export $($o.Name) vorher geloescht (sonst zu wenig Platz)" 'Warning'
+                    $free = Get-HMSbFreeBytes $base
+                }
+            }
+            if ($free -lt $need) {
+                $res.Status = 'Error'; $res.Failed += $n; $res.Notes += "Export: $n zu wenig Platz"
+                $res.Hints += [pscustomobject]@{ Lvl = 'Error'; Text = ("VM-Export {0}: zu wenig Platz am Ziel ({1:N1} GB frei, noetig ca. {2:N1} GB)." -f $n, ($free / 1GB), ($need / 1GB)); Fix = 'Groessere Platte bzw. anderen Export-Ordner verwenden oder weniger Exporte behalten. Auf der Sicherungsplatte kostet jeder Export auch Platz fuer aeltere Sicherungsstaende.' }
+                Write-HMSbLog ("VM-Export {0}: zu wenig Platz ({1:N1} GB frei, noetig ca. {2:N1} GB) - uebersprungen" -f $n, ($free / 1GB), ($need / 1GB)) 'Error'
+                continue
+            }
+        }
+        # -CaptureLiveState nur fuer laufende VMs; ausgeschaltet/gespeichert/angehalten: normaler Export
+        $mode = if ("$($vm.State)" -eq 'Off') { 'Off' } elseif ("$($vm.State)" -eq 'Running' -and $hasLive) { 'CaptureDataConsistentState' } else { '' }
+        Write-HMSbLog ("VM-Export {0}: {1:N1} GB, {2} -> {3}" -f $n, ($need / 1GB), (Format-HMSbExportMode $mode), $vmDir) 'Info'
+        $t1 = Get-Date
+        $one = Invoke-HMSbExportOne -Vm $vm -VmDir $vmDir -Mode $mode -Job $Job -Need $need -PBase $pb -PSpan $span
+        if (-not $one.Ok -and -not $one.Cancelled -and $mode -eq 'CaptureDataConsistentState') {
+            Write-HMSbLog "VM-Export ${n}: anwendungskonsistent nicht moeglich ($($one.Error)) - neuer Versuch absturzkonsistent" 'Warning'
+            $one = Invoke-HMSbExportOne -Vm $vm -VmDir $vmDir -Mode 'CaptureCrashConsistentState' -Job $Job -Need $need -PBase $pb -PSpan $span
+            if ($one.Ok) {
+                & $warn
+                $res.Notes += "Export: $n nur absturzkonsistent"
+                $res.Hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "VM-Export ${n}: nur absturzkonsistent exportiert (wie nach einem Stromausfall) - ein Produktionspruefpunkt mit VSS im Gast war nicht moeglich."; Fix = 'Integrationsdienst Sicherung (VSS) der VM und den Dienst vmicvss im Gast pruefen. Die Sicherung ueber die Windows Server-Sicherung ist davon nicht betroffen.' }
+            }
+        }
+        if ($one.Cancelled) { $res.Status = 'Error'; $res.Failed += $n; $res.Notes += 'Export: abgebrochen'; Write-HMSbLog "VM-Export ${n}: abgebrochen" 'Warning'; break }
+        if (-not $one.Ok) {
+            $res.Status = 'Error'; $res.Failed += $n; $res.Notes += "Export: $n fehlgeschlagen"
+            $res.Hints += [pscustomobject]@{ Lvl = 'Error'; Text = "VM-Export ${n} fehlgeschlagen: $($one.Error)"; Fix = 'Platz und Zugriff am Ziel pruefen (Freigabe: Schreibrecht fuer das Computerkonto des Hosts). Laeuft gerade eine andere Sicherung oder ein Pruefpunkt dieser VM? Hyper-V-VMMS-Protokoll in der Ereignisanzeige ansehen.' }
+            Write-HMSbLog "VM-Export ${n} FEHLGESCHLAGEN: $($one.Error)" 'Error'
+            continue
+        }
+        $res.Ok += $n; $res.Bytes += [long]$one.Bytes
+        $res.Lines += ("{0}: {1:N1} GB in {2}" -f $n, ($one.Bytes / 1GB), (Format-HMDuration ((Get-Date) - $t1)))
+        Write-HMSbLog ("VM-Export {0} erfolgreich: {1:N1} GB in {2} -> {3}" -f $n, ($one.Bytes / 1GB), (Format-HMDuration ((Get-Date) - $t1)), $one.Folder) 'Success'
+        # Aufbewahrung: nur die neuesten $keep Exporte dieser VM behalten (erst nach erfolgreichem neuem Export)
+        $ex = @(Get-HMSbExports $base $n "$($vm.Id)")
+        if ($ex.Count -gt $keep) {
+            foreach ($o in @($ex | Select-Object -First ($ex.Count - $keep))) {
+                $e2 = Remove-HMSbExportDir $o.FullName
+                if ($e2) { & $warn; $res.Notes += "Export: alter Export $n $($o.Name) nicht geloescht"; Write-HMSbLog "VM-Export ${n}: alter Export $($o.Name) nicht geloescht: $e2" 'Warning' }
+                else { Write-HMSbLog "VM-Export ${n}: alter Export $($o.Name) geloescht (behalten: $keep)" 'Info' }
+            }
+        }
+    }
+    $Job.Progress = $PBase + $PSpan
+    Write-HMSbLog ("VM-Export: {0}{1}" -f $(switch ($res.Status) { 'OK' { 'erfolgreich' } 'Warning' { 'mit Warnungen' } default { 'FEHLER' } }), $(if ($res.Ok.Count) { (" - {0} VM(s), {1:N1} GB" -f $res.Ok.Count, ($res.Bytes / 1GB)) } else { '' })) $(switch ($res.Status) { 'OK' { 'Success' } 'Warning' { 'Warning' } default { 'Error' } })
+    return [pscustomobject]$res
+}
+
+# Ereignis eines VM-Exports per Knopf (Anwendung, Quelle HUMig): 1010 = OK, 1011 = Warnung, 1012 = Fehler
+function Write-HMSbExportEvent([string]$Status, [string]$Message) {
+    try {
+        $exists = $false
+        try { $exists = [System.Diagnostics.EventLog]::SourceExists('HUMig') } catch { }
+        if (-not $exists) { New-EventLog -LogName Application -Source 'HUMig' -ErrorAction Stop }
+        $type = switch ($Status) { 'OK' { 'Information' } 'Warning' { 'Warning' } default { 'Error' } }
+        $id = switch ($Status) { 'OK' { 1010 } 'Warning' { 1011 } default { 1012 } }
+        Write-EventLog -LogName Application -Source 'HUMig' -EntryType $type -EventId $id -Message $Message -ErrorAction Stop
+    } catch { }
+}
+
+# VM-Export per Knopf (Hintergrund-Runspace). Ctx: Profile, VMs, Folder, Drive, Keep, PreDelete, Version, LocalReportDir
+function Start-HMSbExport {
+    param([hashtable]$Ctx, [hashtable]$Job)
+    $script:SbJob = $Job
+    $t0 = Get-Date
+    $script:SbRunLog = New-Object System.Collections.Generic.List[string]
+    $r = Invoke-HMSbExport -Opt $Ctx -Job $Job -PBase 0 -PSpan 100
+    $st = if ($r.Status) { "$($r.Status)" } else { 'Error' }
+    $dur = Format-HMDuration ((Get-Date) - $t0)
+    # Protokoll im Tool-Ordner (Logs\ServerBackup\Export_*.log)
+    if ($Ctx.LocalReportDir) {
+        try {
+            New-Item -ItemType Directory -Path "$($Ctx.LocalReportDir)" -Force | Out-Null
+            $lf = Join-Path "$($Ctx.LocalReportDir)" ('Export_{0}_{1}.log' -f $t0.ToString('yyyy-MM-dd_HHmm'), (ConvertTo-HMSbSafeName "$($Ctx.Profile)"))
+            $txt = @($script:SbRunLog.ToArray()) + @('') + @(@($r.Hints) | ForEach-Object { "$($_.Lvl): $($_.Text) - Was tun: $($_.Fix)" })
+            Set-Content -LiteralPath $lf -Value $txt -Encoding UTF8
+            Write-HMSbLog "Protokoll: $lf" 'Info'
+        } catch { }
+    }
+    Write-HMSbExportEvent $st ("VM-Export '{0}' auf {1}: {2}`nVMs: {3}`nZiel: {4}`nDauer: {5}{6}`nHUMig {7}" -f "$($Ctx.Profile)", $env:COMPUTERNAME, $(switch ($st) { 'OK' { 'erfolgreich' } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }), (@($Ctx.VMs) -join ', '), $r.Base, $dur, $(if (@($r.Notes).Count) { "`nHinweis: $(@($r.Notes) -join '; ')" } else { '' }), "$($Ctx.Version)")
+    $Job.Result = [pscustomobject]@{ Status = $st; SizeBytes = [long]$r.Bytes; Base = $r.Base; Notes = @($r.Notes); Hints = @($r.Hints) }
+    $Job.Progress = 100
+    $script:SbRunLog = $null
+    if ($st -eq 'Error') { $Job.Error = (@($r.Notes) -join '; ') }
 }
 
 # ----------------------------------------------------------------------------
@@ -1198,7 +1544,8 @@ function Start-HMServerBackup {
     $vms = @($Ctx.VMs | Where-Object { "$_".Trim() })
     $vols = @($Ctx.Volumes | Where-Object { "$_".Trim() } | ForEach-Object { ("$_".Trim().TrimEnd('\', ':')).ToUpper() + ':' } | Select-Object -Unique)
     $res = [ordered]@{ Status = 'Error'; SizeBytes = [long]0; Report = ''; VersionId = ''; HostVersionId = ''; VolVersionId = ''; Notes = @(); Health = ''; HealthText = ''
-        Minutes = 0; FreeBytes = [long]0; TotalBytes = [long]0; LowSpace = $false; VersionCount = 0; OldestVersion = ''; NewestVersion = ''; VMs = ''; Volumes = ''; HostSystem = '' }
+        Minutes = 0; FreeBytes = [long]0; TotalBytes = [long]0; LowSpace = $false; VersionCount = 0; OldestVersion = ''; NewestVersion = ''; VMs = ''; Volumes = ''; HostSystem = ''
+        Export = ''; ExportStatus = '' }
     $Job.Result = [pscustomobject]$res
 
     Write-HMSbLog "SERVER-BACKUP $($Ctx.Profile) - Host $env:COMPUTERNAME - Ziel $target $($Ctx.DiskLabel)" 'Header'
@@ -1266,7 +1613,8 @@ function Start-HMServerBackup {
         }
         if ($Job.Cancel) { throw 'Abgebrochen' }
 
-        $nPh = [Math]::Max(1, [int][bool]$vms.Count + [int][bool]$vols.Count + [int][bool]$Ctx.HostSystem)
+        $expVms = @(if ($Ctx.Export) { @($Ctx.Export.VMs) | Where-Object { "$_".Trim() } })
+        $nPh = [Math]::Max(1, [int][bool]$vms.Count + [int][bool]$vols.Count + [int][bool]$Ctx.HostSystem + [int][bool]$expVms.Count)
         $span = [int](95 / $nPh)
         $pb = 2
         # --- VMs sichern
@@ -1393,6 +1741,20 @@ function Start-HMServerBackup {
                 Write-HMSbLog 'Host-System-Sicherung erfolgreich' 'Success'
                 try { $vv2 = Get-HMSbVersions $target; $l2 = @($vv2.Versions) | Select-Object -Last 1; if ($l2) { $res.HostVersionId = "$($l2.Id)"; Set-Content -LiteralPath (Join-Path $rep 'Versionen.txt') -Value $vv2.Text -Encoding UTF8 } } catch { }
             }
+            $pb += $span
+        }
+        if ($Job.Cancel) { throw 'Abgebrochen' }
+
+        # --- VM-Export (Option im Profil: nach der Sicherung ausgewaehlte VMs zusaetzlich exportieren)
+        if ($expVms.Count) {
+            $Job.Status = 'VM-Export'
+            $xo = @{ VMs = $expVms; Folder = "$($Ctx.Export.Folder)"; Drive = $L; Keep = $Ctx.Export.Keep; PreDelete = $true; Version = "$($Ctx.Version)" }
+            $xr = Invoke-HMSbExport -Opt $xo -Job $Job -PBase $pb -PSpan $span
+            $res.ExportStatus = "$($xr.Status)"
+            $res.Export = ("{0} -> {1}{2}" -f ($expVms -join ', '), $xr.Base, $(switch ("$($xr.Status)") { 'OK' { '' } 'Warning' { ' (mit Warnungen)' } default { ' (FEHLER)' } }))
+            $notes += @($xr.Notes); $hints += @($xr.Hints)
+            if ("$($xr.Status)" -in @('Warning', 'Error') -and $status -eq 'OK') { $status = 'Warning' }
+            if ($Job.Cancel) { throw 'Abgebrochen' }
         }
     } catch {
         $msg = "$($_.Exception.Message)"
@@ -1423,12 +1785,12 @@ function Start-HMServerBackup {
     # --- Verlauf, Bericht
     $Job.Status = 'Bericht'
     $dur = [math]::Round(((Get-Date) - $t0).TotalMinutes, 1)
-    if (-not $vms.Count -and -not $vols.Count -and -not $Ctx.HostSystem -and -not $hostCfgOk) { $status = 'Error' }
+    if (-not $vms.Count -and -not $vols.Count -and -not $Ctx.HostSystem -and -not $hostCfgOk -and -not ("$($res.ExportStatus)" -in @('OK', 'Warning'))) { $status = 'Error' }
     $entry = [pscustomobject][ordered]@{
         Date = $t0.ToString('yyyy-MM-dd HH:mm'); Profile = "$($Ctx.Profile)"; Host = $env:COMPUTERNAME; Disk = "$($Ctx.DiskLabel)"; DiskSerial = "$($Ctx.DiskSerial)"
         VMs = ($vms -join ', '); Volumes = ($vols -join ', '); VolVersionId = "$($res.VolVersionId)"; Status = $status; Minutes = $dur; SizeGB = [math]::Round($res.SizeBytes / 1GB, 1); VersionId = $verId
         HostConfig = $hostCfgOk; HostSystem = $hostSysOk; HostVersionId = "$($res.HostVersionId)"; Note = ($notes -join '; '); Tool = "HUMig $($Ctx.Version)"; Report = (Split-Path $rep -Leaf)
-        Health = $healthLvl; HealthText = $healthTxt
+        Health = $healthLvl; HealthText = $healthTxt; Export = "$($res.Export)"; ExportStatus = "$($res.ExportStatus)"
     }
     try { Add-HMSbHistory (Join-Path "$target\$($script:SbDirName)" 'history.json') $entry } catch { Write-HMSbLog "Verlauf auf der Platte nicht gespeichert: $($_.Exception.Message)" 'Warning' }
     if ($Ctx.LocalHistory) { try { Add-HMSbHistory "$($Ctx.LocalHistory)" $entry } catch { Write-HMSbLog "Verlauf im Tool-Ordner nicht gespeichert: $($_.Exception.Message)" 'Warning' } }
@@ -1467,7 +1829,7 @@ function Start-HMServerBackup {
     $Job.Progress = 100
     $lvl = switch ($status) { 'OK' { 'Success' } 'Warning' { 'Warning' } default { 'Error' } }
     Write-HMSbLog ("SERVER-BACKUP {0}: {1} in {2} - Bericht: {3}" -f $Ctx.Profile, $(switch ($status) { 'OK' { if ($notes.Count) { 'erfolgreich (mit Hinweis - siehe Bericht)' } else { 'erfolgreich' } } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }), (Format-HMDuration $dur), (Join-Path $rep 'Bericht.html')) $lvl
-    Write-HMSbEvent $status ("Server-Backup '{0}' auf {1}: {2}`nPlatte: {3}`nVMs: {4}{5}`nHost-System: {6}`nDauer: {7}{8}`nBericht: {9}`nHUMig {10}" -f $Ctx.Profile, $env:COMPUTERNAME, $(switch ($status) { 'OK' { 'erfolgreich' } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }), "$($Ctx.DiskLabel)", $(if ($vms.Count) { $vms -join ', ' } else { '-' }), $(if ($vols.Count) { "`nLaufwerke: $($vols -join ', ')" } else { '' }), $(if ($Ctx.HostSystem) { $(if ($hostSysOk) { 'ja' } else { 'FEHLER' }) } else { 'nein' }), (Format-HMDuration $dur), $(if ($notes.Count) { "`nHinweis: $($notes -join '; ')" } else { '' }), (Join-Path $rep 'Bericht.html'), "$($Ctx.Version)")
+    Write-HMSbEvent $status ("Server-Backup '{0}' auf {1}: {2}`nPlatte: {3}`nVMs: {4}{5}`nHost-System: {6}`nDauer: {7}{8}`nBericht: {9}`nHUMig {10}" -f $Ctx.Profile, $env:COMPUTERNAME, $(switch ($status) { 'OK' { 'erfolgreich' } 'Warning' { 'mit Warnungen' } default { 'FEHLGESCHLAGEN' } }), "$($Ctx.DiskLabel)", $(if ($vms.Count) { $vms -join ', ' } else { '-' }), $(if ($vols.Count) { "`nLaufwerke: $($vols -join ', ')" } else { '' }), $(if ($Ctx.HostSystem) { $(if ($hostSysOk) { 'ja' } else { 'FEHLER' }) } else { 'nein' }) + $(if ("$($res.Export)") { "`nVM-Export: $($res.Export)" } else { '' }), (Format-HMDuration $dur), $(if ($notes.Count) { "`nHinweis: $($notes -join '; ')" } else { '' }), (Join-Path $rep 'Bericht.html'), "$($Ctx.Version)")
     # Nach der Sicherung: Platte auswerfen / offline schalten (Einstellung je Platte)
     if ("$($Ctx.After)") { $Job.Status = 'Platte'; Invoke-HMSbAfterBackup -Letter $L -Mode "$($Ctx.After)" -Label "$($Ctx.DiskLabel)" }
     $script:SbRunLog = $null

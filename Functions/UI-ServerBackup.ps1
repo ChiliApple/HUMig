@@ -36,6 +36,7 @@ function ConvertTo-HMSbProfile($p) {
     $w = 0; try { $w = [int]$p.WarnDays } catch { }
     $ad = 0; try { $ad = [int]$p.ArchiveDisks } catch { }
     $ai = 0; try { $ai = [int]$p.ArchiveDays } catch { }
+    $ek = 0; try { $ek = [int]$p.ExportKeep } catch { }
     $da = [ordered]@{}
     if ($null -ne $p.DiskAfter) {
         if ($p.DiskAfter -is [System.Collections.IDictionary]) { foreach ($k in @($p.DiskAfter.Keys)) { if ("$($p.DiskAfter[$k])" -match '^(Eject|Offline)$') { $da["$k".ToUpper()] = "$($p.DiskAfter[$k])" } } }
@@ -50,6 +51,10 @@ function ConvertTo-HMSbProfile($p) {
         ArchiveDisks = $(if ($ad -gt 0 -and $ad -le 9) { $ad } else { 0 })
         ArchiveDays = $(if ($ai -gt 0) { $ai } else { 30 })
         DiskAfter = [pscustomobject]$da
+        ExportVMs = @($p.ExportVMs | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
+        ExportFolder = "$($p.ExportFolder)".Trim()
+        ExportKeep = $(if ($ek -ge 1 -and $ek -le 10) { $ek } else { 1 })
+        ExportAfter = ($p.ExportAfter -eq $true)
     }
 }
 function Get-HMSbConfig {
@@ -221,6 +226,7 @@ function Edit-HMSbProfile {
         foreach ($d in @($script:SbDrives)) { $files += "$($d.Letter):\$($script:SbDirName)\history.json"; $files += "$($d.Letter):\$($script:SbDirName)\profiles.json" }
         foreach ($f in $files) { try { $cnt2 += (Rename-HMSbProfileInFile $f $p.Name $n) } catch { Out-Console "Umbenennen in $f`: $($_.Exception.Message)" 'Warning' } }
         Out-Console "Profil '$($p.Name)' umbenannt in '$n' - $cnt2 Verlaufseintrag/-eintraege angepasst (Tool-Ordner und angesteckte Platten; nicht angesteckte Platten beim naechsten Backup)" 'Success'
+        try { $tn = Rename-HMNotifySbProfile $p.Name $n; if ($tn) { Out-Console "Teams-Benachrichtigung: Profil bei $tn Ziel(en) umbenannt" 'Info' } } catch { Out-Console "Teams-Ziele: Profil nicht umbenannt ($($_.Exception.Message)) - in Einstellungen > Teams pruefen" 'Warning' }
     }
     Out-Console "Profil '$n': Platten $pre-1 bis $pre-$cnt$(if ($ad) { ", Archiv $pre-A1 bis $pre-A$ad (faellig nach $ai Tagen)" }), Warnung nach $wd Tagen" 'Success'
     Update-HMSbProfileList $n
@@ -797,7 +803,7 @@ function Start-HMSbBackup {
     if (-not $d) { Out-Console 'Server-Backup: keine Ziel-Platte gewaehlt.' 'Warning'; return }
     if ($vols -contains "$($d.Letter):") { Out-Console "Server-Backup: das Ziel-Laufwerk $($d.Letter): kann nicht sich selbst sichern - abwaehlen." 'Error'; return }
     if ($d.FileSystem -and $d.FileSystem -notmatch '^(NTFS|ReFS)$') { Out-Console "Server-Backup: Dateisystem $($d.FileSystem) auf $($d.Letter): wird nicht unterstuetzt - Platte einrichten (NTFS)." 'Error'; return }
-    if (-not $vms.Count -and -not $vols.Count -and -not $hs -and -not $hc) { Out-Console 'Server-Backup: nichts gewaehlt (VMs, Laufwerke, Host-Konfiguration oder System).' 'Warning'; return }
+    if (-not $vms.Count -and -not $vols.Count -and -not $hs -and -not $hc) { Out-Console 'Server-Backup: nichts gewaehlt (VMs, Laufwerke, Host-Konfiguration oder System). Nur exportieren: Button "VMs exportieren ...".' 'Warning'; return }
     if ($script:SbPrereq -and ($script:SbPrereq.Feature -eq $false -or -not $script:SbPrereq.Wbadmin)) { Out-Console 'Windows Server-Sicherung fehlt - Button "Windows Server-Sicherung installieren".' 'Error'; return }
     $pName = if ($p) { $p.Name } else { '(ohne Profil)' }
     $msg = "Server-Backup starten?`n`nProfil: $pName`nZiel: $($d.Letter): $($d.Label)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })`nSystem (Bare-Metal): $(if ($hs) { 'ja' } else { 'nein' })`n`nVMs und Server laufen weiter (Online-Sicherung ueber VSS)."
@@ -805,6 +811,8 @@ function Start-HMSbBackup {
     $after = if ($p -and (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { Get-HMSbAfterMode $p $d.Label } else { '' }
     if ($after -eq 'Eject') { $msg += "`n`nNach der Sicherung wird die Platte automatisch ausgeworfen." }
     elseif ($after -eq 'Offline') { $msg += "`n`nNach der Sicherung wird die Platte automatisch offline geschaltet." }
+    $exp = if ($p) { Get-HMSbExportOptions $p } else { $null }
+    if ($exp) { $msg += "`n`nNach der Sicherung: VM-Export $(@($exp.VMs) -join ', ') -> $(Get-HMSbExportBase $exp.Folder $d.Letter) (behalten je VM: $($exp.Keep))" }
     if (-not $p) { $msg += "`n`nHinweis: kein Profil gewaehlt - Verlauf unter '(ohne Profil)'." }
     elseif (-not (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { $msg += "`n`nACHTUNG: Die Platte '$($d.Label)' gehoert laut Bezeichnung NICHT zum Profil ($($p.DiskPrefix)-...)." }
     if ($p) {
@@ -826,7 +834,7 @@ function Start-HMSbBackup {
         Profile = $pName; DiskPrefix = $(if ($p) { $p.DiskPrefix } else { '' }); Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
         VMs = $vms; Volumes = $vols; HostConfig = $hc; HostSystem = $hs; Verify = [bool]$ui.chkSbVerify.IsChecked
         LocalHistory = $script:SbHistFile; LocalHealth = $script:SbHealthFile; LocalReportDir = $script:SbReportDir; Version = $script:Version
-        ProfileData = $(if ($p) { $p } else { $null }); After = $after
+        ProfileData = $(if ($p) { $p } else { $null }); After = $after; Export = $exp
     }
     $script:SbAfterRun = $after
     Start-EngineJob -Command 'Start-HMServerBackup -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'Server-Backup' -ScriptFiles @($script:SbEngine) -OnFinished {
@@ -835,6 +843,148 @@ function Start-HMSbBackup {
         if ($j.Result -and $j.Result.Report) { Out-Console "Berichtsordner: $($j.Result.Report)" 'Info' }
         if ($script:SbAfterRun) { Update-HMSbDrives }
         if ($script:SbArchiveRun) { Out-Console "Archiv-Platte $($script:SbArchiveRun): $(if ($script:SbAfterRun -eq 'Eject') { 'abziehen' } else { 'jetzt ""Auswerfen"", abziehen' }) und getrennt vom Server lagern (nicht angesteckt lassen)." 'Warning' }
+    }
+}
+
+# ----------------------------------------------------------------------------
+# VM-Export: ausgewaehlte VMs per Knopf exportieren bzw. im Profil fuer "nach jeder Sicherung" (auch Zeitplan) festlegen
+# ----------------------------------------------------------------------------
+function Show-HMSbExportDialog($Prof, $Drive) {
+    $x = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VMs exportieren" Width="660" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#FF1E1E2E">
+  <StackPanel Margin="14">
+    <TextBlock x:Name="info" Foreground="#FFCDD6F4" TextWrapping="Wrap" Margin="0,0,0,10"/>
+    <TextBlock Text="Virtuelle Computer:" Foreground="#FFA6ADC8" Margin="0,0,0,3"/>
+    <Border BorderBrush="#FF45475A" BorderThickness="1" MaxHeight="230">
+      <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="pnlVms" Margin="6,4"/></ScrollViewer>
+    </Border>
+    <TextBlock Text="Ziel (leer = Ordner HUMig-Export auf der Platte des Profils):" Foreground="#FFA6ADC8" Margin="0,10,0,3"/>
+    <DockPanel>
+      <Button x:Name="btnDisk" DockPanel.Dock="Right" Content="Platte" Width="70" Height="26" Margin="4,0,0,0" Background="#FF45475A" Foreground="#FFCDD6F4" ToolTip="Ziel zuruecksetzen: Ordner HUMig-Export auf der Platte des Profils"/>
+      <Button x:Name="btnBrowse" DockPanel.Dock="Right" Content="..." Width="34" Height="26" Margin="4,0,0,0" Background="#FF45475A" Foreground="#FFCDD6F4" ToolTip="Ordner waehlen (lokal oder Freigabe)"/>
+      <TextBox x:Name="txtFolder" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,3"/>
+    </DockPanel>
+    <TextBlock x:Name="lblTarget" Foreground="#FF6C7086" TextWrapping="Wrap" Margin="0,3,0,8"/>
+    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+      <TextBlock Text="Exporte je VM behalten (1-10):" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
+      <TextBox x:Name="txtKeep" Width="50" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,2"/>
+      <TextBlock Text="aeltere werden erst nach einem erfolgreichen neuen Export geloescht" Foreground="#FF6C7086" VerticalAlignment="Center" Margin="10,0,0,0"/>
+    </StackPanel>
+    <CheckBox x:Name="chkAfter" Content="Nach jeder Sicherung dieses Profils automatisch exportieren (auch im Zeitplan)" Foreground="#FFCDD6F4" Margin="0,0,0,8"/>
+    <TextBlock Foreground="#FF6C7086" TextWrapping="Wrap" Margin="0,0,0,12" Text="Der Export ist eine vollstaendige Kopie je VM (keine Versionen) und laesst sich an jedem Hyper-V-Host mit 'Virtuellen Computer importieren' wiederherstellen. Laufende VMs werden anwendungskonsistent exportiert (Produktionspruefpunkt). Auf der Sicherungsplatte belegt jeder Export die volle Groesse der virtuellen Festplatten - aeltere Sicherungsstaende der Windows Server-Sicherung fallen dadurch frueher weg. Freigabe als Ziel: Hyper-V schreibt mit dem Computerkonto des Hosts (Schreibrecht fuer HOSTNAME$ noetig). 'Jetzt exportieren' aendert das Profil nicht."/>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button x:Name="ok" Content="Jetzt exportieren" Width="140" Height="28" Background="#FFA6E3A1" Foreground="#FF1E1E2E" FontWeight="SemiBold" Margin="0,0,6,0" IsDefault="True"/>
+      <Button x:Name="save" Content="Im Profil speichern" Width="140" Height="28" Background="#FF89B4FA" Foreground="#FF1E1E2E" Margin="0,0,6,0"/>
+      <Button x:Name="cancel" Content="Abbrechen" Width="100" Height="28" Background="#FF45475A" Foreground="#FFCDD6F4" IsCancel="True"/>
+    </StackPanel>
+  </StackPanel>
+</Window>
+"@
+    $w = [System.Windows.Markup.XamlReader]::Parse($x)
+    if ($script:AppIcon) { $w.Icon = $script:AppIcon }
+    $c = @{}
+    foreach ($n in @('info', 'pnlVms', 'txtFolder', 'btnBrowse', 'btnDisk', 'lblTarget', 'txtKeep', 'chkAfter', 'ok', 'save')) { $c[$n] = $w.FindName($n) }
+    $c.info.Text = "Profil: $(if ($Prof) { $Prof.Name } else { '(kein Profil gewaehlt)' })   Platte: $(if ($Drive) { "$($Drive.Letter): $($Drive.Label)" } else { '(keine)' })"
+    $sel = @(if ($Prof) { @($Prof.ExportVMs) })
+    foreach ($v in @($script:SbVms)) {
+        $cb = New-Object System.Windows.Controls.CheckBox
+        $cb.Content = ('{0}   ({1}, ca. {2})' -f $v.Name, (Format-HMSbState $v.State), (Format-HMSize ([long]$v.SizeBytes)))
+        $cb.Tag = "$($v.Name)"; $cb.Foreground = New-Brush '#FFCDD6F4'; $cb.Margin = [System.Windows.Thickness]::new(0, 2, 0, 2)
+        $cb.IsChecked = [bool]($sel -contains "$($v.Name)")
+        [void]$c.pnlVms.Children.Add($cb)
+    }
+    $c.txtFolder.Text = $(if ($Prof) { "$($Prof.ExportFolder)" } else { '' })
+    $c.txtKeep.Text = "$(if ($Prof) { $Prof.ExportKeep } else { 1 })"
+    $c.chkAfter.IsChecked = [bool]($Prof -and $Prof.ExportAfter)
+    if (-not $Prof) { $c.chkAfter.IsEnabled = $false; $c.save.IsEnabled = $false }
+    $dl = if ($Drive) { "$($Drive.Letter)" } else { '' }
+    # GetNewClosure sieht keine Skript-Funktionen von HUMig - Funktion vorher als Variable mitnehmen
+    $fnBase = ${function:Get-HMSbExportBase}
+    $upd = { $b = & $fnBase "$($c.txtFolder.Text)" $dl; $c.lblTarget.Text = if ($b) { "Ziel: $b\<VM>\<Datum>" } else { 'Ziel: keine Platte gewaehlt - Ordner eintragen' } }.GetNewClosure()
+    & $upd
+    $c.txtFolder.Add_TextChanged($upd)
+    $c.btnDisk.Add_Click({ $c.txtFolder.Text = '' }.GetNewClosure())
+    $c.btnBrowse.Add_Click({
+        $d = New-Object System.Windows.Forms.FolderBrowserDialog
+        $d.Description = 'Ordner fuer den VM-Export waehlen (lokal oder Freigabe)'
+        if ("$($c.txtFolder.Text)".Trim() -and (Test-Path -LiteralPath "$($c.txtFolder.Text)".Trim())) { $d.SelectedPath = "$($c.txtFolder.Text)".Trim() }
+        if ($d.ShowDialog() -eq 'OK' -and $d.SelectedPath) { $c.txtFolder.Text = $d.SelectedPath.TrimEnd('\') }
+    }.GetNewClosure())
+    $res = @{ V = $null }
+    $collect = {
+        param($act)
+        $k = 0
+        if (-not [int]::TryParse("$($c.txtKeep.Text)".Trim(), [ref]$k) -or $k -lt 1 -or $k -gt 10) { [void][System.Windows.MessageBox]::Show($w, 'Anzahl der Exporte je VM: 1 bis 10.', 'VMs exportieren', 'OK', 'Warning'); return }
+        $vms = @($c.pnlVms.Children | Where-Object { $_.IsChecked } | ForEach-Object { "$($_.Tag)" })
+        $fo = "$($c.txtFolder.Text)".Trim().TrimEnd('\')
+        if ($act -eq 'Export' -and -not $vms.Count) { [void][System.Windows.MessageBox]::Show($w, 'Mindestens eine VM waehlen.', 'VMs exportieren', 'OK', 'Warning'); return }
+        if ($act -eq 'Save' -and [bool]$c.chkAfter.IsChecked -and -not $vms.Count) { [void][System.Windows.MessageBox]::Show($w, 'Fuer den Export nach jeder Sicherung mindestens eine VM waehlen.', 'VMs exportieren', 'OK', 'Warning'); return }
+        if ($fo -and ($fo -notmatch '^([A-Za-z]:\\|\\\\[^\\]+\\[^\\]+)' -or $fo.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0 -or $fo.Substring(2).Contains(':') -or $fo -match '[*?"<>|]')) { [void][System.Windows.MessageBox]::Show($w, 'Ziel bitte als vollstaendigen Pfad angeben (z.B. E:\VM-Export oder \\server\freigabe\ordner) - oder leer lassen fuer die Platte.', 'VMs exportieren', 'OK', 'Warning'); return }
+        if ($act -eq 'Export' -and -not $fo -and -not $dl) { [void][System.Windows.MessageBox]::Show($w, 'Keine Platte gewaehlt - Platte anstecken oder einen Ordner eintragen.', 'VMs exportieren', 'OK', 'Warning'); return }
+        $res.V = @{ Action = $act; VMs = $vms; Folder = $fo; Keep = $k; After = [bool]$c.chkAfter.IsChecked }
+        $w.DialogResult = $true
+    }.GetNewClosure()
+    $c.ok.Add_Click({ & $collect 'Export' }.GetNewClosure())
+    $c.save.Add_Click({ & $collect 'Save' }.GetNewClosure())
+    $w.Owner = $script:Window; Set-HMWindowScale $w
+    if ($w.ShowDialog() -eq $true) { return $res.V }
+    return $null
+}
+
+function Save-HMSbExportSettings([string]$Name, $Opt) {
+    $cfg = Get-HMSbConfig
+    foreach ($x in $cfg.Profiles) {
+        if ($x.Name -eq $Name) { $x.ExportVMs = @($Opt.VMs); $x.ExportFolder = "$($Opt.Folder)"; $x.ExportKeep = [int]$Opt.Keep; $x.ExportAfter = [bool]$Opt.After }
+    }
+    Save-HMSbConfig $cfg
+}
+
+function Start-HMSbExportUi {
+    if ($script:JobRunning) { Out-Console 'Es laeuft bereits ein Vorgang.' 'Warning'; return }
+    if (-not @($script:SbVms).Count) { Out-Console 'VM-Export: keine VMs auf diesem Host gefunden (Aktualisieren).' 'Warning'; return }
+    $p = Get-HMSbProfile
+    $d = Get-HMSbDrive
+    $r = Show-HMSbExportDialog $p $d
+    if (-not $r) { return }
+    if ($r.Action -eq 'Save') {
+        Save-HMSbExportSettings $p.Name $r
+        $b = Get-HMSbExportBase $r.Folder ''
+        Out-Console ("Profil '{0}': VM-Export {1}{2}" -f $p.Name, $(if ($r.After) { "nach jeder Sicherung: $($r.VMs -join ', ')" } else { "nach der Sicherung aus (gemerkte Auswahl: $(if ($r.VMs.Count) { $r.VMs -join ', ' } else { '-' }))" }), " - Ziel: $(if ($b) { $b } else { 'Platte des Profils \HUMig-Export' }), behalten je VM: $($r.Keep)") 'Success'
+        Update-HMSbSchedules
+        return
+    }
+    if (-not $r.Folder -and $d.FileSystem -and $d.FileSystem -notmatch '^(NTFS|ReFS)$') { Out-Console "VM-Export: Dateisystem $($d.FileSystem) auf $($d.Letter): wird nicht unterstuetzt (NTFS/ReFS)." 'Error'; return }
+    $base = Get-HMSbExportBase $r.Folder $(if ($d) { $d.Letter } else { '' })
+    if ($r.Folder -and -not (Test-Path -LiteralPath $base)) {
+        if (-not (Confirm-Action "Das Ziel $base ist von hier aus nicht erreichbar oder existiert noch nicht.`n`nHinweis: Netzlaufwerke anderer Konten sind in HUMig (Administrator) nicht sichtbar - besser den UNC-Pfad (\\server\freigabe\ordner) eintragen.`n`nTrotzdem versuchen (Hyper-V legt den Ordner an, wenn moeglich)?" 'VM-Export')) { return }
+    }
+    $need = [long]0
+    foreach ($n in $r.VMs) { $v = @($script:SbVms | Where-Object { $_.Name -eq $n })[0]; if ($v) { $need += [long]$v.SizeBytes } }
+    $free = Get-HMSbFreeBytes $base
+    $old = 0; foreach ($n in $r.VMs) { $v = @($script:SbVms | Where-Object { $_.Name -eq $n })[0]; $old += @(Get-HMSbExports $base $n "$($v.Id)").Count }
+    $msg = "VMs jetzt exportieren?`n`nVMs ($($r.VMs.Count)): $($r.VMs -join ', ')`nZiel: $base\<VM>\<Datum>`nGroesse ca. $(Format-HMSize $need) (virtuelle Festplatten, ohne Pruefpunkte)$(if ($free -ge 0) { "`nFrei am Ziel: $(Format-HMSize $free)" })`nBehalten je VM: $($r.Keep)$(if ($old) { " (vorhanden: $old Export(e))" })`n`nLaufende VMs laufen weiter (Produktionspruefpunkt). Abbrechen wirkt nach der gerade laufenden VM bzw. beendet deren Export."
+    $onDisk = $d -and $base -like "$($d.Letter):\*"
+    if ($onDisk) { $msg += "`n`nHinweis: Der Export liegt auf der Sicherungsplatte - aeltere Sicherungsstaende der Windows Server-Sicherung fallen dadurch frueher weg." }
+    $pre = $false
+    if ($free -ge 0 -and $free -lt ($need + 1GB)) {
+        if ($old) {
+            $q = "Am Ziel ist zu wenig Platz ($(Format-HMSize $free) frei, noetig ca. $(Format-HMSize $need)).`n`nJa = aeltere Exporte dieser VMs vorher loeschen, soweit noetig (waehrend des Exports gibt es dann evtl. keinen fertigen Export)`nNein = abbrechen"
+            if ("$([System.Windows.MessageBox]::Show($script:Window, $q, 'VM-Export', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+            $pre = $true
+        } else { Out-Console ("VM-Export: zu wenig Platz am Ziel ({0} frei, noetig ca. {1})." -f (Format-HMSize $free), (Format-HMSize $need)) 'Error'; return }
+    }
+    if (-not (Confirm-Action $msg 'VM-Export')) { return }
+    $busy = @(Get-HMSbBusy)
+    if ($busy.Count -and -not (Confirm-Action ("Am Host laeuft gerade eine Sicherung/Wiederherstellung:`n  " + ($busy -join "`n  ") + "`n`nEin Export gleichzeitig kann dieselbe VM blockieren (Pruefpunkt). Trotzdem starten?") 'VM-Export')) { return }
+    $ctx = @{ Profile = $(if ($p) { $p.Name } else { '(ohne Profil)' }); VMs = @($r.VMs); Folder = $r.Folder; Drive = $(if ($d) { $d.Letter } else { '' }); Keep = $r.Keep; PreDelete = $pre; Version = $script:Version; LocalReportDir = $script:SbReportDir }
+    Start-EngineJob -Command 'Start-HMSbExport -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'VM-Export' -ScriptFiles @($script:SbEngine) -OnFinished {
+        param($j)
+        if ($j.Result) {
+            foreach ($h in @($j.Result.Hints)) { Out-Console "$($h.Text) - Was tun: $($h.Fix)" $(if ($h.Lvl -eq 'Error') { 'Error' } else { 'Warning' }) }
+            if ($j.Result.Base) { Out-Console "Export-Ordner: $($j.Result.Base) (je VM ein Ordner, darin Export-Info.txt mit Anleitung zum Importieren)" 'Info' }
+        }
+        Update-HMSbDiskInfo
     }
 }
 
@@ -1289,7 +1439,7 @@ function New-HMSbSchedule {
     $hc = [bool]$ui.chkSbHostConfig.IsChecked; $hs = [bool]$ui.chkSbHostSystem.IsChecked; $vf = [bool]$ui.chkSbVerify.IsChecked
     if (-not $vms.Count -and -not $vols.Count -and -not $hs -and -not $hc) { Out-Console 'Zeitplan: nichts gewaehlt (VMs, Laufwerke, Host-Konfiguration oder System).' 'Warning'; return }
     foreach ($x in @($p.Name) + $vms) { if ("$x" -match '["|]') { Out-Console "Zeitplan: Name '$x' enthaelt ein nicht erlaubtes Zeichen (Anfuehrungszeichen oder |)." 'Error'; return } }
-    $info = "Profil: $($p.Name)   (Platten $($p.DiskPrefix)-...)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })   Pruefen: $(if ($vf) { 'ja' } else { 'nein' })   Host-System: $(if ($hs) { 'ja' } else { 'nein' })`n`nEs gelten die aktuell angehakten VMs und Optionen."
+    $info = "Profil: $($p.Name)   (Platten $($p.DiskPrefix)-...)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })   Pruefen: $(if ($vf) { 'ja' } else { 'nein' })   Host-System: $(if ($hs) { 'ja' } else { 'nein' })`n`nEs gelten die aktuell angehakten VMs und Optionen.$(if (Get-HMSbExportOptions $p) { "`nNach der Sicherung: VM-Export $(@($p.ExportVMs) -join ', ') (Einstellung im Profil - gilt beim Lauf, Button 'VMs exportieren ...')" })"
     if ($hs) { $sv = Format-HMSbSysDriveVms (Get-HMSbSysDriveVms $script:SbVms); if ($sv) { $info += "`n`n$sv" } }
     $r = Show-HMSbScheduleDialog $info
     if (-not $r) { return }
@@ -1360,6 +1510,7 @@ function Update-HMSbSchedules {
         if ($mine.Count) {
             $ui.lblSbSchedule.Text = 'Geplant: ' + (@($mine | ForEach-Object { "$(($_.Name -split ' - ', 3)[-1])$(if ($_.Next) { " (naechster Lauf $($_.Next))" })$(if ($_.Result) { " letzter: $($_.Result)" })" }) -join '   |   ')
         } else { $ui.lblSbSchedule.Text = 'Kein Zeitplan fuer dieses Profil (Button Zeitplan ...)' }
+        if ($p -and (Get-HMSbExportOptions $p)) { $ui.lblSbSchedule.Text += "   |   VM-Export nach der Sicherung: $(@($p.ExportVMs) -join ', ') (behalten: $($p.ExportKeep))" }
     } catch { $ui.lblSbSchedule.Text = '' }
 }
 function Show-HMSbSchedules {
@@ -1392,7 +1543,7 @@ function Initialize-HMServerBackupTab {
     $isServer = $false
     try { $isServer = ([int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).ProductType -ne 1) } catch { }
     if ($script:UserMode -or -not $IsAdmin -or (-not $isServer -and -not (Get-Command Get-VM -ErrorAction SilentlyContinue))) { $tab.Visibility = 'Collapsed'; return }
-    $script:SbButtons = @($ui.btnSbBackup, $ui.btnSbSchedule, $ui.btnSbProfileNew, $ui.btnSbProfileSave, $ui.btnSbProfileEdit, $ui.btnSbProfileDel, $ui.btnSbDrives, $ui.btnSbDiskSetup, $ui.btnSbEject, $ui.btnSbHostOnly, $ui.btnSbFeature)
+    $script:SbButtons = @($ui.btnSbBackup, $ui.btnSbSchedule, $ui.btnSbProfileNew, $ui.btnSbProfileSave, $ui.btnSbProfileEdit, $ui.btnSbProfileDel, $ui.btnSbDrives, $ui.btnSbDiskSetup, $ui.btnSbEject, $ui.btnSbHostOnly, $ui.btnSbExport, $ui.btnSbFeature)
     $ui.btnSbBackup.Add_Click({ Start-HMSbBackup })
     $ui.btnSbCancel.Add_Click($cancelAction)
     $ui.btnSbProfileNew.Add_Click({ New-HMSbProfile })
@@ -1429,6 +1580,7 @@ function Initialize-HMServerBackupTab {
     if ($ui.btnSbHealth) { $ui.btnSbHealth.Add_Click({ Start-HMSbHealthRead -Manual }) }
     $ui.btnSbOverview.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMSbAllRuns })
     $ui.btnSbHostOnly.Add_Click({ Start-HMSbHostOnly })
+    $ui.btnSbExport.Add_Click({ Start-HMSbExportUi })
     $ui.btnSbSchedule.Add_Click({ New-HMSbSchedule })
     $ui.btnSbSchedule.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMSbSchedules })
     if ($ui.btnSbConflicts) { $ui.btnSbConflicts.Add_Click({ Show-HMSbConflicts }) }

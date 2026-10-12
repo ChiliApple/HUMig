@@ -1,5 +1,17 @@
 ﻿# Changelog
 
+## v2.0.123 - 2026-10-12
+### Server-Backup: VM-Export
+- Neuer Knopf *VMs exportieren ...*: ausgewaehlte VMs mit Hyper-V exportieren (vollstaendige Kopie je VM, an jedem Hyper-V-Host mit *Virtuellen Computer importieren* wiederherstellbar) - auf die Platte (Ordner `HUMig-Export`) oder in einen beliebigen Ordner bzw. eine Freigabe
+- Im Profil: *Nach jeder Sicherung automatisch exportieren* - laeuft nach jedem Server-Backup des Profils, auch im Zeitplan; Ergebnis in Bericht, Verlauf, Ereignis und Teams-Karte. Ein Export-Fehler macht die Sicherung zur Warnung, die Sicherung selbst bleibt unberuehrt
+- Laufende VMs anwendungskonsistent (Produktionspruefpunkt), sonst absturzkonsistent mit Warnung; Platzpruefung vorab, Pruefung auf Konfiguration und alle virtuellen Festplatten, einstellbare Anzahl Exporte je VM (aeltere werden erst nach einem erfolgreichen neuen Export geloescht), `Export-Info.txt` mit Anleitung zum Importieren
+- Export per Knopf: Ereignisse 1010/1011/1012, Protokoll `Logs\ServerBackup\Export_*.log`
+### Teams-Benachrichtigung
+- Je Ziel waehlbar, fuer welche Server-Backup-Profile es Meldungen bekommt (alle oder Auswahl) - z. B. je Standort ein eigener Kanal bei mehreren Profilen am selben Hyper-V-Host. Umbenannte Profile werden mitgenommen
+- Neue Kategorie *VM-Export fehlgeschlagen / mit Warnungen* (Standard an)
+### Dokumentation
+- Anleitung: neue Abschnitte *VM-Export* und *HUMig-Sicherung oder VM-Export?* (Gegenueberstellung, Empfehlung), Wiederherstellen aus einem Export, Teams-Ziele je Profil
+
 ## v2.0.122 - 2026-10-11
 ### Softwareverteilung: Testinstallation in der Windows Sandbox
 - Neuer Knopf *Testinstallation in der Sandbox*: installiert das Paket in der Windows Sandbox mit genau demselben Code wie bei der Verteilung, optional mit Deinstallationstest - Ergebnis OK / mit Hinweisen / fehlgeschlagen mit Exitcode, Dauer, sichtbaren Fenstern, Desktop-Verknuepfungen, Installation ins Benutzerprofil, neuen Eintraegen und Protokollen
