@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## v2.0.124 - 2026-10-12
+### Behoben
+- Werkzeug *Domaene / Zeit / Kerberos* › *Zeit synchronisieren*: Fehler 0x80070426 ("Dienst wurde nicht gestartet") - der Windows-Zeitdienst (W32Time) wird jetzt vorher gestartet; ein deaktivierter Dienst wird gemeldet, danach ein zweiter Versuch und Anzeige der Zeitquelle
+- Server-Backup › *VMs exportieren ...*: Fenster laesst sich vergroessern, die VM-Liste waechst mit
+
 ## v2.0.123 - 2026-10-12
 ### Server-Backup: VM-Export
 - Neuer Knopf *VMs exportieren ...*: ausgewaehlte VMs mit Hyper-V exportieren (vollstaendige Kopie je VM, an jedem Hyper-V-Host mit *Virtuellen Computer importieren* wiederherstellbar) - auf die Platte (Ordner `HUMig-Export`) oder in einen beliebigen Ordner bzw. eine Freigabe
