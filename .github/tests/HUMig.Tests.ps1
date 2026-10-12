@@ -1174,3 +1174,30 @@ Describe 'VM-Export (Hyper-V Export-VM) und Teams-Ziele je Server-Backup-Profil'
         Get-HMTeamsListKey $l | Should -Not -Be $k
     }
 }
+
+Describe 'HUPilot: Ordner finden und Hashes uebergeben' {
+    BeforeAll {
+        function Out-Console { param($m, $l) }
+        function Confirm-Action { param($m, $t) $false }
+        function Read-JsonFile([string]$Path) { if (Test-Path -LiteralPath $Path) { Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json } }
+        . (Join-Path $script:Root 'Functions\Tools-School.ps1')
+        $script:HP = Join-Path $TestDrive 'Stick'
+        New-Item -ItemType Directory -Path (Join-Path $script:HP 'HUPilot\Setup') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:HP 'HUPilot\Setup\HUPilot-Setup.ps1') -Value '#'
+        Set-Content -LiteralPath (Join-Path $script:HP 'HUPilot-Setup.cmd') -Value '@echo off'
+    }
+    It 'findet den HUPilot-Ordner ueber Stick-Ordner, cmd, ps1 und HUPilot-Ordner' {
+        $want = (Resolve-Path -LiteralPath (Join-Path $script:HP 'HUPilot')).ProviderPath
+        Resolve-HMHUPilotDir $script:HP | Should -Be $want
+        Resolve-HMHUPilotDir (Join-Path $script:HP 'HUPilot-Setup.cmd') | Should -Be $want
+        Resolve-HMHUPilotDir (Join-Path $script:HP 'HUPilot\Setup\HUPilot-Setup.ps1') | Should -Be $want
+        Resolve-HMHUPilotDir (Join-Path $script:HP 'HUPilot') | Should -Be $want
+        Resolve-HMHUPilotDir (Join-Path $TestDrive 'GibtEsNicht') | Should -Be ''
+        Resolve-HMHUPilotDir '' | Should -Be ''
+    }
+    It 'ohne eingetragenes HUPilot wird nichts geschrieben' {
+        $script:ConfigDir = Join-Path $TestDrive 'CfgLeer'
+        Add-HMHUPilotHashes @([pscustomobject]@{ Serial = 'SN1'; Hash = 'AAA'; Tag = '' })
+        Test-Path -LiteralPath (Join-Path $script:HP 'HUPilot\logs\hashes.csv') | Should -BeFalse
+    }
+}

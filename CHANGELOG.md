@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## v2.0.126 - 2026-10-12
+### Werkzeuge
+- Neuer Knopf *HUPilot ...* (Werkzeuge, Computer): oeffnet HUPilot-Setup an diesem PC (eigenes Werkzeug fuer Windows Autopilot per USB-Stick); beim ersten Mal HUPilot-Setup.cmd waehlen oder Anleitung oeffnen, Rechtsklick waehlt den Ordner neu (`Config\hupilot.json`)
+- *Autopilot-Hash* (einzeln und *Geraete (AD) / Mehrfach*): ist HUPilot eingetragen, koennen die Hashes direkt an HUPilot uebergeben werden (`HUPilot\logs\hashes.csv`, hochladen mit *Hashes importieren*)
+- System (dieser PC): alle Direktaufrufe (Taskmanager, Dienste, Registry, Verwaltungskonsolen, Systemsteuerung ...) starten wieder immer mit Administratorrechten - auch wenn HUMig ohne Adminrechte laeuft (Windows fragt dann nach). Ausnahme: *Autostart-Apps* (Einstellungen-App)
+
 ## v2.0.125 - 2026-10-12
 ### Behoben
 - *Zeit synchronisieren*: nach dem Start des Windows-Zeitdienstes wartet HUMig jetzt, bis er bereit ist, und laedt die Zeit-Einstellungen neu (bisher "nicht synchronisiert, da der Zeitdienst inaktiv war"). "Nicht synchronisiert" wird als FEHLER gemeldet, auch wenn w32tm Exitcode 0 liefert; dann Neustart des Dienstes und zweiter Versuch, sonst Anzeige von Zeitquelle, Einstellungen und moeglichen Ursachen

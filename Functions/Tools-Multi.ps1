@@ -438,10 +438,12 @@ function Start-HMAutopilotMulti([string[]]$Hosts) {
         param($rows)
         $lines = New-Object System.Collections.Generic.List[string]
         $tag = $script:AutopilotTag
+        $hup = New-Object System.Collections.Generic.List[object]
         $lines.Add($(if ($tag) { 'Device Serial Number,Windows Product ID,Hardware Hash,Group Tag' } else { 'Device Serial Number,Windows Product ID,Hardware Hash' }))
         foreach ($rw in $rows) {
             if ("$($rw[2])" -match 'SN=(\S*) HASH=(\S+)') {
                 $lines.Add($(if ($tag) { '{0},,{1},{2}' -f $Matches[1], $Matches[2], $tag } else { '{0},,{1}' -f $Matches[1], $Matches[2] }))
+                $hup.Add([pscustomobject]@{ Serial = $Matches[1]; Hash = $Matches[2]; Tag = $tag })
                 $rw[2] = "Seriennummer $($Matches[1]) - Hash gelesen"
             }
         }
@@ -454,6 +456,7 @@ function Start-HMAutopilotMulti([string[]]$Hosts) {
             Out-Console "Autopilot-CSV ($($lines.Count - 1) Geraete): $file" 'Success'
             Start-Process explorer.exe -ArgumentList "/select,`"$file`""
         } catch { Out-Console "Autopilot-CSV nicht gespeichert: $($_.Exception.Message)" 'Error' }
+        if (Get-Command Add-HMHUPilotHashes -ErrorAction SilentlyContinue) { Add-HMHUPilotHashes $hup.ToArray() }
     }
 }
 
