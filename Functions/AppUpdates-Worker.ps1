@@ -83,6 +83,12 @@ try {
         # als SYSTEM: Modul geht unter Windows PowerShell nicht -> winget.exe direkt (nur Ausgabe-Code, keine Textauswertung)
         $wg = Get-WWingetExe
         if (-not $wg) { throw 'winget.exe nicht gefunden (App Installer fuer alle Benutzer?)' }
+        # Als SYSTEM findet winget.exe die Visual-C++-Laufzeit des App-Pakets nicht (Exitcode 0xC0000135 "DLL nicht gefunden",
+        # z.B. Windows Server 2022 ohne VC++ Redistributable): Ordner des VCLibs-Pakets fuer diesen Prozess in den Suchpfad
+        $arch = if ("$env:PROCESSOR_ARCHITECTURE" -eq 'ARM64') { 'arm64' } else { 'x64' }
+        $vcl = @(Get-ChildItem -Path (Join-Path $env:ProgramFiles 'WindowsApps') -Filter "Microsoft.VCLibs.140.00.UWPDesktop_*_${arch}__8wekyb3d8bbwe" -Directory -ErrorAction SilentlyContinue |
+            Sort-Object { try { [version](($_.Name -split '_')[1]) } catch { [version]'0.0' } } -Descending)
+        foreach ($d in @(@($vcl | Select-Object -First 1 | ForEach-Object { $_.FullName }) + @(Split-Path $wg -Parent))) { if ($d -and "$env:PATH" -notlike "*$d*") { $env:PATH = "$d;$env:PATH" } }
         foreach ($it in @($req.Items | Where-Object { $_ })) {
             if (Test-Path -LiteralPath (Join-Path $Dir 'cancel')) { Write-WLog 'CANCEL'; break }
             Write-WLog "START|$($it.Id)"

@@ -68,6 +68,11 @@ try {
     try { Import-Module Microsoft.WinGet.Client -ErrorAction Stop } catch { Import-Module (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\Microsoft.WinGet.Client') -ErrorAction Stop }
     $wg = Get-AWingetExe
     if (-not $wg) { throw 'winget.exe nicht gefunden' }
+    # als SYSTEM fehlt sonst evtl. die Visual-C++-Laufzeit des App-Pakets (0xC0000135, z.B. Windows Server 2022)
+    $arch = if ("$env:PROCESSOR_ARCHITECTURE" -eq 'ARM64') { 'arm64' } else { 'x64' }
+    $vcl = @(Get-ChildItem -Path (Join-Path $env:ProgramFiles 'WindowsApps') -Filter "Microsoft.VCLibs.140.00.UWPDesktop_*_${arch}__8wekyb3d8bbwe" -Directory -ErrorAction SilentlyContinue |
+        Sort-Object { try { [version](($_.Name -split '_')[1]) } catch { [version]'0.0' } } -Descending)
+    foreach ($d in @(@($vcl | Select-Object -First 1 | ForEach-Object { $_.FullName }) + @(Split-Path $wg -Parent))) { if ($d -and "$env:PATH" -notlike "*$d*") { $env:PATH = "$d;$env:PATH" } }
     $seen = @{}
     $todo = @()
     foreach ($src in @($cfg.Sources | Where-Object { $_ })) {
