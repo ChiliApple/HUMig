@@ -1300,7 +1300,20 @@ function Start-HMDomainRepair {
                 "INFO Uhrzeit PC: $((Get-Date).ToString('dd.MM.yyyy HH:mm:ss'))"
             }
             'Repair' { try { if (Test-ComputerSecureChannel -Repair -Credential $cred -ErrorAction Stop) { 'OK Vertrauensstellung repariert' } else { 'FEHLER Reparatur fehlgeschlagen' } } catch { "FEHLER: $($_.Exception.Message)" } }
-            'Time' { $o = & w32tm.exe /resync /force 2>&1; "$(if ($LASTEXITCODE -eq 0) { 'OK' } else { 'FEHLER' }) Zeit: $(($o | Out-String).Trim())" }
+            'Time' {
+                # Windows-Zeitdienst (W32Time) muss laufen - auf vielen PCs startet er nur bei Bedarf (sonst 0x80070426 "Dienst wurde nicht gestartet")
+                $svc = Get-Service -Name W32Time -ErrorAction SilentlyContinue
+                if (-not $svc) { 'FEHLER Zeit: Dienst Windows-Zeitgeber (W32Time) nicht vorhanden - w32tm /register ausfuehren'; return }
+                if ("$($svc.StartType)" -eq 'Disabled') { "FEHLER Zeit: Dienst Windows-Zeitgeber (W32Time) ist deaktiviert - Starttyp auf Manuell/Automatisch setzen (evtl. per GPO deaktiviert)"; return }
+                if ("$($svc.Status)" -ne 'Running') {
+                    try { Start-Service -Name W32Time -ErrorAction Stop; Start-Sleep -Seconds 2; 'INFO Dienst Windows-Zeitgeber (W32Time) gestartet' } catch { "FEHLER Zeit: Dienst W32Time laesst sich nicht starten: $($_.Exception.Message)"; return }
+                }
+                $o = & w32tm.exe /resync /force 2>&1; $rc = $LASTEXITCODE
+                # direkt nach dem Start hat der Dienst evtl. noch keine Zeitquelle - einmal nachfassen
+                if ($rc -ne 0) { Start-Sleep -Seconds 5; $o = & w32tm.exe /resync /force 2>&1; $rc = $LASTEXITCODE }
+                "$(if ($rc -eq 0) { 'OK' } else { 'FEHLER' }) Zeit: $(($o | Out-String).Trim())"
+                "INFO $(((& w32tm.exe /query /status 2>&1) | Where-Object { "$_" -match '^(Quelle|Source)' }) -join ' ')"
+            }
             'Klist' { & klist.exe -li 0x3e7 purge 2>&1 | Out-Null; "$(if ($LASTEXITCODE -eq 0) { 'OK Kerberos-Tickets des Computers geleert (gpupdate holt neue)' } else { "FEHLER klist Code $LASTEXITCODE" })" }
         }
     }

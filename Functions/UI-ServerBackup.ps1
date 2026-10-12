@@ -852,33 +852,35 @@ function Start-HMSbBackup {
 function Show-HMSbExportDialog($Prof, $Drive) {
     $x = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="VMs exportieren" Width="660" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#FF1E1E2E">
-  <StackPanel Margin="14">
-    <TextBlock x:Name="info" Foreground="#FFCDD6F4" TextWrapping="Wrap" Margin="0,0,0,10"/>
-    <TextBlock Text="Virtuelle Computer:" Foreground="#FFA6ADC8" Margin="0,0,0,3"/>
-    <Border BorderBrush="#FF45475A" BorderThickness="1" MaxHeight="230">
+        Title="VMs exportieren" Width="700" Height="720" MinWidth="560" MinHeight="520" ResizeMode="CanResizeWithGrip" WindowStartupLocation="CenterOwner" Background="#FF1E1E2E">
+  <DockPanel Margin="14">
+    <TextBlock x:Name="info" DockPanel.Dock="Top" Foreground="#FFCDD6F4" TextWrapping="Wrap" Margin="0,0,0,10"/>
+    <TextBlock DockPanel.Dock="Top" Text="Virtuelle Computer:" Foreground="#FFA6ADC8" Margin="0,0,0,3"/>
+    <StackPanel DockPanel.Dock="Bottom">
+      <TextBlock Text="Ziel (leer = Ordner HUMig-Export auf der Platte des Profils):" Foreground="#FFA6ADC8" Margin="0,10,0,3"/>
+      <DockPanel>
+        <Button x:Name="btnDisk" DockPanel.Dock="Right" Content="Platte" Width="70" Height="26" Margin="4,0,0,0" Background="#FF45475A" Foreground="#FFCDD6F4" ToolTip="Ziel zuruecksetzen: Ordner HUMig-Export auf der Platte des Profils"/>
+        <Button x:Name="btnBrowse" DockPanel.Dock="Right" Content="..." Width="34" Height="26" Margin="4,0,0,0" Background="#FF45475A" Foreground="#FFCDD6F4" ToolTip="Ordner waehlen (lokal oder Freigabe)"/>
+        <TextBox x:Name="txtFolder" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,3"/>
+      </DockPanel>
+      <TextBlock x:Name="lblTarget" Foreground="#FF6C7086" TextWrapping="Wrap" Margin="0,3,0,8"/>
+      <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+        <TextBlock Text="Exporte je VM behalten (1-10):" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <TextBox x:Name="txtKeep" Width="50" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,2"/>
+        <TextBlock Text="aeltere werden erst nach einem erfolgreichen neuen Export geloescht" Foreground="#FF6C7086" VerticalAlignment="Center" TextWrapping="Wrap" Margin="10,0,0,0"/>
+      </StackPanel>
+      <CheckBox x:Name="chkAfter" Content="Nach jeder Sicherung dieses Profils automatisch exportieren (auch im Zeitplan)" Foreground="#FFCDD6F4" Margin="0,0,0,8"/>
+      <TextBlock Foreground="#FF6C7086" TextWrapping="Wrap" Margin="0,0,0,12" Text="Der Export ist eine vollstaendige Kopie je VM (keine Versionen) und laesst sich an jedem Hyper-V-Host mit 'Virtuellen Computer importieren' wiederherstellen. Laufende VMs werden anwendungskonsistent exportiert (Produktionspruefpunkt). Auf der Sicherungsplatte belegt jeder Export die volle Groesse der virtuellen Festplatten - aeltere Sicherungsstaende der Windows Server-Sicherung fallen dadurch frueher weg. Freigabe als Ziel: Hyper-V schreibt mit dem Computerkonto des Hosts (Schreibrecht fuer HOSTNAME$ noetig). 'Jetzt exportieren' aendert das Profil nicht."/>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button x:Name="ok" Content="Jetzt exportieren" Width="140" Height="28" Background="#FFA6E3A1" Foreground="#FF1E1E2E" FontWeight="SemiBold" Margin="0,0,6,0" IsDefault="True"/>
+        <Button x:Name="save" Content="Im Profil speichern" Width="140" Height="28" Background="#FF89B4FA" Foreground="#FF1E1E2E" Margin="0,0,6,0"/>
+        <Button x:Name="cancel" Content="Abbrechen" Width="100" Height="28" Background="#FF45475A" Foreground="#FFCDD6F4" IsCancel="True"/>
+      </StackPanel>
+    </StackPanel>
+    <Border BorderBrush="#FF45475A" BorderThickness="1" MinHeight="120">
       <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="pnlVms" Margin="6,4"/></ScrollViewer>
     </Border>
-    <TextBlock Text="Ziel (leer = Ordner HUMig-Export auf der Platte des Profils):" Foreground="#FFA6ADC8" Margin="0,10,0,3"/>
-    <DockPanel>
-      <Button x:Name="btnDisk" DockPanel.Dock="Right" Content="Platte" Width="70" Height="26" Margin="4,0,0,0" Background="#FF45475A" Foreground="#FFCDD6F4" ToolTip="Ziel zuruecksetzen: Ordner HUMig-Export auf der Platte des Profils"/>
-      <Button x:Name="btnBrowse" DockPanel.Dock="Right" Content="..." Width="34" Height="26" Margin="4,0,0,0" Background="#FF45475A" Foreground="#FFCDD6F4" ToolTip="Ordner waehlen (lokal oder Freigabe)"/>
-      <TextBox x:Name="txtFolder" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,3"/>
-    </DockPanel>
-    <TextBlock x:Name="lblTarget" Foreground="#FF6C7086" TextWrapping="Wrap" Margin="0,3,0,8"/>
-    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-      <TextBlock Text="Exporte je VM behalten (1-10):" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="0,0,8,0"/>
-      <TextBox x:Name="txtKeep" Width="50" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,2"/>
-      <TextBlock Text="aeltere werden erst nach einem erfolgreichen neuen Export geloescht" Foreground="#FF6C7086" VerticalAlignment="Center" Margin="10,0,0,0"/>
-    </StackPanel>
-    <CheckBox x:Name="chkAfter" Content="Nach jeder Sicherung dieses Profils automatisch exportieren (auch im Zeitplan)" Foreground="#FFCDD6F4" Margin="0,0,0,8"/>
-    <TextBlock Foreground="#FF6C7086" TextWrapping="Wrap" Margin="0,0,0,12" Text="Der Export ist eine vollstaendige Kopie je VM (keine Versionen) und laesst sich an jedem Hyper-V-Host mit 'Virtuellen Computer importieren' wiederherstellen. Laufende VMs werden anwendungskonsistent exportiert (Produktionspruefpunkt). Auf der Sicherungsplatte belegt jeder Export die volle Groesse der virtuellen Festplatten - aeltere Sicherungsstaende der Windows Server-Sicherung fallen dadurch frueher weg. Freigabe als Ziel: Hyper-V schreibt mit dem Computerkonto des Hosts (Schreibrecht fuer HOSTNAME$ noetig). 'Jetzt exportieren' aendert das Profil nicht."/>
-    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-      <Button x:Name="ok" Content="Jetzt exportieren" Width="140" Height="28" Background="#FFA6E3A1" Foreground="#FF1E1E2E" FontWeight="SemiBold" Margin="0,0,6,0" IsDefault="True"/>
-      <Button x:Name="save" Content="Im Profil speichern" Width="140" Height="28" Background="#FF89B4FA" Foreground="#FF1E1E2E" Margin="0,0,6,0"/>
-      <Button x:Name="cancel" Content="Abbrechen" Width="100" Height="28" Background="#FF45475A" Foreground="#FFCDD6F4" IsCancel="True"/>
-    </StackPanel>
-  </StackPanel>
+  </DockPanel>
 </Window>
 "@
     $w = [System.Windows.Markup.XamlReader]::Parse($x)
@@ -928,6 +930,7 @@ function Show-HMSbExportDialog($Prof, $Drive) {
     $c.ok.Add_Click({ & $collect 'Export' }.GetNewClosure())
     $c.save.Add_Click({ & $collect 'Save' }.GetNewClosure())
     $w.Owner = $script:Window; Set-HMWindowScale $w
+    try { $wa = [System.Windows.SystemParameters]::WorkArea; if ($w.Height -gt $wa.Height - 40) { $w.Height = $wa.Height - 40 } } catch { }
     if ($w.ShowDialog() -eq $true) { return $res.V }
     return $null
 }
