@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## v2.0.130 - 2026-10-13
+### Behoben
+- **Softwareverteilung, Testinstallation:** Inno-Setups (z. B. Greenshot) wurden ohne `/ALLUSERS` getestet und landeten im Benutzerprofil - die Erkennung fand das Programm danach nicht. HUMig ergaenzt `/ALLUSERS` jetzt vor dem Test, ausser `/ALLUSERS` oder `/CURRENTUSER` ist schon eingetragen. Danach den Vorschlag fuer die Erkennung uebernehmen
+- Ein Deinstallationsbefehl, der ins Sandbox-Benutzerprofil zeigt (frueherer Test), wird vor dem Test geleert und neu ermittelt
+
 ## v2.0.129 - 2026-10-13
 ### Behoben
 - **App-Updates: HUMig stuerzte auf Windows Server 2019 ab** ("Windows PowerShell funktioniert nicht mehr" bei *WinGet wird geprueft*). Das WinGet-Modul laeuft jetzt immer in einem eigenen Prozess (Pruefen, *WinGet einrichten*, Einrichtung am Ziel-PC): stuerzt es ab, bleibt HUMig offen und meldet *WinGet-Modul ist abgestuerzt* mit Fehlercode; *WinGet einrichten* wird dann nicht mehr angeboten
