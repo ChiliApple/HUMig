@@ -94,11 +94,14 @@ function Install-TWinGet {
         $old = [HMAuT.ErrMode]::SetErrorMode(0x8003)
     } catch { }
     $out = ''; $code = $null
+    $eap = $ErrorActionPreference
     try {
+        # stderr des Unterprozesses darf unter Windows PowerShell 5.1 (2>&1 bei EAP=Stop) nicht als Abbruch zaehlen - es zaehlt der Exitcode
+        $ErrorActionPreference = 'Continue'
         $out = (@(& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc 2>&1) | ForEach-Object { "$_" }) -join ' '
         $code = $LASTEXITCODE
     } catch { $out = $_.Exception.Message; $code = 1 }
-    finally { if ($null -ne $old) { try { [void][HMAuT.ErrMode]::SetErrorMode($old) } catch { } } }
+    finally { $ErrorActionPreference = $eap; if ($null -ne $old) { try { [void][HMAuT.ErrMode]::SetErrorMode($old) } catch { } } }
     if ($code -eq 0) {
         if (Test-TWinGet) { Out-L 'WinGet eingerichtet' } else { $script:TErr += 'WinGet nach der Einrichtung nicht gefunden' }
     } elseif ($code -eq 1) {
@@ -290,15 +293,21 @@ try {
             $keepIt = @()
             foreach ($it in $all) {
                 $iid = "$($it.Id)"
-                if ($iid -notmatch '^[^\s-]\S{0,254}$') {
-                    $res += [pscustomobject]@{ Id = $iid; Status = 'Exception'; Code = 0; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = 'ungueltige Paket-ID - nicht ausgefuehrt' }
-                    Out-L "ungueltige Paket-ID '$iid' - nicht ausgefuehrt"
+                # Paket-ID und Quelle kommen aus der Liste (gelesen im Benutzerkonto) und gehen an winget.exe als SYSTEM:
+                # nur unauffaellige Zeichen zulassen (keine Leerzeichen/Anfuehrungszeichen, die weitere Argumente erzeugen koennten)
+                if ($iid -notmatch '^[^\s\-"][^\s"]{0,254}$' -or "$($it.Source)" -notmatch '^[A-Za-z0-9._-]{1,64}$') {
+                    $res += [pscustomobject]@{ Id = $iid; Status = 'Exception'; Code = 0; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = 'ungueltige Paket-ID oder Quelle - nicht ausgefuehrt' }
+                    Out-L "ungueltige Paket-ID '$iid' bzw. Quelle '$($it.Source)' - nicht ausgefuehrt"
                     Out-L "#DONE|$iid|Exception|0|0|0|False"   # Fortschritt wie bei ausgefuehrten Programmen
                     continue
                 }
                 if ($Op -eq 'Update') {
                     $hit = $null
-                    foreach ($xe in $exl) { $xp = "$($xe.Pattern)".Trim(); if ($iid -like $xp -or "$($it.Name)" -like $xp) { $hit = $xe; break } }
+                    foreach ($xe in $exl) {
+                        $xp = "$($xe.Pattern)".Trim(); $m = $false
+                        try { $m = ($iid -like $xp -or "$($it.Name)" -like $xp) } catch { $m = ($iid -eq $xp -or "$($it.Name)" -eq $xp) }   # ungueltiges Muster bricht nicht ab
+                        if ($m) { $hit = $xe; break }
+                    }
                     if ($hit) {
                         $res += [pscustomobject]@{ Id = $iid; Status = 'Excluded'; Code = 0; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = 'Ausnahme - nicht aktualisiert' }
                         Out-L "$iid`: Ausnahme ($("$($hit.Pattern)".Trim())) - nicht aktualisiert"

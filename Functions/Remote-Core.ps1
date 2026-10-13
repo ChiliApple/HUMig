@@ -456,6 +456,13 @@ function Get-HMRemoteSan([byte[]]$Raw) {
     } catch { }
     return [pscustomobject]@{ IPs = $ips; Dns = $dns }
 }
+# SHA-256-Fingerabdruck eines Zertifikats in Vierergruppen (zum Vergleichen am Handy)
+function Get-HMRemoteFingerprint($Cert) {
+    if (-not $Cert) { return '' }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $h = ([BitConverter]::ToString($sha.ComputeHash($Cert.RawData))) -replace '-', '' } finally { $sha.Dispose() }
+    return ((($h -split '(.{4})') | Where-Object { $_ }) -join ' ')
+}
 function Get-HMRemoteCertSan($Cert) {
     $e = @($Cert.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.17' })[0]
     if (-not $e) { return [pscustomobject]@{ IPs = @(); Dns = @() } }
@@ -504,8 +511,11 @@ function New-HMRemoteServerCert($Ca, [string[]]$Ips, [string]$Store = 'LocalMach
     return (New-SelfSignedCertificate @p)
 }
 # Alte Server-Zertifikate der Fernbedienung entfernen (ausser $Keep)
-function Remove-HMRemoteOldCerts([string]$Keep, [string]$Store = 'LocalMachine') {
-    foreach ($c in @(Get-ChildItem -Path "Cert:\$Store\My" -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -eq $script:HMRemoteCertName -and $_.Thumbprint -ne $Keep })) {
+# Zertifikate, die gerade an eine HTTPS-Bindung (z.B. Einrichtung fuer den Benutzer-Modus) gebunden sind, bleiben ($Keep: weitere)
+function Remove-HMRemoteOldCerts([string[]]$Keep, [string]$Store = 'LocalMachine', [int[]]$BoundPorts = @()) {
+    $k = @($Keep | Where-Object { $_ } | ForEach-Object { "$_".ToUpperInvariant() })
+    foreach ($bp in @($BoundPorts | Where-Object { $_ -gt 0 })) { try { $b = Get-HMRemoteBinding $bp; if ($b.State -eq 'Ours' -and $b.Thumb) { $k += $b.Thumb } } catch { } }
+    foreach ($c in @(Get-ChildItem -Path "Cert:\$Store\My" -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -eq $script:HMRemoteCertName -and $k -notcontains $_.Thumbprint.ToUpperInvariant() })) {
         try { Remove-Item -LiteralPath "Cert:\$Store\My\$($c.Thumbprint)" -DeleteKey -ErrorAction Stop } catch { try { Remove-Item -LiteralPath "Cert:\$Store\My\$($c.Thumbprint)" -ErrorAction SilentlyContinue } catch { } }
     }
 }
@@ -541,18 +551,32 @@ function Remove-HMRemoteBinding([int]$Port) {
     if ((Get-HMRemoteBinding $Port).State -ne 'Ours') { return }
     [void](& netsh.exe http delete sslcert "ipport=0.0.0.0:$Port" 2>&1)
 }
-function Set-HMRemoteUrlAcl([int]$Port, [string]$Sid) {
+# URL-Reservierung (Port-Freigabe) des Benutzer-Modus: das eingerichtete Konto + Administratoren (BA), damit die
+# Fernbedienung auf diesem Port auch als Administrator startet. Eine fremde Reservierung wird nie geloescht.
+function Get-HMRemoteUrlAclText([int]$Port) { return (& netsh.exe http show urlacl "url=https://+:$Port/" 2>&1 | Out-String) }
+# Gehoert die Reservierung (falls vorhanden) uns? Text aus "netsh http show urlacl" (sprachunabhaengig ueber SID/SDDL)
+function Test-HMRemoteUrlAclOurs([string]$Text, [int]$Port, [string]$Sid) {
+    if ("$Text" -notmatch [regex]::Escape("https://+:$Port/")) { return $true }   # keine Reservierung
+    return ($Sid -and "$Text" -match [regex]::Escape("D:(A;;GX;;;$Sid)"))
+}
+function Set-HMRemoteUrlAcl([int]$Port, [string]$Sid, [string]$OldSid = '') {
     if ($Sid -notmatch '^S-1-5-21-[\d-]+$') { throw "Benutzerkonto ungueltig ($Sid)" }
-    [void](& netsh.exe http delete urlacl "url=https://+:$Port/" 2>&1)
-    $o = & netsh.exe http add urlacl "url=https://+:$Port/" "sddl=D:(A;;GX;;;$Sid)" 2>&1
+    $txt = Get-HMRemoteUrlAclText $Port
+    if (-not (Test-HMRemoteUrlAclOurs $txt $Port $Sid) -and -not (Test-HMRemoteUrlAclOurs $txt $Port $OldSid)) { throw "Port $Port ist bereits fuer ein anderes Programm/Konto reserviert (netsh http show urlacl) - anderen Port waehlen" }
+    if ("$txt" -match [regex]::Escape("https://+:$Port/")) { [void](& netsh.exe http delete urlacl "url=https://+:$Port/" 2>&1) }
+    $o = & netsh.exe http add urlacl "url=https://+:$Port/" "sddl=D:(A;;GX;;;$Sid)(A;;GX;;;BA)" 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Port-Freigabe fuer das Benutzerkonto nicht moeglich: $(@($o) -join ' ')" }
 }
-function Remove-HMRemoteUrlAcl([int]$Port) { [void](& netsh.exe http delete urlacl "url=https://+:$Port/" 2>&1) }
+function Remove-HMRemoteUrlAcl([int]$Port, [string]$Sid) {
+    $txt = Get-HMRemoteUrlAclText $Port
+    if ($Sid -and "$txt" -match [regex]::Escape("https://+:$Port/") -and (Test-HMRemoteUrlAclOurs $txt $Port $Sid)) { [void](& netsh.exe http delete urlacl "url=https://+:$Port/" 2>&1) }
+}
 function Set-HMRemoteFirewall([string]$Name, [int]$Port, $Remote) {
     Remove-NetFirewallRule -Name $Name -ErrorAction SilentlyContinue
     $p = @{
         Name = $Name; DisplayName = "HUMig Fernbedienung (TCP $Port)"; Group = 'HUMig'; Direction = 'Inbound'; Action = 'Allow'
         Protocol = 'TCP'; LocalPort = "$Port"; Profile = @('Domain', 'Private'); RemoteAddress = @($Remote)
+        Program = 'System'   # http.sys (Kernel) nimmt die Verbindungen an - ein anderes Programm auf dem Port bleibt gesperrt
         Description = 'HUMig: Handy-Fernbedienung (nur Domaenen- und private Netze). Wird von HUMig angelegt und entfernt.'
     }
     [void](New-NetFirewallRule @p -ErrorAction Stop)

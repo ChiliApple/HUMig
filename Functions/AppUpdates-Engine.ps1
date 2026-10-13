@@ -21,7 +21,10 @@ $script:HMAuAppInstaller = 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe'
 function Find-HMAuExclusion($Item, $Exclusions) {
     foreach ($e in @($Exclusions | Where-Object { $_ -and "$($_.Pattern)".Trim() })) {
         $p = "$($e.Pattern)".Trim()
-        if ("$($Item.Id)" -like $p -or "$($Item.Name)" -like $p) { return $e }
+        # ungueltiges Muster (z.B. "Tool [Beta") darf den Lauf nicht abbrechen - dann als Text vergleichen
+        $hit = $false
+        try { $hit = ("$($Item.Id)" -like $p -or "$($Item.Name)" -like $p) } catch { $hit = ("$($Item.Id)" -eq $p -or "$($Item.Name)" -eq $p) }
+        if ($hit) { return $e }
     }
     return $null
 }

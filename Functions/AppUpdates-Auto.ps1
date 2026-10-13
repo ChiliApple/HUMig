@@ -81,7 +81,7 @@ try {
                 if ($seen.ContainsKey("$($p.Id)")) { continue }
                 $seen["$($p.Id)"] = $true
                 $found++
-                $ex = @($cfg.Exclude | Where-Object { $_ -and "$($_.Pattern)".Trim() -and ("$($p.Id)" -like "$($_.Pattern)".Trim() -or "$($p.Name)" -like "$($_.Pattern)".Trim()) })[0]
+                $ex = @($cfg.Exclude | Where-Object { $_ -and "$($_.Pattern)".Trim() -and $(try { "$($p.Id)" -like "$($_.Pattern)".Trim() -or "$($p.Name)" -like "$($_.Pattern)".Trim() } catch { "$($p.Id)" -eq "$($_.Pattern)".Trim() -or "$($p.Name)" -eq "$($_.Pattern)".Trim() }) })[0]
                 if ($ex) { $excl++; Write-ALog "Ausnahme: $($p.Name) ($($ex.Pattern))"; continue }
                 $todo += [pscustomobject]@{ Id = "$($p.Id)"; Name = "$($p.Name)"; From = "$($p.InstalledVersion)"; To = "$(@($p.AvailableVersions)[0])"; Source = "$src" }
             }
@@ -92,7 +92,7 @@ try {
     foreach ($t in $todo) {
         Set-AProgress $true $i $todo.Count "$($t.Name)" $ok $err
         # Paket-ID pruefen (keine Optionen/Leerzeichen), sonst nicht an winget weitergeben
-        if ("$($t.Id)" -notmatch '^[^\s-]\S{0,254}$') { $i++; $err++; Write-ALog "$($t.Name): ungueltige Paket-ID '$($t.Id)' - uebersprungen"; continue }
+        if ("$($t.Id)" -notmatch '^[^\s\-"][^\s"]{0,254}$' -or "$($t.Source)" -notmatch '^[A-Za-z0-9._-]{1,64}$') { $i++; $err++; Write-ALog "$($t.Name): ungueltige Paket-ID '$($t.Id)' bzw. Quelle '$($t.Source)' - uebersprungen"; continue }
         $out = @(& $wg upgrade --id $t.Id --exact --source $t.Source --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | ForEach-Object { "$_" })
         $r = Format-ACode ([int64]$LASTEXITCODE)
         $i++

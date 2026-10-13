@@ -173,7 +173,9 @@ function Get-HMGitHubRateLimit($Err) {
         if (-not $v) { try { $v = @($hd.GetValues('X-RateLimit-Reset'))[0] } catch { } }
         if ("$v" -match '^\d+$') { $reset = [DateTimeOffset]::FromUnixTimeSeconds([int64]"$v").LocalDateTime }
     } catch { }
-    if (-not $reset) { $reset = (Get-Date).AddHours(1) }
+    # hoechstens etwas ueber eine Stunde (die Grenze gilt je Stunde) - schuetzt vor tagelanger Sperre bei falscher PC-Uhr
+    $max = (Get-Date).AddMinutes(65)
+    if (-not $reset -or $reset -gt $max) { $reset = $(if ($reset) { $max } else { (Get-Date).AddHours(1) }) }
     return $reset.ToString('yyyy-MM-ddTHH:mm:ss')
 }
 

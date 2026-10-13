@@ -1,5 +1,15 @@
 ﻿# Changelog
 
+## v2.0.138 - 2026-10-13
+### Behoben (Pruefung v2.0.137)
+- **Server-Backup endete seit v2.0.123 immer als Abbruch** (Fehler beim Formatieren der Ereignismeldung) - geplante Sicherungen meldeten "Abbruch"/FEHLGESCHLAGEN, obwohl die Sicherung gelungen war, und die Platte wurde danach **nicht ausgeworfen bzw. offline geschaltet**. Ein neuer automatischer Test prueft alle Formatierungen im Code
+- App-Updates: Paket-ID und Quelle aus der gelesenen Liste werden vor dem Aufruf von winget.exe als SYSTEM streng geprueft (keine Leerzeichen/Anfuehrungszeichen) - ein Benutzer kann so keine zusaetzlichen winget-Parameter einschleusen. Neue Quellen nur mit einfachem Namen
+- App-Updates: eine Ausnahme mit ungueltigem Platzhalter (z. B. `Tool [Beta`) bricht den Lauf nicht mehr ab
+- *WinGet einrichten* am Ziel-PC: Ausgaben des Unterprozesses auf stderr zaehlen nicht mehr als Fehler (entscheidend ist der Exitcode)
+- Handy-Fernbedienung: **SHA-256-Fingerabdruck** der CA im Fenster *Handy* (und Hinweis auf der Seite) zum Vergleichen am Handy; Firewall-Regel nur fuer http.sys (Programm *System*); Port-Freigabe fuer den Benutzer-Modus gilt auch fuer Administratoren, eine fremde Reservierung wird nie geloescht; eine zweite HUMig-Instanz (z. B. andere RDP-Sitzung) raeumt die laufende Fernbedienung nicht mehr als "Rest" weg; gebundene Zertifikate werden nicht geloescht; Zugriffsprotokoll wird nicht in eine Verknuepfung geschrieben
+- Testinstallation: `C:\Users\Public` gilt nicht mehr als Benutzerprofil
+- Update-Check: die Sperre wegen der GitHub-Abfragegrenze dauert hoechstens gut eine Stunde (auch bei falsch gehender PC-Uhr)
+
 ## v2.0.137 - 2026-10-13
 ### Update
 - **GitHub-Abfragegrenze** (ohne Anmeldung 60 Abfragen je Stunde fuer alle Geraete hinter derselben Internet-Adresse): HUMig meldet jetzt klar, ab wann es wieder geht (statt "privat?"), und fragt bis dahin nicht mehr. Ein erfolgreicher Update-Check gilt 30 Minuten; nach Einstellungen, Token oder Signieren wird sofort neu gefragt. Abhilfe: Nur-Lese-Token (Rechtsklick auf *Update* > *GitHub-Token*)

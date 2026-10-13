@@ -454,7 +454,8 @@ function ConvertFrom-HMSandboxEntry {
     if (-not $n) { $n = $dn }
     $detName = if ($n) { [System.Management.Automation.WildcardPattern]::Escape($n) + '*' } else { '' }
     $minVer = if ($ver -match '^\d+(\.\d+){1,3}') { $Matches[0] } else { '' }
-    $user = ($key -match '^HKEY_CURRENT_USER') -or ("$($Entry.InstallLocation)$($Entry.UninstallString)" -match '(?i)\\Users\\')
+    $profRx = '(?i)\\Users\\(?!Public\\|Default\\|All Users\\)[^\\]+\\'
+    $user = ($key -match '^HKEY_CURRENT_USER') -or ("$($Entry.InstallLocation)" -match $profRx) -or ("$($Entry.UninstallString)" -match $profRx)
     return [pscustomobject]@{
         DisplayName = $dn; Version = $ver; Publisher = "$($Entry.Publisher)"; UninstallCmd = $un
         ProductCode = $pc; DetectKey = $psKey; DetectName = $detName; MinVersion = $minVer
@@ -1042,7 +1043,9 @@ function Get-HMSandboxSummary {
     $userFolders = @($Res.UserFolders | Where-Object { $_ -match '(?i)\\AppData\\Local\\Programs\\' -and $_ -notmatch '(?i)\\AppData\\Local\\Programs\\Common$' })
     # Installation ins Benutzerprofil: Eintrag in HKCU bzw. Pfad im Profil; neue Programm-Ordner im Profil zaehlen nur,
     # wenn es keinen Eintrag in 'Apps & Features' gibt (sonst entscheidet der Eintrag, z.B. Programme\... fuer alle Benutzer)
-    $userInst = (@($entries | Where-Object { "$($_.Key)" -match '^HKEY_CURRENT_USER' -or "$($_.InstallLocation)$($_.UninstallString)" -match '(?i)\\Users\\' }).Count -gt 0) -or (-not $entries.Count -and $userFolders.Count -gt 0)
+    # Profilpfad: C:\Users\<Name>\... ausser Public/Default; InstallLocation und Deinstallationsbefehl getrennt pruefen
+    $profRx = '(?i)\\Users\\(?!Public\\|Default\\|All Users\\)[^\\]+\\'
+    $userInst = (@($entries | Where-Object { "$($_.Key)" -match '^HKEY_CURRENT_USER' -or "$($_.InstallLocation)" -match $profRx -or "$($_.UninstallString)" -match $profRx }).Count -gt 0) -or (-not $entries.Count -and $userFolders.Count -gt 0)
     if ($userInst) {
         $warnings.Add("ACHTUNG: installiert ins Benutzerprofil - bei der Verteilung landet es im Profil des ausfuehrenden Kontos, nicht beim angemeldeten Benutzer. Schalter fuer 'alle Benutzer' verwenden (Inno: /ALLUSERS, MSI: ALLUSERS=1) oder als Benutzer ausfuehren.")
     }
