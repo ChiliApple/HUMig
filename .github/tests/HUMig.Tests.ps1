@@ -1258,3 +1258,240 @@ Describe 'Testinstallation (Sandbox): Installation ins Benutzerprofil erkennen' 
         (Get-HMSandboxSummary -Result (New-HMSbxRes @() @('C:\Users\WDAGUtilityAccount\AppData\Local\Programs\App')) -Settings ([pscustomobject]@{ Name = 'App' })).Proposal.RunAsUser | Should -BeTrue
     }
 }
+
+Describe 'Handy-Fernbedienung: QR-Code, Kopplung, Anfragen' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Remote-Core.ps1')
+        . (Join-Path $script:Root 'Functions\Remote-Web.ps1')
+        function New-HMRemTestState {
+            $S = New-HMRemoteState
+            $S.Pc = 'TESTPC'; $S.Version = '9.9.9'
+            $S.Static = Get-HMRemoteWebFiles -Version '9.9.9' -Pc 'TESTPC' -Icon192 ([byte[]](1, 2)) -Icon512 ([byte[]](3, 4)) -Ca ([byte[]](48, 1, 0))
+            return $S
+        }
+        function Invoke-HMRemTest($S, [string]$Method, [string]$Path, $Body = $null, [string]$Token = '', [string]$Ip = '10.0.0.9', [string]$Origin = '', [hashtable]$Query = @{}) {
+            $b = if ($null -ne $Body) { $Body | ConvertTo-Json -Compress } else { '' }
+            $a = if ($Token) { "Bearer $Token" } else { '' }
+            return (Get-HMRemoteResponse $S @{ Method = $Method; Path = $Path; Query = $Query; Auth = $a; Origin = $Origin; Host = '10.0.0.5:8443'; Body = $b; Ip = $Ip; Now = (Get-Date) })
+        }
+        function Get-HMRemTestMd5([string]$s) {
+            $m = [System.Security.Cryptography.MD5]::Create()
+            try { return ([BitConverter]::ToString($m.ComputeHash([Text.Encoding]::ASCII.GetBytes($s))) -replace '-', '') } finally { $m.Dispose() }
+        }
+    }
+    It 'QR-Code: Version, Groesse und Module wie die Referenz (Python qrcode, Byte-Modus, Fehlerkorrektur M)' {
+        $q = ConvertTo-HMQrMatrix 'https://10.1.1.5:8443/#c=123456' -Mask 2
+        $q.Version | Should -Be 3; $q.Size | Should -Be 29
+        Get-HMRemTestMd5 (-join $q.Modules) | Should -Be '29844F505C3044CEB3D5A597B7FE6CBB'
+        $q = ConvertTo-HMQrMatrix 'https://192.168.178.200:65535/#c=987654' -Mask 5
+        Get-HMRemTestMd5 (-join $q.Modules) | Should -Be 'C4A16335056A9538C86C93805DEE6648'
+        (ConvertTo-HMQrMatrix ('x' * 200)).Version | Should -Be 10
+        { ConvertTo-HMQrMatrix ('x' * 300) } | Should -Throw
+    }
+    It 'Token und Code: zufaellig, Format, nur Hash vergleichbar' {
+        $t1 = New-HMRemoteToken; $t2 = New-HMRemoteToken
+        $t1 | Should -Match '^[A-Za-z0-9_-]{43}$'; $t1 | Should -Not -Be $t2
+        New-HMRemotePairCode | Should -Match '^\d{6}$'
+        Test-HMRemoteEqual '123456' '123456' | Should -BeTrue
+        Test-HMRemoteEqual '123456' '123457' | Should -BeFalse
+        ConvertTo-HMRemoteDeviceName "<b>Max</b>`n" | Should -Be 'bMax/b'
+        ConvertTo-HMRemoteDeviceName '' | Should -Be 'Handy'
+        (ConvertTo-HMRemoteDeviceName ('a' * 80)).Length | Should -Be 40
+    }
+    It 'Seite: statische Dateien, keine Inline-Skripte, kein innerHTML' {
+        $S = New-HMRemTestState
+        $r = Invoke-HMRemTest $S 'GET' '/'
+        $r.Code | Should -Be 200; $r.Type | Should -Match 'text/html'
+        $html = [Text.Encoding]::UTF8.GetString($r.Bytes)
+        $html | Should -Match '<script src="/app.js" defer></script>'
+        $html | Should -Not -Match '<script>'
+        $html | Should -Not -Match '\son[a-z]+='
+        $html | Should -Not -Match '\sstyle='
+        [Text.Encoding]::UTF8.GetString($S.Static['/app.js'].Bytes) | Should -Not -Match 'innerHTML|outerHTML|insertAdjacentHTML|eval\('
+        [Text.Encoding]::UTF8.GetString($S.Static['/sw.js'].Bytes) | Should -Match "humig-9\.9\.9"
+        ([Text.Encoding]::UTF8.GetString($S.Static['/manifest.webmanifest'].Bytes) | ConvertFrom-Json).name | Should -Be 'HUMig TESTPC'
+        (Invoke-HMRemTest $S 'GET' '/ca.cer').Headers['Content-Disposition'] | Should -Match 'HUMig-CA.cer'
+        (Invoke-HMRemTest $S 'GET' '/gibtsnicht').Code | Should -Be 404
+        (Invoke-HMRemTest $S 'POST' '/').Code | Should -Be 405
+        $script:HMRemoteHeaders['Content-Security-Policy'] | Should -Match "script-src 'self'"
+        $script:HMRemoteHeaders['Content-Security-Policy'] | Should -Match "frame-ancestors 'none'"
+    }
+    It 'Koppeln: nur offen, falscher Code zaehlt, nach 5 Fehlversuchen gesperrt' {
+        $S = New-HMRemTestState
+        (Invoke-HMRemTest $S 'POST' '/api/pair' @{ code = '123456'; name = 'A' }).Code | Should -Be 409
+        $code = Open-HMRemotePairing $S
+        $bad = if ($code -eq '000000') { '111111' } else { '000000' }
+        for ($i = 1; $i -le 5; $i++) { (Invoke-HMRemTest $S 'POST' '/api/pair' @{ code = $bad } -Ip "10.0.0.$i").Code | Should -Be 403 }
+        $S.Pair.Locked | Should -BeTrue
+        (Invoke-HMRemTest $S 'POST' '/api/pair' @{ code = $code } -Ip '10.0.0.50').Code | Should -Be 409
+        $S.Devices.Count | Should -Be 0
+    }
+    It 'Koppeln: richtiger Code -> Token, gespeichert wird nur der Hash; danach Zugriff, Entfernen wirkt sofort' {
+        $S = New-HMRemTestState
+        $code = Open-HMRemotePairing $S
+        $r = Invoke-HMRemTest $S 'POST' '/api/pair' @{ code = $code; name = 'Pixel' }
+        $r.Code | Should -Be 200
+        $j = $r.Text | ConvertFrom-Json
+        $j.token | Should -Match '^[A-Za-z0-9_-]{43}$'
+        $S.Devices.ContainsKey($j.token) | Should -BeFalse
+        $S.Devices.ContainsKey((Get-HMRemoteHash $j.token)) | Should -BeTrue
+        $r.Log | Should -Not -Match ([regex]::Escape($j.token))
+        $S.Events.Dequeue().Kind | Should -Be 'Paired'
+        (Invoke-HMRemTest $S 'GET' '/api/state' -Token $j.token).Code | Should -Be 200
+        $S.Devices.Clear()
+        (Invoke-HMRemTest $S 'GET' '/api/state' -Token $j.token).Code | Should -Be 401
+    }
+    It 'Ohne gueltiges Token: 401, nach 10 Fehlversuchen von einer Adresse 429' {
+        $S = New-HMRemTestState
+        for ($i = 0; $i -lt 10; $i++) { (Invoke-HMRemTest $S 'GET' '/api/state' -Token ('x' * 43) -Ip '10.9.9.9').Code | Should -Be 401 }
+        (Invoke-HMRemTest $S 'GET' '/api/state' -Token ('x' * 43) -Ip '10.9.9.9').Code | Should -Be 429
+        (Invoke-HMRemTest $S 'GET' '/api/state' -Ip '10.9.9.8').Code | Should -Be 401
+    }
+    It 'Status: gueltiges JSON mit Startseite, Vorgang und neuen Konsolenzeilen' {
+        $S = New-HMRemTestState
+        $code = Open-HMRemotePairing $S
+        $tok = ((Invoke-HMRemTest $S 'POST' '/api/pair' @{ code = $code; name = 'P' }).Text | ConvertFrom-Json).token
+        $data = [pscustomobject]@{ Time = (Get-Date '2026-10-13 08:00'); Warnings = @([pscustomobject]@{ Level = 'Error'; Area = 'Zeitplan'; Text = 'Plan <x> "1"' }); Schedules = @(); Backups = @(); Server = @(); Apps = @() }
+        $S.StatusJson = ConvertTo-HMRemoteStatusJson $data
+        $job = @{ Started = (Get-Date).AddSeconds(-65); Progress = 42; Status = 'kopiere'; Cancel = $false }
+        $S.JobJson = ConvertTo-HMRemoteJobJson $job 'Backup PC1'
+        Add-HMRemoteLineTo $S 'eins' 'Info'; Add-HMRemoteLineTo $S 'zwei' 'Error'
+        $j = (Invoke-HMRemTest $S 'GET' '/api/state' -Token $tok -Query @{ since = '1' }).Text | ConvertFrom-Json
+        $j.ok | Should -BeTrue; $j.pc | Should -Be 'TESTPC'; $j.device | Should -Be 'P'
+        $j.status.warnings[0].text | Should -Be 'Plan <x> "1"'
+        $j.job.running | Should -BeTrue; $j.job.progress | Should -Be 42; $j.job.title | Should -Be 'Backup PC1'
+        @($j.lines).Count | Should -Be 1; $j.lines[0].t | Should -Be 'zwei'; $j.seq | Should -Be 2
+        (ConvertTo-HMRemoteJobJson $null '' @{ Title = 'X'; Result = 'erfolgreich'; Time = '13.10. 08:00' } | ConvertFrom-Json).lastTitle | Should -Be 'X'
+        for ($i = 0; $i -lt 350; $i++) { Add-HMRemoteLineTo $S "z$i" 'Info' }
+        $S.Lines.Count | Should -Be 300
+    }
+    It 'Abbrechen nur mit Bestaetigung und Token, fremde Herkunft abgelehnt; Entkoppeln' {
+        $S = New-HMRemTestState
+        $code = Open-HMRemotePairing $S
+        $tok = ((Invoke-HMRemTest $S 'POST' '/api/pair' @{ code = $code; name = 'P' }).Text | ConvertFrom-Json).token
+        (Invoke-HMRemTest $S 'POST' '/api/cancel' @{ } -Token $tok).Code | Should -Be 400
+        $S.CancelReq | Should -BeNullOrEmpty
+        (Invoke-HMRemTest $S 'POST' '/api/cancel' @{ confirm = $true } -Token $tok -Origin 'https://boese.example').Code | Should -Be 403
+        (Invoke-HMRemTest $S 'POST' '/api/cancel' @{ confirm = $true } -Token $tok -Origin 'https://10.0.0.5:8443').Code | Should -Be 202
+        $S.CancelReq.By | Should -Be 'P'
+        (Invoke-HMRemTest $S 'POST' '/api/cancel' @{ confirm = $true }).Code | Should -Be 401
+        (Invoke-HMRemTest $S 'POST' '/api/unpair' @{ } -Token $tok).Code | Should -Be 200
+        $S.Devices.Count | Should -Be 0
+    }
+    It 'Geraete-Datei: speichern und lesen (nur Hashes), kaputte Eintraege ignoriert' {
+        $f = Join-Path $TestDrive 'dev.json'
+        $d = [hashtable]::Synchronized(@{}); $d[(Get-HMRemoteHash 'abc')] = @{ Id = '1'; Name = 'A'; Created = 'x'; LastSeen = 'y'; LastIp = '10.0.0.1' }
+        Save-HMRemoteDevices $d $f
+        (Get-Content $f -Raw) | Should -Not -Match '"abc"'
+        $r = Read-HMRemoteDevices $f
+        $r.Count | Should -Be 1; $r[(Get-HMRemoteHash 'abc')].Name | Should -Be 'A'
+        Set-Content $f '{"Devices":[{"Hash":"kaputt","Name":"X"}]}'
+        (Read-HMRemoteDevices $f).Count | Should -Be 0
+    }
+    It 'Netz: private Adressen, Firewall-Gegenstellen, Reihenfolge der Adressen' {
+        Test-HMRemotePrivateIp '10.1.1.5' | Should -BeTrue
+        Test-HMRemotePrivateIp '172.31.0.1' | Should -BeTrue
+        Test-HMRemotePrivateIp '172.32.0.1' | Should -BeFalse
+        Test-HMRemotePrivateIp '193.170.219.50' | Should -BeFalse
+        @(Get-HMRemoteFirewallRemote @('10.20.0.0/16', 'quatsch', '300.1.1.1', '192.168.1.7')) | Should -Be @('LocalSubnet', '10.20.0.0/16', '192.168.1.7')
+        $l = Select-HMRemoteIPs @([pscustomobject]@{ IP = '172.20.1.1'; Gateway = $false; Private = $true }, [pscustomobject]@{ IP = '10.1.1.5'; Gateway = $true; Private = $true }, [pscustomobject]@{ IP = '193.1.1.1'; Gateway = $true; Private = $false })
+        $l[0].IP | Should -Be '10.1.1.5'; $l[1].IP | Should -Be '193.1.1.1'
+    }
+    It 'Zertifikat: Namensbeschraenkung, SAN lesen, Bindung erkennen' {
+        $t = Get-HMRemoteNameConstraintText @('pc1', 'pc1.schule.local')
+        $t | Should -Match '^2\.5\.29\.30=\{critical\}\{text\}subtree=include&DNS=pc1&DNS=pc1\.schule\.local&IPAddress=10\.0\.0\.0,255\.0\.0\.0&IPAddress=172\.16\.0\.0,255\.240\.0\.0&IPAddress=192\.168\.0\.0,255\.255\.0\.0$'
+        # SEQUENCE { dNSName "pc1", iPAddress 10.1.1.5 }
+        $raw = [byte[]](0x30, 0x0B, 0x82, 0x03, 0x70, 0x63, 0x31, 0x87, 0x04, 10, 1, 1, 5)
+        $s = Get-HMRemoteSan $raw
+        $s.Dns | Should -Be @('pc1'); $s.IPs | Should -Be @('10.1.1.5')
+        $g = $script:HMRemoteAppId.Trim('{}')
+        (ConvertFrom-HMRemoteSslShow "IP:port : 0.0.0.0:8443`n Certificate Hash : 0123456789abcdef0123456789abcdef01234567`n Application ID : {$g}").State | Should -Be 'Ours'
+        (ConvertFrom-HMRemoteSslShow "IP:port : 0.0.0.0:8443`n Certificate Hash : 0123456789abcdef0123456789abcdef01234567`n Application ID : {11111111-2222-3333-4444-555555555555}").State | Should -Be 'Foreign'
+        (ConvertFrom-HMRemoteSslShow 'Das System kann die angegebene Datei nicht finden.').State | Should -Be 'None'
+    }
+}
+
+Describe 'Handy-Fernbedienung: echtes HTTPS mit eigener CA (Windows, Administrator)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Remote-Core.ps1')
+        . (Join-Path $script:Root 'Functions\Remote-Web.ps1')
+        $script:RemOk = ([Environment]::OSVersion.Platform -eq 'Win32NT') -and ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    It 'CA mit Namensbeschraenkung, Server-Zertifikat, Bindung, Webserver: Seite laden und koppeln' -Skip:(-not (([Environment]::OSVersion.Platform -eq 'Win32NT') -and ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))) {
+        $port = Get-HMRemoteFreePort 18442
+        $port | Should -BeGreaterThan 0
+        $ca = $null; $cert = $null; $S = $null; $ps = $null; $rs = $null
+        try {
+            $ca = New-HMRemoteCa
+            $ca.HasPrivateKey | Should -BeTrue
+            @($ca.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.30' -and $_.Critical }).Count | Should -Be 1
+            @($ca.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.19' }).Count | Should -Be 1
+            (Get-HMRemoteCa).Thumbprint | Should -Be $ca.Thumbprint
+            $cert = New-HMRemoteServerCert $ca @('127.0.0.1', '10.1.1.5')
+            Test-HMRemoteServerCert $cert $ca @('10.1.1.5') | Should -BeTrue
+            Test-HMRemoteServerCert $cert $ca @('10.1.1.6') | Should -BeFalse
+            (Get-HMRemoteCertSan $cert).IPs | Should -Contain '10.1.1.5'
+            # Kette baut nur mit der eigenen CA (als vertrauenswuerdig behandelt)
+            $ch = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+            $ch.ChainPolicy.RevocationMode = 'NoCheck'
+            $ch.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
+            [void]$ch.ChainPolicy.ExtraStore.Add($ca)
+            [void]$ch.Build($cert)
+            $ch.ChainElements.Count | Should -Be 2
+            $ch.ChainElements[1].Certificate.Thumbprint | Should -Be $ca.Thumbprint
+            # Webserver (127.0.0.1 ist kein privater Bereich der Namensbeschraenkung - daher eigene Pruefung ohne Namensabgleich)
+            Set-HMRemoteBinding $port $cert.Thumbprint
+            (Get-HMRemoteBinding $port).State | Should -Be 'Ours'
+            $S = New-HMRemoteState
+            $S.Port = $port; $S.Pc = 'CI'; $S.Version = '9.9.9'
+            $S.Static = Get-HMRemoteWebFiles -Version '9.9.9' -Pc 'CI' -Icon192 ([byte[]](1)) -Icon512 ([byte[]](2)) -Ca $ca.RawData
+            $code = Open-HMRemotePairing $S
+            $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace(); $rs.Open()
+            $rs.SessionStateProxy.SetVariable('S', $S)
+            $ps = [PowerShell]::Create(); $ps.Runspace = $rs
+            $core = (Join-Path $script:Root 'Functions\Remote-Core.ps1') -replace "'", "''"
+            [void]$ps.AddScript(". '$core'`nStart-HMRemoteListenerLoop `$S")
+            $h = $ps.BeginInvoke()
+            for ($i = 0; $i -lt 50 -and -not $S.Listening -and -not $S.Error; $i++) { Start-Sleep -Milliseconds 100 }
+            $S.Error | Should -BeNullOrEmpty
+            $S.Listening | Should -BeTrue
+            $caTp = $ca.Thumbprint
+            $old = [Net.ServicePointManager]::ServerCertificateValidationCallback
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+            $caObj = $ca
+            # Kette selbst mit der eigenen CA bauen (nicht im Speicher 'Vertrauenswuerdige Stammzertifizierungsstellen')
+            [Net.ServicePointManager]::ServerCertificateValidationCallback = {
+                param($s, $c, $chain, $err)
+                $x = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+                $x.ChainPolicy.RevocationMode = 'NoCheck'
+                $x.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
+                [void]$x.ChainPolicy.ExtraStore.Add($caObj)
+                [void]$x.Build((New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 $c))
+                return ($x.ChainElements.Count -ge 2 -and $x.ChainElements[1].Certificate.Thumbprint -eq $caTp)
+            }.GetNewClosure()
+            try {
+                $wc = New-Object System.Net.WebClient
+                $html = $wc.DownloadString("https://127.0.0.1:$port/")
+                $html | Should -Match 'Mit HUMig koppeln'
+                $wc.ResponseHeaders['Content-Security-Policy'] | Should -Match "default-src 'none'"
+                $wc.ResponseHeaders['X-Frame-Options'] | Should -Be 'DENY'
+                $wc2 = New-Object System.Net.WebClient
+                $wc2.Headers['Content-Type'] = 'application/json'
+                $res = $wc2.UploadString("https://127.0.0.1:$port/api/pair", 'POST', (@{ code = $code; name = 'CI' } | ConvertTo-Json -Compress)) | ConvertFrom-Json
+                $res.ok | Should -BeTrue
+                $wc3 = New-Object System.Net.WebClient
+                $wc3.Headers['Authorization'] = "Bearer $($res.token)"
+                ($wc3.DownloadString("https://127.0.0.1:$port/api/state") | ConvertFrom-Json).pc | Should -Be 'CI'
+                $wc4 = New-Object System.Net.WebClient
+                $e = $null; try { [void]$wc4.DownloadString("https://127.0.0.1:$port/api/state") } catch { $e = $_ }
+                "$e" | Should -Match '401'
+            } finally { [Net.ServicePointManager]::ServerCertificateValidationCallback = $old }
+        } finally {
+            if ($S) { $S.Run = $false; for ($i = 0; $i -lt 30 -and $S.Listening; $i++) { Start-Sleep -Milliseconds 100 } }
+            try { if ($ps) { $ps.Dispose() }; if ($rs) { $rs.Dispose() } } catch { }
+            Remove-HMRemoteBinding $port
+            foreach ($c in @($cert, $ca)) { if ($c) { Remove-Item -LiteralPath "Cert:\LocalMachine\My\$($c.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue } }
+        }
+        (Get-HMRemoteBinding $port).State | Should -Be 'None'
+    }
+}

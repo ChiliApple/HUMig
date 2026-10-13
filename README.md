@@ -183,6 +183,14 @@ Installierte Programme per **WinGet** aktualisieren – am gewählten PC oder in
 - **Ausnahmen** je Standort (z. B. Prüfungssoftware), eigene Quellen, Verlauf
 - **Zeitplan** an den Ziel-PCs (als SYSTEM, PC wecken, verpasste Termine nachholen)
 
+## Handy-Fernbedienung
+
+Status und laufende Vorgänge am Handy – im selben Netz, als App auf dem Startbildschirm:
+
+- Knopf **Handy** unten rechts: QR-Code scannen, 6-stelligen Code bestätigen, fertig
+- Startseite (Hinweise, Zeitpläne, letzte Sicherungen, Server-Backup, App-Updates), laufender Vorgang mit Fortschritt und Konsole, *Abbrechen* mit Bestätigung
+- HTTPS mit eigener, auf diesen PC beschränkter Zertifizierungsstelle; Zugriff nur für gekoppelte Handys, Firewall-Regel nur solange aktiv
+
 ## Update und Sicherheit
 
 - Kanal **Stabil** (Standard) oder **Test**; Vorversion per Rechtsklick auf *Update*

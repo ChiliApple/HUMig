@@ -140,7 +140,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>Live-Anzeige</td><td>Während Backup, Restore und Server-Backup steht unter den Modulen bzw. VMs: <b>Lesen / Schreiben</b> des Kopiervorgangs in MB/s (Robocopy, USMT, Windows Server-Sicherung – gilt auch für Netzwerkziele), <b>CPU</b> und <b>Arbeitsspeicher</b>, jeweils mit Verlauf der letzten 60 Sekunden. Am Ende: Durchschnitt, Spitze, gelesene und geschriebene Menge. CPU und Arbeitsspeicher sind die Werte des PCs, auf dem HUMig läuft – nicht die eines über das Netzwerk gesicherten PCs.</td></tr>
     <tr><td><b>Konsole</b> (unten)</td><td>Alle Meldungen farbig. Rechtsklick = leeren, <kbd>Strg</kbd>+<kbd>C</kbd> = kopieren. Die Trennlinie ist verschiebbar.</td></tr>
   </table>
-  <p>Ein <b>pulsierender grüner Punkt</b> (Statusleiste unten, im Reiter Server-Backup neben dem Ladehinweis) zeigt, dass HUMig im Hintergrund noch liest oder arbeitet – die Oberfläche bleibt dabei bedienbar. Alle Tabellen passen die Spaltenbreite dem Inhalt an (bei Bedarf waagrechter Bildlauf); Dauern werden lesbar angezeigt (z. B. <i>6 h 12 min</i>).</p>
+  <p>Ein <b>pulsierender grüner Punkt</b> (Statusleiste unten, im Reiter Server-Backup neben dem Ladehinweis) zeigt, dass HUMig im Hintergrund noch liest oder arbeitet – die Oberfläche bleibt dabei bedienbar. Ganz rechts in der Statusleiste öffnet <span class="ui">Handy</span> die <a href="#fernbedienung">Handy-Fernbedienung</a> (grüner Punkt = eingeschaltet). Alle Tabellen passen die Spaltenbreite dem Inhalt an (bei Bedarf waagrechter Bildlauf); Dauern werden lesbar angezeigt (z. B. <i>6 h 12 min</i>).</p>
   <h3>Größe anpassen (kleine Bildschirme)</h3>
   <p><kbd>Strg</kbd>+<kbd>+</kbd> / <kbd>Strg</kbd>+<kbd>−</kbd> oder <kbd>Strg</kbd>+Mausrad vergrößert/verkleinert die gesamte Oberfläche, <kbd>Strg</kbd>+<kbd>0</kbd> = automatisch. Fest einstellen: Einstellungen › Allgemein › <b>Skalierung</b>. Die Größe wird beim Beenden gespeichert und gilt für alle Fenster.</p>
   <p>Ohne Administratorrechte bietet HUMig den <a href="#benutzermodus">Benutzer-Modus</a> an – für Profile anderer Benutzer, Remote, USMT und die meisten Werkzeuge werden Adminrechte gebraucht.</p>
@@ -794,8 +794,37 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   </table>
 </section>
 
+<section id="fernbedienung">
+  <h2><span class="n">14</span>Handy-Fernbedienung</h2>
+  <p class="lead">Status und laufende Vorgänge am Handy ansehen – im selben Netz, verschlüsselt, als App auf dem Startbildschirm. Gekoppelte Handys sehen die Startseite (Hinweise, Zeitpläne, letzte Sicherungen, Server-Backup, App-Updates) und den laufenden Vorgang mit Fortschritt und Konsole und können ihn abbrechen (mit Bestätigung am Handy).</p>
+  <div class="flow"><span>1 · Knopf <b>Handy</b> › Einschalten</span><i>→</i><span>2 · QR-Code scannen</span><i>→</i><span>3 · Zertifikat einmal installieren</span><i>→</i><span>4 · Koppeln, als App hinzufügen</span></div>
+
+  <h3 id="fernbedienung-start">Einschalten und koppeln</h3>
+  <ol class="steps">
+    <li>Unten rechts im Hauptfenster <span class="ui">Handy</span> › <span class="ui g">Einschalten</span>. HUMig zeigt QR-Code, Adresse (<code>https://&lt;IP&gt;:8443</code>) und einen <b>6-stelligen Code</b>. Der Code gilt 10 Minuten und nur solange das Fenster offen ist; nach 5 falschen Eingaben ist die Kopplung gesperrt (<span class="ui">Neuer Code</span>).</li>
+    <li>Handy im <b>selben Netz</b>: QR-Code mit der Kamera scannen. Beim ersten Mal warnt der Browser vor dem Zertifikat – einmal bestätigen.</li>
+    <li>Auf der Seite <b>Zertifikat laden</b> und installieren (Anleitung für Android und iPhone steht dort). <b>Android:</b> Einstellungen › Sicherheit › Verschlüsselung &amp; Anmeldedaten › Zertifikat installieren › CA-Zertifikat. <b>iPhone:</b> in Safari laden, Einstellungen › Profil geladen › Installieren, dann Allgemein › Info › <i>Zertifikatsvertrauenseinstellungen</i> einschalten.</li>
+    <li>Seite neu laden – der Code ist aus dem QR-Code schon eingetragen – <b>Koppeln</b>. Als App: Android <i>App installieren</i>, iPhone Teilen › <i>Zum Home-Bildschirm</i>. Auf dem iPhone hat die App einen eigenen Speicher: dort den Code noch einmal eingeben.</li>
+  </ol>
+  <p>Das Handy bleibt gekoppelt, bis es in HUMig (Fenster <span class="ui">Handy</span> › <span class="ui">Entfernen</span>) oder am Handy (<i>Mehr</i> › <i>Entkoppeln</i>) entfernt wird – bis zu 10 Handys je Windows-Benutzer. Ändert sich die IP-Adresse des PCs, ist es für das Handy eine neue Adresse (neu koppeln) – für Server am besten eine feste Adresse bzw. DHCP-Reservierung.</p>
+
+  <h3 id="fernbedienung-sicherheit">Sicherheit</h3>
+  <ul>
+    <li><b>Verschlüsselt:</b> HTTPS über den Windows-Dienst http.sys mit einem Zertifikat dieses PCs. HUMig legt dafür eine <b>eigene kleine Zertifizierungsstelle (CA)</b> an. Sie darf nur für diesen PC (Name) und private IP-Bereiche (10.x, 172.16–31.x, 192.168.x) ausstellen (<i>Namensbeschränkung</i>), ihr Schlüssel ist nicht exportierbar und liegt im Zertifikatspeicher des Computers (nur Administratoren). Die CA bleibt erhalten, damit das Handy das Zertifikat nur einmal braucht; das Server-Zertifikat erneuert HUMig, wenn sich die Adressen ändern.</li>
+    <li><b>Zugriff nur gekoppelt:</b> jedes Handy hat ein eigenes zufälliges Token (256 Bit); HUMig speichert nur dessen Prüfsumme (<code>%APPDATA%\HUMig\remote-devices.json</code>). Entfernen wirkt sofort. Nach 10 Fehlversuchen von einer Adresse ist diese 15 Minuten gesperrt.</li>
+    <li><b>Netz:</b> Firewall-Regel <i>HUMig Fernbedienung</i> nur für Domänen- und private Netze, nur aus dem lokalen Subnetz (plus eingetragene Netze), nur solange die Fernbedienung an ist. In einem als <i>Öffentlich</i> eingestuften Netz startet sie nicht. Nach einem Absturz räumt HUMig Regel und Bindung beim nächsten Start auf.</li>
+    <li><b>Webseite:</b> strenge Sicherheitsrichtlinie (kein fremder Code, keine Einbettung in fremde Seiten), Daten nur als Text, nie zwischengespeichert. Zugriffe stehen in <code>Logs\Remote\Remote_&lt;Monat&gt;.log</code> (ohne Token und Codes).</li>
+    <li><b>Was das Handy sieht:</b> Namen von PCs und Benutzern, Pfade und Konsolenzeilen – keine Kennwörter oder Webhook-Adressen.</li>
+  </ul>
+
+  <h3 id="fernbedienung-einstellungen">Einstellungen und Benutzer-Modus</h3>
+  <p><span class="ui">Einstellungen</span> › <b>Handy</b>: beim Start automatisch einschalten, <b>Port</b> (Standard 8443; ist er belegt, schlägt HUMig einen freien vor – eine HTTPS-Bindung eines anderen Programms wird nie überschrieben), <b>Laufzeit</b> (solange HUMig läuft oder 15 Minuten bis 8 Stunden), weitere erlaubte Netze (z.&nbsp;B. das WLAN-Netz, wenn es ein eigenes Subnetz ist – die Firewall bzw. das Routing dazwischen muss den Port durchlassen).</p>
+  <p><b>Benutzer-Modus:</b> ohne Administratorrechte kann HUMig Zertifikat, Bindung und Firewall-Regel nicht anlegen. Ein Administrator richtet das einmal ein: <span class="ui">Fuer Benutzer-Modus einrichten</span> mit dem Benutzerkonto. Firewall-Regel <i>HUMig Fernbedienung</i> (dauerhaft), HTTPS-Bindung und Port-Freigabe (<code>netsh http urlacl</code>) nur für dieses Konto bleiben dann bestehen – auch wenn HUMig zu ist (dann antwortet auf dem Port niemand). <span class="ui">Entfernen</span> nimmt alles wieder weg. Gespeichert in <code>Config\remote-setup.json</code>.</p>
+  <div class="note warn"><b class="h">Gut zu wissen</b>HUMig muss am PC offen sein. Geplante Sicherungen laufen ohne HUMig – deren <b>Ergebnis</b> zeigt die Startseite, den Live-Fortschritt nicht. Liegt das Handy-WLAN in einem anderen Netz als der PC, muss die Firewall dazwischen (z.&nbsp;B. FortiGate) den Port vom WLAN zum PC erlauben. Ob jedes Handy die Namensbeschränkung der CA prüft, hängt vom Betriebssystem ab (aktuelle Android- und iOS-Versionen tun es).</div>
+</section>
+
 <section id="einstellungen">
-  <h2><span class="n">14</span>Einstellungen</h2>
+  <h2><span class="n">15</span>Einstellungen</h2>
   <table>
     <tr><th style="width:170px">Reiter</th><th>Inhalt</th></tr>
     <tr><td>Allgemein</td><td>Backup-Ordner, Threads, Aufbewahrung (Tage + Anzahl je PC/Benutzer), gelöschte Dateien im fortlaufenden Backup aufheben (Tage, Standard 90), Warnung bei Massenlöschung (Prozent, Standard 20), USMT-Pfad (<span class="ui">Aus ADK einrichten</span>), Softwareverteilung, Treiberverteilung, WLAN-Schlüssel im Klartext, Übersicht automatisch aktualisieren, Skalierung, HUMig.exe neu erstellen, Desktop-Verknüpfung</td></tr>
@@ -805,6 +834,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>Ausnahmen</td><td>Ordner und Dateitypen, die im Profil und auf C:\ nicht gesichert werden · Standard wiederherstellen</td></tr>
     <tr><td>Module</td><td>Module ein-/ausblenden, eigene Module anlegen/löschen, <code>modules.json</code> für Experten</td></tr>
     <tr><td>Links</td><td>Eigene Links (Name + URL) für den Werkzeug-Reiter; Platzhalter <code>{SERIAL}</code> und <code>{COMPUTER}</code> des gewählten Computers, optional Seriennummer in die Zwischenablage</td></tr>
+    <tr><td>Handy</td><td><a href="#fernbedienung">Handy-Fernbedienung</a>: automatisch einschalten, Port, Laufzeit, erlaubte Netze, Einrichtung für den Benutzer-Modus</td></tr>
     <tr><td>Update</td><td><a href="#update">Kanal Stabil/Test</a>, installierte Version, andere Version / Vorversion, Signatur, Quelle, GitHub-Token (nur bei privatem Repository)</td></tr>
   </table>
   <h3>Konfigurationsdateien</h3>
@@ -816,6 +846,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><code>Config\modules.json</code></td><td>eigene Module und Vorlagen</td></tr>
     <tr><td><code>Config\appupdates.json</code></td><td>App-Updates: Ausnahmen und Quellen je Standort (Vorlage <code>appupdates.default.json</code>), Verlauf in <code>Config\AppUpdates\history.json</code></td></tr>
     <tr><td><code>Config\serverbackup.json</code></td><td>Server-Backup-Profile (VMs, Platten, Optionen, VM-Export: <code>ExportVMs</code>, <code>ExportFolder</code>, <code>ExportKeep</code>, <code>ExportAfter</code>), Suchwörter der Zeitplan-Prüfung (<code>ConflictWords</code>)</td></tr>
+    <tr><td><code>Config\remote-setup.json</code>, <code>remote-temp.json</code></td><td>Handy-Fernbedienung: Einrichtung für den Benutzer-Modus (Konto, Port) bzw. Vermerk für das Aufräumen nach einem Absturz</td></tr>
     <tr><td><code>Config\update.json</code></td><td>Update-Einstellungen: Quelle (<code>Owner</code>, <code>Repo</code>), <code>Channel</code> (<code>Stable</code>/<code>Test</code>), <code>SignerThumbprint</code> (nur eigene Quelle), <code>AllowUnsigned</code> (Signaturprüfung aus – nicht empfohlen), Entwicklung: <code>Branch</code>, <code>UseBranch</code> (nur ohne Signaturpflicht). Daneben <code>installed.json</code>: installierte Version, Kanal und Prüfung.</td></tr>
   </table>
   <p>Die <code>*.default.json</code> kommen mit jedem Update, eigene Dateien bleiben erhalten.</p>
@@ -831,13 +862,15 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td><code>%LOCALAPPDATA%\HUMig\Zeitplaene</code></td><td>Backup-Zeitpläne des Benutzers</td></tr>
     <tr><td><code>%ProgramData%\HUMig\Notify</code></td><td>Teams-Meldung der geplanten Profil-Backups: Skript <code>relay.ps1</code> (läuft als SYSTEM), Stand <code>relay-state.json</code>, Protokoll <code>relay.log</code></td></tr>
     <tr><td><code>HKLM\SOFTWARE\HUMig\Notify</code></td><td>Teams-Ziele (Webhook-Adressen verschlüsselt, nur Administratoren/SYSTEM)</td></tr>
+    <tr><td><code>%APPDATA%\HUMig\remote-devices.json</code></td><td>gekoppelte Handys (nur Prüfsummen der Tokens)</td></tr>
+    <tr><td>Zertifikatspeicher Computer › Eigene</td><td><i>HUMig Fernbedienung CA</i> und <i>HUMig Fernbedienung</i> (Server-Zertifikat) – <a href="#fernbedienung-sicherheit">Handy-Fernbedienung</a></td></tr>
     <tr><td>Aufgabenplanung <code>\HUMig\</code></td><td>Server-Backup-, Backup- und App-Updates-Zeitpläne, <i>Teams-Meldung Profil-Backups</i></td></tr>
   </table>
   <div class="note"><b class="h">Ordner %ProgramData%\HUMig ist geschützt</b>Dort liegen Skripte, die als SYSTEM laufen (App-Update-Zeitplan), und Sicherungen, die HUMig mit Administratorrechten zurückspielt. HUMig sichert den Ordner vor jeder Nutzung am jeweiligen PC ab: Besitzer Administratoren, schreiben dürfen nur SYSTEM und Administratoren, Benutzer nur lesen. Verknüpfungen (Junctions/Symlinks) im Ordner werden entfernt, ohne ihr Ziel anzurühren. Gelingt das Absichern nicht, bricht das betroffene Werkzeug mit einer Meldung ab. <i>Profil zurückholen</i> bietet nur Sicherungen an, die genau so aussehen, wie <i>Profil erneuern</i> sie anlegt.</div>
 </section>
 
 <section id="update">
-  <h2><span class="n">15</span>Installation und Update</h2>
+  <h2><span class="n">16</span>Installation und Update</h2>
   <ol class="steps">
     <li><b>Neu installieren:</b> <code>Pull.ps1</code> in den Zielordner legen und ausführen: <code>powershell -ExecutionPolicy Bypass -File Pull.ps1</code></li>
     <li><b>Update:</b> Knopf <span class="ui">Update</span> – lädt die neueste Version im gewählten Kanal, prüft sie und startet neu. BACKUPS, Config, Software-/Treiberverteilung und HUMig.exe bleiben erhalten (Details unten).</li>
@@ -862,7 +895,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 </section>
 
 <section id="faq">
-  <h2><span class="n">16</span>Fragen und Probleme</h2>
+  <h2><span class="n">17</span>Fragen und Probleme</h2>
   <h3>„Übersprungen“ im Robocopy.log – fehlt etwas?</h3>
   <p>Nein. Versteckte/System-Dateien (z. B. <code>pagefile.sys</code>), Nur-Cloud-Platzhalter und Ausschlussmuster werden bewusst nicht kopiert. Das HUMig-Protokoll zeigt sie getrennt als <i>absichtlich ausgelassen</i>. Echte Fehler stehen unter <i>FAILED</i> und als Warnung im Protokoll.</p>
   <h3>Windows meldet „Robocopy lädt Dateien herunter“</h3>
@@ -884,7 +917,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 </section>
 
 <section id="tasten">
-  <h2><span class="n">17</span>Tastenkürzel</h2>
+  <h2><span class="n">18</span>Tastenkürzel</h2>
   <table>
     <tr><td style="width:230px"><kbd>F1</kbd></td><td>Anleitung</td></tr>
     <tr><td><kbd>Enter</kbd> im Feld Computer</td><td>Verbinden</td></tr>

@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## v2.0.136 - 2026-10-13
+### Neu: Handy-Fernbedienung
+- Status und laufende Vorgaenge am Handy ansehen und abbrechen - im selben Netz, als App auf dem Startbildschirm (PWA). Knopf **Handy** unten rechts: Ein/Aus, QR-Code und 6-stelliger Kopplungscode, gekoppelte Handys
+- Handy-Seite: Startseite (Hinweise, Zeitplaene, letzte Sicherungen, Server-Backup, App-Updates), laufender Vorgang mit Fortschritt und Konsole live, *Abbrechen* mit Bestaetigung am Handy
+- Sicherheit: HTTPS mit eigener CA je PC (nur fuer diesen PC und private IP-Bereiche, Schluessel nicht exportierbar), Geraete-Token mit 256 Bit (gespeichert nur der Hash), Sperre nach Fehlversuchen, Firewall-Regel nur in Domaenen-/privaten Netzen und nur solange aktiv, strenge Sicherheitsrichtlinie der Webseite, Zugriffsprotokoll `Logs\Remote`
+- Einstellungen > **Handy**: automatisch einschalten, Port (Pruefung auf belegte Ports), Laufzeit, weitere erlaubte Netze, einmalige Einrichtung fuer den Benutzer-Modus durch einen Administrator
+
 ## v2.0.135 - 2026-10-13
 ### Werkzeuge
 - *Geraete (AD) / Mehrfach*: neue Aktion **App-Updates suchen** - uebernimmt die angehakten PCs als Ziel in den Reiter App-Updates und sucht dort (danach wie gewohnt aktualisieren oder Zeitplan anlegen)

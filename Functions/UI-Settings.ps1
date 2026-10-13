@@ -91,7 +91,8 @@ function Show-SettingsDialog {
         'chkWlanClear', 'txtSwDir', 'btnSwDir', 'txtDrvDir', 'btnDrvDir', 'txtSubnet', 'txtDns', 'btnLauncher', 'btnShortcut', 'chkRGp', 'chkRWu', 'chkRNum', 'chkRFav', 'chkRFast', 'txtRScript', 'btnRScript', 'chkROfferApps', 'chkRVerify', 'cmbTeams', 'btnTeamsAdd', 'txtTeamsName', 'pwdTeams', 'btnTeamsTest', 'btnTeamsDel', 'lblTeams', 'pnlTeamsCats', 'pnlTeamsSbProfiles',
         'tabExceptions', 'btnExcDefault', 'txtExPF', 'txtExPFi', 'txtExPMin', 'txtExSF', 'txtExSFi', 'txtExSMin', 'tabModules', 'txtNmName', 'cmbNmGroup',
         'cmbNmType', 'txtNmFilter', 'txtNmPath', 'btnNmAdd', 'btnModDel', 'btnModJson', 'btnAppEditor', 'dgModules', 'btnLinkAdd', 'btnLinkDel', 'dgLinks',
-        'txtOwner', 'txtRepo', 'txtBranch', 'lblToken', 'btnTokenSet', 'btnTokenDel', 'tabUpdate', 'cmbChannel', 'lblInstalled', 'btnVersions', 'chkRequireSig', 'txtSignerThumb', 'chkUseBranch')) { $f[$n] = $w.FindName($n) }
+        'txtOwner', 'txtRepo', 'txtBranch', 'lblToken', 'btnTokenSet', 'btnTokenDel', 'tabUpdate', 'cmbChannel', 'lblInstalled', 'btnVersions', 'chkRequireSig', 'txtSignerThumb', 'chkUseBranch',
+        'tabRemote', 'chkRemoteAuto', 'txtRemotePort', 'cmbRemoteTime', 'txtRemoteNets', 'txtRemoteUser', 'btnRemoteSetup', 'btnRemoteUnsetup', 'lblRemoteSetup')) { $f[$n] = $w.FindName($n) }
     $f.lblPath.Text = $script:ConfigDir
     $st = @{ Saved = $false; Win = $w; F = $f }
     $script:SetDlg = $st
@@ -396,6 +397,9 @@ function Show-SettingsDialog {
     })
     $f.btnTokenDel.Add_Click({ Remove-Item -LiteralPath (Get-GitHubTokenFile) -Force -ErrorAction SilentlyContinue; & $script:SetDlg.UpdTok })
 
+    # --- Handy-Fernbedienung ---
+    try { Initialize-HMRemoteSettingsTab $f } catch { Out-Console "Einstellungen Handy: $($_.Exception.Message)" 'Warning' }
+
     # --- Buttons ---
     $f.btnOpenConfig.Add_Click({ Start-Process explorer.exe -ArgumentList "`"$($script:ConfigDir)`"" })
     $f.btnCancel.Add_Click({ $script:SetDlg.Win.Close() })
@@ -496,6 +500,9 @@ function Show-SettingsDialog {
             if ($show -ne $defShow -or $dfl -ne $defDef) { $ov[$r.Id] = [ordered]@{ Show = $show; Default = $dfl } }
         }
         $h.ModuleOverrides = $ov
+        $rem = Get-HMRemoteSettingsFromTab $F $W
+        if ($null -eq $rem) { $F.tabs.SelectedItem = $F.tabRemote; return }
+        $h.Remote = $rem
         Write-JsonFile $p ([pscustomobject]$h) 8
         # Ausnahmen
         $ex = [ordered]@{
@@ -532,6 +539,7 @@ function Show-SettingsDialog {
         'Module' { $f.tabs.SelectedItem = $f.tabModules }
         'Standorte' { $f.tabs.SelectedItem = $f.tabSchools }
         'Update' { $f.tabs.SelectedItem = $f.tabUpdate }
+        'Handy' { $f.tabs.SelectedItem = $f.tabRemote }
     }
     [void]$w.ShowDialog()
     $saved = $st.Saved

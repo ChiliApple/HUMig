@@ -208,6 +208,7 @@
         <!-- Statusleiste -->
         <Border DockPanel.Dock="Bottom" Background="{StaticResource CatCrust}" Padding="8,4">
             <DockPanel>
+                <Button x:Name="btnRemote" DockPanel.Dock="Right" Content="Handy" Style="{StaticResource BtnDefault}" Padding="10,1" Margin="10,0,0,0" FontSize="11" ToolTip="Handy-Fernbedienung: Status und laufende Vorgaenge am Handy ansehen (im selben Netz)"/>
                 <TextBlock x:Name="lblElapsed" DockPanel.Dock="Right" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" Margin="10,0,0,0"/>
                 <ProgressBar x:Name="pbMain" DockPanel.Dock="Right" Width="260" Height="12" Minimum="0" Maximum="100" Value="0" Background="{StaticResource CatSurface0}" Foreground="{StaticResource CatGreen}" BorderThickness="0"/>
                 <Ellipse x:Name="dotBusy" DockPanel.Dock="Left" Width="9" Height="9" Fill="{StaticResource CatGreen}" Margin="0,0,6,0" VerticalAlignment="Center" Visibility="Collapsed"/>

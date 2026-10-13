@@ -364,7 +364,7 @@ try { $script:AclEarly = Invoke-HMAppFolderCheck $script:Splash; $script:AclChec
 # ============================================================================
 # FUNKTIONEN LADEN
 # ============================================================================
-foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Core-Notify.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Sandbox.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1', 'AppUpdates-Engine.ps1', 'UI-AppUpdates.ps1', 'UI-Status.ps1', 'UI-Monitor.ps1', 'UI-Wizard.ps1')) {
+foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Core-Notify.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Sandbox.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1', 'AppUpdates-Engine.ps1', 'UI-AppUpdates.ps1', 'UI-Status.ps1', 'UI-Monitor.ps1', 'UI-Wizard.ps1', 'Remote-Core.ps1', 'Remote-Web.ps1', 'UI-Remote.ps1')) {
     $mp = Join-Path $script:AppRoot "Functions\$mod"
     try { . $mp } catch { [System.Windows.MessageBox]::Show("$mod konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null; exit 1 }
 }
@@ -513,7 +513,7 @@ if ($script:AppIcon) { $script:Window.Icon = $script:AppIcon }
 
 function Get-UI([string]$n) { $e = $script:Window.FindName($n); if (-not $e) { Write-Host "[WARN] UI '$n' fehlt" -ForegroundColor Yellow }; return $e }
 $ui = @{}
-foreach ($n in @('btnWizard', 'brdMonBackup', 'brdMonRestore', 'brdMonServer', 'tabStatus', 'pnlStatus', 'btnStatusRefresh', 'lblStatusTime', 'imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
+foreach ($n in @('btnWizard', 'btnRemote', 'brdMonBackup', 'brdMonRestore', 'brdMonServer', 'tabStatus', 'pnlStatus', 'btnStatusRefresh', 'lblStatusTime', 'imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
     'txtBackupRoot', 'btnBrowseRoot', 'btnOpenRoot', 'lblFree', 'tabMain', 'cmbPreset', 'btnAllOn', 'btnAllOff', 'btnPresetSave', 'pnlBackupModules', 'lstExtra', 'btnExtraAdd',
     'btnExtraDel', 'chkMinProfileExc', 'chkNoProfileFileExc', 'chkMinSystemExc', 'chkNoSystemFileExc', 'btnEditExceptions', 'cmbThreads', 'btnPrecheck',
     'btnProfileSize', 'btnBackup', 'btnCancel', 'btnRefreshBackups', 'btnOpenBackup', 'btnDeleteBackup', 'btnCleanupBackups', 'btnEmptyDeleted', 'dgBackups', 'lblRestoreInfo',
@@ -538,7 +538,10 @@ $ui.lblSubTitle.Text = "Benutzerprofil-Migration  v$($script:Version)"
 # ============================================================================
 if (-not (Test-Path -LiteralPath $script:LogDir)) { New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null }
 Set-ConsoleLogFile (Join-Path $script:LogDir ("HUMig_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss')))
-function Out-Console([string]$Msg, [string]$Lvl = 'Info') { Write-ConsoleOutput -Message $Msg -Level $Lvl -Window $script:Window }
+function Out-Console([string]$Msg, [string]$Lvl = 'Info') {
+    Write-ConsoleOutput -Message $Msg -Level $Lvl -Window $script:Window
+    if ($script:HMRemote) { Add-HMRemoteLine $Msg $Lvl }   # Handy-Fernbedienung: Konsole live
+}
 function Out-Separator { Out-Console '' 'Separator' }
 function Set-Status([string]$Text, [string]$Color = '#FFA6E3A1') {
     $ui.lblStatus.Text = $Text
@@ -1181,10 +1184,13 @@ function Start-EngineJob {
         if ($rs -eq 'NoSpace') { }
         elseif ($long -or -not $script:Window.IsActive) { Show-HMNotification "HUMig - $ttl $stTxt" $det $kind }
         elseif ($rs -eq 'OK') { [System.Media.SystemSounds]::Asterisk.Play() }
+        # Handy-Fernbedienung: letzter Vorgang
+        $script:HMRemoteLast = @{ Title = $ttl; Result = $stTxt; Time = (Get-Date).ToString('dd.MM. HH:mm') }
     }
 }
-$cancelAction = {
-    if ($script:CurrentJob -and (Confirm-Action 'Laufenden Vorgang abbrechen? Bereits kopierte Daten bleiben erhalten.')) {
+# Laufenden Vorgang abbrechen. -Confirmed: ohne Rueckfrage (z.B. am Handy schon bestaetigt)
+function Invoke-HMJobCancel([switch]$Confirmed) {
+    if ($script:CurrentJob -and ($Confirmed -or (Confirm-Action 'Laufenden Vorgang abbrechen? Bereits kopierte Daten bleiben erhalten.'))) {
         $script:CurrentJob.Cancel = $true
         Stop-HMJobProcess $script:CurrentJob
         Out-Console 'Abbruch angefordert ...' 'Warning'
@@ -1204,6 +1210,7 @@ $cancelAction = {
         $t.Start()
     }
 }
+$cancelAction = { Invoke-HMJobCancel }
 # Robocopy-Prozess samt Unterprozessen hart beenden (taskkill /T /F), auch wenn Kill() nicht greift
 function Stop-HMJobProcess($Job) {
     $p = $null
@@ -2049,6 +2056,7 @@ function Show-HMManual {
 }
 $ui.btnAbout.Add_Click({ Show-About })
 $ui.btnWizard.Add_Click({ Show-HMWizard })
+$ui.btnRemote.Add_Click({ Show-HMRemoteDialog })
 $ui.btnHelp.Add_Click({ Show-HMManual })
 $script:Window.Add_PreviewKeyDown({ param($s, $e) if ("$($e.Key)" -eq 'F1') { $e.Handled = $true; Show-HMManual } })
 $ui.imgLogo.Add_MouseLeftButtonUp({ Show-About })
@@ -2396,6 +2404,8 @@ $script:Window.Add_Loaded({
     Restore-HMLastTab
     # Startseite + Hinweise beim Start erst nach dem Anzeigen (Fenster erscheint sofort)
     [void]$script:Window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [action]{ try { Update-HMStatusPage -StartUp } catch { Out-Console "Status: $($_.Exception.Message)" 'Warning' } })
+    # Handy-Fernbedienung: Reste aufraeumen, ggf. automatisch einschalten
+    [void]$script:Window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::ApplicationIdle, [action]{ try { Initialize-HMRemote } catch { Out-Console "Fernbedienung: $($_.Exception.Message)" 'Warning' } })
 })
 $script:Window.Add_Closing({
     param($s, $e)
@@ -2421,6 +2431,7 @@ $script:Window.Add_Closing({
         # Aufraeumen abwarten (u.a. Benutzer-Registry entladen - bliebe sonst bis zum Neustart geladen)
         Wait-HMJobEnd $script:CurrentJob 30
     }
+    try { Stop-HMRemote 'HUMig beendet' } catch { }
     Save-HMWindowState
     try { $us = Get-HMUiScaleSetting; if ([double]$us -ne [double]$script:SettingsBase.UiScale) { Save-LocalSetting 'UiScale' $us } } catch { }
     Remove-HMNotification
