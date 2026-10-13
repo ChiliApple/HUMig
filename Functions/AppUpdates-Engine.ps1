@@ -169,6 +169,7 @@ function Format-HMAuCrash($Iso) {
     $c = if ($null -ne $Iso.ExitCode) { '0x{0:X8}' -f [int]$Iso.ExitCode } else { '?' }
     $t = "WinGet-Modul ist abgestuerzt (Code $c) - HUMig laeuft weiter"
     if (Test-HMAuOsExperimental) { $t += '. Windows Server 2019 wird von Microsoft fuer WinGet nicht unterstuetzt - App-Updates sind auf diesem Server nicht moeglich' }
+    else { $t += ". Meist ist WinGet (App Installer) nicht vollstaendig eingerichtet - 'WinGet einrichten'" }
     return $t
 }
 
@@ -240,6 +241,13 @@ try { L 'Success' ('WinGet ' + (Get-WinGetVersion) + ' bereit') } catch { }
 [Console]::Out.WriteLine('R|OK')
 "@
         $iso = Invoke-HMAuIsolated $scr 1200 { param($m, $l) & $log $m $l } $Job
+        # Absturz beim Pruefen (WinGet unvollstaendig): noch einmal direkt reparieren, ohne vorher zu pruefen
+        if ($iso.Crashed -and -not (Test-HMAuOsExperimental)) {
+            & $log "$(Format-HMAuCrash $iso) - direkte Reparatur ..." 'Warning'
+            $rep = if ($isAdm) { 'Repair-WinGetPackageManager -AllUsers -Latest -Force' } else { 'Repair-WinGetPackageManager -Latest -Force' }
+            $scr2 = "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12`nImport-Module '$($script:HMAuModule)' -Force`nL 'Info' 'WinGet reparieren ($rep, Download von GitHub) ...'`n$rep | Out-Null`nL 'Success' 'WinGet repariert'`n[Console]::Out.WriteLine('R|OK')"
+            $iso = Invoke-HMAuIsolated $scr2 1200 { param($m, $l) & $log $m $l } $Job
+        }
         if (-not $iso.Ok) {
             $ok = $false
             if ($iso.Crashed) { & $log (Format-HMAuCrash $iso) 'Error' }

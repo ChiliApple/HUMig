@@ -141,7 +141,8 @@ function Update-HMAuState([switch]$Search) {
         if (-not $r -or $r -is [string]) { $ui.lblAuInfo.Text = "WinGet nicht pruefbar: $r"; $ui.btnAuSetup.Visibility = 'Visible'; return }
         $s = $r.State
         $script:AuReady = [bool]$s.Ready
-        $ui.btnAuSetup.Visibility = $(if ($s.Ready -or -not $s.OsOk -or $s.Crashed) { 'Collapsed' } else { 'Visible' })
+        # Absturz des Moduls: auf Server 2019 hilft Einrichten nicht, sonst (z.B. Server 2022 ohne App Installer) schon
+        $ui.btnAuSetup.Visibility = $(if ($s.Ready -or -not $s.OsOk -or ($s.Crashed -and $s.Experimental)) { 'Collapsed' } else { 'Visible' })
         if ($s.Experimental -and -not $script:AuExpWarned) { $script:AuExpWarned = $true; Out-Console 'App-Updates: Windows Server 2019 - WinGet wird von Microsoft hier nicht unterstuetzt, HUMig versucht es trotzdem (experimentell). Klappt etwas nicht, Ergebnis/Fehler pruefen.' 'Warning' }
         $ui.lblAuInfo.Text = "$(if ($s.Experimental) { '[Server 2019: experimentell] ' })$(if ($s.Ready) { "Dieser PC: WinGet $($s.WinGet), Modul $($s.Module), App Installer $($s.AppInstaller)" } else { "Dieser PC: $($s.Problem)" })  |  Gelesen wird am Ziel-PC im Konto des angemeldeten Benutzers (oben gewaehlter bevorzugt), ist niemand angemeldet als SYSTEM mit PowerShell 7 (wird bei Bedarf installiert). Aktualisiert: fuer alle Benutzer als SYSTEM, nur fuer einen Benutzer installierte in seinem Konto."
         $ui.btnAuSourceAdd.IsEnabled = [bool]$s.Ready -and -not $script:JobRunning
