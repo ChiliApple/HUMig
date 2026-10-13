@@ -85,25 +85,32 @@ function Format-HMAuCliResult([int64]$Code, [string]$Out) {
     return @{ Ok = $false; Reboot = $false; Text = "$t ($hex)$(if ("$Out".Trim() -and $t -eq 'Fehler') { ": $Out" })" }
 }
 # Windows-Version fuer WinGet: Win10 1809+ / Win11 (Client), Windows Server 2025 (mitgeliefert) und 2022 (nicht mitgeliefert,
-# 'WinGet einrichten' installiert es mit Repair-WinGetPackageManager -AllUsers - von Microsoft nur eingeschraenkt unterstuetzt)
+# 'WinGet einrichten' installiert es mit Repair-WinGetPackageManager -AllUsers - von Microsoft nur eingeschraenkt unterstuetzt).
+# Windows Server 2019 (Build 17763, gleiche Basis wie Windows 10 1809): von Microsoft NICHT unterstuetzt - experimentell zugelassen
 function Test-HMAuOsSupported {
     $b = [Environment]::OSVersion.Version.Build
     $isServer = $false
     try { $isServer = ([int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).ProductType -ne 1) } catch { }
-    if ($isServer) { return ($b -ge 20348) }
     return ($b -ge 17763)
+}
+# Windows Server 2019 (experimentell)?
+function Test-HMAuOsExperimental {
+    $b = [Environment]::OSVersion.Version.Build
+    $isServer = $false
+    try { $isServer = ([int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).ProductType -ne 1) } catch { }
+    return ($isServer -and $b -lt 20348)
 }
 
 # ----------------------------------------------------------------------------
 # Status / Einrichten
 # ----------------------------------------------------------------------------
 function Get-HMAuState {
-    $s = [ordered]@{ OsOk = (Test-HMAuOsSupported); Module = ''; ModuleAllUsers = $false; AppInstaller = ''; WinGet = ''; Ready = $false; Problem = '' }
+    $s = [ordered]@{ OsOk = (Test-HMAuOsSupported); Experimental = (Test-HMAuOsExperimental); Module = ''; ModuleAllUsers = $false; AppInstaller = ''; WinGet = ''; Ready = $false; Problem = '' }
     try { $m = @(Get-Module -ListAvailable -Name $script:HMAuModule | Sort-Object Version -Descending)[0]; if ($m) { $s.Module = "$($m.Version)" } } catch { }
     # SYSTEM und andere Benutzer finden das Modul nur, wenn es fuer alle Benutzer installiert ist (Programme\WindowsPowerShell\Modules)
     $s.ModuleAllUsers = (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$($script:HMAuModule)"))
     try { $a = @(Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller' -ErrorAction Stop)[0]; if ($a) { $s.AppInstaller = "$($a.Version)" } } catch { }
-    if (-not $s.OsOk) { $s.Problem = 'WinGet wird auf dieser Windows-Version nicht unterstuetzt (Windows 10 1809+/11, Windows Server 2022/2025).' }
+    if (-not $s.OsOk) { $s.Problem = 'WinGet wird auf dieser Windows-Version nicht unterstuetzt (Windows 10 1809+/11, Windows Server 2019 (experimentell)/2022/2025).' }
     elseif (-not $s.Module) { $s.Problem = "PowerShell-Modul $($script:HMAuModule) fehlt - 'WinGet einrichten'." }
     elseif (-not $s.ModuleAllUsers) { $s.Problem = "PowerShell-Modul $($script:HMAuModule) ist nur fuer einzelne Benutzer installiert - SYSTEM und andere Benutzer finden es nicht. 'WinGet einrichten' installiert es fuer alle Benutzer." }
     else {

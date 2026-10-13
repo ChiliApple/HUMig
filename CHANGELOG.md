@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## v2.0.128 - 2026-10-12
+### App-Updates
+- **Windows Server 2019 experimentell:** HUMig richtet WinGet dort wie auf Server 2022 ein (`Repair-WinGetPackageManager -AllUsers`) - von Microsoft nicht unterstuetzt, Hinweis in der Konsole; klappt es nicht, wird der PC als *nicht gelesen* gemeldet
+
 ## v2.0.127 - 2026-10-12
 ### App-Updates
 - **Windows Server 2022:** WinGet wird jetzt unterstuetzt - fehlt es am Ziel-PC, richtet HUMig es beim Suchen fuer alle Benutzer ein (`Repair-WinGetPackageManager -AllUsers`, von Microsoft nur eingeschraenkt unterstuetzt); *WinGet einrichten* an diesem PC ebenso

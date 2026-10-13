@@ -142,7 +142,8 @@ function Update-HMAuState([switch]$Search) {
         $s = $r.State
         $script:AuReady = [bool]$s.Ready
         $ui.btnAuSetup.Visibility = $(if ($s.Ready -or -not $s.OsOk) { 'Collapsed' } else { 'Visible' })
-        $ui.lblAuInfo.Text = "$(if ($s.Ready) { "Dieser PC: WinGet $($s.WinGet), Modul $($s.Module), App Installer $($s.AppInstaller)" } else { "Dieser PC: $($s.Problem)" })  |  Gelesen wird am Ziel-PC im Konto des angemeldeten Benutzers (oben gewaehlter bevorzugt), ist niemand angemeldet als SYSTEM mit PowerShell 7 (wird bei Bedarf installiert). Aktualisiert: fuer alle Benutzer als SYSTEM, nur fuer einen Benutzer installierte in seinem Konto."
+        if ($s.Experimental -and -not $script:AuExpWarned) { $script:AuExpWarned = $true; Out-Console 'App-Updates: Windows Server 2019 - WinGet wird von Microsoft hier nicht unterstuetzt, HUMig versucht es trotzdem (experimentell). Klappt etwas nicht, Ergebnis/Fehler pruefen.' 'Warning' }
+        $ui.lblAuInfo.Text = "$(if ($s.Experimental) { '[Server 2019: experimentell] ' })$(if ($s.Ready) { "Dieser PC: WinGet $($s.WinGet), Modul $($s.Module), App Installer $($s.AppInstaller)" } else { "Dieser PC: $($s.Problem)" })  |  Gelesen wird am Ziel-PC im Konto des angemeldeten Benutzers (oben gewaehlter bevorzugt), ist niemand angemeldet als SYSTEM mit PowerShell 7 (wird bei Bedarf installiert). Aktualisiert: fuer alle Benutzer als SYSTEM, nur fuer einen Benutzer installierte in seinem Konto."
         $ui.btnAuSourceAdd.IsEnabled = [bool]$s.Ready -and -not $script:JobRunning
         Update-HMAuSourceList
         if ($s.Ready -and $stt.Search -and -not $script:JobRunning) { Start-HMAuSearch }
