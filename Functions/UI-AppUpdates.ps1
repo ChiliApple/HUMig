@@ -545,6 +545,7 @@ function Remove-HMAuExclusionUi {
 function Add-HMAuSourceUi {
     $v = Show-HMAuInputDialog 'WinGet-Quelle hinzufuegen' "Eigene Quelle fuer diesen PC (braucht Administratorrechte). Nur vertrauenswuerdige Quellen verwenden - sie entscheiden, was installiert wird.`nREST-Quelle: https-Adresse (Typ Microsoft.Rest). Vorindizierte Quelle: Adresse oder Netzwerkpfad (Typ Microsoft.PreIndexed.Package)." @('Name:', 'Adresse / Pfad:', 'Typ:') @('', '', 'Microsoft.Rest') @('Microsoft.Rest', 'Microsoft.PreIndexed.Package')
     if (-not $v -or -not $v[0] -or -not $v[1]) { return }
+    if ("$($v[0])" -notmatch '^[A-Za-z0-9._-]{1,64}$') { Out-Console 'Quelle: Name nur aus Buchstaben, Ziffern, Punkt, Bindestrich und Unterstrich (ohne Leerzeichen, hoechstens 64 Zeichen).' 'Warning'; return }
     Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $a, $t) . $eng; Add-HMAuSource $n $a $t; 'OK' } -ArgumentList @($script:AuEngine, $v[0], $v[1], $v[2]) -TimeoutSec 360 -BusyTag 'Au' -BusyText 'Quelle wird hinzugefuegt ...' -State @{ Name = $v[0] } -OnComplete {
         param($r, $st)
         if ("$r" -ne 'OK') { Out-Console "Quelle $($st.Name) nicht hinzugefuegt: $r" 'Error'; return }

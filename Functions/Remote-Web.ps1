@@ -65,6 +65,7 @@ $script:HMRemoteHtml = @'
         <li>Einstellungen &rsaquo; Allgemein &rsaquo; Info &rsaquo; <b>Zertifikatsvertrauenseinstellungen</b> &rsaquo; <i>HUMig Fernbedienung CA</i> einschalten.</li>
         <li>Seite neu laden, dann <b>Teilen</b> &rsaquo; <b>Zum Home-Bildschirm</b>. In der App den Code noch einmal eingeben.</li>
       </ol></details>
+      <p class="muted small">Sicherheit: Nach dem Installieren in den Zertifikatsdetails am Handy den <b>SHA-256-Fingerabdruck</b> mit dem im HUMig-Fenster <b>Handy</b> am PC vergleichen. Stimmt er nicht, das Zertifikat sofort wieder entfernen.</p>
     </div>
   </section>
 

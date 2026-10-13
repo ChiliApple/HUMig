@@ -36,10 +36,17 @@ function Read-HMRemoteSetup {
 function Write-HMRemoteJson([string]$Path, $Obj) {
     [IO.File]::WriteAllText($Path, (ConvertTo-Json -InputObject $Obj -Depth 4), (New-Object Text.UTF8Encoding $false))
 }
+# Zugriffsprotokoll Logs\Remote\Remote_<Monat>.log. Logs ist fuer Benutzer beschreibbar: ist Logs\Remote oder die Datei eine
+# Verknuepfung (Junction/Symlink), wird nicht geschrieben (sonst schriebe HUMig als Administrator an ein fremdes Ziel)
 function Get-HMRemoteLogFile {
     $d = Join-Path $script:LogDir 'Remote'
-    try { if (-not (Test-Path -LiteralPath $d)) { [void](New-Item -ItemType Directory -Path $d -Force) } } catch { return '' }
-    return (Join-Path $d ("Remote_{0}.log" -f (Get-Date -Format 'yyyy-MM')))
+    try {
+        foreach ($x in @($script:LogDir, $d)) { if ((Test-Path -LiteralPath $x) -and ((Get-Item -LiteralPath $x -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { return '' } }
+        if (-not (Test-Path -LiteralPath $d)) { [void](New-Item -ItemType Directory -Path $d -Force) }
+        $f = Join-Path $d ("Remote_{0}.log" -f (Get-Date -Format 'yyyy-MM'))
+        if ((Test-Path -LiteralPath $f) -and ((Get-Item -LiteralPath $f -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { return '' }
+        return $f
+    } catch { return '' }
 }
 # App-Icon fuer das Handy (Logo auf dunklem Grund, Rand fuer runde/maskierte Icons)
 function New-HMRemoteIconPng([int]$Size) {
@@ -109,6 +116,11 @@ function Clear-HMRemoteLeftovers {
     if (-not (Test-Path -LiteralPath $tf)) { return }
     try {
         $t = Get-Content -LiteralPath $tf -Raw -Encoding UTF8 | ConvertFrom-Json
+        # laeuft die HUMig-Instanz noch, die den Vermerk geschrieben hat (z.B. andere RDP-Sitzung)? Dann nichts anfassen
+        if ([int]$t.Pid -gt 0 -and [int]$t.Pid -ne $PID) {
+            $pr = Get-Process -Id ([int]$t.Pid) -ErrorAction SilentlyContinue
+            if ($pr -and "$($pr.ProcessName)" -match '^(powershell|pwsh|HUMig)' -and ("$($t.ProcStart)" -eq '' -or "$($pr.StartTime.ToString('s'))" -eq "$($t.ProcStart)")) { Out-Console "Fernbedienung: laeuft bereits in einer anderen HUMig-Instanz (Port $($t.Port))" 'Info'; return }
+        }
         Remove-HMRemoteFirewall $script:HMRemoteRuleTemp
         $su = Read-HMRemoteSetup
         if ($t.TempBinding -and [int]$t.Port -gt 0 -and -not ($su -and [int]$su.Port -eq [int]$t.Port)) { Remove-HMRemoteBinding ([int]$t.Port) }
@@ -151,10 +163,11 @@ function Start-HMRemote([switch]$Quiet, $Owner = $null) {
             $ci = Initialize-HMRemoteCert @($ips | ForEach-Object { $_.IP })
             $cert = $ci.Cert; $caPub = $ci.Ca
             if (-not $persist) { $tempBind = $true }
-            Write-HMRemoteJson (Get-HMRemoteTempFile) ([ordered]@{ Port = $port; TempBinding = $tempBind; Started = (Get-Date).ToString('yyyy-MM-dd HH:mm') })
+            $ps0 = ''; try { $ps0 = (Get-Process -Id $PID).StartTime.ToString('s') } catch { }
+            Write-HMRemoteJson (Get-HMRemoteTempFile) ([ordered]@{ Port = $port; TempBinding = $tempBind; Started = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Pid = $PID; ProcStart = $ps0 })
             Set-HMRemoteBinding $port $cert.Thumbprint
             if ($persist -and "$($setup.Thumb)" -ne $cert.Thumbprint) { try { $setup.Thumb = $cert.Thumbprint; Write-HMRemoteJson (Get-HMRemoteSetupFile) $setup } catch { } }
-            Remove-HMRemoteOldCerts $cert.Thumbprint
+            Remove-HMRemoteOldCerts $cert.Thumbprint -BoundPorts @($(if ($setup) { [int]$setup.Port } else { 0 }))
             if (-not $persist -or -not (Get-NetFirewallRule -Name $script:HMRemoteRuleSetup -ErrorAction SilentlyContinue)) {
                 Set-HMRemoteFirewall $script:HMRemoteRuleTemp $port (Get-HMRemoteFirewallRemote $cfg.Networks); $tempFw = $true
             }
@@ -187,7 +200,7 @@ function Start-HMRemote([switch]$Quiet, $Owner = $null) {
     $ps = [PowerShell]::Create(); $ps.Runspace = $rs
     [void]$ps.AddScript(". '$core'`nStart-HMRemoteListenerLoop `$S")
     $h = $ps.BeginInvoke()
-    $script:HMRemote = @{ S = $S; PS = $ps; RS = $rs; Handle = $h; Port = $port; Ips = @($ips | ForEach-Object { $_.IP }); Ip = $ips[0].IP; TempFw = $tempFw; TempBind = $tempBind; Admin = $adm
+    $script:HMRemote = @{ S = $S; PS = $ps; RS = $rs; Handle = $h; Port = $port; CaFp = (Get-HMRemoteFingerprint $caPub); Ips = @($ips | ForEach-Object { $_.IP }); Ip = $ips[0].IP; TempFw = $tempFw; TempBind = $tempBind; Admin = $adm
         StatusObj = $null; LastRefresh = [datetime]::MinValue; Started = (Get-Date); Timer = $null }
     # kurz warten: startet der Webserver nicht (z.B. Port-Freigabe fehlt), sofort melden
     for ($i = 0; $i -lt 30 -and -not $S.Listening -and $S.Run; $i++) { Start-Sleep -Milliseconds 100 }
@@ -319,9 +332,9 @@ function Install-HMRemoteUserSetup([string]$Account, [int]$Port, $Networks) {
     if (-not $ips.Count) { throw 'Keine private IPv4-Adresse gefunden' }
     $ci = Initialize-HMRemoteCert $ips
     Set-HMRemoteBinding $Port $ci.Cert.Thumbprint
-    Set-HMRemoteUrlAcl $Port $sid
+    Set-HMRemoteUrlAcl $Port $sid $(if ($old -and [int]$old.Port -eq $Port) { "$($old.Sid)" } else { '' })
     Set-HMRemoteFirewall $script:HMRemoteRuleSetup $Port (Get-HMRemoteFirewallRemote $Networks)
-    Remove-HMRemoteOldCerts $ci.Cert.Thumbprint
+    Remove-HMRemoteOldCerts $ci.Cert.Thumbprint -BoundPorts @($(if ($script:HMRemote) { [int]$script:HMRemote.Port } else { 0 }))
     Write-HMRemoteJson (Get-HMRemoteSetupFile) ([ordered]@{ Port = $Port; Sid = $sid; Account = $Account; Thumb = $ci.Cert.Thumbprint; Created = (Get-Date).ToString('yyyy-MM-dd HH:mm') })
     Out-Console "Fernbedienung fuer den Benutzer-Modus eingerichtet: Konto $Account, Port $Port (Firewall-Regel und HTTPS-Bindung bleiben dauerhaft)" 'Success'
 }
@@ -330,7 +343,7 @@ function Uninstall-HMRemoteUserSetup {
     if ($su) {
         $p = [int]$su.Port
         if (-not ($script:HMRemote -and $script:HMRemote.Port -eq $p)) { Remove-HMRemoteBinding $p }
-        Remove-HMRemoteUrlAcl $p
+        Remove-HMRemoteUrlAcl $p "$($su.Sid)"
     }
     Remove-HMRemoteFirewall $script:HMRemoteRuleSetup
     Remove-Item -LiteralPath (Get-HMRemoteSetupFile) -Force -ErrorAction SilentlyContinue
@@ -419,6 +432,7 @@ function Show-HMRemoteDialog {
       <StackPanel>
         <TextBlock x:Name="lblState" FontSize="17" FontWeight="Bold"/>
         <TextBox x:Name="txtUrl" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="#FF89B4FA" FontSize="13" Margin="0,2,0,0"/>
+        <TextBox x:Name="txtFp" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="#FFA6ADC8" FontSize="11" FontFamily="Consolas" Margin="0,2,0,0" TextWrapping="Wrap" ToolTip="SHA-256-Fingerabdruck der Zertifizierungsstelle dieses PCs - am Handy in den Zertifikatsdetails vergleichen"/>
       </StackPanel>
     </DockPanel>
     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
@@ -465,8 +479,8 @@ function Show-HMRemoteDialog {
     $w.Owner = $script:Window
     try { Set-HMWindowScale $w } catch { }
     $d = @{ W = $w; Ips = @(); DevKeys = @(); LastKey = ''; Loading = $false }
-    foreach ($n in @('btnOn', 'btnOff', 'lblState', 'txtUrl', 'btnLog', 'btnClose', 'imgQr', 'lblQrOff', 'lblCode', 'lblPair', 'btnNewCode', 'cmbIp', 'lblSteps', 'lstDev', 'btnDel', 'lblDev')) { $d[$n] = $w.FindName($n) }
-    $d.lblSteps.Text = "1. Handy im selben Netz (WLAN): QR-Code mit der Kamera scannen.`n2. Die Warnung zum Zertifikat einmal bestaetigen, auf der Seite 'Zertifikat laden' und installieren (Anleitung fuer Android/iPhone steht dort).`n3. Seite neu laden - der Code ist schon eingetragen - 'Koppeln'.`n4. Als App: Android 'App installieren', iPhone Teilen > 'Zum Home-Bildschirm' (in der App den Code noch einmal eingeben).`n`nGekoppelte Handys sehen den Status und laufende Vorgaenge und koennen sie abbrechen (mit Bestaetigung am Handy). Nur im lokalen Netz, solange HUMig offen ist. Einstellungen: Einstellungen > Handy."
+    foreach ($n in @('btnOn', 'btnOff', 'lblState', 'txtUrl', 'txtFp', 'btnLog', 'btnClose', 'imgQr', 'lblQrOff', 'lblCode', 'lblPair', 'btnNewCode', 'cmbIp', 'lblSteps', 'lstDev', 'btnDel', 'lblDev')) { $d[$n] = $w.FindName($n) }
+    $d.lblSteps.Text = "1. Handy im selben Netz (WLAN): QR-Code mit der Kamera scannen.`n2. Die Warnung zum Zertifikat einmal bestaetigen, auf der Seite 'Zertifikat laden' und installieren (Anleitung fuer Android/iPhone steht dort).`n3. Seite neu laden - der Code ist schon eingetragen - 'Koppeln'.`n4. Als App: Android 'App installieren', iPhone Teilen > 'Zum Home-Bildschirm' (in der App den Code noch einmal eingeben).`n`nSicherheit: am Handy in den Details des installierten Zertifikats den SHA-256-Fingerabdruck mit dem oben angezeigten vergleichen (Android: Einstellungen > Sicherheit > Vertrauenswuerdige Anmeldedaten > Nutzer; iPhone: Profil > Mehr Details). Stimmt er nicht, Zertifikat sofort entfernen - dann hat jemand im Netz eine fremde Seite untergeschoben.`n`nGekoppelte Handys sehen den Status und laufende Vorgaenge und koennen sie abbrechen (mit Bestaetigung am Handy). Nur im lokalen Netz, solange HUMig offen ist. Einstellungen: Einstellungen > Handy."
     $script:HMRemoteDlg = $d
     $d.btnClose.Add_Click({ $script:HMRemoteDlg.W.Close() })
     $d.btnOn.Add_Click({ if (Start-HMRemote -Owner $script:HMRemoteDlg.W) { Open-HMRemotePairing $script:HMRemote.S | Out-Null; $script:HMRemoteDlg.LastKey = '' }; Update-HMRemoteDialog })
@@ -518,6 +532,7 @@ function Update-HMRemoteDialog {
         $d.lblState.Text = "Fernbedienung ist an$(if ($S.StopAt) { " - bis $(([datetime]$S.StopAt).ToString('HH:mm'))" } else { ' - solange HUMig laeuft' })$(if ($S.UserMode) { ' (Benutzer-Modus)' })"
         $d.lblState.Foreground = New-Brush '#FFA6E3A1'
         $d.txtUrl.Text = $url
+        $d.txtFp.Text = $(if ($r.CaFp) { "Zertifikat (SHA-256): $($r.CaFp)" } else { '' })
         $pr = $S.Pair
         if ($pr -and -not $pr.Locked -and $pr.Until -gt (Get-Date)) {
             $key = "$url|$($pr.Code)"
@@ -541,6 +556,7 @@ function Update-HMRemoteDialog {
         $d.lblState.Foreground = New-Brush '#FFCDD6F4'
         $c = Get-HMRemoteConfig
         $d.txtUrl.Text = "Port $($c.Port)$(if (-not (Test-HMRemoteAdmin)) { ' - ohne Adminrechte nur nach Einrichtung durch einen Administrator' })"
+        $d.txtFp.Text = ''
         $d.imgQr.Source = $null; $d.lblQrOff.Visibility = 'Visible'; $d.lblQrOff.Text = 'Fernbedienung ist aus'
         $d.lblCode.Text = '--- ---'; $d.lblPair.Text = "'Einschalten' startet die Fernbedienung und zeigt den QR-Code."
         $d.lblPair.Foreground = New-Brush '#FFA6ADC8'

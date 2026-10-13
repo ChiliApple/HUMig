@@ -1427,6 +1427,25 @@ Describe 'Handy-Fernbedienung: echtes HTTPS mit eigener CA (Windows, Administrat
             @($ca.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.30' -and $_.Critical }).Count | Should -Be 1
             @($ca.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.19' }).Count | Should -Be 1
             (Get-HMRemoteCa).Thumbprint | Should -Be $ca.Thumbprint
+            # Inhalt der Namensbeschraenkung: Hostname + private Bereiche
+            $nc = (@($ca.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.30' })[0]).Format($true)
+            $nc | Should -Match ([regex]::Escape((Get-HMRemoteHostNames)[0]))
+            $nc | Should -Match '10\.0\.0\.0'
+            $nc | Should -Match '192\.168\.0\.0'
+            # Zertifikat fuer eine oeffentliche Adresse von dieser CA: Kette meldet Verstoss gegen die Namensbeschraenkung
+            $bad = New-SelfSignedCertificate -Type Custom -Subject 'CN=HUMig Test' -Signer $ca -KeyExportPolicy NonExportable -CertStoreLocation 'Cert:\LocalMachine\My' -TextExtension @('2.5.29.17={text}IPAddress=8.8.8.8', '2.5.29.37={text}1.3.6.1.5.5.7.3.1')
+            try {
+                $chb = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+                $chb.ChainPolicy.RevocationMode = 'NoCheck'
+                $chb.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
+                [void]$chb.ChainPolicy.ExtraStore.Add($ca)
+                [void]$chb.Build($bad)
+                (@($chb.ChainStatus | ForEach-Object { "$($_.Status)" }) -join ',') | Should -Match 'NotPermittedNameConstraint|HasNotPermittedNameConstraint|InvalidNameConstraints'
+            } finally { Remove-Item -LiteralPath "Cert:\LocalMachine\My\$($bad.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue }
+            # Firewall-Regel nur fuer http.sys (Programm System)
+            Set-HMRemoteFirewall 'HUMig-Remote-CI' $port @('LocalSubnet')
+            try { "$((Get-NetFirewallRule -Name 'HUMig-Remote-CI' | Get-NetFirewallApplicationFilter).Program)" | Should -Be 'System' }
+            finally { Remove-HMRemoteFirewall 'HUMig-Remote-CI' }
             $cert = New-HMRemoteServerCert $ca @('127.0.0.1', '10.1.1.5')
             Test-HMRemoteServerCert $cert $ca @('10.1.1.5') | Should -BeTrue
             Test-HMRemoteServerCert $cert $ca @('10.1.1.6') | Should -BeFalse
@@ -1505,5 +1524,69 @@ Describe 'Update: GitHub-Abfragegrenze erkennen' {
         ([datetime]$r - (Get-Date)).TotalMinutes | Should -BeGreaterThan 50
         $n = [System.Management.Automation.ErrorRecord]::new([Exception]::new('Not Found'), 'x', 'NotSpecified', $null)
         Get-HMGitHubRateLimit $n | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Pruefung 2.0.137: Formatierung, Quelle, Ausnahmen, Profil, Port-Freigabe' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1')
+        . (Join-Path $script:Root 'Functions\Remote-Core.ps1')
+        . (Join-Path $script:Root 'Functions\Tools-Sandbox.ps1')
+    }
+    It 'kein "-f" mit zu wenigen Argumenten (z.B. "+" mitten in der Argumentliste) in allen Skripten' {
+        $bad = @()
+        foreach ($f in @(Get-ChildItem -LiteralPath $script:Root -Recurse -Filter *.ps1 | Where-Object { $_.FullName -notmatch '[\\/]\.github[\\/]' })) {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$null)
+            foreach ($h in $ast.FindAll({ param($a) $a -is [System.Management.Automation.Language.BinaryExpressionAst] -and $a.Operator -eq 'Format' -and ($a.Left -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $a.Left -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) }, $true)) {
+                $idx = @([regex]::Matches($h.Left.Value, '(?<!\{)\{(\d+)(,[-\d]+)?(:[^}]*)?\}') | ForEach-Object { [int]$_.Groups[1].Value })
+                if (-not $idx.Count) { continue }
+                $max = ($idx | Measure-Object -Maximum).Maximum
+                $r = $h.Right
+                if ($r -is [System.Management.Automation.Language.VariableExpressionAst] -or $r -is [System.Management.Automation.Language.SubExpressionAst] -or $r -is [System.Management.Automation.Language.ParenExpressionAst] -or $r -is [System.Management.Automation.Language.ArrayExpressionAst]) { continue }
+                $n = if ($r -is [System.Management.Automation.Language.ArrayLiteralAst]) { $r.Elements.Count } else { 1 }
+                if ($n -le $max) { $bad += "$($f.Name):$($h.Extent.StartLineNumber) braucht $($max + 1), hat $n" }
+            }
+            foreach ($h in $ast.FindAll({ param($a) $a -is [System.Management.Automation.Language.BinaryExpressionAst] -and $a.Operator -in 'Plus', 'Minus' -and $a.Left -is [System.Management.Automation.Language.BinaryExpressionAst] -and $a.Left.Operator -eq 'Format' -and $a.Right -is [System.Management.Automation.Language.ArrayLiteralAst] }, $true)) { $bad += "$($f.Name):$($h.Extent.StartLineNumber) '+' trennt die Argumentliste von -f" }
+        }
+        $bad | Should -BeNullOrEmpty
+    }
+    It 'Ereignistext der Server-Sicherung laesst sich formatieren (mit und ohne VM-Export)' {
+        $eng = Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1') -Raw -Encoding UTF8
+        $m = [regex]::Match($eng, '(?m)^\s*Write-HMSbEvent \$status (\(.+\))\s*$')
+        $m.Success | Should -BeTrue
+        $Ctx = @{ Profile = 'P'; DiskLabel = 'HV-1'; HostSystem = $true; Version = '9' }; $status = 'OK'; $vms = @('DC1'); $vols = @(); $hostSysOk = $true; $notes = @(); $rep = 'C:\R'; $dur = [TimeSpan]::FromMinutes(5)
+        function Format-HMDuration($d) { '5 min' }
+        foreach ($exp in @('', '1 VM exportiert')) {
+            $res = @{ Export = $exp }
+            $txt = Invoke-Expression $m.Groups[1].Value
+            $txt | Should -Match 'Dauer: 5 min'
+            if ($exp) { $txt | Should -Match 'VM-Export: 1 VM exportiert' }
+        }
+    }
+    It 'Ausnahme mit ungueltigem Platzhalter bricht nicht ab' {
+        { Find-HMAuExclusion ([pscustomobject]@{ Id = 'X.Y'; Name = 'Tool' }) @([pscustomobject]@{ Pattern = 'Tool [Beta' }) } | Should -Not -Throw
+        (Find-HMAuExclusion ([pscustomobject]@{ Id = 'X.Y'; Name = 'Tool [Beta' }) @([pscustomobject]@{ Pattern = 'Tool [Beta' })).Pattern | Should -Be 'Tool [Beta'
+    }
+    It 'Paket-ID und Quelle an winget.exe: nur unauffaellige Zeichen (Ziel, Worker, Zeitplan)' {
+        foreach ($f in 'AppUpdates-Target.ps1', 'AppUpdates-Worker.ps1', 'AppUpdates-Auto.ps1') {
+            (Get-Content (Join-Path $script:Root "Functions\$f") -Raw -Encoding UTF8) | Should -Match ([regex]::Escape("-notmatch '^[A-Za-z0-9._-]{1,64}$'"))
+        }
+        'winget' -match '^[A-Za-z0-9._-]{1,64}$' | Should -BeTrue
+        'winget" --override "x' -match '^[A-Za-z0-9._-]{1,64}$' | Should -BeFalse
+        '7zip.7zip' -match '^[^\s\-"][^\s"]{0,254}$' | Should -BeTrue
+        'a"b' -match '^[^\s\-"][^\s"]{0,254}$' | Should -BeFalse
+    }
+    It 'Testinstallation: C:\Users\Public ist kein Benutzerprofil' {
+        $e = [pscustomobject]@{ Key = 'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\X'; DisplayName = 'X 1.0'; DisplayVersion = '1.0'; Publisher = 'P'; UninstallString = '"C:\Users\Public\X\unins000.exe"'; QuietUninstallString = ''; InstallLocation = 'C:\Users\Public\X\'; DisplayIcon = '' }
+        $r = [pscustomobject]@{ ExitCode = 0; InstallStatus = 'OK'; InstallText = 'ok'; Seconds = 1; NewEntries = @($e); NewFolders = @(); UserFolders = @(); SelectedKey = ''; DesktopLinks = @(); DesktopLinksLeft = @(); InstallWindows = @(); UninstallWindows = @(); Deps = @(); UninstallTested = $false; InstallLog = ''; UninstallLog = ''; Error = '' }
+        (Get-HMSandboxSummary -Result $r -Settings ([pscustomobject]@{ Name = 'X' })).Proposal.RunAsUser | Should -BeFalse
+    }
+    It 'Fernbedienung: fremde Port-Freigabe wird erkannt, Fingerabdruck in Vierergruppen' {
+        $sid = 'S-1-5-21-1-2-3-1001'
+        Test-HMRemoteUrlAclOurs 'Die Datei wurde nicht gefunden.' 8443 $sid | Should -BeTrue
+        Test-HMRemoteUrlAclOurs "Reservierte URL : https://+:8443/`n SDDL: D:(A;;GX;;;$sid)(A;;GX;;;BA)" 8443 $sid | Should -BeTrue
+        Test-HMRemoteUrlAclOurs "Reserved URL : https://+:8443/`n SDDL: D:(A;;GX;;;S-1-5-20)" 8443 $sid | Should -BeFalse
+        $c = [pscustomobject]@{ RawData = [byte[]](1, 2, 3) }
+        Get-HMRemoteFingerprint $c | Should -Match '^([0-9A-F]{4} ){15}[0-9A-F]{4}$'
     }
 }
