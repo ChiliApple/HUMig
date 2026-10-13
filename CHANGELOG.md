@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## v2.0.135 - 2026-10-13
+### Werkzeuge
+- *Geraete (AD) / Mehrfach*: neue Aktion **App-Updates suchen** - uebernimmt die angehakten PCs als Ziel in den Reiter App-Updates und sucht dort (danach wie gewohnt aktualisieren oder Zeitplan anlegen)
+
 ## v2.0.134 - 2026-10-13
 ### Behoben
 - App-Updates suchen: brach das Lesen im Konto des angemeldeten Benutzers ohne Ergebnis ab (z. B. Windows lehnt den Start der Aufgabe ab, 0x800710E0), meldete HUMig "0 Updates". Jetzt liest HUMig dann als SYSTEM (PowerShell 7, nur Programme fuer alle Benutzer); gibt es gar kein Ergebnis, steht der PC als *nicht gelesen* da. Der Rueckgabewert der Aufgabe steht zusaetzlich als Hex-Code im Hinweis
