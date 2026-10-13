@@ -1,5 +1,16 @@
 ﻿# Changelog
 
+## v2.1.0 - 2026-10-13
+### Stabile Version (Kanal Stabil) - Zusammenfassung seit v2.0.127
+Gleicher Programmstand wie v2.0.141 (gepruefter Stand). Die Einzelheiten stehen in den Abschnitten v2.0.128 bis v2.0.141.
+- **Neu: Handy-Fernbedienung** (App auf dem Startbildschirm, HTTPS mit eigener CA je PC, QR-Kopplung): Startseite, laufender Vorgang mit Live-Anzeige (Durchsatz, CPU, RAM), Konsole, Abbrechen, **Push-Meldung bei Vorgangsende** (ohne Inhalt)
+- **App-Updates:** WinGet-Modul immer im eigenen Prozess (kein Absturz von HUMig mehr, z. B. Server 2019), Windows Server 2022 unterstuetzt, Suche als SYSTEM als Ersatzweg, *Mehrfachaktion App-Updates suchen*, strengere Pruefung von Paket-ID und Quelle
+- **Server-Backup:** Teams-Meldung auch fuer in HUMig gestartete Laeufe (auch bei Abbruch), Fehler beim Ereignistext behoben (Abbruch nach erfolgreicher Sicherung, Platte nicht ausgeworfen), VM-Export loescht aeltere Exporte nie mehr vor dem neuen
+- **Backup:** Fortschritt nach Datenmenge (laeuft auch bei grossen Ordnern mit)
+- **Softwareverteilung/Testinstallation:** /ALLUSERS bei Inno Setup, bessere Vorschlaege, Erkennung von Installationen ins Benutzerprofil
+- **Update-Check:** GitHub-Abfragegrenze wird klar gemeldet, Ergebnis 30 Minuten zwischengespeichert
+- **HUPilot:** Start als Administrator nur nach Bestaetigung mit Pfad und Warnung bei USB-Stick, Freigabe oder beschreibbarem Ordner
+
 ## v2.0.141 - 2026-10-13
 ### Behoben (Pruefung v2.0.140)
 - **Profil-Backup brach mit Platzpruefung ab, wenn ein Eintrag (z. B. Dokumente) mehr als 2 GB zu kopieren hatte** (neu in 2.0.140, Fortschritt nach Datenmenge) - Zahl lief ueber den Bereich einer 32-Bit-Zahl. Neuer Test mit 3 GB / 900 GB
