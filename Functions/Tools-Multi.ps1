@@ -79,6 +79,7 @@ $script:HMMultiActions = @(
     [pscustomobject]@{ Key = 'doopt';     Text = 'Uebermittlungsoptimierung setzen';     Desc = 'Delivery Optimization: Peer-Modus (LAN/Gruppe) per lokaler Richtlinie - Updates werden zwischen den PCs geteilt.' }
     [pscustomobject]@{ Key = 'cleanup';   Text = 'Speicher aufraeumen';                  Desc = 'Temp, Update-Cache, Fehlerberichte - optional Windows.old und Papierkorb.' }
     [pscustomobject]@{ Key = 'software';  Text = 'Software verteilen';                   Desc = 'Paket aus der Softwareverteilung installieren (bis 8 PCs gleichzeitig).' }
+    [pscustomobject]@{ Key = 'appupd';    Text = 'App-Updates suchen';                   Desc = 'WinGet-Updates der gewaehlten PCs suchen - Ergebnis im Reiter App-Updates (dort aktualisieren oder Zeitplan anlegen).' }
     [pscustomobject]@{ Key = 'drivers';   Text = 'Treiber verteilen';                    Desc = 'Treiber aus der Treiberverteilung installieren (INF/Setup, Hardware-Pruefung, bis 8 PCs gleichzeitig).' }
     [pscustomobject]@{ Key = 'gpupdate';  Text = 'GPUpdate /force';                      Desc = 'Gruppenrichtlinien aktualisieren (Computer + Benutzer).' }
     [pscustomobject]@{ Key = 'intune';    Text = 'Intune-Synchronisierung';              Desc = 'MDM-Sync anstossen (geplante Aufgabe EnterpriseMgmt) + Intune Management Extension neu starten.' }
@@ -256,6 +257,17 @@ function Invoke-HMMultiAction([string[]]$Hosts, [string]$Key, [string]$Text, $Ow
         'autopilot' { Start-HMAutopilotMulti $Hosts; return }
         'doopt' { Start-HMDeliveryOpt $Hosts; return }
         'cleanup' { Start-HMCleanup $Hosts; return }
+        'appupd' {
+            if (-not $ui.tabAppUpdates -or "$($ui.tabAppUpdates.Visibility)" -ne 'Visible') { Out-Console 'App-Updates: nur mit Administratorrechten.' 'Warning'; return }
+            $script:AuTargets = @($Hosts | Where-Object { "$_".Trim() } | Select-Object -Unique)
+            Update-HMAuTargetLabel; Clear-HMAuList
+            Out-Console "App-Updates: Ziel $($script:AuTargets.Count) PC(s) aus der Mehrfachauswahl - Suche startet im Reiter App-Updates." 'Info'
+            $first = -not $script:AuInit
+            $ui.tabMain.SelectedItem = $ui.tabAppUpdates   # beim ersten Oeffnen prueft der Reiter WinGet und sucht selbst
+            try { $script:Window.Activate() | Out-Null } catch { }
+            if (-not $first) { Start-HMAuSearch }
+            return
+        }
         'software' {
             $pk = @(Get-SwPackages)
             if (-not $pk.Count) { Out-Console 'Keine Pakete in der Softwareverteilung.' 'Warning'; return }
