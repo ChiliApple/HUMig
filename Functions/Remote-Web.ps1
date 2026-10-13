@@ -591,7 +591,7 @@ self.addEventListener('push', function (e) {
     var ctl = ('AbortController' in self) ? new AbortController() : null;
     var t = setTimeout(function () { if (ctl) { ctl.abort(); } }, 6000);
     return fetch('/api/state?since=2147483647', { headers: { Authorization: 'Bearer ' + v[0] }, cache: 'no-store', credentials: 'omit', signal: ctl ? ctl.signal : undefined })
-      .then(function (r) { clearTimeout(t); return r.json(); });
+      .then(function (r) { return r.json(); }).then(function (j) { clearTimeout(t); return j; }, function (x) { clearTimeout(t); throw x; });
   }).then(function (j) {
     var job = (j && j.job) || {};
     var body = job.running ? (String(job.title || 'Vorgang') + ' laeuft') : (job.lastTitle ? String(job.lastTitle) + ' - ' + String(job.lastResult || 'fertig') : 'Vorgang beendet');

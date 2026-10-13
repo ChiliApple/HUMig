@@ -1204,7 +1204,7 @@ function Get-HMPlanKey($Mod, $It) { return "$($Mod.Id)|$($It.Type)|$($It.Name)|$
 function Get-HMPlanWeight($Plan, $Mod, $It) {
     $b = [long]0
     if ($Plan) { $k = Get-HMPlanKey $Mod $It; if ($Plan.ContainsKey($k)) { $b = [long]$Plan[$k] } }
-    return [double]([Math]::Max(0, $b) + 4MB)
+    return ([double][Math]::Max([long]0, [long]$b) + [double]4MB)   # long-Ueberladung: Eintraege > 2 GiB
 }
 
 function Invoke-HMRobocopy {
@@ -2580,7 +2580,7 @@ function Start-HMBackup {
             foreach ($it in @($mod.Items)) {
                 if (Test-HMCancel $Job) { break }
                 $wIt = if ($wTotal -gt 0) { Get-HMPlanWeight $plan $mod $it } else { 0 }
-                if ($wTotal -gt 0 -and $it.Type -in @('Folder', 'Files')) {
+                if ($wTotal -gt 0 -and ($it.Type -in @('Folder', 'Files') -or ($it.Type -eq 'Builtin' -and $it.Handler -eq 'ExtraFolders'))) {
                     # waehrend Robocopy laeuft: Fortschritt innerhalb des Eintrags nach geschriebenen Bytes (Invoke-HMRobocopy)
                     $Job.ItemBase = 95 * $wDone / $wTotal; $Job.ItemSpan = 95 * $wIt / $wTotal; $Job.ItemBytes = [long]$plan[(Get-HMPlanKey $mod $it)]; $Job.ItemDoneBytes = [long]0
                 }

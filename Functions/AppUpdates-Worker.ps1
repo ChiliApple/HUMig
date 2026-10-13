@@ -95,7 +95,7 @@ try {
             $r = [ordered]@{ Id = "$($it.Id)"; Status = ''; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = ''; Code = 0 }
             try {
                 if ("$($it.Id)" -notmatch '^[^\s\-"][^\s"]{0,254}$') { throw "ungueltige Paket-ID '$($it.Id)' - nicht ausgefuehrt" }
-                if ("$($it.Source)" -notmatch '^[A-Za-z0-9._-]{1,64}$') { throw "ungueltige Quelle '$($it.Source)' - nicht ausgefuehrt" }
+                if ("$($it.Source)" -notmatch '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$') { throw "ungueltige Quelle '$($it.Source)' - nicht ausgefuehrt" }
                 $a = if ("$($req.Mode)" -eq 'Install') { @('install', '--id', "$($it.Id)", '--exact', '--source', "$($it.Source)", '--scope', 'machine') } else { @('upgrade', '--id', "$($it.Id)", '--exact', '--source', "$($it.Source)") }
                 $a += @('--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
                 if ([bool]$it.Unknown) { $a += '--include-unknown' }
@@ -115,7 +115,7 @@ try {
             $r = [ordered]@{ Id = "$($it.Id)"; Status = ''; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = ''; Code = 0 }
             try {
                 if ("$($it.Id)" -notmatch '^[^\s\-"][^\s"]{0,254}$') { throw "ungueltige Paket-ID '$($it.Id)' - nicht ausgefuehrt" }
-                if ("$($it.Source)" -notmatch '^[A-Za-z0-9._-]{1,64}$') { throw "ungueltige Quelle '$($it.Source)' - nicht ausgefuehrt" }
+                if ("$($it.Source)" -notmatch '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$') { throw "ungueltige Quelle '$($it.Source)' - nicht ausgefuehrt" }
                 $up = @{ Id = "$($it.Id)"; Source = "$($it.Source)"; MatchOption = 'Equals'; Mode = 'Silent'; ErrorAction = 'Stop' }
                 if ([bool]$it.Unknown) { $up.IncludeUnknown = $true }
                 $u = Update-WinGetPackage @up

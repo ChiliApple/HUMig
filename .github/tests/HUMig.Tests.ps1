@@ -872,7 +872,45 @@ Describe 'Umzugs-Assistent: Stand und Ablauf' {
     }
 }
 
+Describe 'Fortschritt nach Datenmenge (Backup)' {
+    BeforeAll { . (Join-Path $script:Root 'Functions\Migration-Engine.ps1') }
+    It 'Gewicht auch fuer Eintraege ueber 2 GiB (long statt int), ohne Plan 4 MB' {
+        $m = [pscustomobject]@{ Id = 'Docs' }; $i = [pscustomobject]@{ Type = 'Folder'; Name = 'DOCS'; Path = 'C:\x'; Handler = '' }
+        $p = @{ (Get-HMPlanKey $m $i) = [long]3GB }
+        Get-HMPlanWeight $p $m $i | Should -Be ([double](3GB + 4MB))
+        $p[(Get-HMPlanKey $m $i)] = [long]900GB
+        Get-HMPlanWeight $p $m $i | Should -Be ([double]900GB + [double]4MB)
+        Get-HMPlanWeight @{} $m $i | Should -Be ([double]4MB)
+        Get-HMPlanWeight $null $m $i | Should -Be ([double]4MB)
+    }
+}
+
 Describe 'Listen-Rueckgaben (return ,@()) erst zuweisen' {
+    It 'keine Funktion mit "return ,..." wird in @() gewickelt oder in eine Pipeline gegeben (alle Skripte)' {
+        $files = @(Get-ChildItem -Path (Join-Path $script:Root 'Functions'), $script:Root -Filter *.ps1 -File)
+        $names = @()
+        foreach ($f in $files) {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$null)
+            foreach ($fd in $ast.FindAll({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+                $rets = $fd.Body.FindAll({ param($a) $a -is [System.Management.Automation.Language.ReturnStatementAst] -and $a.Pipeline -and $a.Pipeline.Extent.Text -match '^\s*,' }, $false)
+                if (@($rets).Count) { $names += $fd.Name }
+            }
+        }
+        $names = @($names | Select-Object -Unique)
+        $names | Should -Contain 'Get-HMRemotePushRequests'
+        $names | Should -Contain 'Get-HMHUPilotRisk'
+        $rx = ($names | ForEach-Object { [regex]::Escape($_) }) -join '|'
+        $bad = @()
+        foreach ($f in $files) {
+            $n = 0
+            foreach ($l in @(Get-Content -LiteralPath $f.FullName -Encoding UTF8)) {
+                $n++
+                if ($l -match '^\s*function\s') { continue }
+                if ($l -match "@\(\s*($rx)\b" -or $l -match "(?<![\w-])($rx)\b[^|;)]*\|") { $bad += "$($f.Name):$n" }
+            }
+        }
+        $bad | Should -BeNullOrEmpty
+    }
     It 'Get-HMSbAllHistory / Read-HMSbHistory werden nie direkt in @() oder einer Pipeline verwendet' {
         # die Funktionen geben die Liste als EIN Objekt zurueck - @(Aufruf) bzw. Aufruf | Where-Object sehen nur 1 Element
         $bad = @()
@@ -1248,23 +1286,28 @@ Describe 'HUPilot: Ordner finden und Hashes uebergeben' {
             $d.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier($sid)), 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
         }
         Set-Acl -LiteralPath (Split-Path $f -Parent) -AclObject $d
-        @(Get-HMHUPilotRisk $f | Where-Object { $_ -match 'normale Benutzer|nicht lesbar' }).Count | Should -Be 0
+        $rk = Get-HMHUPilotRisk $f
+        @($rk | Where-Object { $_ -match 'duerfen|nicht lesbar' }).Count | Should -Be 0
+        foreach ($x in $rk) { $x | Should -BeOfType [string] }
         # Benutzer duerfen lesen: keine Warnung
         $acl = Get-Acl -LiteralPath $f
         $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'ReadAndExecute', 'Allow')))
         Set-Acl -LiteralPath $f -AclObject $acl
-        @(Get-HMHUPilotRisk $f | Where-Object { $_ -match 'normale Benutzer' }).Count | Should -Be 0
+        $rk = Get-HMHUPilotRisk $f
+        @($rk | Where-Object { $_ -match 'normale Benutzer' }).Count | Should -Be 0
         # Benutzer duerfen aendern: Warnung
         $acl = Get-Acl -LiteralPath $f
         $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'Modify', 'Allow')))
         Set-Acl -LiteralPath $f -AclObject $acl
-        @(Get-HMHUPilotRisk $f | Where-Object { $_ -match 'normale Benutzer duerfen die Datei' }).Count | Should -Be 1
+        $rk = Get-HMHUPilotRisk $f
+        @($rk | Where-Object { $_ -match 'normale Benutzer duerfen die Datei' }).Count | Should -Be 1
         # anderes einzelnes Konto mit Schreibrecht (z. B. Ordner im Profil eines Standardbenutzers): ebenfalls Warnung
         $f2 = Join-Path (Split-Path $f -Parent) 'B.ps1'; Set-Content -LiteralPath $f2 -Value '#'
         $a2 = Get-Acl -LiteralPath $f2
         $a2.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-21-1-2-3-1001')), 'Modify', 'Allow')))
         Set-Acl -LiteralPath $f2 -AclObject $a2
-        @(Get-HMHUPilotRisk $f2 | Where-Object { $_ -match 'duerfen die Datei' }).Count | Should -Be 1
+        $rk = Get-HMHUPilotRisk $f2
+        @($rk | Where-Object { $_ -match 'duerfen die Datei' }).Count | Should -Be 1
     }
 }
 
@@ -1540,9 +1583,15 @@ Describe 'Handy-Fernbedienung: Push-Meldungen (ohne Inhalt)' {
         $ec = New-Object System.Security.Cryptography.ECDsaCng($v.Key); $ec.HashAlgorithm = [System.Security.Cryptography.CngAlgorithm]::Sha256
         $ec.VerifyData([Text.Encoding]::UTF8.GetBytes("$($parts[0]).$($parts[1])"), $sig) | Should -BeTrue
         $d = [hashtable]::Synchronized(@{}); $d[('a' * 64)] = @{ Name = 'P'; PushEndpoint = 'https://web.push.apple.com/abc' }; $d[('b' * 64)] = @{ Name = 'Q'; PushEndpoint = '' }
-        $rq = @(Get-HMRemotePushRequests $d $v)
-        $rq.Count | Should -Be 1
-        $rq[0].Auth | Should -Match ('^vapid t=[^,]+, k=' + [regex]::Escape($v.Public) + '$')
+        $d[('c' * 64)] = @{ Name = 'R'; PushEndpoint = 'https://fcm.googleapis.com/fcm/send/x' }
+        $rq = Get-HMRemotePushRequests $d $v   # wie in UI-Remote: direkt zuweisen
+        $rq.Count | Should -Be 2
+        foreach ($q in $rq) { $q.Url | Should -BeOfType [string]; $q.Auth | Should -Match ('^vapid t=[^,]+, k=' + [regex]::Escape($v.Public) + '$') }
+        # Anmeldung je Dienst zwischengespeichert (Apple: hoechstens stuendlich neu)
+        $rq2 = Get-HMRemotePushRequests $d $v
+        (@($rq2 | Where-Object { $_.Url -like '*apple*' })[0].Auth) | Should -Be (@($rq | Where-Object { $_.Url -like '*apple*' })[0].Auth)
+        $none = Get-HMRemotePushRequests ([hashtable]::Synchronized(@{})) $v
+        $none.Count | Should -Be 0
     }
 }
 
@@ -1719,10 +1768,13 @@ Describe 'Pruefung 2.0.137: Formatierung, Quelle, Ausnahmen, Profil, Port-Freiga
     }
     It 'Paket-ID und Quelle an winget.exe: nur unauffaellige Zeichen (Ziel, Worker, Zeitplan)' {
         foreach ($f in 'AppUpdates-Target.ps1', 'AppUpdates-Worker.ps1', 'AppUpdates-Auto.ps1') {
-            (Get-Content (Join-Path $script:Root "Functions\$f") -Raw -Encoding UTF8) | Should -Match ([regex]::Escape("-notmatch '^[A-Za-z0-9._-]{1,64}$'"))
+            (Get-Content (Join-Path $script:Root "Functions\$f") -Raw -Encoding UTF8) | Should -Match ([regex]::Escape("-notmatch '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$'"))
         }
-        'winget' -match '^[A-Za-z0-9._-]{1,64}$' | Should -BeTrue
-        'winget" --override "x' -match '^[A-Za-z0-9._-]{1,64}$' | Should -BeFalse
+        'winget' -match '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$' | Should -BeTrue
+        'winget" --override "x' -match '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$' | Should -BeFalse
+        # Leerzeichen im Namen erlaubt (eigene Quellen wie "Firma Intern"), aber kein fuehrendes - / Leerzeichen, kein \ oder "
+        foreach ($ok in 'Firma Intern', 'msstore', 'a.b_c-d') { $ok -match '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$' | Should -BeTrue -Because $ok }
+        foreach ($bad in '-x', ' x', 'x ', 'x\', 'a"b', ('a' * 65), '') { $bad -match '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$' | Should -BeFalse -Because $bad }
         '7zip.7zip' -match '^[^\s\-"][^\s"]{0,254}$' | Should -BeTrue
         'a"b' -match '^[^\s\-"][^\s"]{0,254}$' | Should -BeFalse
     }

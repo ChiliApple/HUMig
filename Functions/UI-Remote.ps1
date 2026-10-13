@@ -295,31 +295,47 @@ function Send-HMRemotePush {
     $S = $r.S
     # Stand sofort bereitstellen - das Handy fragt gleich nach dem Anklopfen nach
     try { $S.JobJson = ConvertTo-HMRemoteJobJson $script:CurrentJob "$($script:JobTitle)" $script:HMRemoteLast -Mon $script:MonSnap } catch { }
-    $reqs = @(Get-HMRemotePushRequests $S.Devices $script:HMPushVapid)
-    if (-not $reqs.Count) { return }
+    $reqs = Get-HMRemotePushRequests $S.Devices $script:HMPushVapid   # liefert ,@() - nicht in @() wickeln
+    if (-not $reqs -or -not $reqs.Count) { return }
     $ps = [PowerShell]::Create()
     [void]$ps.AddScript($script:HMPushSendScript).AddArgument($reqs)
-    [void]$script:HMPushRuns.Add(@{ PS = $ps; Handle = $ps.BeginInvoke(); Started = (Get-Date) })
+    # Zeitlimit nach Anzahl (je Handy bis 15 s): danach Abbruch im Hintergrund und Meldung
+    [void]$script:HMPushRuns.Add(@{ PS = $ps; Handle = $ps.BeginInvoke(); Started = (Get-Date); Limit = (30 + 20 * $reqs.Count); StopH = $null; Names = @($reqs | ForEach-Object { $_.Name }) })
 }
 function Update-HMRemotePushRuns([switch]$Final) {
     foreach ($run in @($script:HMPushRuns)) {
-        $late = ((Get-Date) - $run.Started).TotalSeconds -gt 90
+        # laeuft ein Abbruch: erst nach dessen Ende aufraeumen (blockiert die Oberflaeche nicht)
+        if ($run.StopH) {
+            if ($run.StopH.IsCompleted -or $Final) { try { $run.PS.EndStop($run.StopH) } catch { }; try { $run.PS.Dispose() } catch { }; $script:HMPushRuns.Remove($run) }
+            continue
+        }
+        $late = ((Get-Date) - $run.Started).TotalSeconds -gt [int]$run.Limit
         if (-not $run.Handle.IsCompleted -and -not $late -and -not $Final) { continue }
         $res = @()
-        try {
-            if ($run.Handle.IsCompleted) { $res = @($run.PS.EndInvoke($run.Handle)); $run.PS.Dispose() }
-            else { [void]$run.PS.BeginStop($null, $null) }   # nicht auf das laufende Senden warten (Oberflaeche bleibt frei)
-        } catch { }
-        $script:HMPushRuns.Remove($run)
+        if ($run.Handle.IsCompleted) {
+            try { $res = @($run.PS.EndInvoke($run.Handle)) } catch { }
+            try { $run.PS.Dispose() } catch { }
+            $script:HMPushRuns.Remove($run)
+        } else {
+            try { $run.StopH = $run.PS.BeginStop($null, $null) } catch { try { $run.PS.Dispose() } catch { }; $script:HMPushRuns.Remove($run) }
+            if (-not $Final) { Out-Console "Fernbedienung: Push-Meldungen nicht alle zugestellt (Zeitueberschreitung, Push-Dienst nicht erreichbar? Proxy/Firewall pruefen) - $(@($run.Names) -join ', ')" 'Warning' }
+            continue
+        }
         $S = if ($script:HMRemote) { $script:HMRemote.S } else { $null }
         foreach ($x in $res) {
             if (-not $x) { continue }
             $c = [int]$x.Code
-            if ($c -ge 200 -and $c -lt 300) { continue }
-            if ($c -in @(401, 403, 404, 410) -and $S -and $S.Devices[$x.Hash]) {
-                # Abo abgelaufen/abgemeldet (App/Browserdaten geloescht) bzw. passt nicht mehr zum Schluessel dieses PCs (401/403)
-                if ("$($S.Devices[$x.Hash].PushEndpoint)" -eq "$($x.Url)") { $S.Devices[$x.Hash].PushEndpoint = ''; $S.DevDirty = $true }
-                Out-Console "Fernbedienung: Push-Meldungen fuer '$($x.Name)' nicht mehr gueltig (HTTP $c) - am Handy unter Mehr wieder einschalten" 'Warning'
+            $dv = if ($S) { $S.Devices[$x.Hash] } else { $null }
+            if ($c -ge 200 -and $c -lt 300) { if ($dv) { $dv.PushFail = 0 }; continue }
+            if ($c -in @(404, 410) -and $dv) {
+                # Abo abgelaufen/abgemeldet (App oder Browserdaten geloescht)
+                if ("$($dv.PushEndpoint)" -eq "$($x.Url)") { $dv.PushEndpoint = ''; $S.DevDirty = $true }
+                Out-Console "Fernbedienung: Push-Meldungen fuer '$($x.Name)' abgelaufen (HTTP $c) - am Handy unter Mehr wieder einschalten" 'Warning'
+            } elseif ($c -in @(401, 403) -and $dv) {
+                # Anmeldung abgelehnt: oft falsche PC-Uhr (Gueltigkeit der Anmeldung) oder neuer Schluessel - erst nach 3 Ablehnungen in Folge austragen
+                $dv.PushFail = [int]$dv.PushFail + 1
+                if ($dv.PushFail -ge 3 -and "$($dv.PushEndpoint)" -eq "$($x.Url)") { $dv.PushEndpoint = ''; $dv.PushFail = 0; $S.DevDirty = $true; Out-Console "Fernbedienung: Push-Meldungen fuer '$($x.Name)' ausgetragen (3x abgelehnt, HTTP $c) - am Handy unter Mehr wieder einschalten" 'Warning' }
+                else { Out-Console "Fernbedienung: Push-Dienst lehnt die Anmeldung ab (HTTP $c) fuer '$($x.Name)' - PC-Uhrzeit pruefen" 'Warning' }
             } else {
                 Out-Console "Fernbedienung: Push-Meldung an '$($x.Name)' nicht zugestellt ($(if ($c) { "HTTP $c" } else { $x.Error }))" 'Warning'
             }

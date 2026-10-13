@@ -415,6 +415,7 @@ function New-HMRemoteVapidJwt($Vapid, [string]$Aud, [datetime]$Now = (Get-Date))
     } finally { $ec.Dispose() }
     return "$h.$c.$(ConvertTo-HMB64Url $sig)"
 }
+$script:HMPushJwtCache = @{}
 # Anfragen fuer alle Handys mit Push-Abo: @{ Hash; Name; Url; Auth }
 function Get-HMRemotePushRequests($Devices, $Vapid, [datetime]$Now = (Get-Date)) {
     $out = @()
@@ -423,7 +424,11 @@ function Get-HMRemotePushRequests($Devices, $Vapid, [datetime]$Now = (Get-Date))
         $ep = "$($d.PushEndpoint)"
         if (-not (Test-HMRemotePushEndpoint $ep)) { continue }
         $u = [Uri]$ep
-        $jwt = New-HMRemoteVapidJwt $Vapid "https://$($u.DnsSafeHost)" $Now
+        $aud = "https://$($u.DnsSafeHost)"
+        # Anmeldung je Push-Dienst hoechstens stuendlich neu (Apple drosselt haeufigere Erneuerung)
+        $ck = "$($Vapid.Public)|$aud"; $c = $script:HMPushJwtCache[$ck]
+        if ($c -and $c.Made -le $Now -and ($Now - $c.Made).TotalMinutes -lt 60) { $jwt = $c.Jwt }
+        else { $jwt = New-HMRemoteVapidJwt $Vapid $aud $Now; $script:HMPushJwtCache[$ck] = @{ Jwt = $jwt; Made = $Now } }
         $out += @{ Hash = $k; Name = "$($d.Name)"; Url = $ep; Auth = "vapid t=$jwt, k=$($Vapid.Public)" }
     }
     return ,@($out)
