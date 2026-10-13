@@ -1121,6 +1121,17 @@ function Start-SwSandboxTest {
     foreach ($fn in 'Test-HMSandboxAvailable', 'Show-HMSandboxSetup', 'Test-HMSandboxBusy', 'Start-HMSandboxTest', 'Get-HMSandboxProgress', 'Get-HMSandboxSummary') {
         if (-not (Get-Command $fn -ErrorAction SilentlyContinue)) { [void][System.Windows.MessageBox]::Show($sw.Win, "Sandbox-Funktion fehlt ($fn) - HUMig unvollstaendig?", 'Sandbox', 'OK', 'Warning'); return }
     }
+    # Inno-Setup: fuer alle Benutzer installieren (sonst landet das Programm im Benutzerprofil des ausfuehrenden Kontos)
+    $i0 = $sw.Lst.SelectedIndex
+    if ($i0 -ge 0 -and $i0 -lt $sw.Pkgs.Count -and "$($sw.Pkgs[$i0].Info.Framework)" -eq 'Inno Setup' -and "$($sw.CmbArgs.Text)" -notmatch '(?i)/(ALLUSERS|CURRENTUSER)\b') {
+        $sw.CmbArgs.Text = ("$($sw.CmbArgs.Text)".Trim() + ' /ALLUSERS').Trim()
+        Out-Console 'Softwareverteilung: Parameter um /ALLUSERS ergaenzt (Inno-Setup fuer alle Benutzer statt ins Benutzerprofil).' 'Info'
+    }
+    # Deinstallationsbefehl aus dem Sandbox-Profil (frueherer Test) passt auf keinem PC - wird beim Test neu ermittelt
+    if ("$($sw.TxtUninst.Text)" -match '(?i)\\Users\\WDAGUtilityAccount\\') {
+        $sw.TxtUninst.Text = ''
+        Out-Console 'Softwareverteilung: Deinstallationsbefehl zeigte ins Sandbox-Benutzerprofil - wird neu ermittelt.' 'Warning'
+    }
     $p = Save-SwForm; if (-not $p) { return }
     if (-not (Test-HMSandboxAvailable)) { Show-HMSandboxSetup -Owner $sw.Win; return }
     if (Test-HMSandboxBusy) { [void][System.Windows.MessageBox]::Show($sw.Win, 'Es laeuft bereits eine Windows Sandbox - bitte zuerst schliessen.', 'Sandbox', 'OK', 'Information'); Update-SwSandboxButton; return }
