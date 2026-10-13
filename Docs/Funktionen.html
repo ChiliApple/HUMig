@@ -83,7 +83,7 @@ footer { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap;
     <div class="brand">
       <div class="logo" aria-hidden="true">HU</div>
       <h1>HUMig</h1>
-      <span class="ver">v2.1.0</span>
+      <span class="ver">v2.1.1</span>
     </div>
     <p class="lead">Profile von PC zu PC umziehen und automatisch sichern – am eigenen PC oder per Fernzugriff auf viele PCs gleichzeitig.</p>
     <div class="facts">
@@ -105,7 +105,7 @@ footer { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap;
       <li style="--c: var(--teal)"><span class="rank">4</span><div><h3>Geplante Profil-Backups</h3><p>Täglich oder wöchentlich, fortlaufend oder neu; USB wird danach ausgeworfen, Schutz bei Massenlöschung.</p></div></li>
       <li style="--c: var(--yellow)"><span class="rank">5</span><div><h3>Softwareverteilung mit Sandbox-Test</h3><p>Setup erst in der Windows Sandbox prüfen, dann still auf viele PCs verteilen.</p></div></li>
       <li style="--c: var(--peach)"><span class="rank">6</span><div><h3>Hyper-V- und Server-Backup</h3><p>Server und VMs auf rotierende USB-Platten, mit SMART-Prüfung und Plattenwechsel-Erinnerung.</p></div></li>
-      <li style="--c: var(--mauve)"><span class="rank">7</span><div><h3>Teams-Benachrichtigung</h3><p>Ergebnisse von Server- und Profil-Backups in Teams-Kanäle, je Ziel eigene Kategorien.</p></div></li>
+      <li style="--c: var(--mauve)"><span class="rank">7</span><div><h3>Teams und Handy</h3><p>Ergebnisse von Server- und Profil-Backups in Teams-Kanäle (je Ziel eigene Kategorien); laufende Vorgänge live am Handy, Push-Meldung bei Vorgangsende.</p></div></li>
       <li style="--c: var(--blue)"><span class="rank">8</span><div><h3>App-Updates per WinGet</h3><p>Ganze EDV-Säle aktualisieren, Prüfungssoftware als Ausnahme, auf Wunsch per Zeitplan.</p></div></li>
       <li style="--c: var(--green)"><span class="rank">9</span><div><h3>Fehlende Programme installieren</h3><p>Beim Restore zuerst die Programme des alten PCs nachinstallieren, dann die Daten zurückspielen.</p></div></li>
       <li style="--c: var(--red)"><span class="rank">10</span><div><h3>PC-Werkzeuge und Mehrfachaktionen</h3><p>Profil erneuern, Speicher aufräumen, Inventar, Neustart – an vielen PCs gleichzeitig.</p></div></li>
@@ -189,7 +189,7 @@ footer { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap;
       </article>
 
       <article class="cat" style="--c: var(--peach)">
-        <div class="cat-head"><span class="chip">Server</span><h3>Server-Backup und Teams</h3></div>
+        <div class="cat-head"><span class="chip">Server</span><h3>Server-Backup, Teams und Handy</h3></div>
         <div class="group"><h4>Hyper-V</h4>
           <ul>
             <li>Server und VMs mit der Windows Server-Sicherung, Profil je Host</li>
@@ -199,11 +199,21 @@ footer { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap;
             <li>VM-Export zum Importieren, per Knopf oder nach jeder Sicherung</li>
           </ul>
         </div>
+        <div class="group"><h4>Handy-Fernbedienung</h4>
+          <ul>
+            <li>App am Startbildschirm (Android und iPhone), Kopplung per QR-Code und Einmal-Code</li>
+            <li>Startseite mit Server-Backup-Kachel (angesteckte und nächste Platte, Archiv, Zustand) und App-Updates je PC</li>
+            <li>Laufender Vorgang mit Restzeit, Menge, Live-Anzeige (Durchsatz, CPU, RAM) und Konsole, Abbrechen mit Bestätigung</li>
+            <li>Verlauf der letzten 10 Vorgänge, Bericht am Handy öffnen</li>
+            <li>Push-Meldung bei Vorgangsende und bei Fehlern im App-Updates-Zeitplan – ohne Inhalt über den Push-Dienst, Text direkt vom PC</li>
+            <li>HTTPS mit eigener, auf den PC beschränkter Zertifizierungsstelle; auch im Benutzer-Modus (einmalig vom Admin eingerichtet)</li>
+          </ul>
+        </div>
         <div class="group"><h4>Teams</h4>
           <ul>
             <li>Bis zu 10 Ziele, Adressen verschlüsselt nur am PC</li>
             <li>Je Ziel eigene Kategorien und Server-Backup-Profile</li>
-            <li>Eine Karte je Lauf mit Stand und Speicherplatz</li>
+            <li>Eine Karte je Lauf mit Stand und Speicherplatz – geplant oder in HUMig gestartet, auch bei Abbruch</li>
           </ul>
         </div>
       </article>
@@ -239,7 +249,6 @@ footer { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap;
           <li>Abgesicherter Restore: Rückfrage bei fremden Backups</li>
           <li>Standorte: je Schule eigene Ordner und Domäne</li>
           <li>Startseite mit Status, Live-Anzeige CPU/RAM</li>
-          <li>Handy-Fernbedienung: Status und laufende Vorgänge am Handy mit Live-Anzeige (Durchsatz, CPU, RAM) und Push-Meldung bei Vorgangsende (App, HTTPS, QR-Kopplung)</li>
           <li>Selbsttest <code>Test-HUMig.ps1</code>, Support-Paket, Anleitung</li>
         </ul>
       </article>
@@ -248,7 +257,7 @@ footer { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap;
   </section>
 
   <footer>
-    <span>Stand 13.10.2026 · Version 2.1.0</span>
+    <span>Stand 13.10.2026 · Version 2.1.1</span>
     <a href="Anleitung.html">Anleitung</a>
     <a href="https://github.com/ChiliApple/HUMig">Projekt auf GitHub</a>
     <a href="https://github.com/ChiliApple/HUMig/releases">Download (Releases)</a>

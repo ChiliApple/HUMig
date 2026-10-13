@@ -708,7 +708,12 @@ function ConvertTo-HMRemoteStatusJson($Data) {
 function ConvertTo-HMRemoteJobJson($Job, [string]$Title, $Last = $null, [datetime]$Now = (Get-Date), $Mon = $null) {
     if ($Job) {
         $el = [int]($Now - $Job.Started).TotalSeconds
-        $o = [ordered]@{ running = $true; title = "$Title"; progress = [Math]::Max(0, [Math]::Min(100, [int]$Job.Progress)); status = "$($Job.Status)"; elapsed = $el; cancel = [bool]$Job.Cancel }
+        $pr = [Math]::Max(0, [Math]::Min(100, [int]$Job.Progress))
+        $o = [ordered]@{ running = $true; title = "$Title"; progress = $pr; status = "$($Job.Status)"; elapsed = $el; cancel = [bool]$Job.Cancel }
+        # Menge (Backup mit Platzpruefung) und geschaetzte Restzeit aus dem bisherigen Tempo
+        $tot = [long]$Job.PlanTotal
+        if ($tot -gt 0) { $o.bytesTotal = $tot; $o.bytesDone = [Math]::Min($tot, [long]$Job.DoneBytes + [long]$Job.CurBytes) }
+        if ($pr -ge 2 -and $pr -lt 100 -and $el -ge 15) { $o.eta = [int]($el * (100 - $pr) / $pr) }
     } else {
         $o = [ordered]@{ running = $false }
         if ($Last) { $o.lastTitle = "$($Last.Title)"; $o.lastResult = "$($Last.Result)"; $o.lastTime = "$($Last.Time)" }
@@ -735,6 +740,8 @@ function New-HMRemoteState {
         Pair = $null; StatusJson = 'null'; JobJson = '{"running":false}'
         Lines = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList)); LineSeq = 0
         CancelReq = $null; RefreshReq = $false; Static = @{}; FailIp = [hashtable]::Synchronized(@{}); LogFile = ''; PushKey = ''
+        HistJson = '[]'; ExtraJson = 'null'; NoticeJson = 'null'
+        Reports = [hashtable]::Synchronized(@{}); Tickets = [hashtable]::Synchronized(@{})
         Events = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
     })
 }
@@ -761,6 +768,23 @@ function Add-HMRemoteFail($S, [string]$Ip, [datetime]$Now) {
     if ($f.Count -ge 10) { $f.Until = $Now.AddMinutes(15) }
     $S.FailIp[$Ip] = $f
 }
+# Bericht ueber eine Einmal-Adresse ausliefern: nur .html bis 10 MB, eigene strenge Richtlinie (keine Skripte, sandbox)
+function Get-HMRemoteReportResponse($S, [string]$Ticket, [datetime]$Now) {
+    $tk = $S.Tickets[$Ticket]
+    if ($tk) { $S.Tickets.Remove($Ticket) }
+    $nf = @{ Code = 404; Type = 'text/plain; charset=utf-8'; Text = 'Bericht nicht (mehr) verfuegbar - in der App erneut antippen'; NoStore = $true; Log = 'Bericht: Adresse ungueltig/abgelaufen'; Headers = @{} }
+    if (-not $tk -or $tk.Until -lt $Now) { return $nf }
+    $p = "$($tk.Path)"
+    try {
+        if ([IO.Path]::GetExtension($p) -notin @('.html', '.htm')) { return $nf }
+        $fi = New-Object IO.FileInfo($p)
+        if (-not $fi.Exists) { $nf.Text = 'Bericht nicht erreichbar (z. B. Platte ausgeworfen oder Freigabe nicht verbunden)'; $nf.Log = 'Bericht: Datei fehlt'; return $nf }
+        if ($fi.Length -gt 10MB) { $nf.Code = 413; $nf.Text = 'Bericht zu gross fuer das Handy - am PC oeffnen'; return $nf }
+        $b = [IO.File]::ReadAllBytes($fi.FullName)
+        return @{ Code = 200; Type = 'text/html; charset=utf-8'; Bytes = $b; NoStore = $true; Log = 'Bericht geladen'
+            Headers = @{ 'Content-Security-Policy' = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" } }
+    } catch { $nf.Code = 500; $nf.Text = 'Bericht nicht lesbar'; $nf.Log = "Bericht: $($_.Exception.Message)"; return $nf }
+}
 function Get-HMRemoteResponse($S, $Req) {
     $now = if ($Req.Now) { [datetime]$Req.Now } else { Get-Date }
     $path = "$($Req.Path)"
@@ -768,6 +792,7 @@ function Get-HMRemoteResponse($S, $Req) {
     # statische Dateien (Seite, Skript, Design, Icons, Manifest, Service Worker, CA-Zertifikat)
     if (-not $path.StartsWith('/api/')) {
         if ($method -ne 'GET' -and $method -ne 'HEAD') { return (New-HMRemoteJson 405 @{ ok = $false; error = 'Methode nicht erlaubt' }) }
+        if ($path -match '^/report/([A-Za-z0-9_-]{43})$') { return (Get-HMRemoteReportResponse $S $Matches[1] $now) }
         $key = if ($path -eq '/' -or $path -eq '') { '/index.html' } else { $path }
         $f = $S.Static[$key]
         if (-not $f) { return @{ Code = 404; Type = 'text/plain; charset=utf-8'; Text = 'Nicht gefunden'; NoStore = $true; Log = ''; Headers = @{} } }
@@ -829,7 +854,7 @@ function Get-HMRemoteResponse($S, $Req) {
             $head = [ordered]@{ ok = $true; pc = "$($S.Pc)"; version = "$($S.Version)"; userMode = [bool]$S.UserMode; device = "$($dev.Name)"; until = $until; seq = [int]$S.LineSeq; lines = $lines }
             $hj = ConvertTo-Json -InputObject $head -Depth 4 -Compress
             # Status und Vorgang sind fertiges JSON (von der Oberflaeche erzeugt)
-            $txt = $hj.Substring(0, $hj.Length - 1) + ',"status":' + "$($S.StatusJson)" + ',"job":' + "$($S.JobJson)" + '}'
+            $txt = $hj.Substring(0, $hj.Length - 1) + ',"status":' + "$($S.StatusJson)" + ',"job":' + "$($S.JobJson)" + ',"hist":' + "$($S.HistJson)" + ',"extra":' + "$($S.ExtraJson)" + ',"notice":' + "$($S.NoticeJson)" + '}'
             return (New-HMRemoteJson 200 $txt)
         }
         '/api/cancel' {
@@ -851,6 +876,16 @@ function Get-HMRemoteResponse($S, $Req) {
             if (-not (Test-HMRemotePushEndpoint $ep)) { return (New-HMRemoteJson 400 @{ ok = $false; error = 'Push-Dienst nicht erlaubt' } 'Push-Abo abgelehnt (Adresse)') }
             $dev.PushEndpoint = $ep; $S.DevDirty = $true
             return (New-HMRemoteJson 200 @{ ok = $true; on = $true } "Push-Meldungen an: $($dev.Name)")
+        }
+        '/api/report' {
+            # Bericht eines Vorgangs aus dem Verlauf: nur ueber die Kennung (Pfad legt HUMig fest), Einmal-Adresse fuer 60 s
+            if ($method -ne 'POST') { return (New-HMRemoteJson 405 @{ ok = $false; error = 'Methode nicht erlaubt' }) }
+            $rid = "$($body.id)"
+            if ($rid -notmatch '^[0-9a-f]{8}$' -or -not $S.Reports.ContainsKey($rid)) { return (New-HMRemoteJson 404 @{ ok = $false; error = 'Bericht nicht gefunden' }) }
+            foreach ($k in @($S.Tickets.Keys)) { if ($S.Tickets[$k].Until -lt $now) { $S.Tickets.Remove($k) } }
+            $tk = New-HMRemoteToken
+            $S.Tickets[$tk] = @{ Path = "$($S.Reports[$rid])"; Until = $now.AddSeconds(60) }
+            return (New-HMRemoteJson 200 @{ ok = $true; url = "/report/$tk" } "Bericht angefordert ($($dev.Name))")
         }
         '/api/push/off' {
             if ($method -ne 'POST') { return (New-HMRemoteJson 405 @{ ok = $false; error = 'Methode nicht erlaubt' }) }
@@ -933,7 +968,7 @@ function Start-HMRemoteListenerLoop($S) {
                 $rs.ContentLength64 = $bytes.Length
                 if ($rq.HttpMethod -ne 'HEAD') { $rs.OutputStream.Write($bytes, 0, $bytes.Length) }
             } catch { } finally { try { $rs.Close() } catch { } }
-            if ($res.Log -or [int]$res.Code -ge 400) { Write-HMRemoteLog $S ("{0,-15} {1} {2} {3}{4}" -f $ip, $rq.HttpMethod, $rq.Url.AbsolutePath, $res.Code, $(if ($res.Log) { " - $($res.Log)" } else { '' })) }
+            if ($res.Log -or [int]$res.Code -ge 400) { Write-HMRemoteLog $S ("{0,-15} {1} {2} {3}{4}" -f $ip, $rq.HttpMethod, ($rq.Url.AbsolutePath -replace '^/report/.*$', '/report/...'), $res.Code, $(if ($res.Log) { " - $($res.Log)" } else { '' })) }
         }
     } finally {
         $S.Listening = $false

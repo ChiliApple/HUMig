@@ -1155,6 +1155,7 @@ function Start-EngineJob {
     Set-Status "$Title ..." '#FFF9E2AF'
     $script:JobTitle = $Title
     $script:JobOnFinished = $OnFinished
+    $script:JobReport = $null   # Bericht des Vorgangs (fuer den Verlauf am Handy) - setzt OnFinished bei Bedarf
     Start-LongJob -ScriptFiles $ScriptFiles -Command $Command -Ctx $Ctx -Job $job -OnTick {
         param($j)
         $n = 0
@@ -1165,6 +1166,7 @@ function Start-EngineJob {
         $ui.lblElapsed.Text = ((Get-Date) - $j.Started).ToString('hh\:mm\:ss')
     } -OnDone {
         param($j)
+        $j.Ended = Get-Date   # Ende des Vorgangs (Dialoge in OnFinished zaehlen nicht zur Dauer)
         Set-JobUi $false
         $script:CurrentJob = $null
         $ttl = $script:JobTitle
@@ -1178,16 +1180,18 @@ function Start-EngineJob {
         $rs = if ($j.Cancel) { 'Cancelled' } elseif ($j.Error) { 'Error' } elseif ($res -and $res.Status) { "$($res.Status)" } else { 'OK' }
         $kind = switch ($rs) { 'OK' { 'Info' } 'Created' { 'Info' } 'Warning' { 'Warning' } 'NoCatalog' { 'Warning' } default { 'Error' } }
         $stTxt = switch ($rs) { 'OK' { 'erfolgreich' } 'Created' { 'erstellt' } 'NoCatalog' { 'ohne Katalog - nur Kurzpruefung' } 'Warning' { 'mit Warnungen' } 'NoSpace' { 'nicht gestartet - zu wenig Platz' } 'Cancelled' { 'abgebrochen' } default { 'mit Fehlern' } }
-        $det = "Dauer $(Format-HMDuration ((Get-Date) - $j.Started))"
+        $det = "Dauer $(Format-HMDuration ($j.Ended - $j.Started))"
         if ($res -and $res.SizeBytes) { $det = "$(Format-HMSize ([long]$res.SizeBytes)), $det" } elseif ($res -and $res.Total) { $det = "$(Format-HMSize ([long]$res.Total)), $det" }
-        $long = ((Get-Date) - $j.Started).TotalSeconds -gt 20
+        $long = ($j.Ended - $j.Started).TotalSeconds -gt 20
         if ($rs -eq 'NoSpace') { }
         elseif ($long -or -not $script:Window.IsActive) { Show-HMNotification "HUMig - $ttl $stTxt" $det $kind }
         elseif ($rs -eq 'OK') { [System.Media.SystemSounds]::Asterisk.Play() }
         # Handy-Fernbedienung: letzter Vorgang
         $script:HMRemoteLast = @{ Title = $ttl; Result = $stTxt; Time = (Get-Date).ToString('dd.MM. HH:mm') }
+        # Verlauf fuer das Handy (letzte 10 Vorgaenge, mit Bericht)
+        if ($long -or $rs -ne 'OK') { try { Add-HMRemoteHistory $j $ttl $stTxt $rs $res } catch { } }
         # Push-Meldung ans Handy (nur bei laengeren Vorgaengen, nur wenn dort eingeschaltet)
-        if ($long -and $script:HMRemote) { try { Send-HMRemotePush } catch { } }
+        if ($long -and $script:HMRemote) { try { Send-HMRemotePush -Text "$ttl - $stTxt" } catch { } }
     }
 }
 # Laufenden Vorgang abbrechen. -Confirmed: ohne Rueckfrage (z.B. am Handy schon bestaetigt)
@@ -1307,7 +1311,7 @@ function Start-BackupJob([hashtable]$Ctx) {
         if ($script:Settings.OverviewAuto -ne $false) { Update-HMBackupOverview -Quiet }
         try { Update-HMWizardAfterJob 'Backup' $j "$($script:LastBackupCtx.BackupPath)" } catch { }
         $rep = if ($j.Result -and $j.Result.Status -and $script:LastBackupCtx.BackupPath) { Join-Path $script:LastBackupCtx.BackupPath 'Bericht_Backup.html' } else { $null }
-        if ($rep -and (Test-Path -LiteralPath $rep)) { Out-Console "Protokoll: $rep  (Reiter Restore > Protokoll)" 'Info' }
+        if ($rep -and (Test-Path -LiteralPath $rep)) { Out-Console "Protokoll: $rep  (Reiter Restore > Protokoll)" 'Info'; $script:JobReport = $rep }
         # Massenloeschung erkannt: Teams-Benachrichtigung (wenn auf diesem PC eingetragen, nur als Administrator)
         if ($isAdmin -and $script:LastBackupCtx.BackupPath) {
             try {

@@ -191,6 +191,7 @@ function Start-HMRemote([switch]$Quiet, $Owner = $null) {
     $S.Port = $port; $S.Version = "$($script:Version)"; $S.UserMode = -not $adm
     if ($cfg.Minutes -gt 0) { $S.StopAt = (Get-Date).AddMinutes($cfg.Minutes) }
     $S.Devices = Read-HMRemoteDevices
+    try { Set-HMRemoteHistory $S (Read-HMRemoteHistory) } catch { }
     # Push-Meldungen: Schluessel dieses Kontos (privat bleibt in der Oberflaeche, der Webserver kennt nur den oeffentlichen)
     $script:HMPushVapid = $null
     try { $script:HMPushVapid = Get-HMRemoteVapid; $S.PushKey = $script:HMPushVapid.Public } catch { Write-Host "[Fernbedienung] Push nicht verfuegbar: $($_.Exception.Message)" -ForegroundColor Yellow }
@@ -282,17 +283,142 @@ function Update-HMRemoteTick {
     }
     $S.JobJson = ConvertTo-HMRemoteJobJson $script:CurrentJob "$($script:JobTitle)" $script:HMRemoteLast -Mon $script:MonSnap
     try { Update-HMRemotePushRuns } catch { }
+    # Zusatzanzeigen (App-Updates je PC, Server-Backup-Kachel) hoechstens alle 2 Minuten bzw. nach neuem Status
+    if (-not $r.ExtraAt -or ((Get-Date) - $r.ExtraAt).TotalSeconds -ge 120 -or -not [object]::ReferenceEquals($script:StatusData, $r.ExtraObj)) {
+        $r.ExtraAt = Get-Date; $r.ExtraObj = $script:StatusData
+        try { $S.ExtraJson = ConvertTo-Json -Compress -Depth 6 -InputObject (Get-HMRemoteExtra) } catch { }
+        try { Test-HMRemoteAuSchedule } catch { }
+    }
     if ($S.DevDirty) { $S.DevDirty = $false; try { Save-HMRemoteDevices $S.Devices } catch { } }
     if ($script:HMRemoteDlg) { try { Update-HMRemoteDialog } catch { } }
+}
+
+# ----------------------------------------------------------------------------
+# Verlauf der letzten Vorgaenge (Handy): %APPDATA%\HUMig\remote-history.json, hoechstens 10
+# ----------------------------------------------------------------------------
+function Get-HMRemoteHistFile { return (Join-Path $env:APPDATA 'HUMig\remote-history.json') }
+function Read-HMRemoteHistory {
+    try {
+        $f = Get-HMRemoteHistFile
+        if (Test-Path -LiteralPath $f -PathType Leaf) { return @(Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { $_ } | Where-Object { $_ } | Select-Object -First 10) }
+    } catch { }
+    return @()
+}
+# Bericht zu einem Vorgang: von OnFinished gesetzt ($script:JobReport) oder aus dem Ergebnis (Restore: Datei, Server-Backup: Ordner)
+function Get-HMRemoteReportPath($Job) {
+    if ($script:JobReport) { return "$($script:JobReport)" }
+    $rp = "$($Job.Result.Report)"
+    if (-not $rp) { return '' }
+    if ($rp -match '\.html?$') { return $rp }
+    return ("$($rp.TrimEnd('\'))\Bericht.html")   # ohne Join-Path: Platte evtl. schon ausgeworfen
+}
+function Add-HMRemoteHistory($Job, [string]$Title, [string]$Result, [string]$Code, $Res) {
+    $lvl = switch ($Code) { 'OK' { 'OK' } 'Created' { 'OK' } 'Warning' { 'Warning' } 'NoCatalog' { 'Warning' } 'Cancelled' { 'Info' } default { 'Error' } }
+    $rb = Get-HMRemoteRandomBytes 4   # liefert ,@() - erst zuweisen
+    $bytes = [long]0
+    try { if ($Res -and $Res.SizeBytes) { $bytes = [long]$Res.SizeBytes } elseif ($Res -and $Res.Total) { $bytes = [long]$Res.Total } elseif ($Job.DoneBytes) { $bytes = [long]$Job.DoneBytes } } catch { }
+    $e = [pscustomobject][ordered]@{
+        Id = (-join ($rb | ForEach-Object { $_.ToString('x2') })); Title = $Title; Result = $Result; Level = $lvl
+        Time = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Seconds = [int]($(if ($Job.Ended) { [datetime]$Job.Ended } else { Get-Date }) - $Job.Started).TotalSeconds; Bytes = $bytes; Report = (Get-HMRemoteReportPath $Job)
+    }
+    $list = @(@($e) + @(Read-HMRemoteHistory) | Select-Object -First 10)
+    try {
+        $f = Get-HMRemoteHistFile; $d = Split-Path $f -Parent
+        if (-not (Test-Path -LiteralPath $d)) { [void](New-Item -ItemType Directory -Path $d -Force) }
+        [IO.File]::WriteAllText($f, (ConvertTo-Json -InputObject @($list) -Depth 3), (New-Object Text.UTF8Encoding $false))
+    } catch { }
+    if ($script:HMRemote) { Set-HMRemoteHistory $script:HMRemote.S $list }
+}
+# Verlauf an den Webserver geben: Anzeige ohne Pfade, Pfade nur in der Zuordnung Kennung -> Bericht
+function Set-HMRemoteHistory($S, $List) {
+    $map = [hashtable]::Synchronized(@{})   # neu aufbauen und dann tauschen (Webserver liest gleichzeitig)
+    $out = @()
+    foreach ($x in @($List | Where-Object { $_ })) {
+        $has = [bool]("$($x.Report)" -and "$($x.Id)" -match '^[0-9a-f]{8}$')
+        if ($has) { $map["$($x.Id)"] = "$($x.Report)" }
+        $out += [ordered]@{ id = "$($x.Id)"; title = "$($x.Title)"; result = "$($x.Result)"; level = "$($x.Level)"; time = "$($x.Time)"; sec = [int]$x.Seconds; bytes = [long]$x.Bytes; report = $has }
+    }
+    $S.Reports = $map
+    $S.HistJson = ConvertTo-Json -Compress -Depth 3 -InputObject @($out)
+}
+
+# ----------------------------------------------------------------------------
+# Zusatzanzeigen fuer das Handy: App-Updates je PC, Server-Backup-Kachel
+# ----------------------------------------------------------------------------
+function Get-HMRemoteExtra {
+    $o = [ordered]@{ apps = @(); sb = @() }
+    if ($script:UserMode) { return $o }
+    # --- App-Updates: Verlauf (letzte 7 Tage), letzte Suche (diese Sitzung), Zeitplan (gelesen bzw. dieser PC)
+    $h = @()
+    try { if ($script:AuHistFile -and (Test-Path -LiteralPath $script:AuHistFile)) { $h = @(Get-Content -LiteralPath $script:AuHistFile -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { $_ }) } } catch { }
+    $since = (Get-Date).AddDays(-7).ToString('yyyy-MM-dd HH:mm')
+    $pcs = @{}
+    foreach ($x in @($h | Where-Object { $_ -and "$($_.Date)" -ge $since })) { $k = "$($x.Computer)".ToUpperInvariant(); if (-not $pcs[$k]) { $pcs[$k] = @() }; $pcs[$k] += $x }
+    if ($script:AuLastSearch) { foreach ($k in @($script:AuLastSearch.ByPc.Keys)) { if (-not $pcs.ContainsKey("$k".ToUpperInvariant())) { $pcs["$k".ToUpperInvariant()] = @() } } }
+    if ($script:AuSchedData) { foreach ($k in @($script:AuSchedData.Keys)) { if (-not $pcs.ContainsKey("$k".ToUpperInvariant())) { $pcs["$k".ToUpperInvariant()] = @() } } }
+    $loc = Read-HMRemoteLocalAuLast
+    if ($loc -and -not $pcs.ContainsKey("$env:COMPUTERNAME".ToUpperInvariant())) { $pcs["$env:COMPUTERNAME".ToUpperInvariant()] = @() }
+    foreach ($k in @($pcs.Keys | Sort-Object)) {
+        $g = @($pcs[$k])
+        $bad = @($g | Where-Object { "$($_.Status)" -notin @('OK', 'Skipped') } | Sort-Object Date -Descending)
+        $e = [ordered]@{ pc = $k; ok = @($g | Where-Object { "$($_.Status)" -eq 'OK' }).Count; failed = $bad.Count; last = "$(@($g | Sort-Object Date -Descending | Select-Object -First 1).Date)"
+            fails = @($bad | Select-Object -First 5 | ForEach-Object { [ordered]@{ name = "$($_.Name)"; text = "$($_.Text)"; date = "$($_.Date)" } }) }
+        if ($script:AuLastSearch -and $script:AuLastSearch.ByPc.ContainsKey($k)) { $e.found = [int]$script:AuLastSearch.ByPc[$k]; $e.foundAt = "$($script:AuLastSearch.Time)" }
+        $sd = $null; if ($script:AuSchedData) { foreach ($sk in @($script:AuSchedData.Keys)) { if ("$sk".ToUpperInvariant() -eq $k) { $sd = $script:AuSchedData[$sk] } } }
+        if ($sd -and $sd.PSObject.Properties['Exists'] -and $sd.Exists) { $e.sched = [ordered]@{ when = "$($sd.When)"; next = "$($sd.Next)"; last = "$($sd.Last)"; result = "$($sd.Summary)" } }
+        elseif ($k -eq "$env:COMPUTERNAME".ToUpperInvariant() -and $loc) { $e.sched = [ordered]@{ when = ''; next = ''; last = "$($loc.Date)"; result = ("{0} gefunden, {1} OK, {2} Fehler" -f [int]$loc.Found, [int]$loc.Ok, [int]$loc.Err) } }
+        $o.apps += $e
+    }
+    # --- Server-Backup: naechste Platte laut Rotation, angesteckte Platten (Bezeichnung, frei)
+    $vols = @()
+    # nur mit Server-Backup-Profilen; mit Zeitlimit (schlafende USB-Platte soll die Oberflaeche nicht lange anhalten)
+    if (@($script:StatusData.Server | Where-Object { $_ }).Count) {
+        try {
+            $vols = @(Get-CimInstance -Namespace 'root/Microsoft/Windows/Storage' -ClassName MSFT_Volume -OperationTimeoutSec 5 -ErrorAction Stop |
+                    Where-Object { "$($_.FileSystemLabel)" -and "$($_.DriveLetter)" -match '^[A-Za-z]$' })
+        } catch { }
+    }
+    foreach ($p in @($script:StatusData.Server | Where-Object { $_ })) {
+        $rot = @($p.Disks | Where-Object { $_ -and -not $_.Archive })
+        $nx = @($rot | Where-Object { $null -eq $_.Age })[0]
+        if (-not $nx) { $nx = @($rot | Sort-Object { [int]$_.Age } -Descending)[0] }
+        $conn = @()
+        foreach ($d in @($p.Disks | Where-Object { $_ })) {
+            $v = @($vols | Where-Object { "$($_.FileSystemLabel)" -eq "$($d.Label)" })[0]
+            if ($v) { $conn += [ordered]@{ label = "$($d.Label)"; drive = "$($v.DriveLetter):"; free = [long]$v.SizeRemaining; size = [long]$v.Size } }
+        }
+        $o.sb += [ordered]@{ name = "$($p.Name)"; next = "$(if ($nx) { $nx.Label })"; conn = @($conn); archiveAge = $p.ArchiveAge }
+    }
+    return $o
+}
+# Ergebnis des App-Updates-Zeitplans auf DIESEM PC (falls eingerichtet): %ProgramData%\HUMig\AppUpdates\auto\last.json
+function Read-HMRemoteLocalAuLast {
+    try {
+        $f = Join-Path $env:ProgramData 'HUMig\AppUpdates\auto\last.json'
+        if (Test-Path -LiteralPath $f -PathType Leaf) { return (Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json) }
+    } catch { }
+    return $null
+}
+# Push, wenn der App-Updates-Zeitplan auf diesem PC mit Fehlern gelaufen ist (nur solange HUMig offen ist)
+function Test-HMRemoteAuSchedule {
+    $l = Read-HMRemoteLocalAuLast
+    if (-not $l -or -not "$($l.Date)") { if ($null -eq $script:HMRemoteAuSeen) { $script:HMRemoteAuSeen = '' }; return }   # noch kein Lauf: der erste wird gemeldet
+    $key = "$($l.Date)|$($l.Err)"
+    if ($null -eq $script:HMRemoteAuSeen) { $script:HMRemoteAuSeen = $key; return }   # Stand beim Start nicht melden
+    if ($key -eq $script:HMRemoteAuSeen) { return }
+    $script:HMRemoteAuSeen = $key
+    if ([int]$l.Err -gt 0) { Send-HMRemotePush -Text ("App-Updates-Zeitplan auf {0}: {1} fehlgeschlagen ({2} OK)" -f $env:COMPUTERNAME, [int]$l.Err, [int]$l.Ok) }
 }
 
 # Push-Meldung (ohne Inhalt) an alle Handys mit eingeschalteten Meldungen - nach dem Ende eines Vorgangs.
 # Gesendet wird im Hintergrund (Oberflaeche blockiert nicht); Ergebnis wertet Update-HMRemotePushRuns aus.
 $script:HMPushRuns = New-Object System.Collections.ArrayList
-function Send-HMRemotePush {
+function Send-HMRemotePush([string]$Text = '') {
     $r = $script:HMRemote
     if (-not $r -or -not $script:HMPushVapid) { return }
     $S = $r.S
+    # Text der Meldung: holt das Handy nach dem Anklopfen ab (nie im Push selbst)
+    if ($Text) { try { $S.NoticeJson = ConvertTo-Json -Compress -InputObject ([ordered]@{ t = [int64](([datetime]::UtcNow - [datetime]'1970-01-01').TotalMilliseconds); text = $Text }) } catch { } }
     # Stand sofort bereitstellen - das Handy fragt gleich nach dem Anklopfen nach
     try { $S.JobJson = ConvertTo-HMRemoteJobJson $script:CurrentJob "$($script:JobTitle)" $script:HMRemoteLast -Mon $script:MonSnap } catch { }
     $reqs = Get-HMRemotePushRequests $S.Devices $script:HMPushVapid   # liefert ,@() - nicht in @() wickeln
@@ -483,7 +609,7 @@ function Get-HMRemoteSettingsFromTab($F, $W) {
 function Show-HMRemoteDialog {
     $x = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="HUMig - Handy-Fernbedienung" Width="820" Height="640" MinWidth="700" MinHeight="560" WindowStartupLocation="CenterOwner"
+        Title="HUMig - Handy-Fernbedienung" Width="840" Height="720" MinWidth="700" MinHeight="600" WindowStartupLocation="CenterOwner"
         Background="#FF1E1E2E" Foreground="#FFCDD6F4" FontFamily="Segoe UI" FontSize="12">
   <DockPanel Margin="14">
     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
@@ -504,6 +630,7 @@ function Show-HMRemoteDialog {
     <Grid>
       <Grid.ColumnDefinitions><ColumnDefinition Width="320"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
       <Border Background="#FF181825" CornerRadius="10" Padding="14" Margin="0,0,12,0">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel>
           <Border Background="White" CornerRadius="8" Width="270" Height="270" HorizontalAlignment="Center">
             <Grid>
@@ -518,8 +645,9 @@ function Show-HMRemoteDialog {
             <Button x:Name="btnNewCode" Content="Neuer Code" Style="{DynamicResource BtnBlue}" Padding="12,5"/>
           </StackPanel>
           <TextBlock Text="Adresse fuer den QR-Code:" Foreground="#FFA6ADC8" Margin="0,10,0,2"/>
-          <ComboBox x:Name="cmbIp"/>
+          <ComboBox x:Name="cmbIp" Height="26" Padding="6,3" ToolTip="Hat der PC mehrere Adressen (z. B. LAN und WLAN): die waehlen, die das Handy erreicht"/>
         </StackPanel>
+        </ScrollViewer>
       </Border>
       <DockPanel Grid.Column="1">
         <TextBlock DockPanel.Dock="Top" Text="SO GEHT'S" Foreground="#FF6C7086" FontWeight="Bold" FontSize="11"/>

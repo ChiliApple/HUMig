@@ -1253,6 +1253,7 @@ function Invoke-HMRobocopy {
                     $f = [Math]::Min(0.98, ([double]$Job.ItemDoneBytes + $w) / [double]$Job.ItemBytes)
                     $p = [int]([double]$Job.ItemBase + [double]$Job.ItemSpan * $f)
                     if ($p -gt [int]$Job.Progress) { $Job.Progress = $p }
+                    $Job.CurBytes = [long]$Job.ItemDoneBytes + $w
                 }
             } catch { $track = $false }
         }
@@ -2563,6 +2564,9 @@ function Start-HMBackup {
         $plan = $Ctx.PlanBytes
         $wTotal = [double]0; $wDone = [double]0
         if ($plan -and $plan.Count) { foreach ($m0 in $Ctx.Modules) { foreach ($i0 in @($m0.Items)) { $wTotal += Get-HMPlanWeight $plan $m0 $i0 } } }
+        # Menge fuer die Anzeige (Handy): geplant / bisher geschrieben
+        $Job.PlanTotal = [long]0; $Job.DoneBytes = [long]0; $Job.CurBytes = [long]0
+        if ($plan -and $plan.Count) { foreach ($v0 in @($plan.Values)) { $Job.PlanTotal = [long]$Job.PlanTotal + [long]$v0 } }
         foreach ($mod in $Ctx.Modules) {
             if (Test-HMCancel $Job) { break }
             Write-HMLog $Job $mod.Name 'Info'
@@ -2606,6 +2610,7 @@ function Start-HMBackup {
                 $mres.Bytes += [long]$r.Bytes
                 if ($r.Status -in @('Error', 'Cancel')) { $mres.Status = 'Error' } elseif ($r.Status -eq 'Warning' -and $mres.Status -eq 'OK') { $mres.Status = 'Warning' }
                 $done++; $wDone += $wIt; $Job.ItemBytes = 0
+                $Job.DoneBytes = [long]$Job.DoneBytes + [long]$r.Bytes; $Job.CurBytes = [long]0
                 $p = if ($wTotal -gt 0) { [int](95 * [Math]::Min(1.0, $wDone / $wTotal)) } else { [int](95 * $done / $total) }
                 if ($p -gt [int]$Job.Progress) { $Job.Progress = $p }
             }
