@@ -1,5 +1,14 @@
 ﻿# Changelog
 
+## v2.0.141 - 2026-10-13
+### Behoben (Pruefung v2.0.140)
+- **Profil-Backup brach mit Platzpruefung ab, wenn ein Eintrag (z. B. Dokumente) mehr als 2 GB zu kopieren hatte** (neu in 2.0.140, Fortschritt nach Datenmenge) - Zahl lief ueber den Bereich einer 32-Bit-Zahl. Neuer Test mit 3 GB / 900 GB
+- Push-Meldungen erreichten ab zwei Handys keines, ohne Handy kam nach jedem Vorgang eine Fehlwarnung; die HUPilot-Warnung zeigte "System.Object[]" statt der Gruende. Ein neuer Test prueft jetzt alle Funktionen, die Listen als ein Objekt zurueckgeben, im ganzen Code
+- Push: Ablehnung der Anmeldung (401/403, z. B. falsche PC-Uhr) traegt ein Handy erst nach 3 Ablehnungen in Folge aus und weist auf die Uhrzeit hin; Anmeldung je Push-Dienst hoechstens stuendlich neu (Apple); Zeitlimit nach Anzahl der Handys, nicht zugestellte werden gemeldet, Aufraeumen ohne die Oberflaeche zu blockieren; am Handy wartet das Zeitlimit auch das Lesen der Antwort ab
+- Fortschritt: auch *Zusaetzliche Ordner* laufen waehrend des Kopierens mit
+- HUPilot-Warnung: Konten, die selbst Administrator sind, gelten nicht mehr als Risiko (wie bei der Pruefung des Programmordners); zusaetzlich geprueft: hoehere Ordner, die andere Konten ersetzen duerfen
+- App-Updates: Namen eigener WinGet-Quellen duerfen wieder Leerzeichen enthalten (z. B. "Firma Intern") - weiterhin keine Anfuehrungszeichen, kein \ und kein - am Anfang
+
 ## v2.0.140 - 2026-10-13
 ### Neu
 - **Push-Meldungen aufs Handy** (Handy-Fernbedienung, *Mehr* > *Benachrichtigungen*): Meldung, wenn ein laengerer Vorgang am PC endet - auch bei geschlossener App. Ohne Inhalt ueber den Push-Dienst des Browsers (Google/Apple/Mozilla/Microsoft); den Text holt das Handy im selben Netz direkt vom PC. Eigener VAPID-Schluessel je Konto (DPAPI), nur Adressen der Push-Dienste werden angenommen

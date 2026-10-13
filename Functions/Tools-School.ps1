@@ -314,9 +314,24 @@ function Get-HMHUPilotRisk([string]$Ps1) {
     # Schreibrechte fuer andere als: SYSTEM, Administratoren, TrustedInstaller, ERSTELLER-BESITZER und das eigene (Admin-)Konto
     $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464', 'S-1-3-0')
     try { $trusted += [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { }
+    # wie bei der Pruefung des Programmordners: einzelne Konten, die selbst Administrator sind, sind unkritisch
+    if (Get-Command Get-HMAppAdminSids -ErrorAction SilentlyContinue) { try { $trusted += @(Get-HMAppAdminSids) } catch { } }
     # nur die schreibenden Bits: WriteData 0x2, AppendData 0x4, DeleteSubdirectoriesAndFiles 0x40, Delete 0x10000,
     # ChangePermissions 0x40000, TakeOwnership 0x80000, GENERIC_ALL 0x10000000, GENERIC_WRITE 0x40000000
     $wr = [int64](0x2 -bor 0x4 -bor 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
+    # Datei und Ordner: jedes Schreiben; hoehere Ordner bis zur Wurzel: Loeschen/Rechte/Besitz (Ordner ersetzen),
+    # nicht das blosse Anlegen (z. B. C:\ erlaubt Benutzern das Anlegen von Ordnern)
+    $wrUp = [int64](0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000)
+    $up = Split-Path (Split-Path $Ps1 -Parent) -Parent
+    while ($up -and $up -ne (Split-Path $up -Parent) -and -not ($w | Where-Object { $_ -match 'duerfen' })) {
+        try {
+            $hitU = @((Get-Acl -LiteralPath $up -ErrorAction Stop).Access | Where-Object {
+                $_.AccessControlType -eq 'Allow' -and -not ("$($_.PropagationFlags)" -match 'InheritOnly') -and ((([int64][int]$_.FileSystemRights) -band 0xFFFFFFFFL -band $wrUp) -ne 0) -and $(try { $trusted -notcontains $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $true })
+            })
+            if ($hitU.Count) { $w += "andere Konten duerfen den uebergeordneten Ordner $up ersetzen ($(@($hitU | ForEach-Object { "$($_.IdentityReference)" } | Select-Object -Unique) -join ', '))"; break }
+        } catch { break }
+        $up = Split-Path $up -Parent
+    }
     foreach ($p in @($Ps1, (Split-Path $Ps1 -Parent))) {
         try {
             $acl = Get-Acl -LiteralPath $p -ErrorAction Stop
@@ -343,7 +358,7 @@ function Start-HMHUPilot([switch]$Choose) {
     # vor dem Start als Administrator: genaue Datei zeigen, bei Stick/Freigabe/beschreibbarem Ordner deutlich warnen
     $info = ''
     try { $fi = Get-Item -LiteralPath $ps1 -ErrorAction Stop; $info = "`ngeaendert: $($fi.LastWriteTime.ToString('dd.MM.yyyy HH:mm')), $([Math]::Round($fi.Length / 1KB)) KB" } catch { Out-Console "HUPilot-Setup nicht gefunden: $ps1" 'Error'; return }
-    $risk = @(Get-HMHUPilotRisk $ps1)
+    $risk = Get-HMHUPilotRisk $ps1   # liefert ,@() - nicht in @() wickeln
     $q = "HUPilot-Setup mit Administratorrechten starten?`n`n$ps1$info"
     if ($risk.Count) { $q += "`n`nACHTUNG - die Datei laeuft mit vollen Rechten:`n - " + ($risk -join "`n - ") + "`n`nNur starten, wenn das sicher dein HUPilot ist." }
     if (-not (Confirm-Action $q 'HUPilot')) { return }

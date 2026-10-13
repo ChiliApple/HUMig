@@ -92,7 +92,7 @@ try {
     foreach ($t in $todo) {
         Set-AProgress $true $i $todo.Count "$($t.Name)" $ok $err
         # Paket-ID pruefen (keine Optionen/Leerzeichen), sonst nicht an winget weitergeben
-        if ("$($t.Id)" -notmatch '^[^\s\-"][^\s"]{0,254}$' -or "$($t.Source)" -notmatch '^[A-Za-z0-9._-]{1,64}$') { $i++; $err++; Write-ALog "$($t.Name): ungueltige Paket-ID '$($t.Id)' bzw. Quelle '$($t.Source)' - uebersprungen"; continue }
+        if ("$($t.Id)" -notmatch '^[^\s\-"][^\s"]{0,254}$' -or "$($t.Source)" -notmatch '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$') { $i++; $err++; Write-ALog "$($t.Name): ungueltige Paket-ID '$($t.Id)' bzw. Quelle '$($t.Source)' - uebersprungen"; continue }
         $out = @(& $wg upgrade --id $t.Id --exact --source $t.Source --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | ForEach-Object { "$_" })
         $r = Format-ACode ([int64]$LASTEXITCODE)
         $i++
