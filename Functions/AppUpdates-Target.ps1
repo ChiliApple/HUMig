@@ -162,7 +162,9 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec, 
             if ($st -and $st -ne 'Running' -and $st -ne 'Queued') {
                 if (-not $doneAt) { $doneAt = Get-Date } elseif (((Get-Date) - $doneAt).TotalSeconds -gt 10) {
                     $lr = ''; try { $lr = "$((Get-ScheduledTaskInfo -TaskPath '\' -TaskName $name).LastTaskResult)" } catch { }
-                    $script:TErr += "Aufgabe als $(if ($sys) { 'SYSTEM' } else { Get-TAccount $Who }) ohne Ergebnis beendet (Rueckgabe $lr)"; break
+                    $lh = ''; try { if ("$lr" -match '^-?\d+$') { $lv = [int64]"$lr"; if ($lv -lt 0) { $lv += 4294967296 }; $lh = ' = 0x{0:X8}' -f $lv } } catch { }
+                    $why = if ("$lh" -match '800710E0') { ' - Windows hat den Start im Benutzerkonto abgelehnt' } else { '' }
+                    $script:TErr += "Aufgabe als $(if ($sys) { 'SYSTEM' } else { Get-TAccount $Who }) ohne Ergebnis beendet (Rueckgabe $lr$lh)$why"; break
                 }
             }
             if (((Get-Date) - $t0).TotalSeconds -gt $TimeoutSec) {
@@ -249,6 +251,16 @@ try {
                 Out-L "lese als $readAs ..."
                 Invoke-TTask $sid $req $false 900
                 if ($script:TRes) { $items = @($script:TRes.Items) }
+                else {
+                    # im Benutzerkonto kein Ergebnis (z.B. Start abgelehnt): als SYSTEM lesen - dann nur Programme fuer alle Benutzer
+                    Install-TPwsh
+                    if (Get-TPwsh) {
+                        Out-L "kein Ergebnis als $readAs - lese als SYSTEM (PowerShell 7, nur Programme fuer alle Benutzer) ..."
+                        $readAs = 'SYSTEM (PowerShell 7)'
+                        Invoke-TTask 'SYSTEM' $req $true 900
+                        if ($script:TRes) { $items = @($script:TRes.Items | ForEach-Object { $_.Scope = 'Machine'; $_ }) }
+                    }
+                }
             } else {
                 Install-TPwsh
                 if (Get-TPwsh) {
@@ -259,6 +271,8 @@ try {
                     if ($script:TRes) { $items = @($script:TRes.Items | ForEach-Object { $_.Scope = 'Machine'; $_ }) }
                 }
             }
+            # gar kein Ergebnis = nicht gelesen (nicht "0 Updates" melden)
+            if (-not $script:TRes) { $readAs = '' }
             # keine Quelle lesbar (z.B. WinGet fehlt: "Klasse nicht registriert") = nicht gelesen - nicht "0 Updates" melden
             $srcBad = @(@($script:TErr) | Where-Object { "$_" -match '^Quelle ' }).Count
             if (-not @($items | Where-Object { $_ }).Count -and $srcBad -and $srcBad -ge [Math]::Max(1, @($My.Sources | Where-Object { $_ }).Count)) {
