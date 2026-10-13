@@ -1432,16 +1432,6 @@ Describe 'Handy-Fernbedienung: echtes HTTPS mit eigener CA (Windows, Administrat
             $nc | Should -Match ([regex]::Escape((Get-HMRemoteHostNames)[0]))
             $nc | Should -Match '10\.0\.0\.0'
             $nc | Should -Match '192\.168\.0\.0'
-            # Zertifikat fuer eine oeffentliche Adresse von dieser CA: Kette meldet Verstoss gegen die Namensbeschraenkung
-            $bad = New-SelfSignedCertificate -Type Custom -Subject 'CN=HUMig Test' -Signer $ca -KeyExportPolicy NonExportable -CertStoreLocation 'Cert:\LocalMachine\My' -TextExtension @('2.5.29.17={text}IPAddress=8.8.8.8', '2.5.29.37={text}1.3.6.1.5.5.7.3.1')
-            try {
-                $chb = New-Object System.Security.Cryptography.X509Certificates.X509Chain
-                $chb.ChainPolicy.RevocationMode = 'NoCheck'
-                $chb.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
-                [void]$chb.ChainPolicy.ExtraStore.Add($ca)
-                [void]$chb.Build($bad)
-                (@($chb.ChainStatus | ForEach-Object { "$($_.Status)" }) -join ',') | Should -Match 'NotPermittedNameConstraint|HasNotPermittedNameConstraint|InvalidNameConstraints'
-            } finally { Remove-Item -LiteralPath "Cert:\LocalMachine\My\$($bad.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue }
             # Firewall-Regel nur fuer http.sys (Programm System)
             Set-HMRemoteFirewall 'HUMig-Remote-CI' $port @('LocalSubnet')
             try { "$((Get-NetFirewallRule -Name 'HUMig-Remote-CI' | Get-NetFirewallApplicationFilter).Program)" | Should -Be 'System' }
@@ -1512,6 +1502,31 @@ Describe 'Handy-Fernbedienung: echtes HTTPS mit eigener CA (Windows, Administrat
             foreach ($c in @($cert, $ca)) { if ($c) { Remove-Item -LiteralPath "Cert:\LocalMachine\My\$($c.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue } }
         }
         (Get-HMRemoteBinding $port).State | Should -Be 'None'
+    }
+    It 'Namensbeschraenkung greift: Zertifikat fuer eine oeffentliche Adresse wird abgelehnt' -Skip:(-not (([Environment]::OSVersion.Platform -eq 'Win32NT') -and ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))) {
+        $ca = $null; $bad = $null; $good = $null; $root = $null; $res = ''
+        try {
+            $ca = New-HMRemoteCa
+            # Die Kette wird nur bei vertrauter Stammstelle vollstaendig geprueft - CA voruebergehend vertrauen (nur auf dem CI-Rechner)
+            $root = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'LocalMachine')
+            $root.Open('ReadWrite'); $root.Add((New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(, $ca.RawData)))
+            $bad = New-SelfSignedCertificate -Type Custom -Subject 'CN=HUMig Test' -Signer $ca -KeyExportPolicy NonExportable -CertStoreLocation 'Cert:\LocalMachine\My' -TextExtension @('2.5.29.17={text}IPAddress=8.8.8.8', '2.5.29.37={text}1.3.6.1.5.5.7.3.1')
+            $good = New-HMRemoteServerCert $ca @('10.1.1.5')
+            $st = {
+                param($c)
+                $ch = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+                $ch.ChainPolicy.RevocationMode = 'NoCheck'
+                [void]$ch.Build($c)
+                @($ch.ChainStatus | ForEach-Object { "$($_.Status)" }) -join ','
+            }
+            $res = & $st $bad
+            (& $st $good) | Should -Not -Match 'NameConstraint|UntrustedRoot'
+        } finally {
+            if ($root) { try { $root.Remove((New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(, $ca.RawData))) } catch { }; $root.Close() }
+            foreach ($c in @($bad, $good, $ca)) { if ($c) { Remove-Item -LiteralPath "Cert:\LocalMachine\My\$($c.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue } }
+        }
+        Write-Host "Kettenstatus 8.8.8.8: '$res'"
+        $res | Should -Match 'NotPermittedNameConstraint|HasNotPermittedNameConstraint|InvalidNameConstraints'
     }
 }
 
