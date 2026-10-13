@@ -69,18 +69,19 @@ function Test-TWinGet {
     return [bool](@(Get-ChildItem -Path (Join-Path $env:ProgramFiles 'WindowsApps') -Filter 'Microsoft.DesktopAppInstaller_*_8wekyb3d8bbwe' -Directory -ErrorAction SilentlyContinue |
             Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'winget.exe') }).Count)
 }
-# Windows-Version: Windows 10 1809+/11, Windows Server 2022 (eingeschraenkt) / 2025
-function Test-TOsOk {
-    $b = [Environment]::OSVersion.Version.Build
+# Windows-Version: Windows 10 1809+/11, Windows Server 2022 (eingeschraenkt) / 2025, Windows Server 2019 experimentell
+# (Build 17763 wie Windows 10 1809 - von Microsoft nicht unterstuetzt)
+function Test-TOsOk { return ([Environment]::OSVersion.Version.Build -ge 17763) }
+function Test-TOsExperimental {
     $srv = $false; try { $srv = ([int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).ProductType -ne 1) } catch { }
-    if ($srv) { return ($b -ge 20348) }
-    return ($b -ge 17763)
+    return ($srv -and [Environment]::OSVersion.Version.Build -lt 20348)
 }
 # Fehlt WinGet (z.B. Windows Server 2022 - dort nicht mitgeliefert), fuer alle Benutzer einrichten: Repair-WinGetPackageManager -AllUsers
 # (laedt App Installer und Abhaengigkeiten von GitHub). Nur mit Modul; Fehler landen in $script:TErr
 function Install-TWinGet {
     if (Test-TWinGet) { return }
-    if (-not (Test-TOsOk)) { $script:TErr += 'WinGet wird auf dieser Windows-Version nicht unterstuetzt (Windows 10 1809+/11, Windows Server 2022/2025)'; return }
+    if (-not (Test-TOsOk)) { $script:TErr += 'WinGet wird auf dieser Windows-Version nicht unterstuetzt (Windows 10 1809+/11, Windows Server 2019 (experimentell)/2022/2025)'; return }
+    if (Test-TOsExperimental) { Out-L 'Windows Server 2019: WinGet wird von Microsoft hier nicht unterstuetzt - Einrichtung wird trotzdem versucht (experimentell)' }
     Out-L 'WinGet (App Installer) fehlt - wird fuer alle Benutzer eingerichtet (Repair-WinGetPackageManager -AllUsers, Download von GitHub) ...'
     try {
         try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
