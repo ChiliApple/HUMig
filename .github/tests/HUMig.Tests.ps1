@@ -1232,3 +1232,29 @@ Describe 'HUPilot: Ordner finden und Hashes uebergeben' {
         Test-Path -LiteralPath (Join-Path $script:HP 'HUPilot\logs\hashes.csv') | Should -BeFalse
     }
 }
+
+Describe 'Testinstallation (Sandbox): Installation ins Benutzerprofil erkennen' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Tools-Sandbox.ps1')
+        function New-HMSbxRes($Entries, $UserFolders) {
+            [pscustomobject]@{ ExitCode = 0; InstallStatus = 'OK'; InstallText = 'installiert'; Seconds = 10; NewEntries = @($Entries); NewFolders = @(); UserFolders = @($UserFolders); SelectedKey = ''
+                DesktopLinks = @(); DesktopLinksLeft = @(); InstallWindows = @(); UninstallWindows = @(); Deps = @(); UninstallTested = $false; InstallLog = ''; UninstallLog = ''; Error = '' }
+        }
+    }
+    It 'Programme-Ordner fuer alle Benutzer (HKLM) + AppData\Local\Programs\Common: kein Benutzerprofil-Hinweis (Greenshot)' {
+        $e = [pscustomobject]@{ Key = 'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Greenshot_is1'; DisplayName = 'Greenshot 1.3.323'; DisplayVersion = '1.3.323'; Publisher = 'Greenshot'
+            UninstallString = '"C:\Program Files\Greenshot\unins000.exe"'; QuietUninstallString = '"C:\Program Files\Greenshot\unins000.exe" /SILENT'; InstallLocation = 'C:\Program Files\Greenshot\'; DisplayIcon = 'C:\Program Files\Greenshot\Greenshot.exe' }
+        $uf = @('C:\Users\WDAGUtilityAccount\AppData\Local\Programs\Common', 'C:\Users\WDAGUtilityAccount\AppData\Roaming\Greenshot', 'C:\Users\WDAGUtilityAccount\AppData\Local\Greenshot')
+        $s = Get-HMSandboxSummary -Result (New-HMSbxRes @($e) $uf) -Settings ([pscustomobject]@{ Name = 'Greenshot 1.3.323' })
+        $s.Proposal.RunAsUser | Should -BeFalse
+        $s.SandboxInfo.UserProfile | Should -BeFalse
+        @($s.Proposal.Warnings | Where-Object { $_ -match 'Benutzerprofil' }).Count | Should -Be 0
+        $s.Proposal.DetectName | Should -Be 'Greenshot*'
+    }
+    It 'Eintrag in HKCU bzw. nur neuer Ordner in AppData\Local\Programs: Benutzerprofil' {
+        $e = [pscustomobject]@{ Key = 'HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\App_is1'; DisplayName = 'App 1.0'; DisplayVersion = '1.0'; Publisher = 'X'
+            UninstallString = '"C:\Users\WDAGUtilityAccount\AppData\Local\Programs\App\unins000.exe"'; QuietUninstallString = ''; InstallLocation = 'C:\Users\WDAGUtilityAccount\AppData\Local\Programs\App\'; DisplayIcon = '' }
+        (Get-HMSandboxSummary -Result (New-HMSbxRes @($e) @()) -Settings ([pscustomobject]@{ Name = 'App' })).Proposal.RunAsUser | Should -BeTrue
+        (Get-HMSandboxSummary -Result (New-HMSbxRes @() @('C:\Users\WDAGUtilityAccount\AppData\Local\Programs\App')) -Settings ([pscustomobject]@{ Name = 'App' })).Proposal.RunAsUser | Should -BeTrue
+    }
+}

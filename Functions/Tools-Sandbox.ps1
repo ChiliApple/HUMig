@@ -1038,8 +1038,11 @@ function Get-HMSandboxSummary {
             else { $lines.Add("Desktop-Verknuepfung(en): $($left -join ', ')  -> 'Ohne Desktop-Verknuepfung' anhaken, wenn unerwuenscht") }
         }
     } elseif ($noDesk) { $lines.Add('Desktop-Verknuepfung: Setup hat keine angelegt') }
-    $userFolders = @($Res.UserFolders | Where-Object { $_ -match '(?i)\\AppData\\Local\\Programs\\' })
-    $userInst = (@($entries | Where-Object { "$($_.Key)" -match '^HKEY_CURRENT_USER' -or "$($_.InstallLocation)$($_.UninstallString)" -match '(?i)\\Users\\' }).Count -gt 0) -or $userFolders.Count -gt 0
+    # AppData\Local\Programs\Common legen auch Setups fuer alle Benutzer an (gemeinsamer Ordner) - zaehlt nicht
+    $userFolders = @($Res.UserFolders | Where-Object { $_ -match '(?i)\\AppData\\Local\\Programs\\' -and $_ -notmatch '(?i)\\AppData\\Local\\Programs\\Common$' })
+    # Installation ins Benutzerprofil: Eintrag in HKCU bzw. Pfad im Profil; neue Programm-Ordner im Profil zaehlen nur,
+    # wenn es keinen Eintrag in 'Apps & Features' gibt (sonst entscheidet der Eintrag, z.B. Programme\... fuer alle Benutzer)
+    $userInst = (@($entries | Where-Object { "$($_.Key)" -match '^HKEY_CURRENT_USER' -or "$($_.InstallLocation)$($_.UninstallString)" -match '(?i)\\Users\\' }).Count -gt 0) -or (-not $entries.Count -and $userFolders.Count -gt 0)
     if ($userInst) {
         $warnings.Add("ACHTUNG: installiert ins Benutzerprofil - bei der Verteilung landet es im Profil des ausfuehrenden Kontos, nicht beim angemeldeten Benutzer. Schalter fuer 'alle Benutzer' verwenden (Inno: /ALLUSERS, MSI: ALLUSERS=1) oder als Benutzer ausfuehren.")
     }

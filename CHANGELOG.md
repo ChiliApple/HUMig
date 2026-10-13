@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## v2.0.132 - 2026-10-13
+### Behoben
+- Testinstallation: falscher Hinweis *Setup installiert nur ins Benutzerprofil* bei Programmen fuer alle Benutzer (z. B. Greenshot mit `/ALLUSERS`). Der gemeinsame Ordner `AppData\Local\Programs\Common` zaehlt nicht mehr; neue Ordner im Profil zaehlen nur, wenn das Setup keinen Eintrag in *Apps & Features* anlegt - sonst entscheidet der Eintrag
+
 ## v2.0.131 - 2026-10-13
 ### Behoben
 - App-Updates: stuerzt das WinGet-Modul ab, bietet HUMig *WinGet einrichten* wieder an (ausser auf Windows Server 2019) - auf Windows Server 2022 ist meist der App Installer nicht vollstaendig eingerichtet, das behebt die Einrichtung (`Repair-WinGetPackageManager -AllUsers`). Der Hinweis nennt das jetzt
