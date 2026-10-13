@@ -1495,3 +1495,15 @@ Describe 'Handy-Fernbedienung: echtes HTTPS mit eigener CA (Windows, Administrat
         (Get-HMRemoteBinding $port).State | Should -Be 'None'
     }
 }
+
+Describe 'Update: GitHub-Abfragegrenze erkennen' {
+    It 'erkennt "rate limit" in der Antwort, sonst leer; ohne Kopfzeile eine Stunde' {
+        $e = [System.Management.Automation.ErrorRecord]::new([Exception]::new('Der Remoteserver hat einen Fehler zurueckgegeben: (403) Unzulaessig.'), 'x', 'NotSpecified', $null)
+        $e.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('{"message":"API rate limit exceeded for 193.170.218.130."}')
+        $r = Get-HMGitHubRateLimit $e
+        $r | Should -Match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$'
+        ([datetime]$r - (Get-Date)).TotalMinutes | Should -BeGreaterThan 50
+        $n = [System.Management.Automation.ErrorRecord]::new([Exception]::new('Not Found'), 'x', 'NotSpecified', $null)
+        Get-HMGitHubRateLimit $n | Should -BeNullOrEmpty
+    }
+}

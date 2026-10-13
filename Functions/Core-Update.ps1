@@ -158,6 +158,25 @@ function Test-HMManifestSignature([byte[]]$Manifest, [byte[]]$Signature, [string
 }
 #endregion HMUpdateLib
 
+# GitHub-Abfragegrenze erreicht? (ohne Anmeldung 60 Abfragen je Stunde und oeffentlicher IP - alle Geraete hinter
+# derselben Internet-Adresse teilen sie). Rueckgabe: '' = nein, sonst Ende der Sperre als 'yyyy-MM-ddTHH:mm:ss' (Ortszeit)
+function Get-HMGitHubRateLimit($Err) {
+    $msg = ''
+    try { $msg = "$($Err.ErrorDetails.Message) $($Err.Exception.Message)" } catch { }
+    $code = 0; try { $code = [int]$Err.Exception.Response.StatusCode } catch { }
+    if (-not ($msg -match '(?i)rate limit' -or $code -eq 429)) { return '' }
+    $reset = $null
+    try {
+        $hd = $Err.Exception.Response.Headers
+        $v = $null
+        try { $v = $hd['X-RateLimit-Reset'] } catch { }
+        if (-not $v) { try { $v = @($hd.GetValues('X-RateLimit-Reset'))[0] } catch { } }
+        if ("$v" -match '^\d+$') { $reset = [DateTimeOffset]::FromUnixTimeSeconds([int64]"$v").LocalDateTime }
+    } catch { }
+    if (-not $reset) { $reset = (Get-Date).AddHours(1) }
+    return $reset.ToString('yyyy-MM-ddTHH:mm:ss')
+}
+
 # ============================================================================
 # Release signieren - nur auf dem PC des Herausgebers (dort liegt der private Schluessel des Signatur-Zertifikats).
 # Auf allen anderen PCs gibt es den Schluessel nicht - dort wird nur geprueft.

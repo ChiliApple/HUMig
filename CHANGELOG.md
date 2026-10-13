@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## v2.0.137 - 2026-10-13
+### Update
+- **GitHub-Abfragegrenze** (ohne Anmeldung 60 Abfragen je Stunde fuer alle Geraete hinter derselben Internet-Adresse): HUMig meldet jetzt klar, ab wann es wieder geht (statt "privat?"), und fragt bis dahin nicht mehr. Ein erfolgreicher Update-Check gilt 30 Minuten; nach Einstellungen, Token oder Signieren wird sofort neu gefragt. Abhilfe: Nur-Lese-Token (Rechtsklick auf *Update* > *GitHub-Token*)
+- *Andere Version / Vorversion*: dieselbe klare Meldung bei der Abfragegrenze
+
 ## v2.0.136 - 2026-10-13
 ### Neu: Handy-Fernbedienung
 - Status und laufende Vorgaenge am Handy ansehen und abbrechen - im selben Netz, als App auf dem Startbildschirm (PWA). Knopf **Handy** unten rechts: Ein/Aus, QR-Code und 6-stelliger Kopplungscode, gekoppelte Handys
