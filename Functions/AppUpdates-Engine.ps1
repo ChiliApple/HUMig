@@ -166,7 +166,7 @@ exit 0
 }
 # Text fuer einen Absturz des Unterprozesses
 function Format-HMAuCrash($Iso) {
-    $c = if ($null -ne $Iso.ExitCode) { '0x{0:X8}' -f ([int64]$Iso.ExitCode -band 0xFFFFFFFF) } else { '?' }
+    $c = if ($null -ne $Iso.ExitCode) { '0x{0:X8}' -f [int]$Iso.ExitCode } else { '?' }
     $t = "WinGet-Modul ist abgestuerzt (Code $c) - HUMig laeuft weiter"
     if (Test-HMAuOsExperimental) { $t += '. Windows Server 2019 wird von Microsoft fuer WinGet nicht unterstuetzt - App-Updates sind auf diesem Server nicht moeglich' }
     return $t
