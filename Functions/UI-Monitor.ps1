@@ -86,6 +86,8 @@ public static class HMMon {
 $script:MonViews = @()
 $script:MonTimer = $null
 $script:MonHist = $null
+# Letzter Stand fuer die Handy-Fernbedienung (Texte + Verlauf, bleibt nach dem Ende mit dem Durchschnitt stehen)
+$script:MonSnap = $null
 # wbengine = Dienst der Windows Server-Sicherung (liest/schreibt bei wbadmin die Daten), nur als Administrator messbar
 $script:MonProcNames = [string[]]@('robocopy', 'scanstate', 'loadstate', 'wbengine')
 
@@ -142,8 +144,18 @@ function Set-HMMonLine($Line, [double[]]$Values, [double]$Max, [double]$W, [doub
     $Line.Points = $pc
 }
 
+# Stand fuer die Handy-Fernbedienung: Texte wie in der Anzeige + Verlauf (MB/s bzw. %, max. 60 Werte)
+function New-HMMonSnap($Hist, [string]$Io, [string]$IoSub, [string]$Cpu, [string]$CpuSub, [string]$Ram, [string]$RamSub, [bool]$Done) {
+    $r1 = { param($l, [double]$d) ,@(@($l) | ForEach-Object { [Math]::Round([double]$_ / $d, 1) }) }
+    return [ordered]@{
+        done = $Done; io = $Io; ioSub = $IoSub; cpu = $Cpu; cpuSub = $CpuSub; ram = $Ram; ramSub = $RamSub
+        wr = (& $r1 $Hist.Wr 1MB); rd = (& $r1 $Hist.Rd 1MB); cpuH = (& $r1 $Hist.Cpu 1); ramH = (& $r1 $Hist.Ram 1)
+    }
+}
+
 function Start-HMMonitor {
     if (-not $script:MonViews.Count) { return }
+    $script:MonSnap = $null
     $script:MonHist = @{ Rd = New-Object System.Collections.Generic.List[double]; Wr = New-Object System.Collections.Generic.List[double]; Cpu = New-Object System.Collections.Generic.List[double]; Ram = New-Object System.Collections.Generic.List[double]
         Last = [datetime]::Now; Start = [datetime]::Now; SumWr = [double]0; SumRd = [double]0; PeakWr = [double]0 }
     try { [void][HMMon]::Cpu(); [void][HMMon]::Io($script:MonProcNames) } catch { }
@@ -170,17 +182,24 @@ function Update-HMMonitor {
         foreach ($p in @(@($h.Rd, $rd), @($h.Wr, $wr), @($h.Cpu, [Math]::Max(0, $cpu)), @($h.Ram, $(if ($tot) { 100 * $used / $tot } else { 0 })))) { $p[0].Add($p[1]); if ($p[0].Count -gt 60) { $p[0].RemoveAt(0) } }
         $maxIo = [Math]::Max(1MB, [Math]::Max(($h.Wr | Measure-Object -Maximum).Maximum, ($h.Rd | Measure-Object -Maximum).Maximum))
         $run = ($now - $h.Start).TotalSeconds
+        $tIo = "$(Format-HMRate $rd)  /  $(Format-HMRate $wr)"
+        $tIoSub = if ($np) { "Durchschnitt Schreiben $(Format-HMRate ($h.SumWr / [Math]::Max(1, $run)))  |  Spitze $(Format-HMRate $h.PeakWr)" } else { 'gerade kein Kopiervorgang (Pruefen, Registry, Einstellungen ...)' }
+        $tCpu = if ($cpu -ge 0) { '{0:N0} %' -f $cpu } else { '-' }
+        $tCpuSub = "$([Environment]::ProcessorCount) logische Prozessoren"
+        $tRam = if ($tot) { '{0:N0} %' -f (100 * $used / $tot) } else { '-' }
+        $tRamSub = if ($tot) { '{0:N1} von {1:N1} GB belegt' -f ($used / 1GB), ($tot / 1GB) } else { '' }
+        $script:MonSnap = New-HMMonSnap $h $tIo $tIoSub $tCpu $tCpuSub $tRam $tRamSub $false
         foreach ($v in $script:MonViews) {
             $w = [Math]::Max(60, $v.Io.Canvas.ActualWidth); $ht = 30
-            $v.Io.Val.Text = "$(Format-HMRate $rd)  /  $(Format-HMRate $wr)"
-            $v.Io.Sub.Text = if ($np) { "Durchschnitt Schreiben $(Format-HMRate ($h.SumWr / [Math]::Max(1, $run)))  |  Spitze $(Format-HMRate $h.PeakWr)" } else { 'gerade kein Kopiervorgang (Pruefen, Registry, Einstellungen ...)' }
+            $v.Io.Val.Text = $tIo
+            $v.Io.Sub.Text = $tIoSub
             Set-HMMonLine $v.Io.Line ([double[]]$h.Wr.ToArray()) $maxIo $w $ht
             Set-HMMonLine $v.Io.Line2 ([double[]]$h.Rd.ToArray()) $maxIo $w $ht
-            $v.Cpu.Val.Text = if ($cpu -ge 0) { '{0:N0} %' -f $cpu } else { '-' }
-            $v.Cpu.Sub.Text = "$([Environment]::ProcessorCount) logische Prozessoren"
+            $v.Cpu.Val.Text = $tCpu
+            $v.Cpu.Sub.Text = $tCpuSub
             Set-HMMonLine $v.Cpu.Line ([double[]]$h.Cpu.ToArray()) 100 ([Math]::Max(60, $v.Cpu.Canvas.ActualWidth)) $ht
-            $v.Ram.Val.Text = if ($tot) { '{0:N0} %' -f (100 * $used / $tot) } else { '-' }
-            $v.Ram.Sub.Text = if ($tot) { '{0:N1} von {1:N1} GB belegt' -f ($used / 1GB), ($tot / 1GB) } else { '' }
+            $v.Ram.Val.Text = $tRam
+            $v.Ram.Sub.Text = $tRamSub
             Set-HMMonLine $v.Ram.Line ([double[]]$h.Ram.ToArray()) 100 ([Math]::Max(60, $v.Ram.Canvas.ActualWidth)) $ht
         }
     } catch { }
@@ -191,9 +210,15 @@ function Stop-HMMonitor {
     $h = $script:MonHist
     if (-not $h) { return }
     $run = [Math]::Max(1, ([datetime]::Now - $h.Start).TotalSeconds)
+    $tIo = "fertig - Durchschnitt $(Format-HMRate ($h.SumWr / $run)) Schreiben"
+    $tIoSub = "gelesen $(Format-HMSize ([long]$h.SumRd)), geschrieben $(Format-HMSize ([long]$h.SumWr)) in $(Format-HMDuration ([datetime]::Now - $h.Start))  |  Spitze $(Format-HMRate $h.PeakWr)"
     foreach ($v in $script:MonViews) {
-        $v.Io.Val.Text = "fertig - Durchschnitt $(Format-HMRate ($h.SumWr / $run)) Schreiben"
-        $v.Io.Sub.Text = "gelesen $(Format-HMSize ([long]$h.SumRd)), geschrieben $(Format-HMSize ([long]$h.SumWr)) in $(Format-HMDuration ([datetime]::Now - $h.Start))  |  Spitze $(Format-HMRate $h.PeakWr)"
+        $v.Io.Val.Text = $tIo
+        $v.Io.Sub.Text = $tIoSub
     }
+    try {
+        $o = $script:MonSnap
+        $script:MonSnap = New-HMMonSnap $h $tIo $tIoSub $(if ($o) { $o.cpu } else { '-' }) $(if ($o) { $o.cpuSub } else { '' }) $(if ($o) { $o.ram } else { '-' }) $(if ($o) { $o.ramSub } else { '' }) $true
+    } catch { }
     $script:MonHist = $null
 }

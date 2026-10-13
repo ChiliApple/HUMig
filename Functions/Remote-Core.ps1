@@ -602,7 +602,8 @@ function ConvertTo-HMRemoteStatusJson($Data) {
     return (ConvertTo-Json -InputObject $o -Depth 6 -Compress)
 }
 # Laufender Vorgang als JSON. $Job: New-JobState-Hashtable oder $null; $Last: @{ Title; Result; Time } des letzten Vorgangs
-function ConvertTo-HMRemoteJobJson($Job, [string]$Title, $Last = $null, [datetime]$Now = (Get-Date)) {
+# $Mon: Live-Anzeige (Durchsatz, CPU, RAM mit Verlauf) aus UI-Monitor.ps1 - bleibt nach dem Ende mit dem Durchschnitt stehen
+function ConvertTo-HMRemoteJobJson($Job, [string]$Title, $Last = $null, [datetime]$Now = (Get-Date), $Mon = $null) {
     if ($Job) {
         $el = [int]($Now - $Job.Started).TotalSeconds
         $o = [ordered]@{ running = $true; title = "$Title"; progress = [Math]::Max(0, [Math]::Min(100, [int]$Job.Progress)); status = "$($Job.Status)"; elapsed = $el; cancel = [bool]$Job.Cancel }
@@ -610,7 +611,8 @@ function ConvertTo-HMRemoteJobJson($Job, [string]$Title, $Last = $null, [datetim
         $o = [ordered]@{ running = $false }
         if ($Last) { $o.lastTitle = "$($Last.Title)"; $o.lastResult = "$($Last.Result)"; $o.lastTime = "$($Last.Time)" }
     }
-    return (ConvertTo-Json -InputObject $o -Compress)
+    if ($Mon) { $o.mon = $Mon }
+    return (ConvertTo-Json -InputObject $o -Depth 4 -Compress)
 }
 # Konsolenzeile merken (Ringpuffer, Nummer laeuft weiter)
 function Add-HMRemoteLineTo($S, [string]$Msg, [string]$Lvl) {

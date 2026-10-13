@@ -1365,6 +1365,24 @@ Describe 'Handy-Fernbedienung: QR-Code, Kopplung, Anfragen' {
         for ($i = 0; $i -lt 350; $i++) { Add-HMRemoteLineTo $S "z$i" 'Info' }
         $S.Lines.Count | Should -Be 300
     }
+    It 'Live-Anzeige (Durchsatz, CPU, RAM) im Vorgang: Texte und Verlauf, Werte gerundet, ohne Anzeige kein Feld' {
+        function Format-HMSize($b) { "$b" }; function Format-HMDuration($d) { 'x' }
+        . (Join-Path $script:Root 'Functions\UI-Monitor.ps1')
+        $h = @{ Wr = New-Object System.Collections.Generic.List[double]; Rd = New-Object System.Collections.Generic.List[double]; Cpu = New-Object System.Collections.Generic.List[double]; Ram = New-Object System.Collections.Generic.List[double] }
+        $h.Wr.Add(3MB); $h.Wr.Add(1572864.0); $h.Cpu.Add(12.345)
+        $m = New-HMMonSnap $h '1,0 MB/s  /  3,0 MB/s' 'Durchschnitt' '12 %' '8 logische Prozessoren' '86 %' '13,5 von 15,7 GB belegt' $false
+        $job = @{ Started = (Get-Date).AddSeconds(-5); Progress = 10; Status = 'kopiere'; Cancel = $false }
+        $j = ConvertTo-HMRemoteJobJson $job 'Backup' -Mon $m | ConvertFrom-Json
+        $j.mon.cpu | Should -Be '12 %'; $j.mon.ram | Should -Be '86 %'
+        @($j.mon.wr) | Should -Be @(3, 1.5); @($j.mon.cpuH) | Should -Be @(12.3); @($j.mon.rd).Count | Should -Be 0
+        $j.mon.done | Should -BeFalse
+        (ConvertTo-HMRemoteJobJson $null '' -Mon $m | ConvertFrom-Json).mon.io | Should -Be '1,0 MB/s  /  3,0 MB/s'
+        (ConvertTo-HMRemoteJobJson $job 'Backup' | ConvertFrom-Json).PSObject.Properties.Name | Should -Not -Contain 'mon'
+        $f = Get-HMRemoteWebFiles -Version '1' -Pc 'PC'
+        $html = [Text.Encoding]::UTF8.GetString($f['/index.html'].Bytes); $js = [Text.Encoding]::UTF8.GetString($f['/app.js'].Bytes)
+        $html | Should -Match 'id="jMon"'; $js | Should -Match 'function renderMon'
+        $js | Should -Not -Match 'innerHTML'
+    }
     It 'Abbrechen nur mit Bestaetigung und Token, fremde Herkunft abgelehnt; Entkoppeln' {
         $S = New-HMRemTestState
         $code = Open-HMRemotePairing $S

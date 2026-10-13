@@ -276,7 +276,7 @@ function Update-HMRemoteTick {
         $r.StatusObj = $script:StatusData
         try { $S.StatusJson = ConvertTo-HMRemoteStatusJson $script:StatusData } catch { }
     }
-    $S.JobJson = ConvertTo-HMRemoteJobJson $script:CurrentJob "$($script:JobTitle)" $script:HMRemoteLast
+    $S.JobJson = ConvertTo-HMRemoteJobJson $script:CurrentJob "$($script:JobTitle)" $script:HMRemoteLast -Mon $script:MonSnap
     if ($S.DevDirty) { $S.DevDirty = $false; try { Save-HMRemoteDevices $S.Devices } catch { } }
     if ($script:HMRemoteDlg) { try { Update-HMRemoteDialog } catch { } }
 }
