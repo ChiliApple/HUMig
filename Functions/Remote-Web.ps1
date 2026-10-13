@@ -93,6 +93,14 @@ $script:HMRemoteHtml = @'
       </div>
     </div>
     <button class="btn danger wide hidden" id="jCancel">Abbrechen</button>
+    <div class="card mon hidden" id="jMon">
+      <div class="mt"><div><div class="ml">KOPIEREN (Lesen / Schreiben)</div><div class="mv" id="mIo">-</div><div class="ms" id="mIoS"></div></div>
+        <svg class="spark" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"><polyline class="rd" id="pRd"></polyline><polyline class="wr" id="pWr"></polyline></svg></div>
+      <div class="mt"><div><div class="ml">CPU</div><div class="mv" id="mCpu">-</div><div class="ms" id="mCpuS"></div></div>
+        <svg class="spark" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"><polyline class="cpu" id="pCpu"></polyline></svg></div>
+      <div class="mt"><div><div class="ml">ARBEITSSPEICHER</div><div class="mv" id="mRam">-</div><div class="ms" id="mRamS"></div></div>
+        <svg class="spark" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"><polyline class="ram" id="pRam"></polyline></svg></div>
+    </div>
     <div class="row between"><h2>Konsole</h2><label class="muted small"><input type="checkbox" id="jFollow" checked> mitlaufen</label></div>
     <div class="console" id="jCon"></div>
   </section>
@@ -180,6 +188,11 @@ ol{margin:6px 0 4px 18px;padding:0;color:var(--sub)}li{margin:6px 0}
 .ring .bar{stroke:var(--green);stroke-linecap:round;stroke-dasharray:326.7;stroke-dashoffset:326.7;transition:stroke-dashoffset .6s ease}
 
 .pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
+.mt{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--s0)}.mt:last-child{border:0}
+.mt>div{flex:1;min-width:0}.ml{font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.03em}
+.mv{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;word-break:break-word}.ms{font-size:12px;color:var(--ov);word-break:break-word}
+.spark{flex:none;width:120px;height:36px;background:var(--crust);border-radius:6px}.spark polyline{fill:none;stroke-width:1.5;vector-effect:non-scaling-stroke}
+.spark .wr{stroke:var(--blue)}.spark .rd{stroke:var(--ov)}.spark .cpu{stroke:var(--green)}.spark .ram{stroke:var(--mauve)}
 .jinfo{min-width:0}.jtitle{font-size:18px;font-weight:700;word-break:break-word}
 .console{background:var(--crust);border:1px solid var(--s0);border-radius:14px;padding:10px 12px;height:46vh;overflow:auto;
 font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
@@ -362,6 +375,26 @@ $script:HMRemoteJs = @'
       $('jTime').textContent = job.lastTime || '';
     }
     show('jCancel', S.running && !job.cancel);
+    renderMon(job.mon);
+  }
+  // Live-Anzeige wie am PC: Durchsatz, CPU, RAM mit Verlauf (letzte 60 s)
+  function nums(a) { return Array.isArray(a) ? a.slice(-60).map(function (v) { v = Number(v); return isFinite(v) && v > 0 ? v : 0; }) : []; }
+  function spark(id, a, max) {
+    var n = a.length, pts = [];
+    if (!(max > 0)) { max = 1; }
+    for (var i = 0; i < n; i++) { pts.push((n > 1 ? 120 * i / 59 : 0).toFixed(1) + ',' + (35 - Math.min(1, a[i] / max) * 34).toFixed(1)); }
+    $(id).setAttribute('points', pts.join(' '));
+  }
+  function renderMon(m) {
+    var on = !!(m && typeof m === 'object');
+    show('jMon', on);
+    if (!on) { return; }
+    $('mIo').textContent = m.io || '-'; $('mIoS').textContent = m.ioSub || '';
+    $('mCpu').textContent = m.cpu || '-'; $('mCpuS').textContent = m.cpuSub || '';
+    $('mRam').textContent = m.ram || '-'; $('mRamS').textContent = m.ramSub || '';
+    var wr = nums(m.wr), rd = nums(m.rd), mx = Math.max.apply(null, [1].concat(wr, rd));
+    spark('pWr', wr, mx); spark('pRd', rd, mx);
+    spark('pCpu', nums(m.cpuH), 100); spark('pRam', nums(m.ramH), 100);
   }
 
   // --- Aktionen

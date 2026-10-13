@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## v2.0.139 - 2026-10-13
+### Handy-Fernbedienung
+- Reiter **Vorgang**: Live-Anzeige wie am PC - Kopieren (Lesen/Schreiben in MB/s, Durchschnitt, Spitze), CPU und Arbeitsspeicher, jeweils mit Verlauf der letzten 60 Sekunden. Nach dem Ende bleibt der Durchschnitt stehen
+
 ## v2.0.138 - 2026-10-13
 ### Behoben (Pruefung v2.0.137)
 - **Server-Backup endete seit v2.0.123 immer als Abbruch** (Fehler beim Formatieren der Ereignismeldung) - geplante Sicherungen meldeten "Abbruch"/FEHLGESCHLAGEN, obwohl die Sicherung gelungen war, und die Platte wurde danach **nicht ausgeworfen bzw. offline geschaltet**. Ein neuer automatischer Test prueft alle Formatierungen im Code
