@@ -1284,6 +1284,7 @@ function Complete-SwSandboxTest($Watch, $Result) {
             $taken = $true
         }
     }
+    if (-not $changes.Count -and $sum.Proposal -and $sum.Proposal.Available -and $lvl -ne 'Fehler') { Out-Console '  Vorschlag entspricht bereits den Paket-Einstellungen - nichts zu uebernehmen.' 'Info' }
     if (Save-SwSettings $pk $set) { Out-Console "Testergebnis$(if ($taken) { ' und Vorschlaege' }) bei '$($pk.Settings.Name)' gespeichert" 'Success' }
     if ($taken -and -not $Watch.TestUn -and @($changes | Where-Object { $_.Field -eq 'UninstallCmd' }).Count) { Out-Console "Tipp: Testinstallation noch einmal mit 'Deinstallation mittesten' starten." 'Info' }
     if ($script:SwUi) {
