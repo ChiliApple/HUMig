@@ -240,6 +240,13 @@ T 'Werkzeug: Uebermittlungsoptimierung lesen (v0.0.5)' { $r = @(& $script:RS_Del
 T 'Werkzeug: AD-Computer lesen (v0.0.5)' { $r = @(& $script:RS_ADComputers); if (@($r | Where-Object { "$_" -like 'FEHLER*' }).Count) { "nicht in der Domaene oder DC nicht erreichbar: $($r -join ' ')" } else { "$($r.Count) Computer" } }
 T 'Werkzeug: Inventar lokal (v0.0.5)' { $r = & $script:RS_Inventory $false; if (-not $r.Computer) { throw 'keine Daten' }; "$($r.Hersteller) $($r.Modell), SN $($r.Seriennummer), $($r.Windows) $($r.Version), BitLocker $($r.BitLocker)" }
 
+# 4d. Handy-Fernbedienung (v2.0.136) - nur lesend, nichts wird eingerichtet
+. (Join-Path $root 'Functions\Remote-Core.ps1')
+. (Join-Path $root 'Functions\Remote-Web.ps1')
+T 'Fernbedienung: QR-Code und Webseite' { $q = ConvertTo-HMQrMatrix 'https://10.1.1.5:8443/#c=123456'; $f = Get-HMRemoteWebFiles -Version '1' -Pc 'X'; if ($q.Size -ne 29 -or -not $f['/index.html']) { throw 'falsch' }; "QR Version $($q.Version), $($f.Count) Dateien" }
+T 'Fernbedienung: Adressen und Port' { $ips = @(Get-HMRemoteIPv4List); $p = @($ips | Where-Object { $_.Private }); "$($ips.Count) IPv4-Adresse(n), $($p.Count) privat$(if ($p.Count) { " (z.B. $($p[0].IP), Netzwerkprofil $(Get-HMRemoteNetCategory $p[0].Index))" }), Port 8443 $(if (Test-HMRemotePortFree 8443) { 'frei' } else { 'belegt' })" }
+T 'Fernbedienung: Zertifikat und Bindung (Bestand)' { $ca = Get-HMRemoteCa; $b = Get-HMRemoteBinding 8443; "CA $(if ($ca) { "vorhanden (bis $($ca.NotAfter.ToString('yyyy-MM-dd')))" } else { 'noch nicht angelegt' }), Bindung 8443: $($b.State)" }
+
 # 5. Softwareverteilung / Starter
 . (Join-Path $root 'Functions\Tools-Software.ps1')
 T 'Softwareverteilung: Sandbox-Skript und Windows Sandbox (v2.0.122)' {

@@ -252,6 +252,42 @@
                 </DockPanel>
             </TabItem>
 
+            <TabItem Header="Handy" x:Name="tabRemote">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="4">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <TextBlock Grid.ColumnSpan="2" Text="Mit dem Handy im selben Netz den Status (Hinweise, Zeitplaene, letzte Sicherungen, App-Updates) und laufende Vorgaenge ansehen und abbrechen. Verschluesselt (HTTPS, eigenes Zertifikat dieses PCs), Kopplung per QR-Code und Code. Ein/Aus und QR-Code: Knopf 'Handy' unten rechts im Hauptfenster." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                        <TextBlock Grid.Row="1" Text="Beim Start:" Style="{DynamicResource Lbl}"/>
+                        <CheckBox x:Name="chkRemoteAuto" Grid.Row="1" Grid.Column="1" Content="Fernbedienung beim Start von HUMig automatisch einschalten" Margin="0,0,0,8"/>
+                        <TextBlock Grid.Row="2" Text="Port (TCP):" Style="{DynamicResource Lbl}"/>
+                        <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
+                            <TextBox x:Name="txtRemotePort" Style="{DynamicResource DarkTextBox}" Width="80"/>
+                            <TextBlock Text="Standard 8443. Ist der Port belegt, schlaegt HUMig beim Einschalten einen freien vor." Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="3" Text="Laufzeit:" Style="{DynamicResource Lbl}"/>
+                        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
+                            <ComboBox x:Name="cmbRemoteTime" Width="180"/>
+                            <TextBlock Text="danach schaltet sich die Fernbedienung selbst aus" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="4" Text="Weitere erlaubte Netze:" Style="{DynamicResource Lbl}" VerticalAlignment="Top" Margin="0,4,6,0"/>
+                        <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,0,0,8">
+                            <TextBox x:Name="txtRemoteNets" Style="{DynamicResource DarkTextBox}" Width="220" Height="56" HorizontalAlignment="Left" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"/>
+                            <TextBlock Text="Je Zeile ein Netz (z.B. 10.20.0.0/16), leer = nur das lokale Subnetz dieses PCs. Die Firewall-Regel gilt nur in Domaenen- und privaten Netzen." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Text="BENUTZER-MODUS (OHNE ADMINRECHTE)" Style="{DynamicResource SectionLabel}" Margin="0,10,0,4"/>
+                        <TextBlock Grid.Row="6" Grid.ColumnSpan="2" Text="Ohne Administratorrechte kann HUMig Zertifikat, HTTPS-Bindung und Firewall-Regel nicht anlegen. Ein Administrator richtet das hier einmal fuer ein Benutzerkonto ein - es bleibt dauerhaft (auch wenn HUMig zu ist; dann antwortet auf dem Port niemand). Das Zertifikat erneuert HUMig beim naechsten Start als Administrator, wenn sich die Adresse des PCs aendert." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <TextBlock Grid.Row="7" Text="Benutzerkonto:" Style="{DynamicResource Lbl}"/>
+                        <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
+                            <TextBox x:Name="txtRemoteUser" Style="{DynamicResource DarkTextBox}" Width="220" ToolTip="Konto, das HUMig ohne Adminrechte startet (z.B. SCHULE\max)"/>
+                            <Button x:Name="btnRemoteSetup" Content="Fuer Benutzer-Modus einrichten" Style="{DynamicResource BtnBlue}" Margin="6,0,0,0"/>
+                            <Button x:Name="btnRemoteUnsetup" Content="Entfernen" Style="{DynamicResource BtnRed}" Margin="4,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock x:Name="lblRemoteSetup" Grid.Row="8" Grid.Column="1" Foreground="#FFA6ADC8" TextWrapping="Wrap"/>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="Update" x:Name="tabUpdate">
                 <Grid Margin="4">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>

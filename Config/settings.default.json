@@ -8,6 +8,7 @@
   "DeletedMassPercent": 20,
   "DeletedMassMin": 50,
   "ShowStatusPage": true,
+  "Remote": { "AutoStart": false, "Port": 8443, "Minutes": 0, "Networks": [] },
   "StatusStaleDays": 8,
   "UsmtPath": "",
   "SoftwareFolder": "",
