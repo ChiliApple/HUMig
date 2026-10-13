@@ -102,10 +102,81 @@ function Test-HMAuOsExperimental {
 }
 
 # ----------------------------------------------------------------------------
+# WinGet-Modul in eigenem Prozess
+# ----------------------------------------------------------------------------
+# Das Modul Microsoft.WinGet.Client nutzt den WinGet-Dienst ueber COM. Wo das nicht unterstuetzt ist (z.B. Windows Server
+# 2019), kann es den ganzen Prozess zum Absturz bringen - darum nie im HUMig-Prozess laden, sondern in einem eigenen
+# powershell.exe. Das Skript schreibt Zeilen "L|<Level>|<Text>" (Ausgabe, Funktion L), "R|<Text>" (Ergebnis); ein Fehler
+# wird als "E|<Text>" gemeldet. Windows-Fehlerdialoge des Unterprozesses sind abgeschaltet (Fehlermodus wird vererbt).
+# Rueckgabe: @{ Ok; Result; Error; ExitCode; Crashed; TimedOut; Cancelled }
+function Invoke-HMAuIsolated([string]$Script, [int]$TimeoutSec = 120, [scriptblock]$OnLine = $null, $Job = $null, [string]$Exe = '') {
+    $pre = @'
+$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
+try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }
+function L([string]$Lvl, [string]$Msg) { [Console]::Out.WriteLine('L|' + $Lvl + '|' + ($Msg -replace '[\r\n]+', ' ')); [Console]::Out.Flush() }
+try {
+'@
+    $post = @'
+
+} catch { [Console]::Out.WriteLine('E|' + ($_.Exception.Message -replace '[\r\n]+', ' ')); [Console]::Out.Flush(); exit 1 }
+exit 0
+'@
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($pre + "`n" + $Script + $post))
+    $r = @{ Ok = $false; Result = ''; Error = ''; ExitCode = $null; Crashed = $false; TimedOut = $false; Cancelled = $false }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = if ($Exe) { $Exe } else { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
+    $psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc"
+    $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = New-Object System.Text.UTF8Encoding $false
+    # keine Absturz-/Debugger-Dialoge im Unterprozess (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX)
+    $oldMode = $null
+    try {
+        if (-not ('HMAu.ErrMode' -as [type])) { Add-Type -Namespace 'HMAu' -Name 'ErrMode' -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetErrorMode(uint mode);' }
+        $oldMode = [HMAu.ErrMode]::SetErrorMode(0x8003)
+    } catch { }
+    try { $p = [System.Diagnostics.Process]::Start($psi) }
+    finally { if ($null -ne $oldMode) { try { [void][HMAu.ErrMode]::SetErrorMode($oldMode) } catch { } } }
+    $errTask = $p.StandardError.ReadToEndAsync()
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $task = $null
+    while ($true) {
+        if (-not $task) { $task = $p.StandardOutput.ReadLineAsync() }
+        if ($task.Wait(500)) {
+            $line = $task.Result; $task = $null
+            if ($null -eq $line) { break }
+            if ($line.StartsWith('L|')) {
+                $x = $line.Substring(2); $i = $x.IndexOf('|')
+                if ($i -gt 0 -and $OnLine) { try { & $OnLine $x.Substring($i + 1) $x.Substring(0, $i) } catch { } }
+            }
+            elseif ($line.StartsWith('R|')) { $r.Result = $line.Substring(2) }
+            elseif ($line.StartsWith('E|')) { $r.Error = $line.Substring(2) }
+            continue
+        }
+        if ($Job -and $Job.Cancel) { $r.Cancelled = $true; try { $p.Kill() } catch { }; break }
+        if ((Get-Date) -gt $deadline) { $r.TimedOut = $true; try { $p.Kill() } catch { }; break }
+    }
+    [void]$p.WaitForExit(15000)
+    try { $r.ExitCode = $p.ExitCode } catch { }
+    if (-not $r.Error -and $r.ExitCode -eq 1) { try { if ($errTask.Wait(2000)) { $r.Error = ("$($errTask.Result)" -replace '\s+', ' ').Trim() } } catch { } }
+    $r.Crashed = (-not $r.TimedOut -and -not $r.Cancelled -and $null -ne $r.ExitCode -and $r.ExitCode -ne 0 -and $r.ExitCode -ne 1)
+    $r.Ok = ($r.ExitCode -eq 0 -and -not $r.TimedOut -and -not $r.Cancelled)
+    try { $p.Dispose() } catch { }
+    return $r
+}
+# Text fuer einen Absturz des Unterprozesses
+function Format-HMAuCrash($Iso) {
+    $c = if ($null -ne $Iso.ExitCode) { '0x{0:X8}' -f ([int64]$Iso.ExitCode -band 0xFFFFFFFF) } else { '?' }
+    $t = "WinGet-Modul ist abgestuerzt (Code $c) - HUMig laeuft weiter"
+    if (Test-HMAuOsExperimental) { $t += '. Windows Server 2019 wird von Microsoft fuer WinGet nicht unterstuetzt - App-Updates sind auf diesem Server nicht moeglich' }
+    return $t
+}
+
+# ----------------------------------------------------------------------------
 # Status / Einrichten
 # ----------------------------------------------------------------------------
 function Get-HMAuState {
-    $s = [ordered]@{ OsOk = (Test-HMAuOsSupported); Experimental = (Test-HMAuOsExperimental); Module = ''; ModuleAllUsers = $false; AppInstaller = ''; WinGet = ''; Ready = $false; Problem = '' }
+    $s = [ordered]@{ OsOk = (Test-HMAuOsSupported); Experimental = (Test-HMAuOsExperimental); Module = ''; ModuleAllUsers = $false; AppInstaller = ''; WinGet = ''; Ready = $false; Problem = ''; Crashed = $false }
     try { $m = @(Get-Module -ListAvailable -Name $script:HMAuModule | Sort-Object Version -Descending)[0]; if ($m) { $s.Module = "$($m.Version)" } } catch { }
     # SYSTEM und andere Benutzer finden das Modul nur, wenn es fuer alle Benutzer installiert ist (Programme\WindowsPowerShell\Modules)
     $s.ModuleAllUsers = (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$($script:HMAuModule)"))
@@ -114,11 +185,12 @@ function Get-HMAuState {
     elseif (-not $s.Module) { $s.Problem = "PowerShell-Modul $($script:HMAuModule) fehlt - 'WinGet einrichten'." }
     elseif (-not $s.ModuleAllUsers) { $s.Problem = "PowerShell-Modul $($script:HMAuModule) ist nur fuer einzelne Benutzer installiert - SYSTEM und andere Benutzer finden es nicht. 'WinGet einrichten' installiert es fuer alle Benutzer." }
     else {
-        try {
-            Import-Module $script:HMAuModule -ErrorAction Stop
-            $s.WinGet = "$(Get-WinGetVersion -ErrorAction Stop)"
-            $s.Ready = $true
-        } catch { $s.Problem = "WinGet nicht bereit ($($_.Exception.Message)) - 'WinGet einrichten'." }
+        # Modul nur im eigenen Prozess laden (Absturz auf nicht unterstuetzten Systemen beendet sonst HUMig)
+        $iso = Invoke-HMAuIsolated "Import-Module '$($script:HMAuModule)'; [Console]::Out.WriteLine('R|' + (Get-WinGetVersion))" 60
+        if ($iso.Ok -and "$($iso.Result)".Trim()) { $s.WinGet = "$($iso.Result)".Trim(); $s.Ready = $true }
+        elseif ($iso.Crashed) { $s.Crashed = $true; $s.Problem = "$(Format-HMAuCrash $iso)." }
+        elseif ($iso.TimedOut) { $s.Problem = "WinGet antwortet nicht (Zeitlimit) - 'WinGet einrichten'." }
+        else { $s.Problem = "WinGet nicht bereit ($($iso.Error)) - 'WinGet einrichten'." }
     }
     return [pscustomobject]$s
 }
@@ -143,27 +215,38 @@ function Install-HMAuWinGet($Job) {
         }
         & $log "Modul $($script:HMAuModule) installieren/aktualisieren (fuer alle Benutzer) ..." 'Info'
         Install-Module -Name $script:HMAuModule -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop
-        Import-Module $script:HMAuModule -Force -ErrorAction Stop
-        & $log "Modul $($script:HMAuModule) $(@(Get-Module $script:HMAuModule)[0].Version) bereit" 'Success'
     } catch {
         $ok = $false
         & $log "Modul nicht installierbar: $($_.Exception.Message)" 'Error'
         & $log 'Moegliche Ursachen: kein Internet / Proxy, Firewall mit SSL-Pruefung (www.powershellgallery.com, psg-prod-eastus.azureedge.net), PowerShell nicht als Administrator.' 'Warning'
     }
-    # 3. WinGet pruefen, sonst reparieren (laedt den App Installer von GitHub)
+    # 3. Modul laden, WinGet pruefen, sonst reparieren (laedt den App Installer von GitHub) - im eigenen Prozess,
+    #    damit ein Absturz des Moduls (z.B. Windows Server 2019) HUMig nicht mitreisst
     if ($ok) {
-        $ready = $false
-        try { Assert-WinGetPackageManager -ErrorAction Stop; $ready = $true } catch { & $log "WinGet nicht bereit: $($_.Exception.Message) - wird repariert ..." 'Warning' }
-        if (-not $ready) {
-            # -AllUsers (Administrator): App Installer fuer alle Konten inkl. SYSTEM (Zeitplan, Programme fuer alle Benutzer) - z.B. Windows Server 2022
-            $isAdm = $false; try { $isAdm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
-            try {
-                if ($isAdm) { & $log 'WinGet fuer alle Benutzer einrichten (Repair-WinGetPackageManager -AllUsers, Download von GitHub) ...' 'Info'; Repair-WinGetPackageManager -AllUsers -Latest -Force -ErrorAction Stop }
-                else { Repair-WinGetPackageManager -Latest -Force -ErrorAction Stop }
-                Assert-WinGetPackageManager -ErrorAction Stop; $ready = $true; & $log 'WinGet repariert' 'Success'
-            } catch { $ok = $false; & $log "WinGet-Reparatur fehlgeschlagen: $($_.Exception.Message)" 'Error' }
+        $isAdm = $false; try { $isAdm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
+        $scr = @"
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Import-Module '$($script:HMAuModule)' -Force
+L 'Success' ('Modul $($script:HMAuModule) ' + (@(Get-Module '$($script:HMAuModule)')[0].Version) + ' bereit')
+`$ready = `$false
+try { Assert-WinGetPackageManager; `$ready = `$true } catch { L 'Warning' ('WinGet nicht bereit: ' + `$_.Exception.Message + ' - wird repariert ...') }
+if (-not `$ready) {
+    if (`$$isAdm) { L 'Info' 'WinGet fuer alle Benutzer einrichten (Repair-WinGetPackageManager -AllUsers, Download von GitHub) ...'; Repair-WinGetPackageManager -AllUsers -Latest -Force }
+    else { Repair-WinGetPackageManager -Latest -Force }
+    Assert-WinGetPackageManager
+    L 'Success' 'WinGet repariert'
+}
+try { L 'Success' ('WinGet ' + (Get-WinGetVersion) + ' bereit') } catch { }
+[Console]::Out.WriteLine('R|OK')
+"@
+        $iso = Invoke-HMAuIsolated $scr 1200 { param($m, $l) & $log $m $l } $Job
+        if (-not $iso.Ok) {
+            $ok = $false
+            if ($iso.Crashed) { & $log (Format-HMAuCrash $iso) 'Error' }
+            elseif ($iso.Cancelled) { & $log 'WinGet einrichten abgebrochen' 'Warning' }
+            elseif ($iso.TimedOut) { & $log 'WinGet einrichten: Zeitlimit (20 Minuten) ueberschritten' 'Error' }
+            else { & $log "WinGet-Reparatur fehlgeschlagen: $($iso.Error)" 'Error' }
         }
-        if ($ready) { try { & $log "WinGet $(Get-WinGetVersion) bereit" 'Success' } catch { } }
     }
     if ($Job) { $Job.Result = [pscustomobject]@{ Status = $(if ($ok) { 'OK' } else { 'Error' }) } }
     return $ok

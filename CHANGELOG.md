@@ -1,5 +1,10 @@
 ﻿# Changelog
 
+## v2.0.129 - 2026-10-13
+### Behoben
+- **App-Updates: HUMig stuerzte auf Windows Server 2019 ab** ("Windows PowerShell funktioniert nicht mehr" bei *WinGet wird geprueft*). Das WinGet-Modul laeuft jetzt immer in einem eigenen Prozess (Pruefen, *WinGet einrichten*, Einrichtung am Ziel-PC): stuerzt es ab, bleibt HUMig offen und meldet *WinGet-Modul ist abgestuerzt* mit Fehlercode; *WinGet einrichten* wird dann nicht mehr angeboten
+- Softwareverteilung: auf Windows Server 2019 sucht HUMig Pakete nur noch ueber winget.exe (eigener Prozess), nicht ueber das WinGet-Modul
+
 ## v2.0.128 - 2026-10-12
 ### App-Updates
 - **Windows Server 2019 experimentell:** HUMig richtet WinGet dort wie auf Server 2022 ein (`Repair-WinGetPackageManager -AllUsers`) - von Microsoft nicht unterstuetzt, Hinweis in der Konsole; klappt es nicht, wird der PC als *nicht gelesen* gemeldet
