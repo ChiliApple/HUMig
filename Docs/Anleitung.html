@@ -835,7 +835,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>Module</td><td>Module ein-/ausblenden, eigene Module anlegen/löschen, <code>modules.json</code> für Experten</td></tr>
     <tr><td>Links</td><td>Eigene Links (Name + URL) für den Werkzeug-Reiter; Platzhalter <code>{SERIAL}</code> und <code>{COMPUTER}</code> des gewählten Computers, optional Seriennummer in die Zwischenablage</td></tr>
     <tr><td>Handy</td><td><a href="#fernbedienung">Handy-Fernbedienung</a>: automatisch einschalten, Port, Laufzeit, erlaubte Netze, Einrichtung für den Benutzer-Modus</td></tr>
-    <tr><td>Update</td><td><a href="#update">Kanal Stabil/Test</a>, installierte Version, andere Version / Vorversion, Signatur, Quelle, GitHub-Token (nur bei privatem Repository)</td></tr>
+    <tr><td>Update</td><td><a href="#update">Kanal Stabil/Test</a>, installierte Version, andere Version / Vorversion, Signatur, Quelle, GitHub-Token (privates Repository oder gegen die GitHub-Abfragegrenze)</td></tr>
   </table>
   <h3>Konfigurationsdateien</h3>
   <table>
@@ -896,6 +896,8 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
 
 <section id="faq">
   <h2><span class="n">17</span>Fragen und Probleme</h2>
+  <h3>„GitHub-Abfragegrenze erreicht“ bzw. „rate limit exceeded“</h3>
+  <p>Ohne Anmeldung erlaubt GitHub <b>60 Abfragen je Stunde und öffentlicher Internet-Adresse</b> – alle Geräte eines Standorts hinter derselben Adresse teilen sie sich (auch Browser und andere Programme). HUMig meldet dann, ab wann es wieder geht, und fragt bis dahin nicht mehr; ein erfolgreiches Ergebnis merkt sich HUMig 30 Minuten (<code>%LOCALAPPDATA%\HUMig\updatecheck.json</code>), nach Einstellungen, Token oder Signieren wird sofort neu gefragt. Abhilfe: Rechtsklick auf <span class="ui">Update</span> › <i>GitHub-Token</i> mit einem <b>Nur-Lese-Token</b> (Fine-grained PAT, nur dieses Repository, „Contents: Read“) – dann gelten 5000 Abfragen je Stunde für dieses Konto. Der Token wird verschlüsselt nur für den eigenen Windows-Benutzer gespeichert.</p>
   <h3>„Übersprungen“ im Robocopy.log – fehlt etwas?</h3>
   <p>Nein. Versteckte/System-Dateien (z. B. <code>pagefile.sys</code>), Nur-Cloud-Platzhalter und Ausschlussmuster werden bewusst nicht kopiert. Das HUMig-Protokoll zeigt sie getrennt als <i>absichtlich ausgelassen</i>. Echte Fehler stehen unter <i>FAILED</i> und als Warnung im Protokoll.</p>
   <h3>Windows meldet „Robocopy lädt Dateien herunter“</h3>

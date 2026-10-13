@@ -1956,7 +1956,7 @@ function Open-Settings([string]$Tab = '') {
         foreach ($e in $script:ConfigErrors) { Out-Console "Konfigurationsfehler: $e" 'Error' }
         Update-UiFromConfig
         try { Set-HMStatusTabVisibility; Update-HMStatusPage } catch { }
-        if (-not $script:UserMode) { Invoke-UpdateCheck }
+        if (-not $script:UserMode) { Invoke-UpdateCheck -Force }
     }
 }
 $ui.btnEditExceptions.Add_Click({ Open-Settings 'Ausnahmen' })
@@ -2078,9 +2078,44 @@ function Get-HMInstalledInfo {
 }
 function Format-HMChannel([string]$Channel) { if ($Channel -eq 'Test') { return 'Test' } elseif ($Channel -eq 'Branch') { return 'Entwicklung (Branch)' } else { return 'Stabil' } }
 # Update-Pruefung: Kanal Stabil = neuestes freigegebenes Release, Test = neuestes Release inkl. Vorab-Releases
-function Invoke-UpdateCheck {
+# Ergebnis 30 Minuten merken (%LOCALAPPDATA%\HUMig\updatecheck.json) - ohne Anmeldung erlaubt GitHub nur 60 Abfragen je Stunde
+# und oeffentlicher IP, die sich alle Geraete eines Standorts teilen. Ist die Grenze erreicht, wird bis zu ihrem Ende nicht
+# mehr gefragt. -Force: immer neu fragen (nach Einstellungen, Token, Signieren).
+function Get-HMUpdateCacheFile { return (Join-Path $env:LOCALAPPDATA 'HUMig\updatecheck.json') }
+function Read-HMUpdateCache {
+    try { $f = Get-HMUpdateCacheFile; if (Test-Path -LiteralPath $f) { return (Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json) } } catch { }
+    return $null
+}
+function Save-HMUpdateCache($Obj) {
+    try {
+        $f = Get-HMUpdateCacheFile; $d = Split-Path $f -Parent
+        if (-not (Test-Path -LiteralPath $d)) { [void](New-Item -ItemType Directory -Path $d -Force) }
+        [IO.File]::WriteAllText($f, (ConvertTo-Json -InputObject $Obj -Depth 4), (New-Object Text.UTF8Encoding $false))
+    } catch { }
+}
+function Get-HMUpdateCacheKey($Cfg) { return "$($Cfg.Owner)/$($Cfg.Repo)|$($Cfg.Channel)|$([bool]$Cfg.RequireSignature)|$([bool]$Cfg.UseBranch)|$($Cfg.Branch)" }
+function Format-HMRateUntil([string]$Until) {
+    $d = [datetime]::MinValue
+    if ([datetime]::TryParse($Until, [ref]$d)) { return $(if ($d.Date -eq (Get-Date).Date) { $d.ToString('HH:mm') } else { $d.ToString('dd.MM. HH:mm') }) }
+    return 'in einer Stunde'
+}
+function Invoke-UpdateCheck([switch]$Force) {
     $cfg = Get-HMUpdateConfig $script:ConfigDir
     $script:UpdateCfg = $cfg
+    $key = Get-HMUpdateCacheKey $cfg
+    $c = Read-HMUpdateCache
+    if (-not $Force -and $c) {
+        $until = [datetime]::MinValue
+        if ("$($c.RateUntil)" -and [datetime]::TryParse("$($c.RateUntil)", [ref]$until) -and $until -gt (Get-Date)) {
+            Out-Console "Update-Check: GitHub-Abfragegrenze erreicht - naechster Versuch ab $(Format-HMRateUntil "$($c.RateUntil)") (Abhilfe: Rechtsklick auf 'Update' > GitHub-Token)" 'Debug'
+            return
+        }
+        $t = [datetime]::MinValue
+        if ("$($c.Key)" -eq $key -and $c.Result -and [datetime]::TryParse("$($c.Time)", [ref]$t) -and ((Get-Date) - $t).TotalMinutes -lt 30 -and $t -le (Get-Date)) {
+            Show-HMUpdateCheckResult $c.Result
+            return
+        }
+    }
     Invoke-AsyncCommand -ScriptBlock {
         param($lib, $token, $cfg)
         try {
@@ -2098,31 +2133,39 @@ function Invoke-UpdateCheck {
             if (-not $rel) { return 'NONE' }
             return [pscustomobject]@{ Version = "$($rel.Version)"; Tag = $rel.Tag; Prerelease = $rel.Prerelease; Branch = $false; Manifest = [bool]$rel.ManifestUrl }
         } catch {
+            $rl = ''; try { $rl = Get-HMGitHubRateLimit $_ } catch { }
+            if ($rl) { return "RATE:$rl" }
             $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
             if ($code -in 401, 403, 404) { return "AUTH:$code" }
             return "ERR:$($_.Exception.Message)"
         }
-    } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), (Read-GitHubToken), $cfg) -TimeoutSec 40 -OnComplete {
-        param($r)
-        $cfg = $script:UpdateCfg
-        $chan = if ($cfg.UseBranch) { "Branch $($cfg.Branch)" } else { "Kanal $(Format-HMChannel $cfg.Channel)" }
-        if ($r -and $r -isnot [string] -and $r.Version) {
-            $cmp = 0; try { $cmp = ([Version]"$($r.Version)").CompareTo([Version]$script:Version) } catch { }
-            if ($cmp -gt 0) {
-                Out-Console "UPDATE VERFUEGBAR: v$($r.Version)$(if ($r.Prerelease) { ' (Test)' }) - aktuell v$($script:Version), $chan - Button 'Update' druecken" 'Warning'
-                $ui.btnUpdate.Content = "Update v$($r.Version)$(if ($r.Prerelease) { ' (Test)' })"
-                $ui.btnUpdate.Background = [System.Windows.Media.Brushes]::Gold
-                $ui.btnUpdate.Foreground = Get-ConsoleBrush '#FF1E1E2E'
-            } else {
-                Out-Console "Version aktuell: v$($script:Version) ($chan)" 'Debug'
-                $ui.btnUpdate.Content = 'Update'
-                $ui.btnUpdate.ClearValue([System.Windows.Controls.Control]::BackgroundProperty)
-                $ui.btnUpdate.ClearValue([System.Windows.Controls.Control]::ForegroundProperty)
-            }
-        } elseif ("$r" -eq 'NONE') { Out-Console "Update-Check: kein $(if ($cfg.RequireSignature) { 'signiertes ' })Release im $chan" 'Debug' }
-        elseif ("$r" -match '^AUTH:') { Out-Console "Update-Check: Repo $($cfg.Owner)/$($cfg.Repo) nicht erreichbar (privat? Rechtsklick auf 'Update' > GitHub-Token)" 'Debug' }
-        else { Out-Console "Update-Check nicht moeglich: $("$r" -replace '^ERR:', '')" 'Debug' }
+    } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), (Read-GitHubToken), $cfg) -TimeoutSec 40 -State @{ Key = $key } -OnComplete {
+        param($r, $st)
+        if ("$r" -match '^RATE:(.+)$') { Save-HMUpdateCache ([ordered]@{ Key = $st.Key; Time = (Get-Date).ToString('s'); RateUntil = $Matches[1]; Result = $null }) }
+        elseif ($r -and ($r -isnot [string] -or "$r" -eq 'NONE')) { Save-HMUpdateCache ([ordered]@{ Key = $st.Key; Time = (Get-Date).ToString('s'); RateUntil = ''; Result = $r }) }
+        Show-HMUpdateCheckResult $r
     }
+}
+function Show-HMUpdateCheckResult($r) {
+    $cfg = $script:UpdateCfg
+    $chan = if ($cfg.UseBranch) { "Branch $($cfg.Branch)" } else { "Kanal $(Format-HMChannel $cfg.Channel)" }
+    if ($r -and $r -isnot [string] -and $r.Version) {
+        $cmp = 0; try { $cmp = ([Version]"$($r.Version)").CompareTo([Version]$script:Version) } catch { }
+        if ($cmp -gt 0) {
+            Out-Console "UPDATE VERFUEGBAR: v$($r.Version)$(if ($r.Prerelease) { ' (Test)' }) - aktuell v$($script:Version), $chan - Button 'Update' druecken" 'Warning'
+            $ui.btnUpdate.Content = "Update v$($r.Version)$(if ($r.Prerelease) { ' (Test)' })"
+            $ui.btnUpdate.Background = [System.Windows.Media.Brushes]::Gold
+            $ui.btnUpdate.Foreground = Get-ConsoleBrush '#FF1E1E2E'
+        } else {
+            Out-Console "Version aktuell: v$($script:Version) ($chan)" 'Debug'
+            $ui.btnUpdate.Content = 'Update'
+            $ui.btnUpdate.ClearValue([System.Windows.Controls.Control]::BackgroundProperty)
+            $ui.btnUpdate.ClearValue([System.Windows.Controls.Control]::ForegroundProperty)
+        }
+    } elseif ("$r" -eq 'NONE') { Out-Console "Update-Check: kein $(if ($cfg.RequireSignature) { 'signiertes ' })Release im $chan" 'Debug' }
+    elseif ("$r" -match '^RATE:(.+)$') { Out-Console "Update-Check: GitHub-Abfragegrenze erreicht (ohne Anmeldung 60 Abfragen je Stunde fuer alle Geraete hinter derselben Internet-Adresse) - wieder ab $(Format-HMRateUntil $Matches[1]). Abhilfe: Rechtsklick auf 'Update' > GitHub-Token (Nur-Lese-Token)" 'Warning' }
+    elseif ("$r" -match '^AUTH:') { Out-Console "Update-Check: Repo $($cfg.Owner)/$($cfg.Repo) nicht erreichbar (privat? Rechtsklick auf 'Update' > GitHub-Token)" 'Debug' }
+    else { Out-Console "Update-Check nicht moeglich: $("$r" -replace '^ERR:', '')" 'Debug' }
 }
 function Start-HMPull([string]$Version = '') {
     if ($script:JobRunning) { Out-Console 'Waehrend eines Backups/Restores kein Update.' 'Warning'; return }
@@ -2164,10 +2207,18 @@ function Show-HMVersionPicker {
     Invoke-AsyncCommand -ScriptBlock {
         param($lib, $token, $owner, $repo)
         . $lib
-        @(Get-HMReleases $owner $repo $token)
+        try { @(Get-HMReleases $owner $repo $token) }
+        catch {
+            $rl = ''; try { $rl = Get-HMGitHubRateLimit $_ } catch { }
+            if ($rl) { "FEHLER: RATE:$rl" } else { "FEHLER: $($_.Exception.Message)" }
+        }
     } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), (Read-GitHubToken), $script:UpdateOwner, $script:UpdateRepo) -TimeoutSec 40 -OnComplete {
         param($r)
-        if ($r -is [string]) { Out-Console "Versionen nicht lesbar: $($r -replace '^FEHLER: ', '')" 'Error'; return }
+        if ($r -is [string]) {
+            if ("$r" -match 'RATE:(.+)$') { Out-Console "Versionen nicht lesbar: GitHub-Abfragegrenze erreicht (ohne Anmeldung 60 Abfragen je Stunde fuer alle Geraete hinter derselben Internet-Adresse) - wieder ab $(Format-HMRateUntil $Matches[1]). Abhilfe: Rechtsklick auf 'Update' > GitHub-Token (Nur-Lese-Token)" 'Warning' }
+            else { Out-Console "Versionen nicht lesbar: $($r -replace '^FEHLER: ', '')" 'Error' }
+            return
+        }
         $list = @($r | Where-Object { $_ -and $_.Version })
         if (-not $list.Count) { Out-Console 'Keine Releases gefunden.' 'Warning'; return }
         $rows = New-Object System.Collections.Generic.List[object]
@@ -2250,7 +2301,7 @@ function Start-HMReleaseSigning {
                 Out-Console 'Gespeicherter Schreib-Token geloescht - beim naechsten Signieren neu eingeben.' 'Warning'
             }
             if (@($items | Where-Object { $_.Ok }).Count) { Out-Console 'Naechster Schritt: testen, dann Rechtsklick auf Update > Release freigeben.' 'Info' }
-            Invoke-UpdateCheck
+            Invoke-UpdateCheck -Force
         }
     }
 }
@@ -2300,7 +2351,7 @@ function Start-HMReleasePublish {
             param($res)
             $tag = if ($script:PubCtx) { "$($script:PubCtx.Tag)" } else { '' }
             $script:PubCtx = $null
-            if ($res -and $res -isnot [string] -and $res.Ok) { Out-Console "$tag ist freigegeben (Kanal Stabil) und wird allen Installationen als Update angeboten." 'Success'; Invoke-UpdateCheck; return }
+            if ($res -and $res -isnot [string] -and $res.Ok) { Out-Console "$tag ist freigegeben (Kanal Stabil) und wird allen Installationen als Update angeboten." 'Success'; Invoke-UpdateCheck -Force; return }
             $msg = if ($res -is [string]) { $res } elseif ($res) { $res.Err } else { 'keine Antwort' }
             Out-Console "Freigabe fehlgeschlagen: $msg" 'Error'
             if ($res -and $res -isnot [string] -and $res.Auth) {
@@ -2321,7 +2372,7 @@ $miT.Add_Click({
     $a = [System.Windows.MessageBox]::Show($script:Window, "Update-Quelle: $($script:UpdateOwner)/$($script:UpdateRepo)`nGespeicherter Token: $(if (Test-Path -LiteralPath $f) { 'vorhanden' } else { 'keiner' })`n`nNur fuer PRIVATE Repos noetig (Fine-grained PAT, nur 'Contents: Read').`n`nJa = Token eingeben`nNein = Token loeschen", 'GitHub-Token', 'YesNoCancel', 'Question')
     if ($a -eq 'Yes') {
         $c = Get-Credential -UserName 'github' -Message 'GitHub-Token als Kennwort eingeben (wird verschluesselt gespeichert)'
-        if ($c) { $c | Export-Clixml -Path $f -Force; Out-Console 'GitHub-Token gespeichert (DPAPI)' 'Success'; Invoke-UpdateCheck }
+        if ($c) { $c | Export-Clixml -Path $f -Force; Out-Console 'GitHub-Token gespeichert (DPAPI)' 'Success'; Invoke-UpdateCheck -Force }
     } elseif ($a -eq 'No') { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue; Out-Console 'GitHub-Token geloescht' 'Info' }
 })
 $miSep2 = New-Object System.Windows.Controls.Separator
