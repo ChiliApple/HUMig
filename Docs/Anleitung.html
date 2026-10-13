@@ -808,12 +808,20 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   </ol>
   <p>Das Handy bleibt gekoppelt, bis es in HUMig (Fenster <span class="ui">Handy</span> › <span class="ui">Entfernen</span>) oder am Handy (<i>Mehr</i> › <i>Entkoppeln</i>) entfernt wird – bis zu 10 Handys je Windows-Benutzer. Ändert sich die IP-Adresse des PCs, ist es für das Handy eine neue Adresse (neu koppeln) – für Server am besten eine feste Adresse bzw. DHCP-Reservierung.</p>
 
+  <h3 id="fernbedienung-ansicht">Was das Handy zeigt</h3>
+  <ul>
+    <li><b>Status:</b> Hinweise, Zeitpläne, letzte Backups. <b>Server-Backup</b> je Profil: letzte erfolgreiche Sicherung, angesteckte Platte mit freiem Platz, nächste Platte laut Rotation (die am längsten nicht gesicherte), Archiv fällig, Zustand jeder Platte. <b>App-Updates je PC:</b> Ergebnis der letzten Suche (in dieser HUMig-Sitzung), Zeitplan (sobald einmal unter <i>Zeitpläne</i> gelesen bzw. für diesen PC), Ergebnis der letzten 7 Tage mit den fehlgeschlagenen Programmen und Grund.</li>
+    <li><b>Vorgang:</b> Fortschritt mit geschätzter Restzeit, beim Backup die Menge („1,2 von 2,6 GB“), Live-Anzeige (Durchsatz, CPU, Arbeitsspeicher), Konsole, Abbrechen.</li>
+    <li><b>Letzte Vorgänge:</b> die letzten 10 längeren Vorgänge mit Ergebnis, Dauer und Menge. <span class="ui">Bericht</span> öffnet den Bericht des Vorgangs am Handy (nur über eine Einmal-Adresse, die 60 Sekunden gilt; liegt der Bericht auf einer ausgeworfenen Platte, kommt ein Hinweis). Gespeichert in <code>%APPDATA%\HUMig\remote-history.json</code>.</li>
+  </ul>
+
   <h3 id="fernbedienung-push">Push-Meldungen aufs Handy</h3>
   <p>Am Handy unter <i>Mehr</i> › <b>Benachrichtigungen</b> › <span class="ui g">Einschalten</span> (der Browser fragt einmal nach der Erlaubnis). Danach meldet sich das Handy, wenn ein längerer Vorgang (über 20 Sekunden) am PC endet – auch wenn die App geschlossen ist, z. B. <i>„HUMig PC01: Backup – erfolgreich“</i>.</p>
   <ul>
     <li><b>Weg:</b> über den Push-Dienst des Browsers (Android/Chrome: Google, iPhone: Apple, Firefox: Mozilla, Edge: Microsoft). HUMig schickt <b>keinen Inhalt</b> mit – der Dienst sieht nur, <i>dass</i> eine Meldung kommt. Den Text holt sich das Handy danach selbst vom PC; ist es nicht im selben Netz, steht nur <i>„Vorgang am PC beendet“</i>.</li>
     <li><b>Voraussetzungen:</b> Zertifikat installiert (App-Modus), HUMig am PC offen, Fernbedienung an, der PC erreicht das Internet. <b>iPhone/iPad:</b> nur aus der App auf dem Home-Bildschirm (ab iOS 16.4).</li>
     <li><b>Schlüssel:</b> HUMig meldet sich beim Push-Dienst mit einem eigenen Schlüssel (VAPID, ECDSA P-256) an, der privat nur verschlüsselt im Konto liegt (<code>%APPDATA%\HUMig\remote-push.json</code>, DPAPI). HUMig sendet nur an Adressen dieser Push-Dienste.</li>
+    <li><b>App-Updates-Zeitplan dieses PCs:</b> endet er mit Fehlern, kommt ebenfalls eine Meldung (z. B. „App-Updates-Zeitplan auf HYPERV-0: 1 fehlgeschlagen“) – solange HUMig an diesem PC offen ist.</li>
     <li><b>Aus:</b> am Handy <i>Ausschalten</i>, Entkoppeln oder in HUMig <span class="ui">Entfernen</span>. Ist ein Abo abgelaufen (App gelöscht), meldet HUMig das in der Konsole und trägt es aus.</li>
   </ul>
 
@@ -829,7 +837,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
   <h3 id="fernbedienung-einstellungen">Einstellungen und Benutzer-Modus</h3>
   <p><span class="ui">Einstellungen</span> › <b>Handy</b>: beim Start automatisch einschalten, <b>Port</b> (Standard 8443; ist er belegt, schlägt HUMig einen freien vor – eine HTTPS-Bindung eines anderen Programms wird nie überschrieben), <b>Laufzeit</b> (solange HUMig läuft oder 15 Minuten bis 8 Stunden), weitere erlaubte Netze (z.&nbsp;B. das WLAN-Netz, wenn es ein eigenes Subnetz ist – die Firewall bzw. das Routing dazwischen muss den Port durchlassen).</p>
   <p><b>Benutzer-Modus:</b> ohne Administratorrechte kann HUMig Zertifikat, Bindung und Firewall-Regel nicht anlegen. Ein Administrator richtet das einmal ein: <span class="ui">Fuer Benutzer-Modus einrichten</span> mit dem Benutzerkonto. Firewall-Regel <i>HUMig Fernbedienung</i> (dauerhaft), HTTPS-Bindung und Port-Freigabe (<code>netsh http urlacl</code>, für dieses Konto und Administratoren) bleiben dann bestehen. Eine Port-Freigabe eines anderen Programms auf demselben Port lässt HUMig unangetastet und meldet sie – auch wenn HUMig zu ist (dann antwortet auf dem Port niemand). <span class="ui">Entfernen</span> nimmt alles wieder weg. Gespeichert in <code>Config\remote-setup.json</code>.</p>
-  <div class="note warn"><b class="h">Gut zu wissen</b>HUMig muss am PC offen sein. Geplante Sicherungen laufen ohne HUMig – deren <b>Ergebnis</b> zeigt die Startseite, den Live-Fortschritt nicht. Liegt das Handy-WLAN in einem anderen Netz als der PC, muss die Firewall dazwischen (z.&nbsp;B. FortiGate) den Port vom WLAN zum PC erlauben. Ob jedes Handy die Namensbeschränkung der CA prüft, hängt vom Betriebssystem ab (aktuelle Android- und iOS-Versionen tun es).</div>
+  <div class="note warn"><b class="h">Gut zu wissen</b>HUMig muss am PC offen sein. Geplante Sicherungen laufen ohne HUMig – deren <b>Ergebnis</b> zeigt die Startseite, den Live-Fortschritt nicht. Liegt das Handy-WLAN in einem anderen Netz als der PC, muss die Firewall dazwischen (z.&nbsp;B. FortiGate) den Port vom WLAN zum PC erlauben. Ob jedes Handy die Namensbeschränkung der CA prüft, hängt vom Betriebssystem ab (aktuelle Android- und iOS-Versionen tun es). Pro PC nur <b>eine</b> HUMig-Kopie mit Fernbedienung verwenden – die Firewall-Regeln haben feste Namen.</div>
 </section>
 
 <section id="einstellungen">

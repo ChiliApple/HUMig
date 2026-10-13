@@ -1595,6 +1595,91 @@ Describe 'Handy-Fernbedienung: Push-Meldungen (ohne Inhalt)' {
     }
 }
 
+Describe 'Handy-Fernbedienung: Restzeit, Verlauf mit Bericht, Zusatzanzeigen' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Remote-Core.ps1')
+        . (Join-Path $script:Root 'Functions\Remote-Web.ps1')
+        . (Join-Path $script:Root 'Functions\UI-Remote.ps1')
+        function Invoke-HMHistTest($S, [string]$Method, [string]$Path, $Body = $null, [string]$Token = '') {
+            $b = if ($null -ne $Body) { $Body | ConvertTo-Json -Compress } else { '' }
+            return (Get-HMRemoteResponse $S @{ Method = $Method; Path = $Path; Query = @{}; Auth = $(if ($Token) { "Bearer $Token" } else { '' }); Origin = ''; Host = '10.0.0.5:8443'; Body = $b; Ip = '10.0.0.9'; Now = (Get-Date) })
+        }
+    }
+    It 'Vorgang: Menge (geplant/geschrieben) und geschaetzte Restzeit' {
+        $job = @{ Started = (Get-Date).AddSeconds(-60); Progress = 25; Status = 'x'; Cancel = $false; PlanTotal = [long]4GB; DoneBytes = [long]1GB; CurBytes = [long]512MB }
+        $j = ConvertTo-HMRemoteJobJson $job 'Backup' | ConvertFrom-Json
+        [long]$j.bytesTotal | Should -Be ([long]4GB); [long]$j.bytesDone | Should -Be ([long]1.5GB)
+        $j.eta | Should -BeGreaterThan 170; $j.eta | Should -BeLessThan 190   # 60 s fuer 25 % -> ca. 180 s
+        $job2 = @{ Started = (Get-Date).AddSeconds(-5); Progress = 1; Status = 'x'; Cancel = $false }
+        $j2 = ConvertTo-HMRemoteJobJson $job2 'Backup' | ConvertFrom-Json
+        $j2.PSObject.Properties.Name | Should -Not -Contain 'eta'
+        $j2.PSObject.Properties.Name | Should -Not -Contain 'bytesTotal'
+    }
+    It 'Verlauf: hoechstens 10, Anzeige ohne Pfade; Bericht nur ueber Einmal-Adresse (60 s), mit eigener Richtlinie' {
+        $oldAppData = $env:APPDATA
+        $env:APPDATA = Join-Path $TestDrive 'appdata'
+        try {
+        $S = New-HMRemoteState; $S.Pc = 'PC'; $S.Version = '1'
+        $code = Open-HMRemotePairing $S
+        $tok = ((Invoke-HMHistTest $S 'POST' '/api/pair' @{ code = $code; name = 'P' }).Text | ConvertFrom-Json).token
+        $script:HMRemote = @{ S = $S }
+        $rep = Join-Path $TestDrive 'Bericht_Backup.html'; Set-Content -LiteralPath $rep -Value '<html><body><h1>Bericht</h1><script>alert(1)</script></body></html>' -Encoding UTF8
+        $script:JobReport = $rep
+        for ($i = 0; $i -lt 12; $i++) { Add-HMRemoteHistory @{ Started = (Get-Date).AddSeconds(-90); DoneBytes = [long]0 } "Backup $i" 'erfolgreich' 'OK' ([pscustomobject]@{ SizeBytes = [long]2GB }) }
+        $h = $S.HistJson | ConvertFrom-Json
+        @($h).Count | Should -Be 10
+        $h[0].title | Should -Be 'Backup 11'; $h[0].report | Should -BeTrue; [long]$h[0].bytes | Should -Be ([long]2GB)
+        $S.HistJson | Should -Not -Match ([regex]::Escape('Bericht_Backup.html'))
+        $st = (Invoke-HMHistTest $S 'GET' '/api/state' -Token $tok).Text | ConvertFrom-Json
+        @($st.hist).Count | Should -Be 10
+        (Invoke-HMHistTest $S 'POST' '/api/report' @{ id = $h[0].id }).Code | Should -Be 401
+        (Invoke-HMHistTest $S 'POST' '/api/report' @{ id = 'deadbeef' } -Token $tok).Code | Should -Be 404
+        (Invoke-HMHistTest $S 'POST' '/api/report' @{ id = '../../x' } -Token $tok).Code | Should -Be 404
+        $r = (Invoke-HMHistTest $S 'POST' '/api/report' @{ id = $h[0].id } -Token $tok).Text | ConvertFrom-Json
+        $r.url | Should -Match '^/report/[A-Za-z0-9_-]{43}$'
+        $g = Invoke-HMHistTest $S 'GET' $r.url
+        $g.Code | Should -Be 200
+        [Text.Encoding]::UTF8.GetString($g.Bytes) | Should -Match 'Bericht'
+        $g.Headers['Content-Security-Policy'] | Should -Match 'sandbox'
+        $g.Headers['Content-Security-Policy'] | Should -Not -Match 'script-src'
+        (Invoke-HMHistTest $S 'GET' $r.url).Code | Should -Be 404   # nur einmal
+        # Bericht ist keine HTML-Datei: nicht ausliefern
+        $S.Reports['abcdef01'] = (Join-Path $TestDrive 'x.txt'); Set-Content -LiteralPath (Join-Path $TestDrive 'x.txt') -Value 'geheim'
+        $r2 = (Invoke-HMHistTest $S 'POST' '/api/report' @{ id = 'abcdef01' } -Token $tok).Text | ConvertFrom-Json
+        (Invoke-HMHistTest $S 'GET' $r2.url).Code | Should -Be 404
+        } finally { $env:APPDATA = $oldAppData; $script:HMRemote = $null; $script:JobReport = $null }
+    }
+    It 'Bericht-Pfad: Restore-Datei bzw. Server-Backup-Ordner (Bericht.html)' {
+        $script:JobReport = $null
+        Get-HMRemoteReportPath @{ Result = [pscustomobject]@{ Report = 'E:\B\Bericht_Restore_PC_1.html' } } | Should -Be 'E:\B\Bericht_Restore_PC_1.html'
+        Get-HMRemoteReportPath @{ Result = [pscustomobject]@{ Report = 'G:\HUMig-ServerBackup\2026-10-13_1302_EUGym' } } | Should -Match 'Bericht\.html$'
+        Get-HMRemoteReportPath @{ Result = [pscustomobject]@{ Status = 'OK' } } | Should -Be ''
+    }
+    It 'Zusatzanzeigen: naechste Platte laut Rotation, App-Updates je PC mit Fehlern; Push-Text nur vom PC' {
+        $script:UserMode = $false
+        $script:AuHistFile = Join-Path $TestDrive 'auhist.json'
+        $now = (Get-Date).ToString('yyyy-MM-dd HH:mm')
+        ConvertTo-Json -InputObject @(@{ Date = $now; Computer = 'PC1'; Name = 'App A'; Status = 'OK'; Text = '' }, @{ Date = $now; Computer = 'PC1'; Name = 'App B'; Status = 'Error'; Text = 'Installer 1603' }) | Set-Content -LiteralPath $script:AuHistFile -Encoding UTF8
+        $script:AuLastSearch = @{ Time = '13.10. 10:00'; ByPc = @{ 'PC1' = 3 } }
+        $script:AuSchedData = @{}
+        $script:StatusData = [pscustomobject]@{ Server = @([pscustomobject]@{ Name = 'Gym'; ArchiveAge = 40; Disks = @([pscustomobject]@{ Label = 'H-1'; Age = 0 }, [pscustomobject]@{ Label = 'H-2'; Age = 9 }, [pscustomobject]@{ Label = 'H-3'; Age = 4 }, [pscustomobject]@{ Label = 'H-A1'; Age = 50; Archive = $true }) }) }
+        $x = Get-HMRemoteExtra
+        $pc1 = @($x.apps | Where-Object { $_.pc -eq 'PC1' })[0]
+        $pc1.ok | Should -Be 1; $pc1.failed | Should -Be 1; $pc1.found | Should -Be 3
+        $pc1.fails[0].name | Should -Be 'App B'; $pc1.fails[0].text | Should -Be 'Installer 1603'
+        $x.sb[0].next | Should -Be 'H-2'
+        $script:StatusData.Server[0].Disks[2].Age = $null
+        (Get-HMRemoteExtra).sb[0].next | Should -Be 'H-3'   # nie gesichert zuerst
+        $j = ConvertTo-Json -Compress -Depth 6 -InputObject $x
+        { $j | ConvertFrom-Json } | Should -Not -Throw
+        $f = Get-HMRemoteWebFiles -Version '1' -Pc 'PC'
+        $sw = [Text.Encoding]::UTF8.GetString($f['/sw.js'].Bytes)
+        $sw | Should -Match 'nt\.text'; $sw | Should -Not -Match 'e\.data'
+        $js = [Text.Encoding]::UTF8.GetString($f['/app.js'].Bytes)
+        $js | Should -Match 'function renderHist'; $js | Should -Match 'function openReport'; $js | Should -Not -Match 'innerHTML'
+    }
+}
+
 Describe 'Handy-Fernbedienung: echtes HTTPS mit eigener CA (Windows, Administrator)' {
     BeforeAll {
         . (Join-Path $script:Root 'Functions\Remote-Core.ps1')

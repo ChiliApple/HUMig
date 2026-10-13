@@ -1,5 +1,15 @@
 ﻿# Changelog
 
+## v2.1.1 - 2026-10-13
+### Handy-Fernbedienung
+- Reiter *Vorgang*: **geschaetzte Restzeit** ("noch ca. 3 min") und beim Backup die **Menge** ("1,18 GB von 2,47 GB")
+- **Letzte Vorgaenge:** die letzten 10 laengeren Vorgaenge mit Ergebnis, Dauer und Menge; *Bericht* oeffnet den Bericht am Handy (Einmal-Adresse fuer 60 s, strenge Richtlinie ohne Skripte)
+- Startseite: **Server-Backup-Kachel** je Profil (angesteckte Platte mit freiem Platz, naechste Platte laut Rotation, Archiv faellig, Zustand der Platten) und **App-Updates je PC** (letzte Suche, Zeitplan, letzte 7 Tage mit fehlgeschlagenen Programmen und Grund)
+- **Push bei Fehlern im App-Updates-Zeitplan** dieses PCs (solange HUMig offen ist); der Text der Meldung kommt weiterhin direkt vom PC
+- Fenster *Handy*: das Feld *Adresse fuer den QR-Code* war bei zweizeiligem Text abgeschnitten
+### Doku
+- Funktionsseite: Handy-Fernbedienung in den Top 10 und als eigene Gruppe; Anleitung: was das Handy zeigt, Hinweis "pro PC nur eine HUMig-Kopie mit Fernbedienung"
+
 ## v2.1.0 - 2026-10-13
 ### Stabile Version (Kanal Stabil) - Zusammenfassung seit v2.0.127
 Gleicher Programmstand wie v2.0.141 (gepruefter Stand). Die Einzelheiten stehen in den Abschnitten v2.0.128 bis v2.0.141.

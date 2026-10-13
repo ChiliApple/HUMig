@@ -208,11 +208,14 @@ function Show-HMAuSearchResult($Res) {
     $dt = New-HMAuTable
     $n = 0; $x = 0; $okPc = 0; $bad = @(); $readAs = @()
     $script:AuUsers = @{}
+    # letzte Suche fuer die Handy-Anzeige: Updates je PC (ohne Ausnahmen)
+    $script:AuLastSearch = @{ Time = (Get-Date).ToString('dd.MM. HH:mm'); ByPc = @{} }
     $keys = @($Res.ByPc.Keys | Sort-Object)
     foreach ($k in $keys) {
         $v = $Res.ByPc[$k]
         if (-not $v -or -not $v.PSObject.Properties['Items'] -or -not "$($v.ReadAs)") { $bad += $k; continue }
         $okPc++
+        $script:AuLastSearch.ByPc["$k".ToUpperInvariant()] = 0
         $script:AuUsers[$k] = [pscustomobject]@{ Sid = "$($v.UserSid)"; Account = "$($v.UserAccount)" }
         if ("$($v.ReadAs)") { $readAs += "$($v.ReadAs)" }
         if (@($v.Sources).Count -and ((Test-HMIsLocal $k) -or -not @($script:AuSources).Count)) { $script:AuSources = @($v.Sources | Where-Object { $_ }) }
@@ -228,7 +231,7 @@ function Show-HMAuSearchResult($Res) {
             $row.Bereich = $(if ($row.Scope -eq 'User') { "nur $(("$($v.UserAccount)" -split '\\')[-1])" } else { 'alle Benutzer' })
             $row.Hinweis = $(if ($ex) { "Ausnahme ($($ex.Pattern)): $($ex.Reason)" } elseif ($unk) { 'Version unbekannt - Zuordnung unsicher' } else { '' })
             $dt.Rows.Add($row)
-            if ($ex) { $x++ } else { $n++ }
+            if ($ex) { $x++ } else { $n++; $script:AuLastSearch.ByPc["$k".ToUpperInvariant()] = [int]$script:AuLastSearch.ByPc["$k".ToUpperInvariant()] + 1 }
         }
     }
     Update-HMAuSourceList

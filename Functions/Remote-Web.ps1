@@ -90,6 +90,7 @@ $script:HMRemoteHtml = @'
         <div class="jtitle" id="jTitle">Kein Vorgang</div>
         <div class="muted" id="jStatus"></div>
         <div class="muted small" id="jTime"></div>
+        <div class="muted small" id="jBytes"></div>
       </div>
     </div>
     <button class="btn danger wide hidden" id="jCancel">Abbrechen</button>
@@ -101,6 +102,7 @@ $script:HMRemoteHtml = @'
       <div class="mt"><div><div class="ml">ARBEITSSPEICHER</div><div class="mv" id="mRam">-</div><div class="ms" id="mRamS"></div></div>
         <svg class="spark" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"><polyline class="ram" id="pRam"></polyline></svg></div>
     </div>
+    <div class="hidden" id="jHistBox"><h2>Letzte Vorgaenge</h2><div id="jHist"></div></div>
     <div class="row between"><h2>Konsole</h2><label class="muted small"><input type="checkbox" id="jFollow" checked> mitlaufen</label></div>
     <div class="console" id="jCon"></div>
   </section>
@@ -198,6 +200,8 @@ ol{margin:6px 0 4px 18px;padding:0;color:var(--sub)}li{margin:6px 0}
 .mv{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;word-break:break-word}.ms{font-size:12px;color:var(--ov);word-break:break-word}
 .spark{flex:none;width:120px;height:36px;background:var(--crust);border-radius:6px}.spark polyline{fill:none;stroke-width:1.5;vector-effect:non-scaling-stroke}
 .spark .wr{stroke:var(--blue)}.spark .rd{stroke:var(--ov)}.spark .cpu{stroke:var(--green)}.spark .ram{stroke:var(--mauve)}
+.item .s.ml{white-space:pre-line;font-weight:400;line-height:1.45}
+.item .act{margin-top:8px}.btn.mini{padding:5px 12px;font-size:13px;border-radius:9px}
 .jinfo{min-width:0}.jtitle{font-size:18px;font-weight:700;word-break:break-word}
 .console{background:var(--crust);border:1px solid var(--s0);border-radius:14px;padding:10px 12px;height:46vh;overflow:auto;
 font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
@@ -307,7 +311,8 @@ $script:HMRemoteJs = @'
     document.title = 'HUMig - ' + (j.pc || '');
     $('mDev').textContent = j.device || '-'; $('mPc').textContent = j.pc || '-'; $('mVer').textContent = j.version || '-';
     $('mUntil').textContent = j.until ? j.until + ' Uhr' : 'solange HUMig laeuft';
-    renderStatus(j.status);
+    renderStatus(j.status, j.extra);
+    renderHist(j.hist);
     renderJob(j.job || {});
     var lines = j.lines || [];
     if (lines.length) {
@@ -328,8 +333,21 @@ $script:HMRemoteJs = @'
     var b = el('div'); b.appendChild(el('div', 't', title)); if (sub) { b.appendChild(el('div', 's', sub)); }
     d.appendChild(b); return d;
   }
+  // Karte mit mehreren Zeilen (Zeilen nur als Text)
+  function card(level, title, lines) {
+    var d = item(level, title, '');
+    var s = el('div', 's ml', lines.filter(Boolean).join('\n'));
+    d.lastChild.appendChild(s); return d;
+  }
+  function fmtSize(b) {
+    b = Number(b) || 0; var u = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
+    while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+    return (i ? b.toFixed(b >= 100 ? 0 : (b >= 10 ? 1 : 2)) : String(b)).replace('.', ',') + ' ' + u[i];
+  }
+  function fmtEta(s) { s = s | 0; if (s < 60) { return 'unter 1 min'; } var m = Math.round(s / 60); if (m < 60) { return 'ca. ' + m + ' min'; } return 'ca. ' + Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; }
+  function fmtAge(a) { return (a === null || a === undefined) ? 'nie' : (a <= 0 ? 'heute' : 'vor ' + a + ' T.'); }
   function sec(body, title) { body.appendChild(el('div', 'sec', title)); }
-  function renderStatus(st) {
+  function renderStatus(st, ex) {
     var body = $('sBody'); clear(body);
     if (!st) { body.appendChild(el('p', 'empty', 'Noch keine Daten - Aktualisieren tippen.')); return; }
     $('sTime').textContent = st.time ? 'Stand ' + st.time : '';
@@ -345,10 +363,18 @@ $script:HMRemoteJs = @'
     } else { body.appendChild(el('p', 'empty', 'Kein Zeitplan angelegt')); }
     if ((st.server || []).length) {
       sec(body, 'Server-Backup');
+      var xs = (ex && ex.sb) || [];
       st.server.forEach(function (s) {
-        var dk = (s.disks || []).map(function (d) { return d.label + (d.archive ? '' : ': ' + (d.age === null || d.age === undefined ? 'nie' : (d.age <= 0 ? 'heute' : 'vor ' + d.age + ' T.'))) + (d.health === 'Error' ? ' (defekt?)' : d.health === 'Warning' ? ' (pruefen)' : ''); }).join(', ');
-        var sub = [s.lastOk ? 'zuletzt erfolgreich ' + s.lastOk + (s.lastDisk ? ' auf ' + s.lastDisk : '') : 'noch keine erfolgreiche Sicherung', dk, s.archiveDue ? 'Archiv faellig' : ''].filter(Boolean).join(' · ');
-        body.appendChild(item(s.level, s.name, sub));
+        var x = xs.filter(function (y) { return y.name === s.name; })[0] || {};
+        var conn = (x.conn || []).map(function (c) { return c.label + ' (' + c.drive + ') - ' + fmtSize(c.free) + ' frei von ' + fmtSize(c.size); });
+        var dk = (s.disks || []).map(function (d) { return d.label + ': ' + (d.archive ? 'Archiv' : fmtAge(d.age)) + (d.health === 'Error' ? ' (defekt?)' : d.health === 'Warning' ? ' (pruefen)' : (d.health === 'OK' ? ' (Zustand gut)' : '')); });
+        body.appendChild(card(s.level, s.name, [
+          s.lastOk ? 'Zuletzt erfolgreich: ' + s.lastOk + (s.lastDisk ? ' auf ' + s.lastDisk : '') : 'Noch keine erfolgreiche Sicherung',
+          xs.length ? (conn.length ? 'Angesteckt: ' + conn.join('; ') : 'Keine Platte des Profils angesteckt') : '',
+          x.next ? 'Naechste laut Rotation: ' + x.next : '',
+          s.archiveDue ? 'Archiv-Sicherung faellig' + ((x.archiveAge !== null && x.archiveAge !== undefined) ? ' (letzte vor ' + x.archiveAge + ' T.)' : '') : '',
+          dk.length ? 'Platten: ' + dk.join(', ') : ''
+        ]));
       });
     }
     sec(body, 'Letzte Backups');
@@ -360,10 +386,53 @@ $script:HMRemoteJs = @'
       });
       if (st.backupsMore) { body.appendChild(el('p', 'empty', '... und ' + st.backupsMore + ' weitere')); }
     } else { body.appendChild(el('p', 'empty', 'Keine Backups im Backup-Ordner')); }
-    if ((st.apps || []).length) {
+    var xa = (ex && ex.apps) || [];
+    if (xa.length) {
+      sec(body, 'App-Updates je PC');
+      xa.forEach(function (a) {
+        var lines = [];
+        if (a.found !== undefined) { lines.push('Letzte Suche ' + (a.foundAt || '') + ': ' + a.found + ' Update(s) verfuegbar'); }
+        if (a.sched) { lines.push('Zeitplan' + (a.sched.when ? ' ' + a.sched.when : '') + (a.sched.last ? ' · zuletzt ' + a.sched.last : '') + (a.sched.next ? ' · naechster ' + a.sched.next : '') + (a.sched.result ? '\n   ' + a.sched.result : '')); }
+        if (a.ok || a.failed) { lines.push('7 Tage: ' + a.ok + ' aktualisiert' + (a.failed ? ', ' + a.failed + ' Fehler' : '')); }
+        (a.fails || []).forEach(function (f) { lines.push('x ' + f.name + (f.text ? ' - ' + f.text : '') + (f.date ? ' (' + f.date + ')' : '')); });
+        if (!lines.length) { lines.push('noch keine Daten'); }
+        body.appendChild(card(a.failed ? 'Warning' : 'OK', a.pc, lines));
+      });
+    } else if ((st.apps || []).length) {
       sec(body, 'App-Updates (7 Tage)');
       st.apps.forEach(function (a) { body.appendChild(item(a.level, a.pc, a.ok + ' aktualisiert' + (a.failed ? ', ' + a.failed + ' Fehler: ' + (a.failedNames || []).join(', ') : ''))); });
     }
+  }
+  // Verlauf der letzten Vorgaenge (Reiter Vorgang); Bericht ueber eine Einmal-Adresse vom PC
+  function renderHist(h) {
+    h = Array.isArray(h) ? h : [];
+    var key = JSON.stringify(h);
+    if (key === S.histKey) { return; }
+    S.histKey = key;
+    var box = $('jHist'); clear(box);
+    show('jHistBox', h.length > 0);
+    h.forEach(function (x) {
+      var dur = x.sec >= 60 ? Math.floor(x.sec / 60) + ' min ' + (x.sec % 60) + ' s' : (x.sec | 0) + ' s';
+      var d = item(x.level, String(x.title || '') + ' - ' + String(x.result || ''), [String(x.time || ''), dur, x.bytes > 0 ? fmtSize(x.bytes) : ''].filter(Boolean).join(' · '));
+      if (x.report) {
+        var b = el('button', 'btn mini', 'Bericht');
+        b.addEventListener('click', function () { openReport(x.id, b); });
+        var a = el('div', 'act'); a.appendChild(b); d.lastChild.appendChild(a);
+      }
+      box.appendChild(d);
+    });
+  }
+  function openReport(id, b) {
+    b.disabled = true;
+    api('POST', '/api/report', { id: String(id) }).then(function (j) {
+      b.disabled = false;
+      if (j.ok && typeof j.url === 'string' && /^\/report\/[A-Za-z0-9_-]{43}$/.test(j.url)) {
+        // eigenes Fenster (in der App gibt es sonst keinen Weg zurueck); blockiert der Browser das, in der App oeffnen
+        var w = null; try { w = window.open(j.url, '_blank'); } catch (e) { w = null; }
+        if (!w) { location.href = j.url; }
+      }
+      else { banner(j.error || 'Bericht nicht verfuegbar'); }
+    }).catch(function () { b.disabled = false; banner('HUMig nicht erreichbar'); });
   }
   function renderJob(job) {
     S.running = !!job.running;
@@ -376,11 +445,13 @@ $script:HMRemoteJs = @'
     if (S.running) {
       $('jTitle').textContent = job.title || 'Vorgang laeuft';
       $('jStatus').textContent = job.cancel ? 'Abbruch angefordert ...' : (job.status || '');
-      $('jTime').textContent = 'laeuft seit ' + fmtDur(job.elapsed);
+      $('jTime').textContent = 'laeuft seit ' + fmtDur(job.elapsed) + (job.eta > 0 ? ' · noch ' + fmtEta(job.eta) : '');
+      $('jBytes').textContent = job.bytesTotal > 0 ? fmtSize(job.bytesDone) + ' von ' + fmtSize(job.bytesTotal) : '';
     } else {
       $('jTitle').textContent = 'Kein Vorgang';
       $('jStatus').textContent = job.lastTitle ? 'zuletzt: ' + job.lastTitle + (job.lastResult ? ' - ' + job.lastResult : '') : '';
       $('jTime').textContent = job.lastTime || '';
+      $('jBytes').textContent = '';
     }
     show('jCancel', S.running && !job.cancel);
     renderMon(job.mon);
@@ -593,7 +664,11 @@ self.addEventListener('push', function (e) {
     return fetch('/api/state?since=2147483647', { headers: { Authorization: 'Bearer ' + v[0] }, cache: 'no-store', credentials: 'omit', signal: ctl ? ctl.signal : undefined })
       .then(function (r) { return r.json(); }).then(function (j) { clearTimeout(t); return j; }, function (x) { clearTimeout(t); throw x; });
   }).then(function (j) {
-    var job = (j && j.job) || {};
+    var job = (j && j.job) || {}, nt = j && j.notice;
+    // Text vom PC (z. B. Fehler im App-Updates-Zeitplan), wenn er frisch ist - sonst Stand des Vorgangs
+    if (nt && typeof nt.text === 'string' && nt.text && Math.abs(Date.now() - Number(nt.t)) < 15 * 60000) {
+      return self.registration.showNotification('HUMig ' + String((j && j.pc) || pc), { body: nt.text, icon: '/icon-192.png', tag: 'humig-job', renotify: true });
+    }
     var body = job.running ? (String(job.title || 'Vorgang') + ' laeuft') : (job.lastTitle ? String(job.lastTitle) + ' - ' + String(job.lastResult || 'fertig') : 'Vorgang beendet');
     return self.registration.showNotification('HUMig ' + String((j && j.pc) || pc), { body: body, icon: '/icon-192.png', tag: 'humig-job', renotify: true });
   }).catch(function () {
