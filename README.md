@@ -185,7 +185,7 @@ Installierte Programme per **WinGet** aktualisieren – am gewählten PC oder in
 
 ## Handy-Fernbedienung
 
-Status und laufende Vorgänge am Handy (mit Live-Anzeige Durchsatz, CPU, RAM) – im selben Netz, als App auf dem Startbildschirm:
+Status und laufende Vorgänge am Handy (mit Live-Anzeige Durchsatz, CPU, RAM und Push-Meldung bei Vorgangsende) – im selben Netz, als App auf dem Startbildschirm:
 
 - Knopf **Handy** unten rechts: QR-Code scannen, 6-stelligen Code bestätigen, fertig
 - Startseite (Hinweise, Zeitpläne, letzte Sicherungen, Server-Backup, App-Updates), laufender Vorgang mit Fortschritt und Konsole, *Abbrechen* mit Bestätigung

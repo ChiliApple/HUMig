@@ -1,5 +1,17 @@
 ﻿# Changelog
 
+## v2.0.140 - 2026-10-13
+### Neu
+- **Push-Meldungen aufs Handy** (Handy-Fernbedienung, *Mehr* > *Benachrichtigungen*): Meldung, wenn ein laengerer Vorgang am PC endet - auch bei geschlossener App. Ohne Inhalt ueber den Push-Dienst des Browsers (Google/Apple/Mozilla/Microsoft); den Text holt das Handy im selben Netz direkt vom PC. Eigener VAPID-Schluessel je Konto (DPAPI), nur Adressen der Push-Dienste werden angenommen
+- **Teams-Meldung auch fuer in HUMig gestartete Server-Backups** (bisher nur Zeitplan) - mit denselben Zielen und Kategorien, auch bei einem Abbruch durch einen Fehler (nicht bei *Abbrechen*)
+### Verbessert
+- Fortschritt beim Backup nach **Datenmenge** statt nach Anzahl der Eintraege - grosse Teile wie das Chrome-Profil laufen nicht mehr lange bei 0 %, der Ring am Handy und der Balken am PC bewegen sich waehrend des Kopierens
+- Verlaufslinien (Kopieren, CPU, Arbeitsspeicher) am PC und am Handy beginnen rechts und wandern nach links (wie im Task-Manager)
+### Sicherheit (Pruefung v2.0.137)
+- VM-Export nach der Sicherung (auch Zeitplan) loescht aeltere Exporte **nie mehr vorher** - reicht der Platz nicht fuer alten und neuen Export, wird die VM ausgelassen und gemeldet, der vorhandene Export bleibt
+- Handy koppeln: der Code gilt nur **fuer ein Handy** - danach zeigt das Fenster sofort einen neuen
+- HUPilot: vor dem Start als Administrator zeigt HUMig die genaue Datei und warnt bei USB-Stick, Freigabe oder einem Ordner, den normale Benutzer aendern duerfen
+
 ## v2.0.139 - 2026-10-13
 ### Handy-Fernbedienung
 - Reiter **Vorgang**: Live-Anzeige wie am PC - Kopieren (Lesen/Schreiben in MB/s, Durchschnitt, Spitze), CPU und Arbeitsspeicher, jeweils mit Verlauf der letzten 60 Sekunden. Nach dem Ende bleibt der Durchschnitt stehen

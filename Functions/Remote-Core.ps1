@@ -336,7 +336,8 @@ function Read-HMRemoteDevices([string]$Path = (Get-HMRemoteDeviceFile)) {
             $j = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
             foreach ($d in @($j.Devices)) {
                 if (-not $d -or "$($d.Hash)" -notmatch '^[0-9a-f]{64}$') { continue }
-                $h["$($d.Hash)"] = @{ Id = "$($d.Id)"; Name = (ConvertTo-HMRemoteDeviceName "$($d.Name)"); Created = "$($d.Created)"; LastSeen = "$($d.LastSeen)"; LastIp = "$($d.LastIp)" }
+                $pe = "$($d.PushEndpoint)"; if (-not (Test-HMRemotePushEndpoint $pe)) { $pe = '' }
+                $h["$($d.Hash)"] = @{ Id = "$($d.Id)"; Name = (ConvertTo-HMRemoteDeviceName "$($d.Name)"); Created = "$($d.Created)"; LastSeen = "$($d.LastSeen)"; LastIp = "$($d.LastIp)"; PushEndpoint = $pe }
             }
         }
     } catch { }
@@ -344,12 +345,108 @@ function Read-HMRemoteDevices([string]$Path = (Get-HMRemoteDeviceFile)) {
 }
 function Save-HMRemoteDevices($Devices, [string]$Path = (Get-HMRemoteDeviceFile)) {
     $list = @()
-    foreach ($k in @($Devices.Keys)) { $d = $Devices[$k]; if ($d) { $list += [pscustomobject]@{ Id = $d.Id; Name = $d.Name; Hash = $k; Created = $d.Created; LastSeen = $d.LastSeen; LastIp = $d.LastIp } } }
+    foreach ($k in @($Devices.Keys)) { $d = $Devices[$k]; if ($d) { $list += [pscustomobject]@{ Id = $d.Id; Name = $d.Name; Hash = $k; Created = $d.Created; LastSeen = $d.LastSeen; LastIp = $d.LastIp; PushEndpoint = "$($d.PushEndpoint)" } } }
     $dir = Split-Path $Path -Parent
     if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
     $tmp = "$Path.tmp"
     [IO.File]::WriteAllText($tmp, ([pscustomobject]@{ Devices = $list } | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding $false))
     Move-Item -LiteralPath $tmp -Destination $Path -Force
+}
+
+# ============================================================================
+# PUSH-MELDUNGEN (Web Push ohne Inhalt, VAPID)
+# ============================================================================
+# Das Handy wird ueber den Push-Dienst seines Browsers (Google, Apple, Mozilla, Microsoft) "angeklopft" - ohne Inhalt,
+# die Dienste sehen also nur den Zeitpunkt. Die App holt die Details danach selbst vom PC (im selben Netz).
+# Nur Adressen dieser Dienste werden angenommen (kein Senden an beliebige Adressen im Netz).
+$script:HMPushHosts = @('fcm.googleapis.com', 'android.googleapis.com', 'web.push.apple.com', 'updates.push.services.mozilla.com')
+$script:HMPushSuffix = @('.push.apple.com', '.notify.windows.com', '.push.services.mozilla.com')
+$script:HMPushSub = 'https://github.com/ChiliApple/HUMig'
+function Test-HMRemotePushEndpoint([string]$Url) {
+    if (-not $Url -or $Url.Length -gt 1024) { return $false }
+    $u = $null
+    if (-not [Uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$u)) { return $false }
+    if ($u.Scheme -ne 'https' -or -not $u.IsDefaultPort -or $u.UserInfo -or $u.HostNameType -ne 'Dns') { return $false }
+    $h = $u.DnsSafeHost.ToLowerInvariant()
+    if ($script:HMPushHosts -contains $h) { return $true }
+    foreach ($s in $script:HMPushSuffix) { if ($h.EndsWith($s) -and $h.Length -gt $s.Length) { return $true } }
+    return $false
+}
+function ConvertTo-HMB64Url([byte[]]$Bytes) { return ([Convert]::ToBase64String($Bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')) }
+function Get-HMRemotePushFile { return (Join-Path $env:APPDATA 'HUMig\remote-push.json') }
+# VAPID-Schluessel dieses PCs/Kontos (ECDSA P-256): privat nur DPAPI-geschuetzt (aktuelles Konto), Rueckgabe @{ Key (CngKey); Public (b64url, 65 Byte) }
+function Get-HMRemoteVapid([string]$Path = (Get-HMRemotePushFile), [switch]$NoCreate) {
+    Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+    $ent = [Text.Encoding]::UTF8.GetBytes('HUMig-Push-VAPID')
+    $key = $null
+    try {
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            $j = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+            $blob = [System.Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String("$($j.Private)"), $ent, 'CurrentUser')
+            $key = [System.Security.Cryptography.CngKey]::Import($blob, [System.Security.Cryptography.CngKeyBlobFormat]::EccPrivateBlob)
+        }
+    } catch { $key = $null }
+    if (-not $key) {
+        if ($NoCreate) { return $null }
+        $p = New-Object System.Security.Cryptography.CngKeyCreationParameters
+        $p.ExportPolicy = [System.Security.Cryptography.CngExportPolicies]::AllowPlaintextExport
+        $key = [System.Security.Cryptography.CngKey]::Create([System.Security.Cryptography.CngAlgorithm]::ECDsaP256, $null, $p)
+        $blob = $key.Export([System.Security.Cryptography.CngKeyBlobFormat]::EccPrivateBlob)
+        $prot = [System.Security.Cryptography.ProtectedData]::Protect($blob, $ent, 'CurrentUser')
+        $dir = Split-Path $Path -Parent
+        if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
+        [IO.File]::WriteAllText($Path, ([pscustomobject]@{ Private = [Convert]::ToBase64String($prot); Created = (Get-Date).ToString('yyyy-MM-dd HH:mm') } | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
+    }
+    # oeffentlicher Schluessel: EccPublicBlob = 8 Byte Kopf + X (32) + Y (32) -> unkomprimierter Punkt 04|X|Y
+    $pub = $key.Export([System.Security.Cryptography.CngKeyBlobFormat]::EccPublicBlob)
+    $pt = New-Object byte[] 65; $pt[0] = 4; [Array]::Copy($pub, 8, $pt, 1, 64)
+    return @{ Key = $key; Public = (ConvertTo-HMB64Url $pt) }
+}
+# VAPID-Anmeldung (JWT, ES256) fuer einen Push-Dienst: Aud = https://<host>, gilt 12 Stunden
+function New-HMRemoteVapidJwt($Vapid, [string]$Aud, [datetime]$Now = (Get-Date)) {
+    $exp = [int64](($Now.ToUniversalTime() - [datetime]'1970-01-01').TotalSeconds) + 12 * 3600
+    $u8 = New-Object Text.UTF8Encoding $false
+    $h = ConvertTo-HMB64Url ($u8.GetBytes('{"typ":"JWT","alg":"ES256"}'))
+    $c = ConvertTo-HMB64Url ($u8.GetBytes((ConvertTo-Json -Compress -InputObject ([ordered]@{ aud = $Aud; exp = $exp; sub = $script:HMPushSub }))))
+    $ec = New-Object System.Security.Cryptography.ECDsaCng($Vapid.Key)
+    try {
+        $ec.HashAlgorithm = [System.Security.Cryptography.CngAlgorithm]::Sha256
+        $sig = $ec.SignData($u8.GetBytes("$h.$c"))   # IEEE P1363 (r|s, 64 Byte) - wie JWS verlangt
+    } finally { $ec.Dispose() }
+    return "$h.$c.$(ConvertTo-HMB64Url $sig)"
+}
+# Anfragen fuer alle Handys mit Push-Abo: @{ Hash; Name; Url; Auth }
+function Get-HMRemotePushRequests($Devices, $Vapid, [datetime]$Now = (Get-Date)) {
+    $out = @()
+    foreach ($k in @($Devices.Keys)) {
+        $d = $Devices[$k]
+        $ep = "$($d.PushEndpoint)"
+        if (-not (Test-HMRemotePushEndpoint $ep)) { continue }
+        $u = [Uri]$ep
+        $jwt = New-HMRemoteVapidJwt $Vapid "https://$($u.DnsSafeHost)" $Now
+        $out += @{ Hash = $k; Name = "$($d.Name)"; Url = $ep; Auth = "vapid t=$jwt, k=$($Vapid.Public)" }
+    }
+    return ,@($out)
+}
+# Push senden (im Hintergrund-Runspace aufgerufen): leerer POST. Rueckgabe je Anfrage @{ Hash; Name; Code; Error }
+$script:HMPushSendScript = {
+    param($Reqs)
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+    foreach ($q in @($Reqs)) {
+        $code = 0; $err = ''
+        try {
+            $w = [System.Net.HttpWebRequest]::Create($q.Url)
+            $w.Method = 'POST'; $w.Timeout = 15000; $w.ReadWriteTimeout = 15000; $w.AllowAutoRedirect = $false
+            $w.Headers.Add('Authorization', $q.Auth)
+            $w.Headers.Add('TTL', '21600')
+            $w.Headers.Add('Urgency', 'high')
+            $w.ContentLength = 0
+            $resp = $w.GetResponse(); $code = [int]$resp.StatusCode; $resp.Close()
+        } catch [System.Net.WebException] {
+            if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode; try { $_.Exception.Response.Close() } catch { } } else { $err = "$($_.Exception.Message)" }
+        } catch { $err = "$($_.Exception.Message)" }
+        @{ Hash = $q.Hash; Name = $q.Name; Url = $q.Url; Code = $code; Error = $err }
+    }
 }
 
 # ============================================================================
@@ -632,7 +729,7 @@ function New-HMRemoteState {
         Started = (Get-Date); StopAt = $null; Devices = [hashtable]::Synchronized(@{}); DevDirty = $false
         Pair = $null; StatusJson = 'null'; JobJson = '{"running":false}'
         Lines = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList)); LineSeq = 0
-        CancelReq = $null; RefreshReq = $false; Static = @{}; FailIp = [hashtable]::Synchronized(@{}); LogFile = ''
+        CancelReq = $null; RefreshReq = $false; Static = @{}; FailIp = [hashtable]::Synchronized(@{}); LogFile = ''; PushKey = ''
         Events = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
     })
 }
@@ -701,6 +798,8 @@ function Get-HMRemoteResponse($S, $Req) {
         $id = ((Get-HMRemoteHash $tok).Substring(0, 8))
         $S.Devices[(Get-HMRemoteHash $tok)] = @{ Id = $id; Name = $name; Created = $now.ToString('yyyy-MM-dd HH:mm'); LastSeen = $now.ToString('yyyy-MM-dd HH:mm'); LastIp = "$($Req.Ip)" }
         $S.DevDirty = $true
+        # Code gilt nur einmal: fuer ein weiteres Handy steht im Fenster sofort ein neuer Code (abfotografierter Code ist wertlos)
+        $pr.Code = New-HMRemotePairCode; $pr.Fails = 0
         $S.Events.Enqueue(@{ Kind = 'Paired'; Name = $name; Ip = "$($Req.Ip)" })
         return (New-HMRemoteJson 200 @{ ok = $true; token = $tok; name = $name; pc = "$($S.Pc)" } "gekoppelt: $name")
     }
@@ -738,6 +837,20 @@ function Get-HMRemoteResponse($S, $Req) {
             if ($method -ne 'POST') { return (New-HMRemoteJson 405 @{ ok = $false; error = 'Methode nicht erlaubt' }) }
             $S.RefreshReq = $true
             return (New-HMRemoteJson 202 @{ ok = $true })
+        }
+        '/api/push' {
+            # Push-Meldungen (ohne Inhalt): GET = oeffentlicher Schluessel + Zustand, POST = Abo des Browsers eintragen
+            if ($method -eq 'GET') { return (New-HMRemoteJson 200 @{ ok = $true; key = "$($S.PushKey)"; on = [bool]"$($dev.PushEndpoint)" }) }
+            if (-not "$($S.PushKey)") { return (New-HMRemoteJson 409 @{ ok = $false; error = 'Push-Meldungen sind an diesem PC nicht verfuegbar' }) }
+            $ep = "$($body.endpoint)"
+            if (-not (Test-HMRemotePushEndpoint $ep)) { return (New-HMRemoteJson 400 @{ ok = $false; error = 'Push-Dienst nicht erlaubt' } 'Push-Abo abgelehnt (Adresse)') }
+            $dev.PushEndpoint = $ep; $S.DevDirty = $true
+            return (New-HMRemoteJson 200 @{ ok = $true; on = $true } "Push-Meldungen an: $($dev.Name)")
+        }
+        '/api/push/off' {
+            if ($method -ne 'POST') { return (New-HMRemoteJson 405 @{ ok = $false; error = 'Methode nicht erlaubt' }) }
+            $dev.PushEndpoint = ''; $S.DevDirty = $true
+            return (New-HMRemoteJson 200 @{ ok = $true; on = $false } "Push-Meldungen aus: $($dev.Name)")
         }
         '/api/unpair' {
             if ($method -ne 'POST') { return (New-HMRemoteJson 405 @{ ok = $false; error = 'Methode nicht erlaubt' }) }

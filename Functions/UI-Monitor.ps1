@@ -33,6 +33,12 @@ public static class HMMon {
     static ulong lIdle, lKernel, lUser; static bool haveCpu;
     static Dictionary<int, ulong[]> last = new Dictionary<int, ulong[]>();
     // CPU-Auslastung in Prozent seit dem letzten Aufruf (-1 beim ersten Aufruf)
+    // geschriebene Bytes eines Prozesses (Handle bleibt nach dem Ende gueltig) - Fortschritt innerhalb eines Kopiervorgangs
+    public static long ProcWrite(IntPtr h) {
+        IO_COUNTERS c;
+        if (h == IntPtr.Zero || !GetProcessIoCounters(h, out c)) return -1;
+        return (long)c.WriteBytes;
+    }
     public static double Cpu() {
         FILETIME i, k, u;
         if (!GetSystemTimes(out i, out k, out u)) return -1;
@@ -137,7 +143,7 @@ function Set-HMMonLine($Line, [double[]]$Values, [double]$Max, [double]$W, [doub
     if ($Max -le 0) { $Max = 1 }
     $n = $Values.Count
     for ($i = 0; $i -lt $n; $i++) {
-        $x = if ($n -gt 1) { $W * $i / 59 } else { 0 }
+        $x = $W - ($n - 1 - $i) * $W / 59   # rechtsbuendig: neuester Wert rechts, wandert nach links (wie im Task-Manager)
         $y = $H - 1 - [Math]::Min(1.0, $Values[$i] / $Max) * ($H - 2)
         $pc.Add([System.Windows.Point]::new($x, $y))
     }

@@ -1199,6 +1199,14 @@ function Get-HMRobocopySummary([string]$Text) {
     return $s
 }
 
+# Schluessel/Gewicht eines Backup-Eintrags fuer den Fortschritt nach Datenmenge
+function Get-HMPlanKey($Mod, $It) { return "$($Mod.Id)|$($It.Type)|$($It.Name)|$($It.Path)|$($It.Handler)" }
+function Get-HMPlanWeight($Plan, $Mod, $It) {
+    $b = [long]0
+    if ($Plan) { $k = Get-HMPlanKey $Mod $It; if ($Plan.ContainsKey($k)) { $b = [long]$Plan[$k] } }
+    return [double]([Math]::Max(0, $b) + 4MB)
+}
+
 function Invoke-HMRobocopy {
     param(
         $Job, [string]$Source, [string]$Dest, [string[]]$Files = @(), [string[]]$XD = @(), [string[]]$XF = @(),
@@ -1232,10 +1240,25 @@ function Invoke-HMRobocopy {
     $psi.CreateNoWindow = $true
     $proc = [System.Diagnostics.Process]::Start($psi)
     $Job.Process = $proc
+    # Fortschritt innerhalb eines Eintrags (Backup): geschriebene Bytes von Robocopy gegen die geplante Menge
+    $track = (-not $ListOnly) -and $Job -and ([long]$Job.ItemBytes -gt 0) -and [bool]('HMMon' -as [type])
+    $wr = [long]0
     while (-not $proc.WaitForExit(400)) {
         if (Test-HMCancel $Job) { try { $proc.Kill() } catch { }; break }
+        if ($track) {
+            try {
+                $w = [HMMon]::ProcWrite($proc.Handle)
+                if ($w -ge 0) {
+                    $wr = $w
+                    $f = [Math]::Min(0.98, ([double]$Job.ItemDoneBytes + $w) / [double]$Job.ItemBytes)
+                    $p = [int]([double]$Job.ItemBase + [double]$Job.ItemSpan * $f)
+                    if ($p -gt [int]$Job.Progress) { $Job.Progress = $p }
+                }
+            } catch { $track = $false }
+        }
     }
     $proc.WaitForExit()
+    if ($track) { try { $w = [HMMon]::ProcWrite($proc.Handle); if ($w -ge 0) { $wr = $w } } catch { }; $Job.ItemDoneBytes = [long]$Job.ItemDoneBytes + $wr }
     $Job.Process = $null
     $code = $proc.ExitCode
     $text = ''
@@ -2396,6 +2419,7 @@ function Backup-HMUsmt {
 function Start-HMBackup {
     param([hashtable]$Ctx, $Job)
     $start = Get-Date
+    $Ctx.PlanBytes = $null
     $Ctx.IsRemote = -not (Test-HMIsLocal $Ctx.Computer)
     if (-not $Ctx.IsRemote) { $Ctx.Computer = $env:COMPUTERNAME }
     $Ctx.CopyMap = New-Object System.Collections.Generic.List[object]
@@ -2454,6 +2478,8 @@ function Start-HMBackup {
         if (-not $Ctx.Options.SkipSpaceCheck) {
             Write-HMLog $Job 'Platzbedarf wird ermittelt ...' 'Info'
             $need = [long]0
+            # geplante Bytes je Eintrag - fuer einen Fortschritt nach Datenmenge (statt nach Anzahl der Eintraege)
+            $Ctx.PlanBytes = @{}
             $Ctx.ListOnly = $true
             try {
                 foreach ($mod in $Ctx.Modules) {
@@ -2463,11 +2489,14 @@ function Start-HMBackup {
                         if ($it.Type -in @('Folder', 'Files')) {
                             $r = Backup-HMFolderItem $Ctx $Job $mod $it $tenv
                             $need += [long]$r.BytesCopied
+                            $Ctx.PlanBytes[(Get-HMPlanKey $mod $it)] = [long]$r.BytesCopied
                         } elseif ($it.Type -eq 'Builtin' -and $it.Handler -eq 'ExtraFolders') {
+                            $xb = [long]0
                             foreach ($fx in @((Get-HMExtraFolderMap $Ctx.BackupPath @($Ctx.Options.ExtraFolders | Where-Object { $_ })).Map)) {
                                 $r = Backup-HMFolderItem $Ctx $Job $mod ([pscustomobject]@{ Name = "FOLDER$([int]$fx.Index)"; Path = "$($fx.Path)"; Type = 'Folder' }) $tenv
-                                $need += [long]$r.BytesCopied
+                                $need += [long]$r.BytesCopied; $xb += [long]$r.BytesCopied
                             }
+                            $Ctx.PlanBytes[(Get-HMPlanKey $mod $it)] = $xb
                         }
                     }
                 }
@@ -2530,6 +2559,10 @@ function Start-HMBackup {
         $total = @($Ctx.Modules | ForEach-Object { @($_.Items).Count } | Measure-Object -Sum).Sum
         if (-not $total) { $total = 1 }
         $done = 0
+        # Fortschritt nach Datenmenge, wenn der Platzbedarf ermittelt wurde (jeder Eintrag zaehlt mind. 4 MB, damit auch Registry-Teile vorankommen)
+        $plan = $Ctx.PlanBytes
+        $wTotal = [double]0; $wDone = [double]0
+        if ($plan -and $plan.Count) { foreach ($m0 in $Ctx.Modules) { foreach ($i0 in @($m0.Items)) { $wTotal += Get-HMPlanWeight $plan $m0 $i0 } } }
         foreach ($mod in $Ctx.Modules) {
             if (Test-HMCancel $Job) { break }
             Write-HMLog $Job $mod.Name 'Info'
@@ -2546,10 +2579,15 @@ function Start-HMBackup {
             try {
             foreach ($it in @($mod.Items)) {
                 if (Test-HMCancel $Job) { break }
-                if ($pre.Skip) { $done++; continue }
+                $wIt = if ($wTotal -gt 0) { Get-HMPlanWeight $plan $mod $it } else { 0 }
+                if ($wTotal -gt 0 -and $it.Type -in @('Folder', 'Files')) {
+                    # waehrend Robocopy laeuft: Fortschritt innerhalb des Eintrags nach geschriebenen Bytes (Invoke-HMRobocopy)
+                    $Job.ItemBase = 95 * $wDone / $wTotal; $Job.ItemSpan = 95 * $wIt / $wTotal; $Job.ItemBytes = [long]$plan[(Get-HMPlanKey $mod $it)]; $Job.ItemDoneBytes = [long]0
+                }
+                if ($pre.Skip) { $done++; $wDone += $wIt; $Job.ItemBytes = 0; continue }
                 if ($pre.SkipServiceItems -and (Test-HMServiceItem $it)) {
                     $mres.Items += [pscustomobject]@{ Name = $it.Name; Status = 'Warning'; Msg = 'ausgelassen: Dienst-Datenbank (Dienst nicht gestoppt)'; Bytes = [long]0; Source = "$($it.Path)" }
-                    $done++; continue
+                    $done++; $wDone += $wIt; $Job.ItemBytes = 0; continue
                 }
                 try {
                     $r = switch ($it.Type) {
@@ -2567,8 +2605,9 @@ function Start-HMBackup {
                 $mres.Items += [pscustomobject]@{ Name = $r.Name; Status = $r.Status; Msg = $r.Msg; Bytes = [long]$r.Bytes; Source = $r.Source }
                 $mres.Bytes += [long]$r.Bytes
                 if ($r.Status -in @('Error', 'Cancel')) { $mres.Status = 'Error' } elseif ($r.Status -eq 'Warning' -and $mres.Status -eq 'OK') { $mres.Status = 'Warning' }
-                $done++
-                $Job.Progress = [int](95 * $done / $total)
+                $done++; $wDone += $wIt; $Job.ItemBytes = 0
+                $p = if ($wTotal -gt 0) { [int](95 * [Math]::Min(1.0, $wDone / $wTotal)) } else { [int](95 * $done / $total) }
+                if ($p -gt [int]$Job.Progress) { $Job.Progress = $p }
             }
             } finally { $Ctx.LockedHint = $false; Exit-HMModule $Ctx $Job $pre }
             if (@($mres.Items | Where-Object { $_.Status -ne 'Skip' }).Count -eq 0) { $mres.Status = 'Skip' }

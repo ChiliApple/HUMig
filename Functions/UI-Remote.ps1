@@ -191,6 +191,9 @@ function Start-HMRemote([switch]$Quiet, $Owner = $null) {
     $S.Port = $port; $S.Version = "$($script:Version)"; $S.UserMode = -not $adm
     if ($cfg.Minutes -gt 0) { $S.StopAt = (Get-Date).AddMinutes($cfg.Minutes) }
     $S.Devices = Read-HMRemoteDevices
+    # Push-Meldungen: Schluessel dieses Kontos (privat bleibt in der Oberflaeche, der Webserver kennt nur den oeffentlichen)
+    $script:HMPushVapid = $null
+    try { $script:HMPushVapid = Get-HMRemoteVapid; $S.PushKey = $script:HMPushVapid.Public } catch { Write-Host "[Fernbedienung] Push nicht verfuegbar: $($_.Exception.Message)" -ForegroundColor Yellow }
     $S.LogFile = Get-HMRemoteLogFile
     $S.Static = Get-HMRemoteWebFiles -Version "$($script:Version)" -Pc "$env:COMPUTERNAME" -Icon192 (New-HMRemoteIconPng 192) -Icon512 (New-HMRemoteIconPng 512) -Ca $(if ($caPub) { $caPub.RawData } else { $null })
     $core = (Join-Path $script:AppRoot 'Functions\Remote-Core.ps1') -replace "'", "''"
@@ -232,6 +235,7 @@ function Stop-HMRemote([string]$Why = '', [switch]$Silent) {
     try { $r.PS.Dispose() } catch { }
     try { $r.RS.Dispose() } catch { }
     try { if ($r.S.DevDirty) { Save-HMRemoteDevices $r.S.Devices } } catch { }
+    try { Update-HMRemotePushRuns -Final } catch { }
     if ($r.Admin) {
         if ($r.TempFw) { Remove-HMRemoteFirewall $script:HMRemoteRuleTemp }
         if ($r.TempBind) { Remove-HMRemoteBinding $r.Port }
@@ -277,8 +281,50 @@ function Update-HMRemoteTick {
         try { $S.StatusJson = ConvertTo-HMRemoteStatusJson $script:StatusData } catch { }
     }
     $S.JobJson = ConvertTo-HMRemoteJobJson $script:CurrentJob "$($script:JobTitle)" $script:HMRemoteLast -Mon $script:MonSnap
+    try { Update-HMRemotePushRuns } catch { }
     if ($S.DevDirty) { $S.DevDirty = $false; try { Save-HMRemoteDevices $S.Devices } catch { } }
     if ($script:HMRemoteDlg) { try { Update-HMRemoteDialog } catch { } }
+}
+
+# Push-Meldung (ohne Inhalt) an alle Handys mit eingeschalteten Meldungen - nach dem Ende eines Vorgangs.
+# Gesendet wird im Hintergrund (Oberflaeche blockiert nicht); Ergebnis wertet Update-HMRemotePushRuns aus.
+$script:HMPushRuns = New-Object System.Collections.ArrayList
+function Send-HMRemotePush {
+    $r = $script:HMRemote
+    if (-not $r -or -not $script:HMPushVapid) { return }
+    $S = $r.S
+    # Stand sofort bereitstellen - das Handy fragt gleich nach dem Anklopfen nach
+    try { $S.JobJson = ConvertTo-HMRemoteJobJson $script:CurrentJob "$($script:JobTitle)" $script:HMRemoteLast -Mon $script:MonSnap } catch { }
+    $reqs = @(Get-HMRemotePushRequests $S.Devices $script:HMPushVapid)
+    if (-not $reqs.Count) { return }
+    $ps = [PowerShell]::Create()
+    [void]$ps.AddScript($script:HMPushSendScript).AddArgument($reqs)
+    [void]$script:HMPushRuns.Add(@{ PS = $ps; Handle = $ps.BeginInvoke(); Started = (Get-Date) })
+}
+function Update-HMRemotePushRuns([switch]$Final) {
+    foreach ($run in @($script:HMPushRuns)) {
+        $late = ((Get-Date) - $run.Started).TotalSeconds -gt 90
+        if (-not $run.Handle.IsCompleted -and -not $late -and -not $Final) { continue }
+        $res = @()
+        try {
+            if ($run.Handle.IsCompleted) { $res = @($run.PS.EndInvoke($run.Handle)); $run.PS.Dispose() }
+            else { [void]$run.PS.BeginStop($null, $null) }   # nicht auf das laufende Senden warten (Oberflaeche bleibt frei)
+        } catch { }
+        $script:HMPushRuns.Remove($run)
+        $S = if ($script:HMRemote) { $script:HMRemote.S } else { $null }
+        foreach ($x in $res) {
+            if (-not $x) { continue }
+            $c = [int]$x.Code
+            if ($c -ge 200 -and $c -lt 300) { continue }
+            if ($c -in @(401, 403, 404, 410) -and $S -and $S.Devices[$x.Hash]) {
+                # Abo abgelaufen/abgemeldet (App/Browserdaten geloescht) bzw. passt nicht mehr zum Schluessel dieses PCs (401/403)
+                if ("$($S.Devices[$x.Hash].PushEndpoint)" -eq "$($x.Url)") { $S.Devices[$x.Hash].PushEndpoint = ''; $S.DevDirty = $true }
+                Out-Console "Fernbedienung: Push-Meldungen fuer '$($x.Name)' nicht mehr gueltig (HTTP $c) - am Handy unter Mehr wieder einschalten" 'Warning'
+            } else {
+                Out-Console "Fernbedienung: Push-Meldung an '$($x.Name)' nicht zugestellt ($(if ($c) { "HTTP $c" } else { $x.Error }))" 'Warning'
+            }
+        }
+    }
 }
 function Update-HMRemoteButton {
     if (-not $ui.btnRemote) { return }
