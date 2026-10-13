@@ -206,7 +206,11 @@ function Install-HMAuWinGet($Job) {
             & $log 'App Installer (WinGet) fuer dieses Konto registrieren ...' 'Info'
             Add-AppxPackage -RegisterByFamilyName -MainPackage $script:HMAuAppInstaller -ErrorAction Stop
         }
-    } catch { & $log "App Installer nicht registrierbar: $($_.Exception.Message)" 'Warning' }
+    } catch {
+        # 0x80073CF1: App Installer ist auf diesem PC gar nicht vorhanden (z.B. Windows Server 2022) - Schritt 3 laedt ihn
+        if ("$($_.Exception.Message)" -match '80073CF1') { & $log 'App Installer ist auf diesem PC nicht vorhanden - wird unten von GitHub geladen.' 'Info' }
+        else { & $log "App Installer nicht registrierbar: $($_.Exception.Message)" 'Warning' }
+    }
     # 2. NuGet-Anbieter + Modul (alle Benutzer)
     try {
         $nu = @(Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' })
@@ -214,8 +218,19 @@ function Install-HMAuWinGet($Job) {
             & $log 'NuGet-Anbieter installieren (PowerShell Gallery) ...' 'Info'
             Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers -ErrorAction Stop | Out-Null
         }
-        & $log "Modul $($script:HMAuModule) installieren/aktualisieren (fuer alle Benutzer) ..." 'Info'
-        Install-Module -Name $script:HMAuModule -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop
+        # schon fuer alle Benutzer installiert: nur aktualisieren, wenn die Galerie eine neuere Version hat
+        # (Install-Module -Force derselben Version scheitert sonst an der Katalog-Signaturpruefung)
+        $have = @(Get-Module -ListAvailable -Name $script:HMAuModule | Where-Object { "$($_.ModuleBase)".StartsWith((Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules'), [StringComparison]::OrdinalIgnoreCase) } | Sort-Object Version -Descending)[0]
+        $new = $null
+        if ($have) { try { $new = Find-Module -Name $script:HMAuModule -Repository PSGallery -ErrorAction Stop } catch { & $log "Neue Version nicht pruefbar ($($_.Exception.Message)) - vorhandenes Modul $($have.Version) wird verwendet" 'Warning' } }
+        if (-not $have) {
+            & $log "Modul $($script:HMAuModule) installieren (fuer alle Benutzer) ..." 'Info'
+            Install-Module -Name $script:HMAuModule -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop
+        } elseif ($new -and [version]"$($new.Version)" -gt $have.Version) {
+            & $log "Modul $($script:HMAuModule) aktualisieren ($($have.Version) -> $($new.Version), fuer alle Benutzer) ..." 'Info'
+            try { Install-Module -Name $script:HMAuModule -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop }
+            catch { & $log "Modul nicht aktualisierbar ($($_.Exception.Message)) - vorhandenes Modul $($have.Version) wird verwendet" 'Warning' }
+        } else { & $log "Modul $($script:HMAuModule) $($have.Version) ist aktuell (fuer alle Benutzer)" 'Info' }
     } catch {
         $ok = $false
         & $log "Modul nicht installierbar: $($_.Exception.Message)" 'Error'

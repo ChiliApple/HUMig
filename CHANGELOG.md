@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## v2.0.133 - 2026-10-13
+### Behoben
+- *WinGet einrichten*: war das Modul Microsoft.WinGet.Client schon fuer alle Benutzer installiert, brach die Einrichtung mit "not catalog signed" ab (erneutes Installieren derselben Version). Jetzt wird nur aktualisiert, wenn es eine neuere Version gibt; klappt das nicht, geht es mit dem vorhandenen Modul weiter (WinGet reparieren)
+- *WinGet einrichten*: fehlt der App Installer ganz (z. B. Windows Server 2022), steht das als Info statt als Warnung da - er wird danach von GitHub geladen
+- Testinstallation: entspricht der Vorschlag schon den Paket-Einstellungen, steht das jetzt in der Konsole (bisher kam einfach keine Frage)
+
 ## v2.0.132 - 2026-10-13
 ### Behoben
 - Testinstallation: falscher Hinweis *Setup installiert nur ins Benutzerprofil* bei Programmen fuer alle Benutzer (z. B. Greenshot mit `/ALLUSERS`). Der gemeinsame Ordner `AppData\Local\Programs\Common` zaehlt nicht mehr; neue Ordner im Profil zaehlen nur, wenn das Setup keinen Eintrag in *Apps & Features* anlegt - sonst entscheidet der Eintrag
