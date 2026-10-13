@@ -83,12 +83,29 @@ function Install-TWinGet {
     if (-not (Test-TOsOk)) { $script:TErr += 'WinGet wird auf dieser Windows-Version nicht unterstuetzt (Windows 10 1809+/11, Windows Server 2019 (experimentell)/2022/2025)'; return }
     if (Test-TOsExperimental) { Out-L 'Windows Server 2019: WinGet wird von Microsoft hier nicht unterstuetzt - Einrichtung wird trotzdem versucht (experimentell)' }
     Out-L 'WinGet (App Installer) fehlt - wird fuer alle Benutzer eingerichtet (Repair-WinGetPackageManager -AllUsers, Download von GitHub) ...'
+    # im eigenen Prozess: das Modul kann auf nicht unterstuetzten Systemen (z.B. Windows Server 2019) abstuerzen und wuerde
+    # sonst den aufrufenden Prozess (HUMig bzw. die Remote-Sitzung) mitreissen; keine Absturz-Dialoge (Fehlermodus wird vererbt)
+    $mp = (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$ModName") -replace "'", "''"
+    $cmd = "`$ErrorActionPreference = 'Stop'; `$ProgressPreference = 'SilentlyContinue'; try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }; try { Import-Module '$mp'; Repair-WinGetPackageManager -AllUsers -Latest -Force | Out-Null; exit 0 } catch { [Console]::Out.WriteLine(`$_.Exception.Message); exit 1 }"
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
+    $old = $null
     try {
-        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
-        Import-Module (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$ModName") -ErrorAction Stop
-        Repair-WinGetPackageManager -AllUsers -Latest -Force -ErrorAction Stop | Out-Null
+        if (-not ('HMAuT.ErrMode' -as [type])) { Add-Type -Namespace 'HMAuT' -Name 'ErrMode' -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetErrorMode(uint mode);' }
+        $old = [HMAuT.ErrMode]::SetErrorMode(0x8003)
+    } catch { }
+    $out = ''; $code = $null
+    try {
+        $out = (@(& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc 2>&1) | ForEach-Object { "$_" }) -join ' '
+        $code = $LASTEXITCODE
+    } catch { $out = $_.Exception.Message; $code = 1 }
+    finally { if ($null -ne $old) { try { [void][HMAuT.ErrMode]::SetErrorMode($old) } catch { } } }
+    if ($code -eq 0) {
         if (Test-TWinGet) { Out-L 'WinGet eingerichtet' } else { $script:TErr += 'WinGet nach der Einrichtung nicht gefunden' }
-    } catch { $script:TErr += "WinGet nicht einrichtbar: $($_.Exception.Message) - am PC als Administrator: Repair-WinGetPackageManager -AllUsers -Latest -Force" }
+    } elseif ($code -eq 1) {
+        $script:TErr += "WinGet nicht einrichtbar: $("$out".Trim()) - am PC als Administrator: Repair-WinGetPackageManager -AllUsers -Latest -Force"
+    } else {
+        $script:TErr += ("WinGet-Modul beim Einrichten abgestuerzt (Code 0x{0:X8}){1}" -f [int]$code, $(if (Test-TOsExperimental) { ' - Windows Server 2019 wird von Microsoft fuer WinGet nicht unterstuetzt' } else { '' }))
+    }
 }
 
 # einmalige Aufgabe: $Who = 'SYSTEM' oder Benutzer-SID. Setzt $script:TRes, gibt Protokollzeilen aus.

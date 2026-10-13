@@ -1278,7 +1278,17 @@ function Get-HMWingetExe {
     return $null
 }
 
-function Test-HMWingetModule { return [bool](Get-Command Find-WinGetPackage -ErrorAction SilentlyContinue) }
+# WinGet-Modul nur dort im HUMig-Prozess verwenden, wo es unterstuetzt ist - auf Windows Server 2019 (Build < 20348) kann es
+# den Prozess zum Absturz bringen, dort immer winget.exe (eigener Prozess)
+function Test-HMWingetModule {
+    if ($null -eq $script:HMWingetModuleOk) {
+        $ok = $true
+        try { if ([Environment]::OSVersion.Version.Build -lt 20348 -and [int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).ProductType -ne 1) { $ok = $false } } catch { }
+        $script:HMWingetModuleOk = $ok
+    }
+    if (-not $script:HMWingetModuleOk) { return $false }
+    return [bool](Get-Command Find-WinGetPackage -ErrorAction SilentlyContinue)
+}
 
 $script:HMWingetMissing = 'winget ist nicht installiert - "App-Installer" aus dem Microsoft Store installieren (ab Windows 10 1809).'
 

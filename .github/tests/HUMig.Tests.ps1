@@ -234,6 +234,37 @@ Describe 'App-Updates (WinGet)' {
         Get-HMAuPcKey 'pc-01.schule.local' | Should -Be 'PC-01.SCHULE.LOCAL'
         (Format-HMAuCliResult -1978335215 '').Text | Should -Match 'Pruefsumme'
     }
+    It 'WinGet-Modul im eigenen Prozess: Ausgabe, Ergebnis, Fehler, Absturz, Zeitlimit (HUMig bleibt offen)' -Skip:([Environment]::OSVersion.Platform -ne 'Win32NT') {
+        $lines = New-Object System.Collections.Generic.List[string]
+        $r = Invoke-HMAuIsolated "L 'Info' 'eins'; L 'Success' 'zwei|drei'; [Console]::Out.WriteLine('R|1.2.3')" 60 { param($m, $l) $lines.Add("$l=$m") }
+        $r.Ok | Should -BeTrue
+        $r.Result | Should -Be '1.2.3'
+        @($lines) | Should -Be @('Info=eins', 'Success=zwei|drei')
+        $r = Invoke-HMAuIsolated "throw 'kaputt'" 60
+        $r.Ok | Should -BeFalse; $r.Crashed | Should -BeFalse; $r.Error | Should -Be 'kaputt'
+        $r = Invoke-HMAuIsolated "[Environment]::FailFast('Test')" 60
+        $r.Ok | Should -BeFalse; $r.Crashed | Should -BeTrue
+        (Format-HMAuCrash $r) | Should -Match 'abgestuerzt \(Code 0x[0-9A-F]{8}\)'
+        $r = Invoke-HMAuIsolated 'Start-Sleep -Seconds 60' 2
+        $r.TimedOut | Should -BeTrue; $r.Crashed | Should -BeFalse
+        $r = Invoke-HMAuIsolated 'Start-Sleep -Seconds 60' 60 -Job @{ Cancel = $true }
+        $r.Cancelled | Should -BeTrue; $r.Ok | Should -BeFalse
+    }
+    It 'WinGet-Modul wird nie im HUMig-Prozess geladen (Status, Einrichten, Ziel-PC)' {
+        $eng = Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1') -Raw -Encoding UTF8
+        $st = [regex]::Match($eng, '(?s)function Get-HMAuState \{.*?\n\}').Value
+        $st | Should -Not -BeNullOrEmpty
+        $st | Should -Not -Match '(?m)^\s*Import-Module \$script:HMAuModule'
+        $st | Should -Match 'Invoke-HMAuIsolated'
+        $in = [regex]::Match($eng, '(?s)function Install-HMAuWinGet\(\$Job\) \{.*?(?=\r?\n# ---|\r?\nfunction )').Value
+        $in | Should -Match 'Invoke-HMAuIsolated'
+        $in = $in -replace '(?s)@".*?\n"@', ''   # Skript fuer den eigenen Prozess (Here-String) zaehlt nicht
+        $in | Should -Not -Match '(?m)^\s*(Import-Module|Repair-WinGetPackageManager|Assert-WinGetPackageManager)\b'
+        $tg = Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw -Encoding UTF8
+        $tw = [regex]::Match($tg, '(?s)function Install-TWinGet \{.*?\n\}').Value
+        $tw | Should -Match 'EncodedCommand'
+        $tw | Should -Not -Match '(?m)^\s*(Import-Module|Repair-WinGetPackageManager)\b'
+    }
 }
 
 Describe 'Migration: Robocopy-Auswertung' {
