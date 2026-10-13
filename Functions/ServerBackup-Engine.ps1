@@ -558,6 +558,34 @@ function Test-HMSbLowSpace([long]$Free, [long]$Total, [long]$Need) {
     return ($Free -lt ($Total * 0.1))
 }
 
+# Teams-Meldung nach einem in der Oberflaeche gestarteten Server-Backup - gleiche Ziele und Kategorien wie im Zeitplan.
+# Braucht Core-Notify.ps1 im selben Runspace. $ErrText: Abbruch (Ausnahme) - wird als Fehler gemeldet (Kategorie SbError).
+function Send-HMSbRunNotify($Ctx, $Job, [string]$ErrText = '') {
+    try {
+        if (-not (Get-Command Get-HMNotifyConfig -ErrorAction SilentlyContinue)) { return }
+        if ($Job.Cancel) { return }
+        $Job.Status = 'Teams-Meldung senden ...'
+        $nc = Get-HMNotifyConfig
+        if (-not $nc.Configured) { if ($nc.Error) { Write-HMSbLog "Teams-Benachrichtigung: Webhook nicht lesbar: $($nc.Error)" 'Warning' }; return }
+        $prof = "$($Ctx.Profile)"
+        foreach ($tg in @($nc.Targets | Where-Object { $_ })) {
+            if (-not (Test-HMNotifySbProfile $tg $prof)) { continue }
+            if ($ErrText -or -not $Job.Result) {
+                if (-not (Test-HMNotifyCat $tg 'SbError')) { continue }
+                $why = if ($ErrText) { $ErrText } else { 'kein Ergebnis' }
+                $r = Send-HMTeamsMessage -Title "Server-Backup '$prof' auf $env:COMPUTERNAME FEHLGESCHLAGEN (manuell gestartet)" -Lines @("Abbruch: $why", "Platte: $($Ctx.DiskLabel)", "HUMig $($Ctx.Version)") -Level 'Error' -Url $tg.Url
+            } else {
+                $msg = New-HMSbNotifyMessage -Result $Job.Result -ProfileName $prof -Disk "$($Ctx.DiskLabel)" -Reminders @() -Cats $tg.Cats
+                if (-not $msg) { continue }
+                $r = Send-HMTeamsMessage -Title "$($msg.Title) (manuell gestartet)" -Lines $msg.Lines -Level $msg.Level -Url $tg.Url
+            }
+            Write-HMSbLog "Teams-Benachrichtigung '$($tg.Name)': $(if ($r) { $r } else { 'gesendet' })" 'Info'
+        }
+    } catch { Write-HMSbLog "Teams-Benachrichtigung: $($_.Exception.Message)" 'Warning' }
+    # "Abbrechen" waehrend des Sendens: die Sicherung war schon fertig - nicht als abgebrochen werten
+    if ($Job.Cancel) { $Job.Cancel = $false; Write-HMSbLog 'Abbrechen kam erst nach dem Ende der Sicherung - nur das Senden der Teams-Meldung wurde ggf. unterbrochen.' 'Info' }
+}
+
 # Teams-Meldung eines Server-Backup-Laufs aus den eingeschalteten Kategorien (eine Karte je Lauf).
 # Rueckgabe: Title, Lines, Level - oder $null, wenn keine eingeschaltete Kategorie etwas zu melden hat.
 function New-HMSbNotifyMessage {
@@ -1748,7 +1776,7 @@ function Start-HMServerBackup {
         # --- VM-Export (Option im Profil: nach der Sicherung ausgewaehlte VMs zusaetzlich exportieren)
         if ($expVms.Count) {
             $Job.Status = 'VM-Export'
-            $xo = @{ VMs = $expVms; Folder = "$($Ctx.Export.Folder)"; Drive = $L; Keep = $Ctx.Export.Keep; PreDelete = $true; Version = "$($Ctx.Version)" }
+            $xo = @{ VMs = $expVms; Folder = "$($Ctx.Export.Folder)"; Drive = $L; Keep = $Ctx.Export.Keep; PreDelete = $false; Version = "$($Ctx.Version)" }
             $xr = Invoke-HMSbExport -Opt $xo -Job $Job -PBase $pb -PSpan $span
             $res.ExportStatus = "$($xr.Status)"
             $res.Export = ("{0} -> {1}{2}" -f ($expVms -join ', '), $xr.Base, $(switch ("$($xr.Status)") { 'OK' { '' } 'Warning' { ' (mit Warnungen)' } default { ' (FEHLER)' } }))

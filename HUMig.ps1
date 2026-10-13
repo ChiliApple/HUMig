@@ -1186,6 +1186,8 @@ function Start-EngineJob {
         elseif ($rs -eq 'OK') { [System.Media.SystemSounds]::Asterisk.Play() }
         # Handy-Fernbedienung: letzter Vorgang
         $script:HMRemoteLast = @{ Title = $ttl; Result = $stTxt; Time = (Get-Date).ToString('dd.MM. HH:mm') }
+        # Push-Meldung ans Handy (nur bei laengeren Vorgaengen, nur wenn dort eingeschaltet)
+        if ($long -and $script:HMRemote) { try { Send-HMRemotePush } catch { } }
     }
 }
 # Laufenden Vorgang abbrechen. -Confirmed: ohne Rueckfrage (z.B. am Handy schon bestaetigt)

@@ -837,7 +837,9 @@ function Start-HMSbBackup {
         ProfileData = $(if ($p) { $p } else { $null }); After = $after; Export = $exp
     }
     $script:SbAfterRun = $after
-    Start-EngineJob -Command 'Start-HMServerBackup -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'Server-Backup' -ScriptFiles @($script:SbEngine) -OnFinished {
+    # Teams-Meldung auch fuer manuell gestartete Laeufe (auch bei Abbruch durch einen Fehler; nicht bei "Abbrechen")
+    $cmd = '$e = ''''; try { Start-HMServerBackup -Ctx $Ctx -Job $Job } catch { $e = "$($_.Exception.Message)"; throw } finally { Send-HMSbRunNotify $Ctx $Job $e }'
+    Start-EngineJob -Command $cmd -Ctx $ctx -Title 'Server-Backup' -ScriptFiles @($script:SbEngine, (Join-Path $script:AppRoot 'Functions\Core-Notify.ps1')) -OnFinished {
         param($j)
         Update-HMSbHistory
         if ($j.Result -and $j.Result.Report) { Out-Console "Berichtsordner: $($j.Result.Report)" 'Info' }

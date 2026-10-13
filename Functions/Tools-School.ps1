@@ -293,6 +293,41 @@ function Select-HMHUPilotDir {
     Out-Console "HUPilot: Ordner gemerkt - $dir" 'Success'
     return $dir
 }
+# Warnungen vor dem Start als Administrator: Wechseldatentraeger/Netz (anderer Stick unter demselben Buchstaben)
+# und Ordner/Datei, in die normale Benutzer schreiben duerfen (fremder Code liefe mit Adminrechten)
+function Get-HMHUPilotRisk([string]$Ps1) {
+    $w = @()
+    try {
+        if ($Ps1 -match '^\\\\') { $w += 'liegt auf einer Netzwerkfreigabe' }
+        else {
+            $dt = "$(([System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($Ps1))).DriveType)"
+            if ($dt -eq 'Removable') { $w += 'liegt auf einem Wechseldatentraeger (USB-Stick) - steckt ein anderer Stick unter demselben Laufwerksbuchstaben, liefe dessen Inhalt' }
+            elseif ($dt -eq 'Network') { $w += 'liegt auf einem Netzlaufwerk' }
+            else {
+                # USB-Festplatten melden sich als "Fixed" - Bus der Platte pruefen
+                $bus = ''
+                try { $bus = "$((Get-Partition -DriveLetter ([System.IO.Path]::GetPathRoot($Ps1)[0]) -ErrorAction Stop | Get-Disk -ErrorAction Stop).BusType)" } catch { }
+                if ($bus -match '^(USB|7)$') { $w += 'liegt auf einer USB-Platte - steckt eine andere Platte unter demselben Laufwerksbuchstaben, liefe deren Inhalt' }
+            }
+        }
+    } catch { }
+    # Schreibrechte fuer andere als: SYSTEM, Administratoren, TrustedInstaller, ERSTELLER-BESITZER und das eigene (Admin-)Konto
+    $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464', 'S-1-3-0')
+    try { $trusted += [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { }
+    # nur die schreibenden Bits: WriteData 0x2, AppendData 0x4, DeleteSubdirectoriesAndFiles 0x40, Delete 0x10000,
+    # ChangePermissions 0x40000, TakeOwnership 0x80000, GENERIC_ALL 0x10000000, GENERIC_WRITE 0x40000000
+    $wr = [int64](0x2 -bor 0x4 -bor 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
+    foreach ($p in @($Ps1, (Split-Path $Ps1 -Parent))) {
+        try {
+            $acl = Get-Acl -LiteralPath $p -ErrorAction Stop
+            $hit = @($acl.Access | Where-Object {
+                $_.AccessControlType -eq 'Allow' -and -not ("$($_.PropagationFlags)" -match 'InheritOnly') -and ((([int64][int]$_.FileSystemRights) -band 0xFFFFFFFFL -band $wr) -ne 0) -and $(try { $trusted -notcontains $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $true })
+            })
+            if ($hit.Count) { $w += "andere Konten/normale Benutzer duerfen $(if ($p -eq $Ps1) { 'die Datei' } else { 'den Ordner' }) aendern ($(@($hit | ForEach-Object { "$($_.IdentityReference)" } | Select-Object -Unique) -join ', '))"; break }
+        } catch { $w += 'Berechtigungen nicht lesbar (z. B. FAT32-Stick ohne Rechte) - jeder kann die Datei aendern'; break }
+    }
+    return ,@($w)
+}
 # Links: HUPilot-Setup starten (nicht gefunden: suchen oder Anleitung) | Rechts: Ordner neu waehlen
 function Start-HMHUPilot([switch]$Choose) {
     $dir = if ($Choose) { Select-HMHUPilotDir } else { Get-HMHUPilotDir }
@@ -305,6 +340,13 @@ function Start-HMHUPilot([switch]$Choose) {
     }
     if (-not $dir) { return }
     $ps1 = Join-Path $dir 'Setup\HUPilot-Setup.ps1'
+    # vor dem Start als Administrator: genaue Datei zeigen, bei Stick/Freigabe/beschreibbarem Ordner deutlich warnen
+    $info = ''
+    try { $fi = Get-Item -LiteralPath $ps1 -ErrorAction Stop; $info = "`ngeaendert: $($fi.LastWriteTime.ToString('dd.MM.yyyy HH:mm')), $([Math]::Round($fi.Length / 1KB)) KB" } catch { Out-Console "HUPilot-Setup nicht gefunden: $ps1" 'Error'; return }
+    $risk = @(Get-HMHUPilotRisk $ps1)
+    $q = "HUPilot-Setup mit Administratorrechten starten?`n`n$ps1$info"
+    if ($risk.Count) { $q += "`n`nACHTUNG - die Datei laeuft mit vollen Rechten:`n - " + ($risk -join "`n - ") + "`n`nNur starten, wenn das sicher dein HUPilot ist." }
+    if (-not (Confirm-Action $q 'HUPilot')) { return }
     try {
         Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$ps1`"") -WorkingDirectory (Split-Path $ps1 -Parent) -ErrorAction Stop
         Out-Console "HUPilot-Setup gestartet ($dir)" 'Success'

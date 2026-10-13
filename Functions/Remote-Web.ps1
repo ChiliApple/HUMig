@@ -115,9 +115,14 @@ $script:HMRemoteHtml = @'
       <div class="kv"><span>Fernbedienung bis</span><b id="mUntil">-</b></div>
       <div class="kv"><span>Verbindung</span><b id="mCert">-</b></div>
     </div>
+    <div class="card">
+      <div class="kv"><span>Benachrichtigungen</span><b id="nState">-</b></div>
+      <p class="muted small" id="nHint"></p>
+      <button class="btn primary wide hidden" id="nBtn">Einschalten</button>
+    </div>
     <a class="btn wide" href="/ca.cer" download="HUMig-CA.cer">Zertifikat erneut laden</a>
     <button class="btn danger wide" id="mUnpair">Dieses Handy entkoppeln</button>
-    <p class="muted small">Ansehen und Abbrechen laufender Vorgaenge. Daten bleiben im lokalen Netz, HUMig muss am PC offen sein.</p>
+    <p class="muted small">Ansehen und Abbrechen laufender Vorgaenge. Daten bleiben im lokalen Netz (Push-Meldungen kommen ohne Inhalt), HUMig muss am PC offen sein.</p>
   </section>
 </main>
 
@@ -245,10 +250,13 @@ $script:HMRemoteJs = @'
     S.tab = v;
     Array.prototype.forEach.call(document.querySelectorAll('.tabs button'), function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === v); });
     if (v === 'vJob' && S.follow) { var c = $('jCon'); c.scrollTop = c.scrollHeight; }
+    if (v === 'vMore') { pushState(); }
     schedule(50);
   }
   function needPair(msg) {
     S.token = null; try { localStorage.removeItem('hm_token'); } catch (e) { }
+    kv('readwrite', function (st) { st.clear(); }).catch(function () { });
+    pushSub().then(function (s) { if (s) { s.unsubscribe(); } }).catch(function () { });
     clearTimeout(S.timer);
     setView('vPair');
     if (msg) { $('pErr').textContent = msg; show('pErr', true); }
@@ -382,7 +390,7 @@ $script:HMRemoteJs = @'
   function spark(id, a, max) {
     var n = a.length, pts = [];
     if (!(max > 0)) { max = 1; }
-    for (var i = 0; i < n; i++) { pts.push((n > 1 ? 120 * i / 59 : 0).toFixed(1) + ',' + (35 - Math.min(1, a[i] / max) * 34).toFixed(1)); }
+    for (var i = 0; i < n; i++) { pts.push((120 - (n - 1 - i) * 120 / 59).toFixed(1) + ',' + (35 - Math.min(1, a[i] / max) * 34).toFixed(1)); }
     $(id).setAttribute('points', pts.join(' '));
   }
   function renderMon(m) {
@@ -395,6 +403,90 @@ $script:HMRemoteJs = @'
     var wr = nums(m.wr), rd = nums(m.rd), mx = Math.max.apply(null, [1].concat(wr, rd));
     spark('pWr', wr, mx); spark('pRd', rd, mx);
     spark('pCpu', nums(m.cpuH), 100); spark('pRam', nums(m.ramH), 100);
+  }
+
+  // --- Push-Meldungen (ohne Inhalt): Service Worker zeigt die Meldung und holt die Details selbst vom PC
+  function pushOk() { return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window) && S.secure === true; }
+  function kv(mode, fn) {
+    return new Promise(function (res, rej) {
+      if (!window.indexedDB) { rej(new Error('kein IndexedDB')); return; }
+      var o = indexedDB.open('humig', 1);
+      o.onupgradeneeded = function () { o.result.createObjectStore('kv'); };
+      o.onerror = function () { rej(o.error); };
+      o.onsuccess = function () {
+        var db = o.result, tx = db.transaction('kv', mode), r = fn(tx.objectStore('kv'));
+        tx.oncomplete = function () { db.close(); res(r ? r.result : undefined); };
+        tx.onerror = function () { db.close(); rej(tx.error); };
+      };
+    });
+  }
+  function pushSub() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) { return Promise.resolve(null); }
+    return navigator.serviceWorker.getRegistration('/').then(function (r) { return r ? r.pushManager.getSubscription() : null; });
+  }
+  function b64u(s) {
+    s = String(s || '').replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) { s += '='; }
+    var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) { a[i] = b.charCodeAt(i); } return a;
+  }
+  // Abo passt zum Schluessel dieses PCs? (neuer Schluessel am PC -> neu einschalten)
+  function sameKey(s, key) {
+    try {
+      var k = s.options && s.options.applicationServerKey; if (!k) { return true; }
+      var a = new Uint8Array(k), b = b64u(key); if (a.length !== b.length) { return false; }
+      for (var i = 0; i < a.length; i++) { if (a[i] !== b[i]) { return false; } }
+      return true;
+    } catch (e) { return true; }
+  }
+  function pushUi(state, hint, btn) {
+    $('nState').textContent = state; $('nHint').textContent = hint || '';
+    show('nBtn', !!btn); if (btn) { $('nBtn').textContent = btn; $('nBtn').disabled = false; }
+  }
+  function pushState() {
+    if (!S.token) { return; }
+    if (!pushOk()) {
+      var ios = /iPhone|iPad/.test(navigator.userAgent || '');
+      pushUi('nicht moeglich', S.secure !== true ? 'Erst das Zertifikat installieren (App-Modus), dann geht es.' :
+        (ios ? 'iPhone/iPad: HUMig ueber Teilen > "Zum Home-Bildschirm" hinzufuegen und von dort oeffnen (ab iOS 16.4).' : 'Dieser Browser kann keine Push-Meldungen.'), '');
+      return;
+    }
+    api('GET', '/api/push').then(function (j) {
+      S.pushKey = j.key || '';
+      if (!j.ok || !S.pushKey) { pushUi('nicht verfuegbar', 'Am PC nicht verfuegbar.', ''); return; }
+      if (Notification.permission === 'denied') { pushUi('blockiert', 'In den Website-Einstellungen des Browsers Benachrichtigungen fuer diese Adresse erlauben.', ''); return; }
+      pushSub().then(function (s) {
+        S.pushOn = !!(j.on && s && sameKey(s, S.pushKey));
+        if (S.pushOn) { kv('readwrite', function (st) { st.put(S.token, 'tok'); st.put(S.info.pc || '', 'pc'); }).catch(function () { }); }
+        if (S.pushOn) { pushUi('an', 'Meldung, wenn ein laengerer Vorgang am PC endet - auch wenn die App zu ist. Inhalt kommt nur im selben Netz direkt vom PC.', 'Ausschalten'); }
+        else { pushUi('aus', 'Meldung aufs Handy, wenn ein laengerer Vorgang am PC endet. Laeuft ueber den Push-Dienst des Browsers (ohne Inhalt).', 'Einschalten'); }
+      });
+    }).catch(function () { pushUi('-', 'HUMig nicht erreichbar.', ''); });
+  }
+  function pushToggle() {
+    $('nBtn').disabled = true;
+    if (S.pushOn) {
+      pushSub().then(function (s) { return s ? s.unsubscribe() : true; }).catch(function () { })
+        .then(function () { return api('POST', '/api/push/off', {}); })
+        .then(function () { return kv('readwrite', function (st) { st.clear(); }).catch(function () { }); })
+        .then(pushState, pushState);
+      return;
+    }
+    Notification.requestPermission().then(function (p) {
+      if (p !== 'granted') { pushState(); return; }
+      return navigator.serviceWorker.ready.then(function (reg) {
+        var opt = { userVisibleOnly: true, applicationServerKey: b64u(S.pushKey) };
+        return reg.pushManager.getSubscription().then(function (o) { return (o && !sameKey(o, S.pushKey)) ? o.unsubscribe() : true; })
+          .then(function () { return reg.pushManager.subscribe(opt); }).catch(function () {
+          // altes Abo mit anderem Schluessel (z. B. anderer PC/Konto): abmelden und neu
+          return reg.pushManager.getSubscription().then(function (o) { return o ? o.unsubscribe() : true; }).then(function () { return reg.pushManager.subscribe(opt); });
+        });
+      }).then(function (sub) {
+        return kv('readwrite', function (st) { st.put(S.token, 'tok'); st.put(S.info.pc || '', 'pc'); }).catch(function () { })
+          .then(function () { return api('POST', '/api/push', { endpoint: sub.endpoint }); });
+      }).then(function (j) {
+        if (j && !j.ok) { banner(j.error || 'Einschalten nicht moeglich'); }
+        pushState();
+      });
+    }).catch(function () { banner('Benachrichtigungen konnten nicht eingeschaltet werden'); pushState(); });
   }
 
   // --- Aktionen
@@ -453,6 +545,7 @@ $script:HMRemoteJs = @'
     $('sRefresh').addEventListener('click', refresh);
     $('jCancel').addEventListener('click', cancelJob);
     $('mUnpair').addEventListener('click', unpair);
+    $('nBtn').addEventListener('click', pushToggle);
     $('jFollow').addEventListener('change', function () { S.follow = $('jFollow').checked; });
     Array.prototype.forEach.call(document.querySelectorAll('.tabs button'), function (b) { b.addEventListener('click', function () { setView(b.getAttribute('data-tab')); }); });
     document.addEventListener('visibilitychange', function () { if (!document.hidden) { schedule(50); } else { clearTimeout(S.timer); } });
@@ -473,6 +566,47 @@ self.addEventListener('activate', function (e) {
   e.waitUntil(caches.keys().then(function (ks) {
     return Promise.all(ks.filter(function (k) { return k !== CACHE; }).map(function (k) { return caches.delete(k); }));
   }).then(function () { return self.clients.claim(); }));
+});
+// Push ohne Inhalt: Stand beim PC nachfragen (nur im selben Netz erreichbar), sonst allgemeine Meldung
+function kvGet(k) {
+  return new Promise(function (res) {
+    try {
+      var o = indexedDB.open('humig', 1);
+      o.onupgradeneeded = function () { o.result.createObjectStore('kv'); };
+      o.onerror = function () { res(''); };
+      o.onsuccess = function () {
+        var db = o.result, r;
+        try { r = db.transaction('kv', 'readonly').objectStore('kv').get(k); } catch (x) { db.close(); res(''); return; }
+        r.onsuccess = function () { db.close(); res(r.result || ''); };
+        r.onerror = function () { db.close(); res(''); };
+      };
+    } catch (x) { res(''); }
+  });
+}
+self.addEventListener('push', function (e) {
+  var pc = '';
+  var shown = Promise.all([kvGet('tok'), kvGet('pc')]).then(function (v) {
+    pc = v[1] || '';
+    if (!v[0]) { throw new Error('kein Token'); }
+    var ctl = ('AbortController' in self) ? new AbortController() : null;
+    var t = setTimeout(function () { if (ctl) { ctl.abort(); } }, 6000);
+    return fetch('/api/state?since=2147483647', { headers: { Authorization: 'Bearer ' + v[0] }, cache: 'no-store', credentials: 'omit', signal: ctl ? ctl.signal : undefined })
+      .then(function (r) { clearTimeout(t); return r.json(); });
+  }).then(function (j) {
+    var job = (j && j.job) || {};
+    var body = job.running ? (String(job.title || 'Vorgang') + ' laeuft') : (job.lastTitle ? String(job.lastTitle) + ' - ' + String(job.lastResult || 'fertig') : 'Vorgang beendet');
+    return self.registration.showNotification('HUMig ' + String((j && j.pc) || pc), { body: body, icon: '/icon-192.png', tag: 'humig-job', renotify: true });
+  }).catch(function () {
+    return self.registration.showNotification('HUMig ' + pc, { body: 'Vorgang am PC beendet - Details in der App (im selben Netz wie der PC)', icon: '/icon-192.png', tag: 'humig-job', renotify: true });
+  });
+  e.waitUntil(shown);
+});
+self.addEventListener('notificationclick', function (e) {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (cs) {
+    for (var i = 0; i < cs.length; i++) { if ('focus' in cs[i]) { return cs[i].focus(); } }
+    return self.clients.openWindow('/');
+  }));
 });
 self.addEventListener('fetch', function (e) {
   var u = new URL(e.request.url);

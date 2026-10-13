@@ -1231,6 +1231,41 @@ Describe 'HUPilot: Ordner finden und Hashes uebergeben' {
         Add-HMHUPilotHashes @([pscustomobject]@{ Serial = 'SN1'; Hash = 'AAA'; Tag = '' })
         Test-Path -LiteralPath (Join-Path $script:HP 'HUPilot\logs\hashes.csv') | Should -BeFalse
     }
+    It 'warnt vor dem Start als Administrator, wenn normale Benutzer die Datei aendern duerfen' -Skip:([Environment]::OSVersion.Platform -ne 'Win32NT') {
+        $f = Join-Path $TestDrive 'Risk\HUPilot\Setup\HUPilot-Setup.ps1'
+        New-Item -ItemType Directory -Path (Split-Path $f -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $f -Value '#'
+        # nur eigenes Konto, SYSTEM und Administratoren (Vererbung aus)
+        $acl = Get-Acl -LiteralPath $f
+        $acl.SetAccessRuleProtection($true, $false)
+        foreach ($sid in @('S-1-5-18', 'S-1-5-32-544', ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value))) {
+            $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier($sid)), 'FullControl', 'Allow')))
+        }
+        Set-Acl -LiteralPath $f -AclObject $acl
+        $d = Get-Acl -LiteralPath (Split-Path $f -Parent)
+        $d.SetAccessRuleProtection($true, $false)
+        foreach ($sid in @('S-1-5-18', 'S-1-5-32-544', ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value))) {
+            $d.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier($sid)), 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+        }
+        Set-Acl -LiteralPath (Split-Path $f -Parent) -AclObject $d
+        @(Get-HMHUPilotRisk $f | Where-Object { $_ -match 'normale Benutzer|nicht lesbar' }).Count | Should -Be 0
+        # Benutzer duerfen lesen: keine Warnung
+        $acl = Get-Acl -LiteralPath $f
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'ReadAndExecute', 'Allow')))
+        Set-Acl -LiteralPath $f -AclObject $acl
+        @(Get-HMHUPilotRisk $f | Where-Object { $_ -match 'normale Benutzer' }).Count | Should -Be 0
+        # Benutzer duerfen aendern: Warnung
+        $acl = Get-Acl -LiteralPath $f
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'Modify', 'Allow')))
+        Set-Acl -LiteralPath $f -AclObject $acl
+        @(Get-HMHUPilotRisk $f | Where-Object { $_ -match 'normale Benutzer duerfen die Datei' }).Count | Should -Be 1
+        # anderes einzelnes Konto mit Schreibrecht (z. B. Ordner im Profil eines Standardbenutzers): ebenfalls Warnung
+        $f2 = Join-Path (Split-Path $f -Parent) 'B.ps1'; Set-Content -LiteralPath $f2 -Value '#'
+        $a2 = Get-Acl -LiteralPath $f2
+        $a2.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-21-1-2-3-1001')), 'Modify', 'Allow')))
+        Set-Acl -LiteralPath $f2 -AclObject $a2
+        @(Get-HMHUPilotRisk $f2 | Where-Object { $_ -match 'duerfen die Datei' }).Count | Should -Be 1
+    }
 }
 
 Describe 'Testinstallation (Sandbox): Installation ins Benutzerprofil erkennen' {
@@ -1337,6 +1372,11 @@ Describe 'Handy-Fernbedienung: QR-Code, Kopplung, Anfragen' {
         $S.Devices.ContainsKey((Get-HMRemoteHash $j.token)) | Should -BeTrue
         $r.Log | Should -Not -Match ([regex]::Escape($j.token))
         $S.Events.Dequeue().Kind | Should -Be 'Paired'
+        # Code gilt nur einmal - fuer das naechste Handy gibt es einen neuen
+        $S.Pair.Code | Should -Not -Be $code
+        $S.Pair.Code | Should -Match '^\d{6}$'
+        (Invoke-HMRemTest $S 'POST' '/api/pair' @{ code = $code; name = 'Zweit' } -Ip '10.0.0.77').Code | Should -Be 403
+        (Invoke-HMRemTest $S 'POST' '/api/pair' @{ code = $S.Pair.Code; name = 'Zweit' } -Ip '10.0.0.78').Code | Should -Be 200
         (Invoke-HMRemTest $S 'GET' '/api/state' -Token $j.token).Code | Should -Be 200
         $S.Devices.Clear()
         (Invoke-HMRemTest $S 'GET' '/api/state' -Token $j.token).Code | Should -Be 401
@@ -1426,6 +1466,83 @@ Describe 'Handy-Fernbedienung: QR-Code, Kopplung, Anfragen' {
         (ConvertFrom-HMRemoteSslShow "IP:port : 0.0.0.0:8443`n Certificate Hash : 0123456789abcdef0123456789abcdef01234567`n Application ID : {$g}").State | Should -Be 'Ours'
         (ConvertFrom-HMRemoteSslShow "IP:port : 0.0.0.0:8443`n Certificate Hash : 0123456789abcdef0123456789abcdef01234567`n Application ID : {11111111-2222-3333-4444-555555555555}").State | Should -Be 'Foreign'
         (ConvertFrom-HMRemoteSslShow 'Das System kann die angegebene Datei nicht finden.').State | Should -Be 'None'
+    }
+}
+
+Describe 'Handy-Fernbedienung: Push-Meldungen (ohne Inhalt)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Remote-Core.ps1')
+        . (Join-Path $script:Root 'Functions\Remote-Web.ps1')
+        function New-HMPushTestState {
+            $S = New-HMRemoteState
+            $S.Pc = 'TESTPC'; $S.Version = '9.9.9'; $S.PushKey = 'BPUBKEY'
+            return $S
+        }
+        function Invoke-HMPushTest($S, [string]$Method, [string]$Path, $Body = $null, [string]$Token = '') {
+            $b = if ($null -ne $Body) { $Body | ConvertTo-Json -Compress } else { '' }
+            return (Get-HMRemoteResponse $S @{ Method = $Method; Path = $Path; Query = @{}; Auth = $(if ($Token) { "Bearer $Token" } else { '' }); Origin = ''; Host = '10.0.0.5:8443'; Body = $b; Ip = '10.0.0.9'; Now = (Get-Date) })
+        }
+    }
+    It 'nimmt nur Adressen der Push-Dienste an (kein Senden an beliebige Adressen)' {
+        foreach ($ok in @('https://fcm.googleapis.com/fcm/send/abc:def', 'https://web.push.apple.com/QGx', 'https://updates.push.services.mozilla.com/wpush/v2/x', 'https://db5p.notify.windows.com/w/?token=x', 'https://api.push.apple.com/3/x')) {
+            Test-HMRemotePushEndpoint $ok | Should -BeTrue -Because $ok
+        }
+        foreach ($bad in @('', 'http://fcm.googleapis.com/x', 'https://fcm.googleapis.com:8443/x', 'https://fcm.googleapis.com.evil.example/x', 'https://evil.example/fcm.googleapis.com',
+                'https://10.0.0.1/x', 'https://localhost/x', 'https://user:pw@fcm.googleapis.com/x', 'https://notify.windows.com/x', 'https://push.apple.com/x', 'file:///c:/x', ('https://fcm.googleapis.com/' + ('a' * 1100)))) {
+            Test-HMRemotePushEndpoint $bad | Should -BeFalse -Because $bad
+        }
+    }
+    It 'Ein/Aus nur mit Token; Adresse wird geprueft und mit dem Handy gespeichert' {
+        $S = New-HMPushTestState
+        $code = Open-HMRemotePairing $S
+        $tok = ((Invoke-HMPushTest $S 'POST' '/api/pair' @{ code = $code; name = 'P' }).Text | ConvertFrom-Json).token
+        (Invoke-HMPushTest $S 'GET' '/api/push').Code | Should -Be 401
+        $j = (Invoke-HMPushTest $S 'GET' '/api/push' -Token $tok).Text | ConvertFrom-Json
+        $j.key | Should -Be 'BPUBKEY'; $j.on | Should -BeFalse
+        (Invoke-HMPushTest $S 'POST' '/api/push' @{ endpoint = 'https://192.168.1.10/hook' } -Token $tok).Code | Should -Be 400
+        (Invoke-HMPushTest $S 'POST' '/api/push' @{ endpoint = 'https://fcm.googleapis.com/fcm/send/xyz' } -Token $tok).Code | Should -Be 200
+        ((Invoke-HMPushTest $S 'GET' '/api/push' -Token $tok).Text | ConvertFrom-Json).on | Should -BeTrue
+        $S.Devices[(Get-HMRemoteHash $tok)].PushEndpoint | Should -Be 'https://fcm.googleapis.com/fcm/send/xyz'
+        $f = Join-Path $TestDrive 'dev.json'
+        Save-HMRemoteDevices $S.Devices $f
+        (Read-HMRemoteDevices $f)[(Get-HMRemoteHash $tok)].PushEndpoint | Should -Be 'https://fcm.googleapis.com/fcm/send/xyz'
+        # manipulierte Datei: fremde Adresse wird beim Lesen verworfen
+        (Get-Content -LiteralPath $f -Raw) -replace 'https://fcm.googleapis.com/fcm/send/xyz', 'https://10.0.0.1/x' | Set-Content -LiteralPath $f -Encoding UTF8
+        (Read-HMRemoteDevices $f)[(Get-HMRemoteHash $tok)].PushEndpoint | Should -Be ''
+        (Invoke-HMPushTest $S 'POST' '/api/push/off' @{} -Token $tok).Code | Should -Be 200
+        $S.Devices[(Get-HMRemoteHash $tok)].PushEndpoint | Should -Be ''
+        # ohne Schluessel am PC: Einschalten abgelehnt
+        $S.PushKey = ''
+        (Invoke-HMPushTest $S 'POST' '/api/push' @{ endpoint = 'https://fcm.googleapis.com/fcm/send/xyz' } -Token $tok).Code | Should -Be 409
+    }
+    It 'Seite und Service Worker: Ein/Aus im Reiter Mehr, Meldung ohne Inhalt, Klick oeffnet die App' {
+        $f = Get-HMRemoteWebFiles -Version '1' -Pc 'PC'
+        $js = [Text.Encoding]::UTF8.GetString($f['/app.js'].Bytes); $sw = [Text.Encoding]::UTF8.GetString($f['/sw.js'].Bytes)
+        [Text.Encoding]::UTF8.GetString($f['/index.html'].Bytes) | Should -Match 'id="nBtn"'
+        $js | Should -Match 'function pushToggle'; $js | Should -Match 'userVisibleOnly: true'
+        $sw | Should -Match "addEventListener\('push'"; $sw | Should -Match "addEventListener\('notificationclick'"
+        $sw | Should -Match 'showNotification'
+        $sw | Should -Not -Match 'e\.data'   # kein Inhalt aus der Push-Nachricht
+    }
+    It 'VAPID: Schluessel DPAPI-geschuetzt, gleich nach Neuladen, JWT ES256 pruefbar (Windows)' -Skip:([Environment]::OSVersion.Platform -ne 'Win32NT') {
+        $p = Join-Path $TestDrive 'push.json'
+        $v = Get-HMRemoteVapid $p
+        $v.Public | Should -Match '^[A-Za-z0-9_-]{87}$'   # 65 Byte b64url
+        (Get-Content -LiteralPath $p -Raw) | Should -Not -Match ([regex]::Escape($v.Public))
+        (Get-HMRemoteVapid $p).Public | Should -Be $v.Public
+        $jwt = New-HMRemoteVapidJwt $v 'https://fcm.googleapis.com' (Get-Date '2026-10-13 12:00')
+        $parts = $jwt.Split('.'); $parts.Count | Should -Be 3
+        $dec = { param($s) $s = $s.Replace('-', '+').Replace('_', '/'); while ($s.Length % 4) { $s += '=' }; [Convert]::FromBase64String($s) }
+        $claims = [Text.Encoding]::UTF8.GetString((& $dec $parts[1])) | ConvertFrom-Json
+        $claims.aud | Should -Be 'https://fcm.googleapis.com'; $claims.sub | Should -Match '^https://'
+        $claims.exp | Should -Be ([int64]((Get-Date '2026-10-13 12:00').ToUniversalTime() - [datetime]'1970-01-01').TotalSeconds + 43200)
+        $sig = & $dec $parts[2]; $sig.Length | Should -Be 64
+        $ec = New-Object System.Security.Cryptography.ECDsaCng($v.Key); $ec.HashAlgorithm = [System.Security.Cryptography.CngAlgorithm]::Sha256
+        $ec.VerifyData([Text.Encoding]::UTF8.GetBytes("$($parts[0]).$($parts[1])"), $sig) | Should -BeTrue
+        $d = [hashtable]::Synchronized(@{}); $d[('a' * 64)] = @{ Name = 'P'; PushEndpoint = 'https://web.push.apple.com/abc' }; $d[('b' * 64)] = @{ Name = 'Q'; PushEndpoint = '' }
+        $rq = @(Get-HMRemotePushRequests $d $v)
+        $rq.Count | Should -Be 1
+        $rq[0].Auth | Should -Match ('^vapid t=[^,]+, k=' + [regex]::Escape($v.Public) + '$')
     }
 }
 
