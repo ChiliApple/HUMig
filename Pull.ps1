@@ -464,6 +464,27 @@ function Stop-HMPull([string]$Msg) {
     if (-not $NonInteractive) { Read-Host 'Enter zum Beenden' | Out-Null }
     exit 1
 }
+# (gleich wie in Functions\Core-Update.ps1 - der Test prueft das)
+# GitHub-Abfragegrenze erreicht? (ohne Anmeldung 60 Abfragen je Stunde und oeffentlicher IP - alle Geraete hinter
+# derselben Internet-Adresse teilen sie). Rueckgabe: '' = nein, sonst Ende der Sperre als 'yyyy-MM-ddTHH:mm:ss' (Ortszeit)
+function Get-HMGitHubRateLimit($Err) {
+    $msg = ''
+    try { $msg = "$($Err.ErrorDetails.Message) $($Err.Exception.Message)" } catch { }
+    $code = 0; try { $code = [int]$Err.Exception.Response.StatusCode } catch { }
+    if (-not ($msg -match '(?i)rate limit' -or $code -eq 429)) { return '' }
+    $reset = $null
+    try {
+        $hd = $Err.Exception.Response.Headers
+        $v = $null
+        try { $v = $hd['X-RateLimit-Reset'] } catch { }
+        if (-not $v) { try { $v = @($hd.GetValues('X-RateLimit-Reset'))[0] } catch { } }
+        if ("$v" -match '^\d+$') { $reset = [DateTimeOffset]::FromUnixTimeSeconds([int64]"$v").LocalDateTime }
+    } catch { }
+    # hoechstens etwas ueber eine Stunde (die Grenze gilt je Stunde) - schuetzt vor tagelanger Sperre bei falscher PC-Uhr
+    $max = (Get-Date).AddMinutes(65)
+    if (-not $reset -or $reset -gt $max) { $reset = $(if ($reset) { $max } else { (Get-Date).AddHours(1) }) }
+    return $reset.ToString('yyyy-MM-ddTHH:mm:ss')
+}
 
 if (-not $Target) {
     $here = $PSScriptRoot
@@ -576,6 +597,9 @@ for ($attempt = 1; $attempt -le 3 -and -not $ref; $attempt++) {
             $Token = ''; $triedNoToken = $true
             continue
         }
+        # Abfragegrenze (ohne Anmeldung 60 je Stunde und Internet-Adresse) - kein Token-Problem, nicht danach fragen
+        $rl = Get-HMGitHubRateLimit $_
+        if ($rl) { Stop-HMPull "GitHub-Abfragegrenze erreicht (ohne Anmeldung 60 Abfragen je Stunde - alle Geraete hinter derselben Internet-Adresse teilen sie, z.B. im Schulnetz). Wieder moeglich ab ca. $(([datetime]$rl).ToString('HH:mm')) Uhr - dann Pull.ps1 erneut starten." }
         if (-not $newCred -and -not $NonInteractive -and $code -in 401, 403, 404) {
             Write-Host "[INFO] $Owner/$Repo ist $(if ($Token) { 'mit dem Token' } else { 'ohne Token' }) nicht erreichbar (HTTP $code) - privates Repo?" -ForegroundColor Yellow
             Write-Host 'Read-only GitHub-Token eingeben (Fine-grained PAT, Contents: Read) - leer = Abbruch:' -ForegroundColor Yellow

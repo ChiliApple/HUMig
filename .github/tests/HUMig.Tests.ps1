@@ -1504,7 +1504,7 @@ Describe 'Handy-Fernbedienung: QR-Code, Kopplung, Anfragen' {
         Test-HMRemotePrivateIp '10.1.1.5' | Should -BeTrue
         Test-HMRemotePrivateIp '172.31.0.1' | Should -BeTrue
         Test-HMRemotePrivateIp '172.32.0.1' | Should -BeFalse
-        Test-HMRemotePrivateIp '193.170.219.50' | Should -BeFalse
+        Test-HMRemotePrivateIp '203.0.113.50' | Should -BeFalse
         @(Get-HMRemoteFirewallRemote @('10.20.0.0/16', 'quatsch', '300.1.1.1', '192.168.1.7')) | Should -Be @('LocalSubnet', '10.20.0.0/16', '192.168.1.7')
         $l = Select-HMRemoteIPs @([pscustomobject]@{ IP = '172.20.1.1'; Gateway = $false; Private = $true }, [pscustomobject]@{ IP = '10.1.1.5'; Gateway = $true; Private = $true }, [pscustomobject]@{ IP = '193.1.1.1'; Gateway = $true; Private = $false })
         $l[0].IP | Should -Be '10.1.1.5'; $l[1].IP | Should -Be '193.1.1.1'
@@ -2039,12 +2039,19 @@ Describe 'Handy-Fernbedienung: echtes HTTPS mit eigener CA (Windows, Administrat
 Describe 'Update: GitHub-Abfragegrenze erkennen' {
     It 'erkennt "rate limit" in der Antwort, sonst leer; ohne Kopfzeile eine Stunde' {
         $e = [System.Management.Automation.ErrorRecord]::new([Exception]::new('Der Remoteserver hat einen Fehler zurueckgegeben: (403) Unzulaessig.'), 'x', 'NotSpecified', $null)
-        $e.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('{"message":"API rate limit exceeded for 193.170.218.130."}')
+        $e.ErrorDetails = [System.Management.Automation.ErrorDetails]::new('{"message":"API rate limit exceeded for 203.0.113.10."}')
         $r = Get-HMGitHubRateLimit $e
         $r | Should -Match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$'
         ([datetime]$r - (Get-Date)).TotalMinutes | Should -BeGreaterThan 50
         $n = [System.Management.Automation.ErrorRecord]::new([Exception]::new('Not Found'), 'x', 'NotSpecified', $null)
         Get-HMGitHubRateLimit $n | Should -BeNullOrEmpty
+    }
+    It 'Pull.ps1 erkennt die Abfragegrenze genauso (gleiche Funktion wie Core-Update.ps1)' {
+        $re = '(?s)function Get-HMGitHubRateLimit\(\$Err\) \{.*?\r?\n\}'
+        $a = [regex]::Match((Get-Content (Join-Path $script:Root 'Pull.ps1') -Raw -Encoding UTF8), $re).Value -replace "`r`n", "`n"
+        $b = [regex]::Match((Get-Content (Join-Path $script:Root 'Functions\Core-Update.ps1') -Raw -Encoding UTF8), $re).Value -replace "`r`n", "`n"
+        $a | Should -Not -BeNullOrEmpty
+        $a | Should -Be $b
     }
 }
 

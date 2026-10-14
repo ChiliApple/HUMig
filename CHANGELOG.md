@@ -9,6 +9,9 @@
 - **Ordnerrechte: auch die Ordner ueber dem HUMig-Ordner** werden geprueft (beim Start als Administrator, in `Pull.ps1` als Hinweis). Duerfen normale Benutzer einen davon umbenennen oder ersetzen - z. B. `C:\Tools` mit den Standardrechten von `C:\` -, koennten sie den abgesicherten HUMig-Ordner wegbenennen und einen eigenen hinlegen, den geplante Aufgaben (Server-Backup als SYSTEM) und der naechste Start als Administrator ausfuehren wuerden. HUMig fragt und sichert auf Wunsch **nur den Ordner selbst** ab (Besitzer Administratoren; kein Umbenennen/Loeschen/Rechte aendern fuer Nicht-Administratoren; Lesen/Anlegen und die Rechte der Unterordner anderer Programme bleiben). Ordner unter `C:\Users` werden nie geaendert, nur gemeldet. **Funktionsaenderung:** bestehende Installationen z. B. unter `C:\Tools` bekommen beim naechsten Start diese Rueckfrage
 - Dieselbe Pruefung beim Anlegen eines Server-Backup-Zeitplans und eines Profil-Backup-Zeitplans mit Administratorrechten (absichern und planen / trotzdem planen / nicht planen)
 - Empfehlung fuer Server und gemeinsam genutzte PCs jetzt `C:\Program Files\HUMig` (Anleitung, INSTALL, Hinweise beim Planen)
+### Installation/Update
+- `Pull.ps1`: **GitHub-Abfragegrenze erkannt** (ohne Anmeldung 60 Abfragen je Stunde und Internet-Adresse, im Schulnetz schnell erreicht) - nennt die Uhrzeit, ab der es wieder geht, statt faelschlich nach einem Token fuer ein "privates Repo" zu fragen
+- Tests: Beispiel-Adressen ohne echte Adressen
 ### Berichte
 - Backup-, Restore- und Server-Backup-Bericht am Handy gut lesbar (einheitliche Schriftgroesse, lange Pfade umbrochen); am PC unveraendert
 
