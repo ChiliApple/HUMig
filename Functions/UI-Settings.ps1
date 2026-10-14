@@ -92,7 +92,7 @@ function Show-SettingsDialog {
         'tabExceptions', 'btnExcDefault', 'txtExPF', 'txtExPFi', 'txtExPMin', 'txtExSF', 'txtExSFi', 'txtExSMin', 'tabModules', 'txtNmName', 'cmbNmGroup',
         'cmbNmType', 'txtNmFilter', 'txtNmPath', 'btnNmAdd', 'btnModDel', 'btnModJson', 'btnAppEditor', 'dgModules', 'btnLinkAdd', 'btnLinkDel', 'dgLinks',
         'txtOwner', 'txtRepo', 'txtBranch', 'lblToken', 'btnTokenSet', 'btnTokenDel', 'tabUpdate', 'cmbChannel', 'lblInstalled', 'btnVersions', 'chkRequireSig', 'txtSignerThumb', 'chkUseBranch',
-        'tabRemote', 'chkRemoteAuto', 'txtRemotePort', 'cmbRemoteTime', 'txtRemoteNets', 'txtRemoteUser', 'btnRemoteSetup', 'btnRemoteUnsetup', 'lblRemoteSetup')) { $f[$n] = $w.FindName($n) }
+        'tabRemote', 'chkRemoteAuto', 'txtRemotePort', 'cmbRemoteTime', 'txtRemoteNets', 'txtRemoteUser', 'btnRemoteSetup', 'btnRemoteUnsetup', 'lblRemoteSetup', 'chkSchedBackup', 'chkSchedServer', 'chkSchedAu')) { $f[$n] = $w.FindName($n) }
     $f.lblPath.Text = $script:ConfigDir
     $st = @{ Saved = $false; Win = $w; F = $f }
     $script:SetDlg = $st
