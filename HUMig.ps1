@@ -424,14 +424,13 @@ function Protect-HMAppParent([string]$Dir) {
         if ($di.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return 'Verknuepfung (Junction/Link) - nicht geaendert' }
         $mask = Get-HMAppParentMask -DriveRoot:($null -eq $di.Parent)
         $safe = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
-        $own = ''; try { $own = (Get-Acl -LiteralPath $Dir -ErrorAction Stop).GetOwner([System.Security.Principal.SecurityIdentifier]).Value } catch { }
-        if ($safe -notcontains $own -and @(Get-HMAppAdminSids) -notcontains $own) {
-            $o = & icacls.exe "$Dir" /setowner '*S-1-5-32-544' /C /Q 2>&1
-            if ($LASTEXITCODE -ne 0) { return "Besitzer: $(@($o) -join ' ')" }
-        }
         $old = Get-Acl -LiteralPath $Dir -ErrorAction Stop
         $risk = @(Get-HMAppParentRisk $old $mask)
         if ($risk.Count) {
+            # geerbte Verweigerungen: nach dem Umbau (alles eigen) kaemen sie vor eigene Erlaubnisse - Wirkung wuerde sich aendern
+            if (@($old.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | Where-Object { $_.IsInherited -and "$($_.AccessControlType)" -eq 'Deny' }).Count) {
+                return 'geerbte Verweigerung (Deny) in den Rechten - bitte von Hand pruefen, HUMig aendert hier nichts'
+            }
             # neue Rechteliste: alle bisherigen Eintraege (eigene und geerbte) als eigene, riskante aufgeteilt in
             # "nur vererben" (unveraendert fuer Unterordner) + "dieser Ordner" ohne die riskanten Rechte
             $new = New-Object System.Security.AccessControl.DirectorySecurity
@@ -445,7 +444,7 @@ function Protect-HMAppParent([string]$Dir) {
                     continue
                 }
                 if ("$($r.InheritanceFlags)" -ne 'None') {
-                    $new.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($r.IdentityReference, [System.Security.AccessControl.FileSystemRights]$rights, $r.InheritanceFlags, [System.Security.AccessControl.PropagationFlags]::InheritOnly, 'Allow')))
+                    $new.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($r.IdentityReference, [System.Security.AccessControl.FileSystemRights]$rights, $r.InheritanceFlags, [System.Security.AccessControl.PropagationFlags](([int]$r.PropagationFlags) -bor 2), 'Allow')))   # NoPropagateInherit bleibt erhalten
                 }
                 $rest = $rights -band (-bnot $mask)
                 if ($rest -band 0xFFFF) {
@@ -459,6 +458,12 @@ function Protect-HMAppParent([string]$Dir) {
             if (-not [HMAppSecNative]::SetFileSecurity($di.FullName, [uint32]2147483652, $new.GetSecurityDescriptorBinaryForm())) {
                 return "Rechte nicht gesetzt (Fehler $([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
             }
+        }
+        # Besitzer erst nach den Rechten (scheitert das Schreiben der Rechte, bleibt alles wie es war)
+        $own = ''; try { $own = (Get-Acl -LiteralPath $Dir -ErrorAction Stop).GetOwner([System.Security.Principal.SecurityIdentifier]).Value } catch { }
+        if ($safe -notcontains $own -and @(Get-HMAppAdminSids) -notcontains $own) {
+            $o = & icacls.exe "$Dir" /setowner '*S-1-5-32-544' /C /Q 2>&1
+            if ($LASTEXITCODE -ne 0) { return "Besitzer: $(@($o) -join ' ')" }
         }
         $left = @(Get-HMAppParentRisk (Get-Acl -LiteralPath $Dir -ErrorAction Stop) $mask)
         if ($left.Count) { return "noch: $(@($left | ForEach-Object { "$($_.IdentityReference): $($_.FileSystemRights)" }) -join '; ')" }
