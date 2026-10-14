@@ -2046,6 +2046,41 @@ Describe 'Update: GitHub-Abfragegrenze erkennen' {
         $n = [System.Management.Automation.ErrorRecord]::new([Exception]::new('Not Found'), 'x', 'NotSpecified', $null)
         Get-HMGitHubRateLimit $n | Should -BeNullOrEmpty
     }
+    It 'Pull.ps1 Zielordner: Update in einer Installation, Erstinstallation im leeren Ordner, sonst Desktop' {
+        $code = [regex]::Match((Get-Content (Join-Path $script:Root 'Pull.ps1') -Raw -Encoding UTF8), '(?s)function Resolve-HMPullTarget\(\[string\]\$Here\) \{.*?\r?\n\}').Value
+        $code | Should -Not -BeNullOrEmpty
+        . ([scriptblock]::Create($code))
+        $oldUp = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = Join-Path $TestDrive 'profil'
+            $desk = Join-Path $env:USERPROFILE 'Desktop\HUMig'
+            # leer bis auf Pull.ps1 -> genau dort
+            $e = Join-Path $TestDrive 'leer'; New-Item -ItemType Directory -Path $e -Force | Out-Null; Set-Content -LiteralPath (Join-Path $e 'Pull.ps1') -Value '#'
+            (Resolve-HMPullTarget $e).Target | Should -Be ([IO.Path]::GetFullPath($e).TrimEnd('\'))
+            # weitere Dateien daneben (z.B. Downloads) -> Desktop
+            Set-Content -LiteralPath (Join-Path $e 'anderes.txt') -Value 'x'
+            (Resolve-HMPullTarget $e).Target | Should -Be $desk
+            # HUMig-Installation -> Update dort
+            $i = Join-Path $TestDrive 'inst'; New-Item -ItemType Directory -Path (Join-Path $i 'Functions') -Force | Out-Null
+            $r = Resolve-HMPullTarget $i
+            $r.Target | Should -Be $i; $r.Mode | Should -Match 'Update'
+            # Downloads-Ordner selbst nie, auch wenn leer
+            $dl = Join-Path $env:USERPROFILE 'Downloads'; New-Item -ItemType Directory -Path $dl -Force | Out-Null; Set-Content -LiteralPath (Join-Path $dl 'Pull.ps1') -Value '#'
+            (Resolve-HMPullTarget $dl).Target | Should -Be $desk
+            # ohne Ordner -> Desktop
+            (Resolve-HMPullTarget '').Target | Should -Be $desk
+        } finally { $env:USERPROFILE = $oldUp }
+    }
+    It 'Install.ps1: nur ASCII, laedt Pull.ps1 aus dem freigegebenen Release und prueft die Pruefsumme' {
+        $f = Join-Path $script:Root 'Install.ps1'
+        $b = [IO.File]::ReadAllBytes($f)
+        @($b[3..($b.Length - 1)] | Where-Object { $_ -gt 127 }).Count | Should -Be 0
+        $t = Get-Content -LiteralPath $f -Raw -Encoding UTF8
+        $t | Should -Match 'releases/latest/download'
+        $t | Should -Match 'Get-FileHash'
+        $t | Should -Match '-Target \$t'
+        $t | Should -Not -Match '(?m)^#Requires'
+    }
     It 'Pull.ps1 erkennt die Abfragegrenze genauso (gleiche Funktion wie Core-Update.ps1)' {
         $re = '(?s)function Get-HMGitHubRateLimit\(\$Err\) \{.*?\r?\n\}'
         $a = [regex]::Match((Get-Content (Join-Path $script:Root 'Pull.ps1') -Raw -Encoding UTF8), $re).Value -replace "`r`n", "`n"

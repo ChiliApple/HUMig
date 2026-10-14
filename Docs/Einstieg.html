@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HUMig Einstieg</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root {
+  --bg: #eff1f5; --surface: #ffffff; --surface-2: #e6e9ef; --line: #ccd0da;
+  --fg: #3b3e52; --fg-strong: #1e1e2e; --muted: #6c6f85;
+  --green: #40a02b; --mauve: #8839ef; --yellow: #c78b0a; --teal: #13867f; --blue: #1e66f5; --red: #d20f39; --peach: #e2620e;
+  --tint: 12%;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Figtree", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", Consolas, ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #1e1e2e; --surface: #262637; --surface-2: #313244; --line: #3d3e55;
+  --fg: #cdd6f4; --fg-strong: #ffffff; --muted: #a6adc8;
+  --green: #a6e3a1; --mauve: #cba6f7; --yellow: #f9e2af; --teal: #94e2d5; --blue: #89b4fa; --red: #f38ba8; --peach: #fab387;
+  --tint: 16%; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #1e1e2e; --surface: #262637; --surface-2: #313244; --line: #3d3e55;
+  --fg: #cdd6f4; --fg-strong: #ffffff; --muted: #a6adc8;
+  --green: #a6e3a1; --mauve: #cba6f7; --yellow: #f9e2af; --teal: #94e2d5; --blue: #89b4fa; --red: #f38ba8; --peach: #fab387;
+  --tint: 16%; color-scheme: dark }
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 400 16px/1.6 var(--f-body); }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 40px 16px 72px; display: grid; gap: 64px; }
+h1, h2, h3 { font-family: var(--f-display); color: var(--fg-strong); margin: 0; text-wrap: balance; }
+p { margin: 0; }
+code, .mono { font-family: var(--f-mono); font-size: .88em; }
+a { color: var(--blue); }
+
+/* Kopf */
+header { display: grid; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 12px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+.logo { width: 44px; height: 44px; border-radius: 11px; background: var(--surface); border: 1px solid var(--line); display: grid; place-items: center; overflow: hidden; }
+.logo img { width: 30px; height: 30px; }
+h1 { font-size: clamp(32px, 6vw, 54px); font-weight: 800; line-height: 1.05; letter-spacing: -.02em; }
+h1 em { font-style: normal; color: var(--mauve); }
+.lead { font-size: 19px; max-width: 64ch; color: var(--fg); }
+.promise { display: flex; flex-wrap: wrap; gap: 10px; }
+.promise span { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 600; }
+
+/* Abschnittskopf */
+.sec { display: grid; gap: 22px; }
+.sec > h2 { font-size: clamp(24px, 4vw, 32px); font-weight: 700; }
+.sec > p.sub { color: var(--muted); max-width: 70ch; margin-top: -10px; }
+
+/* Wegweiser */
+.finder { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.finder a { --c: var(--blue); display: grid; gap: 4px; text-decoration: none; color: inherit; background: var(--surface); border: 1px solid var(--line); border-left: 5px solid var(--c); border-radius: 12px; padding: 14px 16px; transition: transform .12s, border-color .12s; }
+.finder a:hover { transform: translateY(-2px); border-color: var(--c); }
+.finder b { color: var(--fg-strong); font-weight: 600; }
+.finder small { color: var(--muted); font-size: 13.5px; }
+
+/* Warum zusaetzlich zur Cloud */
+.why { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.why > div { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--green); border-radius: 12px; padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+.why b { color: var(--fg-strong); font-family: var(--f-display); font-size: 16.5px; }
+.why span { font-size: 14.5px; }
+
+/* Szenario */
+.scn { --c: var(--blue); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; scroll-margin-top: 16px; }
+.scn-head { padding: 22px 24px 18px; background: color-mix(in srgb, var(--c) var(--tint), var(--surface)); border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+.tag { justify-self: start; font: 600 12px/1 var(--f-body); text-transform: uppercase; letter-spacing: .08em; color: var(--c); }
+.scn h3 { font-size: 23px; font-weight: 700; }
+.quote { font-style: italic; color: var(--fg); }
+.scn-body { padding: 20px 24px 24px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 28px; }
+.scn-body h4 { margin: 0 0 8px; font: 600 13px/1 var(--f-body); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; counter-reset: s; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; }
+.steps li::before { content: counter(s); width: 28px; height: 28px; border-radius: 50%; background: var(--c); color: var(--surface); font: 700 14px/28px var(--f-display); text-align: center; }
+.ui { display: inline-block; padding: 0 7px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); font-weight: 600; font-size: .92em; white-space: nowrap; }
+.gets { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.gets li { padding-left: 24px; position: relative; }
+.gets li::before { content: "✓"; position: absolute; left: 2px; color: var(--green); font-weight: 700; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.meta span { font-size: 13px; color: var(--muted); background: var(--surface-2); border-radius: 6px; padding: 3px 9px; }
+.tip { margin-top: 14px; font-size: 14.5px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--yellow) var(--tint), var(--surface)); border: 1px solid color-mix(in srgb, var(--yellow) 35%, var(--line)); }
+.tip b { color: var(--fg-strong); }
+.shot { margin: 16px 0 0; max-width: 300px; display: grid; gap: 6px; }
+.shot img { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
+.shot figcaption { font-size: 13px; color: var(--muted); text-align: center; }
+.shots2 { display: grid; gap: 4px; margin-top: 4px; align-items: start; }
+
+/* Start */
+.start { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: grid; gap: 8px; align-content: start; }
+.card .n { font: 800 30px/1 var(--f-display); color: var(--mauve); }
+.card h3 { font-size: 18px; }
+pre { margin: 6px 0 0; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; font: 500 12.5px/1.5 var(--f-mono); color: var(--fg-strong); white-space: pre; }
+
+/* Erster Versuch */
+.first { background: var(--surface); border: 2px dashed color-mix(in srgb, var(--green) 55%, var(--line)); border-radius: 16px; padding: 22px 24px; display: grid; gap: 12px; }
+.first h2 { font-size: 24px; }
+
+/* FAQ */
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+details + details { margin-top: 10px; }
+summary { cursor: pointer; font-weight: 600; color: var(--fg-strong); }
+details p { margin-top: 8px; }
+
+footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); padding-top: 20px; display: grid; gap: 6px; }
+
+@media (max-width: 760px) {
+  .scn-body { grid-template-columns: 1fr; gap: 20px; }
+  .scn-head, .scn-body { padding-inline: 18px; }
+  .lead { font-size: 17px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="brand">
+    <div class="logo"><img src="../Assets/logo64.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Assets/logo64.png'" alt=""></div>
+    HUMig · Einstieg für IT-Betreuung und Administration
+  </div>
+  <h1>Was mache ich im Alltag <em>konkret</em> damit?</h1>
+  <p class="lead">HUMig kann viel – und genau das macht den Einstieg schwer. Diese Seite zeigt nicht alle Funktionen, sondern <b>typische Situationen aus dem IT-Alltag</b> in Verwaltung, Büro und Schulungsräumen: was du tust, was HUMig dabei erledigt und was du am Ende hast.</p>
+  <div class="promise">
+    <span>Sicherung ohne Cloud – zusätzlich zur Cloud</span><span>Kein Server nötig</span><span>Keine Lizenz</span><span>Windows 10 / 11 und Server</span><span>Anleitung im Tool mit F1</span>
+  </div>
+</header>
+
+<section class="sec">
+  <h2>Warum zusätzlich zur Cloud sichern?</h2>
+  <p class="sub">OneDrive und Co. schützen schon gut – nach der bewährten 3-2-1-Regel gehört trotzdem eine weitere Kopie an einen anderen Ort. HUMig legt eine zweite Kopie dort ab, wo du sie in der Hand hast: auf einer USB-Platte oder im eigenen Netzwerk.</p>
+  <div class="why">
+    <div><b>Zweite, unabhängige Kopie</b><span>Die Cloud hat Papierkorb, Versionen und eine Wiederherstellung nach Verschlüsselung. HUMig ist die Kopie daneben – für den Fall, dass ein Konto gelöscht wird, eine Aufbewahrungsfrist abläuft oder die Synchronisierung Fehler macht. Eine abgesteckte USB-Platte hängt von keinem Anbieter ab.</span></div>
+    <div><b>Mehr als nur Dateien</b><span>Die Cloud kennt Dokumente. HUMig sichert auch Browser-Lesezeichen, Outlook-Signaturen, Drucker, WLAN, Programm-Einstellungen und Dateien außerhalb des Cloud-Ordners.</span></div>
+    <div><b>Schnell zurück</b><span>Ein ganzes Profil kommt von der lokalen Platte in Minuten zurück – ohne Gigabytes über die Internetleitung herunterzuladen.</span></div>
+    <div><b>Auch ohne Internet</b><span>Sichern und Zurückspielen klappen, wenn die Leitung weg ist oder ein Konto gesperrt wurde.</span></div>
+    <div><b>Daten bleiben im Haus</b><span>Die Sicherung liegt bei dir, nicht bei einem Anbieter. Wer was sehen darf, regeln deine Ordnerrechte.</span></div>
+  </div>
+</section>
+
+<section class="sec">
+  <h2>Was steht bei dir gerade an?</h2>
+  <p class="sub">Tippe auf die Situation, die zu dir passt.</p>
+  <nav class="finder">
+    <a href="#neuer-laptop" style="--c: var(--blue)"><b>Ein Mitarbeiter bekommt einen neuen PC</b><small>alles vom alten Gerät mitnehmen</small></a>
+    <a href="#neu-aufsetzen" style="--c: var(--teal)"><b>Vor einer Neuinstallation</b><small>Daten sichern und danach zurückholen</small></a>
+    <a href="#datei-weg" style="--c: var(--green)"><b>„Meine Datei ist weg!“</b><small>regelmäßige Backups, Dateien zurückholen</small></a>
+    <a href="#server" style="--c: var(--mauve)"><b>Der Server soll gesichert werden</b><small>Hyper-V, Wechselplatten, Erinnerung</small></a>
+    <a href="#edv-saal" style="--c: var(--peach)"><b>Programme aktuell halten</b><small>fast alle deine Apps – am eigenen PC oder auf vielen anderen</small></a>
+    <a href="#programm-verteilen" style="--c: var(--yellow)"><b>Ein Programm soll auf viele PCs</b><small>erst testen, dann verteilen</small></a>
+    <a href="#problem-pc" style="--c: var(--red)"><b>Ein PC macht Probleme</b><small>Profil kaputt, Speicher voll, Inventar</small></a>
+    <a href="#unterwegs" style="--c: var(--teal)"><b>Ich bin nicht am PC</b><small>Fortschritt und Meldungen am Handy</small></a>
+  </nav>
+</section>
+
+<section class="sec">
+  <h2>Situationen aus dem Alltag</h2>
+
+  <article class="scn" id="neuer-laptop" style="--c: var(--blue)">
+    <div class="scn-head">
+      <span class="tag">Profil-Umzug</span>
+      <h3>Ein Mitarbeiter bekommt einen neuen PC</h3>
+      <p class="quote">„Am neuen Gerät soll alles wieder so sein wie vorher – Desktop, Lesezeichen, Outlook-Signatur, Drucker, WLAN.“</p>
+    </div>
+    <div class="scn-body">
+      <div>
+        <h4>So gehst du vor</h4>
+        <ol class="steps">
+          <li><span>HUMig am <b>alten</b> PC starten, Benutzer auswählen, im Reiter <span class="ui">Backup</span> auf <span class="ui">Umzug …</span> klicken.</span></li>
+          <li><span>Der Umzugs-Assistent führt in sechs Schritten durch alles: sichern (USB-Platte oder Netzwerk), Programme erkennen, Liste für den neuen PC.</span></li>
+          <li><span>Am <b>neuen</b> PC: Benutzer einmal anmelden lassen, HUMig starten, Backup wählen, <span class="ui">Restore</span>. HUMig bietet an, fehlende Programme zuerst nachzuinstallieren.</span></li>
+          <li><span>Am Ende hakt der Mitarbeiter eine kurze Prüfliste ab („Outlook startet“, „Drucker da“ …).</span></li>
+        </ol>
+        <div class="meta"><span>⏱ meist 30–60 Minuten, das meiste läuft alleine</span><span>auch bei anderem Profilnamen</span></div>
+      </div>
+      <div>
+        <h4>Was du am Ende hast</h4>
+        <ul class="gets">
+          <li>Dokumente, Desktop, Bilder – auch große Datenmengen, schnell kopiert</li>
+          <li>Browser-Lesezeichen (gespeicherte Kennwörter vorher über Browser-Sync oder Export – sie sind an PC und Konto gebunden)</li>
+          <li>Outlook-Einstellungen und Signaturen, Office-Vorlagen</li>
+          <li>Drucker, WLAN, Netzlaufwerke</li>
+          <li>Einstellungen von rund 480 erkannten Programmen, auch Lizenzdateien</li>
+          <li>Einen Bericht, was gesichert und zurückgespielt wurde</li>
+        </ul>
+        <p class="tip"><b>Gut zu wissen:</b> OneDrive- und SharePoint-Dateien werden nicht heruntergeladen – die kommen am neuen Gerät ohnehin aus der Cloud.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="scn" id="neu-aufsetzen" style="--c: var(--teal)">
+    <div class="scn-head">
+      <span class="tag">Sichern und zurückspielen</span>
+      <h3>Vor einer Neuinstallation: Daten sichern und zurückholen</h3>
+      <p class="quote">„Windows ist hinüber, der PC kommt neu drauf – aber die Daten und Einstellungen müssen bleiben.“</p>
+    </div>
+    <div class="scn-body">
+      <div>
+        <h4>So gehst du vor</h4>
+        <ol class="steps">
+          <li><span>Vorher in HUMig: Benutzer auswählen, <span class="ui">Backup starten</span> – auf USB oder ins Netzwerk.</span></li>
+          <li><span>PC wie gewohnt neu installieren – mit deinen üblichen Mitteln (Image, MDT, Autopilot …). Das macht HUMig nicht.</span></li>
+          <li><span>Danach HUMig starten, Backup auswählen, <span class="ui">Restore</span>. Vorher zeigt eine Vorschau, was zurückkommt.</span></li>
+        </ol>
+        <div class="meta"><span>⏱ Sichern meist 10–30 Minuten</span><span>mehrere Benutzer eines PCs möglich</span></div>
+      </div>
+      <div>
+        <h4>Was du am Ende hast</h4>
+        <ul class="gets">
+          <li>Der PC ist frisch, die Benutzer finden ihre Sachen wieder</li>
+          <li>Die Liste der Programme vom alten Stand – fehlende kann HUMig nachinstallieren</li>
+          <li>Ein geprüftes Backup (Stichproben-Prüfung nach dem Kopieren)</li>
+        </ul>
+        <p class="tip"><b>Tipp:</b> Das Backup bleibt liegen. Fällt später noch etwas auf („die Vorlage fehlt“), holst du es einfach nach.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="scn" id="datei-weg" style="--c: var(--green)">
+    <div class="scn-head">
+      <span class="tag">Geplante Backups</span>
+      <h3>„Meine Datei ist weg!“</h3>
+      <p class="quote">„Ich hab gestern die Kalkulation überschrieben – gibt es noch die alte Version?“</p>
+    </div>
+    <div class="scn-body">
+      <div>
+        <h4>So gehst du vor</h4>
+        <ol class="steps">
+          <li><span>Einmalig: im Reiter <span class="ui">Backup</span> einen <b>Zeitplan</b> anlegen – täglich oder wöchentlich, auf USB-Platte oder Netzwerk.</span></li>
+          <li><span>Ab dann sichert der PC von allein; eine USB-Platte wird danach ausgeworfen.</span></li>
+          <li><span>Wenn etwas fehlt: Backup öffnen und die Datei zurückholen – der Mitarbeiter kann das sogar selbst (<b>Benutzer-Modus</b>, ohne Adminrechte, nur eigene Backups).</span></li>
+        </ol>
+        <div class="meta"><span>⏱ Einrichten: 5 Minuten</span><span>Meldung bei Fehlern (Teams, Handy)</span></div>
+      </div>
+      <div>
+        <h4>Was du am Ende hast</h4>
+        <ul class="gets">
+          <li>Regelmäßige Sicherungen, ohne daran denken zu müssen</li>
+          <li>Warnung, wenn ein Zeitplan länger nicht erfolgreich lief</li>
+          <li>Schutz vor Massenlöschung: verschwinden plötzlich viele Dateien, schlägt HUMig Alarm statt sie mitzulöschen</li>
+          <li>Jeder Mitarbeiter sieht nur seine eigenen Backups</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <article class="scn" id="server" style="--c: var(--mauve)">
+    <div class="scn-head">
+      <span class="tag">Server-Backup</span>
+      <h3>Der Server soll gesichert werden</h3>
+      <p class="quote">„Wir haben einen Hyper-V-Host mit DC, Fileserver und Druckserver. Jeden Freitag soll die Platte gewechselt werden – und wehe, das vergisst jemand.“</p>
+    </div>
+    <div class="scn-body">
+      <div>
+        <h4>So gehst du vor</h4>
+        <ol class="steps">
+          <li><span>Am Server HUMig starten, Reiter <span class="ui">Server-Backup</span>: Profil für den Standort anlegen, USB-Platten zuordnen.</span></li>
+          <li><span>VMs anhaken, <span class="ui">Zeitplan …</span> – z. B. jede Nacht um 22 Uhr.</span></li>
+          <li><span>Platten im Wechsel anstecken. HUMig weiß, welche Platte als Nächstes dran ist.</span></li>
+        </ol>
+        <div class="meta"><span>⏱ Einrichten: 15–20 Minuten</span><span>nutzt die Windows Server-Sicherung</span></div>
+      </div>
+      <div>
+        <h4>Was du am Ende hast</h4>
+        <ul class="gets">
+          <li>Nächtliche Sicherung aller gewählten VMs und auf Wunsch der Host-Konfiguration</li>
+          <li>Erinnerung, wenn eine Platte zu lange nicht dran war</li>
+          <li>Zustand der Platten (SMART) und Verlauf mit Statistik</li>
+          <li>Ergebnis in Teams oder als Push am Handy</li>
+          <li>Ein Skript, das virtuelle Switches nach einer Neuinstallation wiederherstellt</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <article class="scn" id="edv-saal" style="--c: var(--peach)">
+    <div class="scn-head">
+      <span class="tag">App-Updates</span>
+      <h3>Programme aktuell halten – am eigenen PC und auf vielen anderen</h3>
+      <p class="quote">„Browser, PDF-Reader, 7-Zip, Teams … ständig will irgendwas ein Update. Ich hätte gern einen Knopf für alles – bei mir und auf den PCs der Abteilung. Nur die Fachanwendung muss auf ihrer Version bleiben.“</p>
+    </div>
+    <div class="scn-body">
+      <div>
+        <h4>So gehst du vor</h4>
+        <ol class="steps">
+          <li><span>Reiter <span class="ui">App-Updates</span>: den eigenen PC wählen – oder gleich mehrere PCs (auch aus dem AD), <span class="ui">Suchen</span>.</span></li>
+          <li><span>Liste mit Haken: was aktualisiert wird, entscheidest du. Was nicht aktualisiert werden darf, steht als <b>Ausnahme</b> drin und wird nie angefasst.</span></li>
+          <li><span>Aktualisieren – oder gleich einen Zeitplan anlegen, z. B. jede Nacht.</span></li>
+        </ol>
+        <div class="meta"><span>⏱ ein PC oder viele auf einmal</span><span>über WinGet</span></div>
+      </div>
+      <div>
+        <h4>Was du am Ende hast</h4>
+        <ul class="gets">
+          <li>Aktuelle Browser, PDF-Reader, Office-Hilfsprogramme …</li>
+          <li>Fast alle installierten Programme mit einem Klick aktuell – statt jedes einzeln</li>
+          <li>Auf mehreren PCs: überall dieselben Versionen</li>
+          <li>Verlauf: was wann wo aktualisiert wurde – und was nicht geklappt hat, mit Grund</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <article class="scn" id="programm-verteilen" style="--c: var(--yellow)">
+    <div class="scn-head">
+      <span class="tag">Softwareverteilung</span>
+      <h3>Ein Programm soll auf viele PCs</h3>
+      <p class="quote">„Die Abteilung braucht ein neues Programm auf 30 PCs – bis morgen.“</p>
+    </div>
+    <div class="scn-body">
+      <div>
+        <h4>So gehst du vor</h4>
+        <ol class="steps">
+          <li><span>Setup in den Software-Ordner legen.</span></li>
+          <li><span>Zuerst in der <b>Windows Sandbox</b> testen: Läuft die stille Installation wirklich ohne Rückfrage?</span></li>
+          <li><span>Dann auf die gewählten PCs verteilen – alle gleichzeitig.</span></li>
+        </ol>
+        <div class="meta"><span>⏱ statt von PC zu PC zu gehen</span></div>
+      </div>
+      <div>
+        <h4>Was du am Ende hast</h4>
+        <ul class="gets">
+          <li>Das Programm auf allen PCs, ohne einen einzigen davon anzufassen</li>
+          <li>Kein böses Erwachen: der Test in der Sandbox zeigt Probleme vorher</li>
+          <li>Auch Treiber lassen sich so verteilen</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <article class="scn" id="problem-pc" style="--c: var(--red)">
+    <div class="scn-head">
+      <span class="tag">Werkzeuge</span>
+      <h3>Ein PC macht Probleme</h3>
+      <p class="quote">„Bei mir lädt nur ein temporäres Profil.“ – „Die Festplatte ist voll.“ – „Welche PCs sind eigentlich gerade an?“</p>
+    </div>
+    <div class="scn-body">
+      <div>
+        <h4>So gehst du vor</h4>
+        <ol class="steps">
+          <li><span>Reiter <span class="ui">Werkzeuge</span>: PC eintragen oder aus dem AD wählen.</span></li>
+          <li><span>Passendes Werkzeug wählen – z. B. Profil erneuern (Daten bleiben erhalten), Speicher aufräumen, Diagnose, Neustart.</span></li>
+          <li><span>Für viele PCs auf einmal: <span class="ui">Mehrfach</span> – z. B. Inventar einer ganzen Abteilung als Liste.</span></li>
+        </ol>
+      </div>
+      <div>
+        <h4>Was du am Ende hast</h4>
+        <ul class="gets">
+          <li>Schnelle Hilfe ohne zum PC zu gehen (Fernwartung)</li>
+          <li>Inventar als CSV: Seriennummern, Modelle, Windows-Version</li>
+          <li>BitLocker-Status, Autopilot-Hash für neue Geräte</li>
+          <li>Direkte Links zu den Treiberseiten von Lenovo, HP und Dell</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <article class="scn" id="unterwegs" style="--c: var(--teal)">
+    <div class="scn-head">
+      <span class="tag">Handy</span>
+      <h3>Ich bin nicht am PC</h3>
+      <p class="quote">„Das Backup läuft noch, ich muss aber in eine Besprechung. Ist es schon fertig?“</p>
+    </div>
+    <div class="scn-body">
+      <div>
+        <h4>So gehst du vor</h4>
+        <ol class="steps">
+          <li><span>Einmalig: in HUMig die Handy-Fernbedienung einschalten, QR-Code mit dem Handy scannen.</span></li>
+          <li><span>HUMig als App auf den Startbildschirm legen, Benachrichtigungen erlauben.</span></li>
+        </ol>
+        <div class="meta"><span>nur im eigenen Netz, verschlüsselt</span><span>Standard: aus</span></div>
+        <div class="shots2">
+          <figure class="shot"><img src="img/handy_push.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Docs/img/handy_push.png'" alt="Push-Meldungen am Handy" loading="lazy"><figcaption>Push-Meldung, wenn ein Vorgang fertig ist</figcaption></figure>
+          <figure class="shot"><img src="img/handy_status.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Docs/img/handy_status.png'" alt="Statusseite am Handy" loading="lazy"><figcaption>Startseite mit Hinweisen und letzten Sicherungen</figcaption></figure>
+        </div>
+      </div>
+      <div>
+        <h4>Was du am Ende hast</h4>
+        <ul class="gets">
+          <li>Fortschritt und Restzeit live am Handy</li>
+          <li>Eine Push-Meldung, wenn der Vorgang fertig ist</li>
+          <li>Die letzten Vorgänge mit Bericht</li>
+          <li>Auf Wunsch: vorhandene Zeitpläne vom Handy aus sofort starten</li>
+        </ul>
+        <figure class="shot"><img src="img/handy_vorgang.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Docs/img/handy_vorgang.png'" alt="Handy-Ansicht eines laufenden Vorgangs" loading="lazy"><figcaption>Laufender Vorgang mit Restzeit und Live-Anzeige</figcaption></figure>
+      </div>
+    </div>
+  </article>
+</section>
+
+<section class="first">
+  <h2>Der erste Versuch – ohne jedes Risiko</h2>
+  <p>Sichere einfach <b>dein eigenes Profil</b> auf eine USB-Platte: Benutzer wählen, Reiter <span class="ui">Backup</span>, <span class="ui">Backup starten</span>. Ein Backup <b>verändert keine Daten</b> – HUMig bittet nur, offene Programme wie Outlook zu schließen. Danach schau dir den Bericht an und öffne das Backup. So siehst du in zehn Minuten, wie HUMig arbeitet, bevor du es bei anderen einsetzt.</p>
+</section>
+
+<section class="sec">
+  <h2>In 10 Minuten startklar</h2>
+  <p class="sub">Du brauchst: Windows 10 / 11 oder Windows Server und Administratorrechte. PowerShell ist in Windows schon dabei, sonst nichts.</p>
+  <div class="start">
+    <div class="card" style="grid-column: 1 / -1">
+      <div class="n">1</div>
+      <h3>Installieren – eine Zeile</h3>
+      <p>PowerShell <b>als Administrator</b> öffnen und einfügen:</p>
+      <pre>irm https://github.com/ChiliApple/HUMig/releases/latest/download/Install.ps1 | iex</pre>
+      <p style="font-size:14px;color:var(--muted)">Fragt nach dem Zielordner – Vorschlag <code>C:\Program Files\HUMig</code>, dort können normale Benutzer nichts verändern (wichtig, weil HUMig mit Adminrechten läuft). Dann wird die freigegebene Version geladen, jede Datei geprüft und HUMig gestartet. Wer Skripte aus dem Internet nicht direkt ausführen will: die Adresse im Browser öffnen und lesen – oder den Weg unten.</p>
+    </div>
+    <div class="card">
+      <div class="n">2</div>
+      <h3>Erster Start</h3>
+      <p>HUMig startet von selbst. Dabei entstehen <b>HUMig.exe</b> (für dich) und <b>HUMig-Benutzer.exe</b> (für Mitarbeiter ohne Adminrechte) – ab dann damit starten.</p>
+    </div>
+    <div class="card">
+      <div class="n">3</div>
+      <h3>Erste Rückfrage</h3>
+      <p>HUMig prüft die Ordnerrechte und bietet an, sie abzusichern. Mit <b>Ja</b> bestätigen. Alles Weitere erklärt die Anleitung – im Tool jederzeit mit <b>F1</b>.</p>
+    </div>
+    <div class="card">
+      <div class="n" style="color:var(--muted)">oder</div>
+      <h3>Ohne Einzeiler</h3>
+      <p><a href="https://github.com/ChiliApple/HUMig/raw/main/Pull.ps1"><code>Pull.ps1</code></a> herunterladen (Rechtsklick › <i>Link speichern unter …</i>), in einen <b>leeren</b> Ordner legen, z. B. <code>C:\Program Files\HUMig</code>, und als Administrator starten:</p>
+      <pre>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\HUMig\Pull.ps1"</pre>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <h2>Häufige Fragen</h2>
+  <div>
+    <details><summary>Brauche ich einen Server oder eine Datenbank?</summary><p>Nein. HUMig läuft direkt am PC oder Server, an dem du es startest. Backups landen auf einer USB-Platte oder in einem Netzwerkordner deiner Wahl.</p></details>
+    <details><summary>Muss ich PowerShell können?</summary><p>Nein. Die Bedienung läuft über die Oberfläche mit Knöpfen und Listen. PowerShell brauchst du nur für den einen Befehl beim Herunterladen.</p></details>
+    <details><summary>Was kostet das?</summary><p>Nichts. Die Nutzung ist frei, Details stehen in der Lizenz im Repository.</p></details>
+    <details><summary>Ersetzt HUMig Intune, MDT oder unser zentrales Backup?</summary><p>Nein, es ergänzt sie. HUMig hilft bei den Aufgaben dazwischen: Umzug eines Profils, schnelles Sichern vor einer Neuinstallation, Updates auf vielen PCs, die Server-Sicherung auf Wechselplatten.</p></details>
+    <details><summary>Wie kommen Updates?</summary><p>HUMig meldet neue Versionen selbst. Für den laufenden Betrieb den Kanal <b>Stabil</b> verwenden – dort landen nur geprüfte und signierte Versionen. Jede Datei wird beim Update per Prüfsumme kontrolliert.</p></details>
+    <details><summary>Und der Datenschutz?</summary><p>Backups enthalten persönliche Daten der Mitarbeiter. HUMig richtet den Backup-Ordner so ein, dass jede Person nur ihre eigenen Backups sieht. Kläre in deiner Organisation, wo Backups liegen und wann sie gelöscht werden.</p></details>
+    <details><summary>Beim Herunterladen kommt „GitHub-Abfragegrenze erreicht“</summary><p>Alle PCs hinter derselben Internet-Adresse teilen sich 60 Abfragen pro Stunde. Pull nennt die Uhrzeit, ab der es wieder geht – dann einfach noch einmal starten. (Ältere Pull-Versionen fragen stattdessen nach einem Token: Enter drücken, ein Token ist nicht nötig.)</p></details>
+  </div>
+</section>
+
+<footer>
+  <p>HUMig ist ein freies Werkzeug von Admins für Admins. Die Nutzung erfolgt ohne Gewähr – teste neue Abläufe zuerst an einem eigenen Gerät.</p>
+  <p><a href="https://chiliapple.github.io/HUMig/Docs/Funktionen.html">Alle Funktionen im Überblick</a> · <a href="https://chiliapple.github.io/HUMig/Docs/Anleitung.html">Ausführliche Anleitung</a> · <a href="https://github.com/ChiliApple/HUMig">Repository</a></p>
+</footer>
+
+</div>
+</body>
+</html>

@@ -14,12 +14,27 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 </p>
 
 <p align="center">
+  <a href="https://chiliapple.github.io/HUMig/Docs/Einstieg.html"><b>Einstieg: Was mache ich damit?</b></a> ·
   <a href="https://chiliapple.github.io/HUMig/Docs/Funktionen.html"><b>Funktionen im Überblick</b></a> ·
   <a href="https://chiliapple.github.io/HUMig/Docs/Anleitung.html"><b>Anleitung</b></a> ·
   <a href="INSTALL.md">Installation</a> ·
   <a href="CHANGELOG.md">Änderungen</a> ·
   <a href="LICENSE">Lizenz</a>
 </p>
+
+---
+
+## Installation in einer Zeile
+
+PowerShell **als Administrator** öffnen und einfügen:
+
+```powershell
+irm https://github.com/ChiliApple/HUMig/releases/latest/download/Install.ps1 | iex
+```
+
+Fragt nach dem Zielordner (Vorschlag `C:\Program Files\HUMig`), lädt die freigegebene Version, prüft jede Datei (Prüfsumme und Signatur) und startet HUMig. Was die Zeile genau tut: [Install.ps1](Install.ps1). Ohne Einzeiler: `Pull.ps1` in einen leeren Ordner legen und starten – siehe [INSTALL.md](INSTALL.md).
+
+**Neu bei HUMig?** → [Einstieg: Was mache ich im Alltag konkret damit?](https://chiliapple.github.io/HUMig/Docs/Einstieg.html) – typische Situationen Schritt für Schritt.
 
 ---
 
@@ -45,8 +60,8 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 
 ## Schnellstart
 
-1. `Pull.ps1` in einen leeren Ordner legen und ausführen: `powershell -ExecutionPolicy Bypass -File Pull.ps1`
-2. **Start.cmd** starten – dabei entstehen **HUMig.exe** (Administrator) und **HUMig-Benutzer.exe** (Benutzer-Modus)
+1. Installieren: Zeile oben in PowerShell als Administrator – oder `Pull.ps1` in einen leeren Ordner legen (z. B. `C:\Program Files\HUMig`) und `powershell -ExecutionPolicy Bypass -File Pull.ps1` ausführen
+2. HUMig startet danach selbst (beim ersten Mal über **Start.cmd**) – dabei entstehen **HUMig.exe** (Administrator) und **HUMig-Benutzer.exe** (Benutzer-Modus)
 3. Computer und Benutzer wählen → Reiter **Backup** → **Backup starten**
 
 Details: [INSTALL.md](INSTALL.md) und die [Anleitung](https://chiliapple.github.io/HUMig/Docs/Anleitung.html) (im Tool mit **F1**).

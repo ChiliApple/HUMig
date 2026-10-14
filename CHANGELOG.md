@@ -1,5 +1,14 @@
 ﻿# Changelog
 
+## v2.1.4 - 2026-10-14
+### Installation
+- **Erstinstallation in einer Zeile** (PowerShell als Administrator): `irm https://github.com/ChiliApple/HUMig/releases/latest/download/Install.ps1 | iex` - fragt nach dem Zielordner (Vorschlag `C:\Program Files\HUMig`), laedt `Pull.ps1` aus dem freigegebenen Release, prueft dessen Pruefsumme und installiert. `Install.ps1` und `Pull.ps1` haengen dafuer an jedem Release
+- `Pull.ps1` **allein in einem leeren Ordner** installiert jetzt genau dort (bisher immer nach `Desktop\HUMig`); in einer HUMig-Installation weiter Update an Ort und Stelle, aus einem Ordner mit anderen Dateien (z. B. *Downloads*) weiter nach `Desktop\HUMig`; nie in Laufwerkswurzel, Windows-, Programm-, Temp-, Benutzer-, Desktop- oder Downloads-Ordner selbst
+### Doku
+- Neue Seite **Einstieg** (`Docs/Einstieg.html`): typische Situationen Schritt fuer Schritt statt Funktionsliste - neuer PC, vor einer Neuinstallation, Datei weg, Server-Backup, Programme aktuell halten, Softwareverteilung, Problem-PC, Handy; warum zusaetzlich zur Cloud sichern
+- README: Installation in einer Zeile und Einstieg ganz oben; INSTALL und Anleitung mit beiden Installationswegen und dem richtigen Zielordner (bisher stand dort "in den Zielordner legen" - das galt nur fuer Updates)
+- Bild der Handy-Startseite mit neutralen Beispielnamen
+
 ## v2.1.3 - 2026-10-14
 ### Handy-Fernbedienung
 - **Zeitplaene vom Handy sofort starten** (Reiter *Vorgang* > *Zeitplan jetzt starten*): Profil-Backups (eigene, ohne Adminrechte angelegt), Server-Backups und App-Updates dieses PCs. **Standard aus**, je Art einzeln einschaltbar unter Einstellungen > Handy; Server-Backup und App-Updates nur als Administrator
