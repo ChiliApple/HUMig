@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## v2.1.5 - 2026-10-14
+### Backup
+- **Backup als Archiv einfrieren** (Reiter *Restore* > *Als Archiv*, mit Rueckfrage): kein fortlaufendes Backup - auch kein Zeitplan - schreibt mehr hinein; ist es das neueste dieses PCs/Benutzers, legt der naechste Lauf ein neues Backup an. Die Aufbewahrung zaehlt Archive nicht mit und schlaegt sie nie vor (auch nicht im Zeitplan), *Loeschen* und *Geloeschte leeren* lehnen ab, beiseitegelegte Dateien (`_GELOESCHT`) bleiben dauerhaft. Spalte *Archiv* in der Backup-Liste, Hinweis in der Uebersicht `Backups.html`. Markierung = schreibgeschuetzte Datei `HUMig-Archiv.txt` im Backup-Ordner (keine Aenderung von Rechten, geht auf USB, NAS, Freigabe); *Archiv aufheben* macht es wieder normal. Typischer Fall: erstes Backup mit fast allem "zur Sicherheit", danach engere Auswahl
+### Handy-Fernbedienung und Status
+- **App-Updates-Fehler verschwinden, sobald sie erledigt sind:** dieselbe App wurde am selben PC danach erfolgreich aktualisiert oder eine spaetere Suche findet fuer sie kein Update mehr (bisher blieben Fehler 7 Tage stehen) - am Handy und im Reiter *Status*
+- Am Handy erscheinen auch die Laeufe des App-Updates-Zeitplans dieses PCs im 7-Tage-Ergebnis (bisher erst nach *Verlauf uebernehmen*)
+
 ## v2.1.4 - 2026-10-14
 ### Installation
 - **Erstinstallation in einer Zeile** (PowerShell als Administrator): `irm https://github.com/ChiliApple/HUMig/releases/latest/download/Install.ps1 | iex` - fragt nach dem Zielordner (Vorschlag `C:\Program Files\HUMig`), laedt `Pull.ps1` aus dem freigegebenen Release, prueft dessen Pruefsumme und installiert. `Install.ps1` und `Pull.ps1` haengen dafuer an jedem Release

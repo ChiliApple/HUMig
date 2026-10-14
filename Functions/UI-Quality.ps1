@@ -206,6 +206,7 @@ function Show-HMChecklist([string]$ReportPath, [string[]]$Extra = @()) {
 
 # ----------------------------------------------------------------------------
 # Aufbewahrung: neueste N je PC + Benutzer behalten, aeltere nach X Tagen vorschlagen
+# Archiv-Backups zaehlen nicht mit und werden nie vorgeschlagen
 # ----------------------------------------------------------------------------
 function Get-HMRetentionCandidates {
     param([object[]]$Backups, [int]$Days, [int]$Keep)
@@ -213,6 +214,7 @@ function Get-HMRetentionCandidates {
     $out = New-Object System.Collections.Generic.List[object]
     $groups = @{}
     foreach ($b in @($Backups)) {
+        if (-not $b -or $b.Archived) { continue }
         $k = ("{0}|{1}" -f $b.Computer, $(if ($b.Sid) { $b.Sid } else { $b.User })).ToUpperInvariant()
         if (-not $groups.ContainsKey($k)) { $groups[$k] = New-Object System.Collections.Generic.List[object] }
         $groups[$k].Add($b)
@@ -317,6 +319,7 @@ function Update-HMBackupOverview([switch]$Open, [switch]$Quiet) {
         foreach ($b in @($list | Sort-Object { Get-HMBackupDate $_ } -Descending)) {
             $m = $b.Manifest
             $st = "$($b.Status)"; $c = if ($col.ContainsKey($st)) { $col[$st] } else { '#222' }
+            if ($b.Archived) { $st += ' - Archiv' }
             $ver = if ($m -and $m.Verify) { "$($m.Verify.Sampled) geprueft, $(@($m.Verify.HashMismatch | Where-Object { $_ }).Count) Abw." } else { '' }
             $cat = if ($m -and $m.Catalog) { "$($m.Catalog.Files) Dateien" } else { '-' }
             if ($m -and $m.LastCheck) { $cat += " / $($m.LastCheck.Date): $($m.LastCheck.Status)" }

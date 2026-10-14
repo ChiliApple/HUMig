@@ -709,7 +709,7 @@ $ui = @{}
 foreach ($n in @('btnWizard', 'btnRemote', 'brdMonBackup', 'brdMonRestore', 'brdMonServer', 'tabStatus', 'pnlStatus', 'btnStatusRefresh', 'lblStatusTime', 'imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
     'txtBackupRoot', 'btnBrowseRoot', 'btnOpenRoot', 'lblFree', 'tabMain', 'cmbPreset', 'btnAllOn', 'btnAllOff', 'btnPresetSave', 'pnlBackupModules', 'lstExtra', 'btnExtraAdd',
     'btnExtraDel', 'chkMinProfileExc', 'chkNoProfileFileExc', 'chkMinSystemExc', 'chkNoSystemFileExc', 'btnEditExceptions', 'cmbThreads', 'btnPrecheck',
-    'btnProfileSize', 'btnBackup', 'btnCancel', 'btnRefreshBackups', 'btnOpenBackup', 'btnDeleteBackup', 'btnCleanupBackups', 'btnEmptyDeleted', 'dgBackups', 'lblRestoreInfo',
+    'btnProfileSize', 'btnBackup', 'btnCancel', 'btnRefreshBackups', 'btnOpenBackup', 'btnDeleteBackup', 'btnCleanupBackups', 'btnEmptyDeleted', 'btnArchiveBackup', 'dgBackups', 'lblRestoreInfo',
     'pnlRestoreModules', 'lblRestoreTarget', 'chkGpUpdate', 'chkWUDrivers', 'chkNumLock', 'chkFavorites', 'chkFastBoot', 'txtPostScript', 'btnPostScript',
     'btnRestore', 'btnCancelRestore', 'btnToolCredWiz', 'btnToolCredList', 'btnToolUserAppData', 'btnToolUserStartup', 'btnToolProfileFolder', 'pnlSysTools',
     'pnlLinks', 'rtbConsole', 'pbMain', 'lblStatus', 'lblElapsed', 'rowConsole', 'btnToolSoftDeploy', 'btnToolDrvDeploy', 'btnToolSoftList', 'lblSizeTotal', 'lstExclude',
@@ -1532,13 +1532,28 @@ function Find-PreviousBackup {
     $c = Get-TargetComputer
     if (Test-HMIsLocal $c) { $c = $env:COMPUTERNAME }
     $cand = @($script:BackupInfos | Where-Object { -not $_.Legacy -and $_.Sid -eq $p.SID -and ("$($_.Computer)" -ieq $c -or "$($_.Computer)".Split('.')[0] -ieq $c.Split('.')[0]) } | Sort-Object Name -Descending)
-    if ($cand.Count) { return $cand[0] }
+    # neuestes ist ein Archiv: nicht weiterfuehren (neues Backup)
+    if ($cand.Count -and -not $cand[0].Archived) { return $cand[0] }
+    return $null
+}
+# Neuestes Backup dieses PCs/Benutzers ist ein Archiv? (Hinweis beim fortlaufenden Backup)
+function Find-PreviousArchive {
+    $p = Get-SelectedProfile
+    if (-not $p -or -not $p.SID -or $p.NoProfile) { return $null }
+    $c = Get-TargetComputer
+    if (Test-HMIsLocal $c) { $c = $env:COMPUTERNAME }
+    $cand = @($script:BackupInfos | Where-Object { -not $_.Legacy -and $_.Sid -eq $p.SID -and ("$($_.Computer)" -ieq $c -or "$($_.Computer)".Split('.')[0] -ieq $c.Split('.')[0]) } | Sort-Object Name -Descending)
+    if ($cand.Count -and $cand[0].Archived) { return $cand[0] }
     return $null
 }
 function Update-IncrementalInfo {
     if (-not $ui.lblIncremental) { return }
     $prev = Find-PreviousBackup
-    if (-not $prev) { $ui.lblIncremental.Text = 'Kein frueheres Backup - es wird ein neues angelegt.'; return }
+    if (-not $prev) {
+        $arc = Find-PreviousArchive
+        $ui.lblIncremental.Text = $(if ($arc) { "Neuestes Backup ($($arc.Name)) ist ein Archiv und bleibt unveraendert - es wird ein neues angelegt." } else { 'Kein frueheres Backup - es wird ein neues angelegt.' })
+        return
+    }
     $d = "$($prev.Created)"; if ($d.Length -gt 16) { $d = $d.Substring(0, 16) }
     $sz = if ($prev.SizeBytes) { ", $(Format-HMSize $prev.SizeBytes)" } else { '' }
     if ($ui.chkIncremental.IsChecked) { $ui.lblIncremental.Text = "Wird aktualisiert: Backup vom $d$sz" }
@@ -1670,6 +1685,7 @@ function Update-BackupList {
             Computer = $b.Computer; Benutzer = $(if ($b.Account) { $b.Account } else { $b.User })
             Groesse = $(if ($b.SizeBytes) { Format-HMSize $b.SizeBytes } else { '' })
             Status = $b.Status; Anzahl = @($b.Modules).Count; Name = $b.Name; Info = $b
+            Archiv = $(if ($b.Archived) { "$([char]::ConvertFromUtf32(0x1F512)) Archiv" } else { '' })
             # beiseitegelegte (an der Quelle geloeschte) Dateien laut manifest.json; Massenloeschung deutlich markieren
             Geloescht = $(
                 $gx = ''
@@ -1693,9 +1709,10 @@ function Update-RestoreTargetLabel {
 }
 $ui.dgBackups.Add_SelectionChanged({
     $row = $ui.dgBackups.SelectedItem
-    if (-not $row) { $script:SelectedBackup = $null; return }
+    if (-not $row) { $script:SelectedBackup = $null; $ui.btnArchiveBackup.Content = 'Als Archiv'; return }
     $b = $row.Info
     $script:SelectedBackup = $b
+    $ui.btnArchiveBackup.Content = $(if ($b.Archived) { 'Archiv aufheben' } else { 'Als Archiv' })
     # Module im Backup, die ausgeblendet sind (Programm-Katalog, ausgeblendete Standardmodule) -> einblenden
     $known = @($script:Modules | ForEach-Object { $_.Id })
     $hidden = @(@($b.Modules) | Where-Object { $_ -and -not $script:RestoreChecks.ContainsKey($_) -and $known -contains $_ })
@@ -1709,6 +1726,7 @@ $ui.dgBackups.Add_SelectionChanged({
         $script:RestoreChecks[$k].IsChecked = ($has -and $k -notin @('Info', 'Drivers', 'Tasks', 'PrintersFull'))
     }
     $txt = "Backup: $($b.Name)"
+    if ($b.Archived) { $txt += '  |  ARCHIV: wird nicht weitergefuehrt, nicht geloescht, _GELOESCHT bleibt erhalten' }
     if ($b.Legacy) { $txt += '  |  Format der Vorgaengerversion' }
     if ($b.Manifest -and $b.Manifest.SourceOS) { $txt += "  |  Quelle: $($b.Manifest.SourceOS)" }
     if ($b.Manifest -and $b.Manifest.OneDriveFolders) { $txt += "  |  OneDrive-Ordner nicht enthalten" }
@@ -1741,6 +1759,7 @@ $ui.btnReport.Add_Click({
 $ui.btnDeleteBackup.Add_Click({
     $b = $script:SelectedBackup
     if (-not $b) { return }
+    if (Test-HMBackupArchived $b.Path) { Out-Console "Backup '$($b.Name)' ist als Archiv markiert und wird nicht geloescht - zuerst 'Archiv aufheben'." 'Warning'; return }
     if (-not (Confirm-Action "Backup '$($b.Name)' endgueltig loeschen?")) { return }
     Out-Console "Loesche $($b.Path) ..." 'Warning'
     Invoke-AsyncCommand -ScriptBlock { param($eng, $p) . $eng; Remove-HMBackupFolder $p } -ArgumentList @($script:Engine, $b.Path) -TimeoutSec 3600 -OnComplete {
@@ -1748,10 +1767,29 @@ $ui.btnDeleteBackup.Add_Click({
     }
 })
 $ui.btnCleanupBackups.Add_Click({ Start-HMRetentionCleanup })
+# Backup als Archiv markieren (einfrieren) bzw. Markierung aufheben
+$ui.btnArchiveBackup.Add_Click({
+    $b = $script:SelectedBackup
+    if (-not $b) { Out-Console 'Zuerst ein Backup markieren.' 'Warning'; return }
+    $on = -not (Test-HMBackupArchived $b.Path)
+    if ($on) {
+        if ($script:JobRunning) { Out-Console 'Waehrend ein Vorgang laeuft, wird nichts als Archiv markiert - bitte nach Abschluss.' 'Warning'; return }
+        if ("$($b.Status)" -eq 'Running') { Out-Console "Backup '$($b.Name)' wird gerade geschrieben oder ist unvollstaendig - erst nach Abschluss als Archiv markieren." 'Warning'; return }
+        if (-not (Confirm-Action "Backup '$($b.Name)' als ARCHIV markieren?`n`nDanach:`n- schreibt kein fortlaufendes Backup (auch Zeitplan) mehr hinein - ist es das neueste, legt der naechste Lauf ein neues Backup an`n- schlaegt die Aufbewahrung es nicht vor und es kann nicht geloescht werden`n- bleiben die beiseitegelegten Dateien (_GELOESCHT) erhalten`n`nRestore, Suchen und Pruefen gehen weiter. Aufheben jederzeit mit 'Archiv aufheben'." 'Archiv')) { return }
+    } else {
+        if (-not (Confirm-Action "Archiv-Markierung von '$($b.Name)' aufheben?`n`nDanach kann ein fortlaufendes Backup wieder hineinschreiben (abgewaehlte und an der Quelle geloeschte Dateien wandern nach _GELOESCHT und werden nach der eingestellten Frist entfernt), und die Aufbewahrung kann es zum Loeschen vorschlagen bzw. ein Zeitplan es loeschen." 'Archiv aufheben')) { return }
+    }
+    $r = Set-HMBackupArchive $b.Path $on
+    if ($r -eq 'OK') { Out-Console $(if ($on) { "Backup '$($b.Name)' ist jetzt ein Archiv (Datei $($script:HMArchiveFile) im Backup-Ordner)" } else { "Archiv-Markierung von '$($b.Name)' aufgehoben" }) 'Success' }
+    else { Out-Console "Archiv: $r" 'Error' }
+    Update-BackupList
+    if ($script:Settings.OverviewAuto -ne $false) { try { Update-HMBackupOverview -Quiet } catch { } }
+})
 # Beiseitegelegte (an der Quelle geloeschte) Dateien eines fortlaufenden Backups endgueltig loeschen
 $ui.btnEmptyDeleted.Add_Click({
     $b = $script:SelectedBackup
     if (-not $b) { Out-Console 'Zuerst ein Backup markieren.' 'Warning'; return }
+    if (Test-HMBackupArchived $b.Path) { Out-Console "Backup '$($b.Name)' ist als Archiv markiert - beiseitegelegte Dateien bleiben erhalten. Zum Leeren zuerst 'Archiv aufheben'." 'Warning'; return }
     $gd = Join-Path $b.Path '_GELOESCHT'
     if (-not (Test-Path -LiteralPath $gd)) { Out-Console "Backup '$($b.Name)': keine beiseitegelegten (geloeschten) Dateien." 'Info'; return }
     $script:EmptyDelCtx = [pscustomobject]@{ Dir = $gd; Name = $b.Name }

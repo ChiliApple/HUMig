@@ -415,7 +415,7 @@ Describe 'Aufbewahrung, Backup-Ordner und Platte einrichten (Code-Pruefung H1, H
         # einzelne Funktionen aus Dateien laden, die sonst die Oberflaeche brauchen (direkt hier, damit sie in den Tests sichtbar sind)
         $want = @(
             @('Functions\UI-Quality.ps1', @('Get-HMBackupDate', 'Get-HMRetentionCandidates', 'Test-HMBackupUsable', 'Format-HMBackupStatus')),
-            @('Functions\Migration-Engine.ps1', @('Remove-HMBackupFolder', 'Get-HMBackupList'))
+            @('Functions\Migration-Engine.ps1', @('Remove-HMBackupFolder', 'Get-HMBackupList', 'Test-HMInArchive', 'Test-HMBackupArchived'))
         )
         foreach ($w in $want) {
             $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root $w[0]), [ref]$null, [ref]$null)
@@ -439,6 +439,13 @@ Describe 'Aufbewahrung, Backup-Ordner und Platte einrichten (Code-Pruefung H1, H
         $c = @(Get-HMRetentionCandidates -Backups $l -Days 0 -Keep 3)
         @($c | ForEach-Object { $_.Backup.Name }) | Sort-Object | Should -Be @('B2', 'B3', 'B7')
         @($c | Where-Object { $_.Backup.Name -eq 'B7' })[0].Rank | Should -Be 4
+    }
+    It 'Archiv: zaehlt bei der Aufbewahrung nicht mit und wird nie vorgeschlagen' {
+        $a = New-HMTestBk 60 'OK'; $a | Add-Member -NotePropertyName Archived -NotePropertyValue $true
+        $l = @((New-HMTestBk 1 'OK'), (New-HMTestBk 40 'OK'), $a, (New-HMTestBk 70 'OK'))
+        @(Get-HMRetentionCandidates -Backups $l -Days 30 -Keep 1 | ForEach-Object { $_.Backup.Name }) | Sort-Object | Should -Be @('B40', 'B70')
+        # nur ein Archiv: nichts vorzuschlagen
+        @(Get-HMRetentionCandidates -Backups @($a) -Days 1 -Keep 0).Count | Should -Be 0
     }
     It 'das neueste brauchbare Backup wird nie vorgeschlagen (auch Keep 0 + Tage)' {
         $l = @((New-HMTestBk 40 'OK'), (New-HMTestBk 50 'OK'))
@@ -527,6 +534,51 @@ Describe 'Fortlaufendes Backup: an der Quelle geloeschte Dateien beiseitelegen' 
         $r = Move-HMDeletedFromBackup -Ctx $ctx -Job $null -Src (Join-Path $TestDrive 'gibtsnicht') -Dst $dst
         $r.Moved | Should -Be 0
         Test-Path -LiteralPath "$dst\datei.txt" | Should -BeTrue
+    }
+    It 'Archiv: markieren/aufheben, Liste zeigt es, wird nie geloescht, _GELOESCHT bleibt' {
+        $root = Join-Path $TestDrive 'ARCH'; $bk = Join-Path $root '2026-01-01_1200_PC1_max'
+        New-HMTestFile "$bk\Dokumente\a.txt"
+        New-HMTestFile "$bk\_GELOESCHT\20200101_120000\Mod\alt.txt"
+        '{ "Status": "OK", "SourceComputer": "PC1", "UserName": "max", "UserSid": "S-1-5-21-1", "Created": "2026-01-01 12:00:00", "Modules": [] }' | Set-Content -LiteralPath "$bk\manifest.json" -Encoding UTF8
+        Test-HMBackupArchived $bk | Should -BeFalse
+        @(Get-HMBackupList -Root $root -Modules @())[0].Archived | Should -BeFalse
+        Set-HMBackupArchive $bk $true | Should -Be 'OK'
+        $f = Join-Path $bk 'HUMig-Archiv.txt'
+        Test-Path -LiteralPath $f | Should -BeTrue
+        [int]((Get-Item -LiteralPath $f -Force).Attributes -band [System.IO.FileAttributes]::ReadOnly) | Should -Not -Be 0
+        Set-HMBackupArchive $bk $true | Should -Be 'OK'   # schon markiert: bleibt so
+        @(Get-HMBackupList -Root $root -Modules @())[0].Archived | Should -BeTrue
+        # nie loeschen: Backup selbst, beiseitegelegte Laeufe (Ablauf und von Hand)
+        Remove-HMBackupFolder $bk | Should -Match 'Archiv'
+        $ex = Remove-HMDeletedExpired $bk 90
+        $ex.Removed | Should -Be 0; @($ex.Errors).Count | Should -Be 1
+        Remove-HMBackupFolder "$bk\_GELOESCHT\20200101_120000" | Should -Match 'Archiv'
+        Remove-HMBackupFolder "$bk\_GELOESCHT" | Should -Match 'Archiv'
+        Test-Path -LiteralPath "$bk\_GELOESCHT\20200101_120000\Mod\alt.txt" | Should -BeTrue
+        Test-Path -LiteralPath "$bk\Dokumente\a.txt" | Should -BeTrue
+        # aufheben: danach wieder normal loeschbar
+        Set-HMBackupArchive $bk $false | Should -Be 'OK'
+        Test-Path -LiteralPath $f | Should -BeFalse
+        Set-HMBackupArchive $bk $false | Should -Be 'OK'
+        @(Get-HMBackupList -Root $root -Modules @())[0].Archived | Should -BeFalse
+        Remove-HMBackupFolder $bk | Should -Be 'OK'
+        Test-Path -LiteralPath $bk | Should -BeFalse
+        Set-HMBackupArchive (Join-Path $root 'gibtsnicht') $true | Should -Match '^FEHLER'
+    }
+    It 'Archiv: fortlaufendes Backup (Engine, Zeitplan, Oberflaeche) schreibt nie hinein' {
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        $eng | Should -Match 'if \(\$Ctx\.ExistingBackup -and \(Test-HMBackupArchived \$Ctx\.ExistingBackup\)\) \{ \$archSkip = [^\r\n]*\$Ctx\.ExistingBackup = \$null \}'
+        # Reihenfolge: Pruefung vor dem Weiterfuehren
+        $eng.IndexOf('Test-HMBackupArchived $Ctx.ExistingBackup') | Should -BeLessThan $eng.IndexOf('if ($prev) { $Ctx.BackupPath = $Ctx.ExistingBackup }')
+        $task = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Backup-Task.ps1')
+        $task | Should -Match 'if \(\$mine\.Count -and \$mine\[0\]\.Archived\) \{ \$archived = '
+        $task | Should -Match 'elseif \(\$mine\.Count\) \{ \$ctx\.ExistingBackup = '
+        $gui = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'HUMig.ps1')
+        $gui | Should -Match 'if \(\$cand\.Count -and -not \$cand\[0\]\.Archived\) \{ return \$cand\[0\] \}'
+        $gui | Should -Match "'btnArchiveBackup'"
+        $x = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'XAML\MainWindow.xaml')
+        $x | Should -Match 'x:Name="btnArchiveBackup"'
+        $x | Should -Match 'Header="Archiv" Binding="\{Binding Archiv\}"'
     }
     It 'entfernt beiseitegelegte Laeufe erst nach der eingestellten Zahl von Tagen' {
         $bk = Join-Path $TestDrive 'BACKUPS\PC_max_3'
@@ -645,6 +697,29 @@ Describe 'Startseite Status und Hinweise beim Start' {
         $t | Should -Match 'Archiv-Sicherung faellig'
         $t | Should -Not -Match 'HUMIG-GYM-1 seit'
         $s.Server[0].Level | Should -Be 'OK'
+    }
+    It 'App-Updates: Fehler verschwinden nach spaeterem Erfolg oder wenn die letzte Suche kein Update mehr findet' {
+        $a = @(
+            [pscustomobject]@{ Date = (D 3); Computer = 'PC1'; Id = 'A.A'; Name = 'App A'; Status = 'Error' },
+            [pscustomobject]@{ Date = (D 1); Computer = 'pc1'; Id = 'A.A'; Name = 'App A'; Status = 'OK' },
+            [pscustomobject]@{ Date = (D 2); Computer = 'PC1'; Id = 'B.B'; Name = 'App B'; Status = 'Error' },
+            [pscustomobject]@{ Date = (D 2); Computer = 'PC1'; Id = 'C.C'; Name = 'App C'; Status = 'Error' },
+            [pscustomobject]@{ Date = (D 1); Computer = 'PC2'; Id = 'A.A'; Name = 'App A'; Status = 'Error' },
+            [pscustomobject]@{ Date = (D 2); Computer = 'PC2'; Id = 'D.D'; Name = 'App D'; Status = 'OK' },
+            [pscustomobject]@{ Date = (D 1); Computer = 'PC2'; Id = 'D.D'; Name = 'App D'; Status = 'Error' },
+            [pscustomobject]@{ Date = (D 1); Computer = 'PC2'; Id = 'E.E'; Name = 'App E'; Status = 'Skipped' })
+        # A auf PC1 spaeter OK -> erledigt; Erfolg auf anderem PC zaehlt nicht; Erfolg VOR dem Fehler zaehlt nicht; uebersprungen ist kein Fehler
+        @(Get-HMAuOpenFailures $a | ForEach-Object { "$($_.Computer)/$($_.Name)" }) | Sort-Object | Should -Be @('PC1/App B', 'PC1/App C', 'PC2/App A', 'PC2/App D')
+        # letzte Suche nach den Fehlern: auf PC1 steht nur noch C an -> B erledigt; PC2 nicht gesucht -> bleibt
+        $srch = @{ At = (D 0); Ids = @{ 'pc1' = @('c.c') } }
+        @(Get-HMAuOpenFailures $a $srch | ForEach-Object { "$($_.Computer)/$($_.Name)" }) | Sort-Object | Should -Be @('PC1/App C', 'PC2/App A', 'PC2/App D')
+        # Suche vor dem Fehler zaehlt nicht
+        @(Get-HMAuOpenFailures $a @{ At = (D 5); Ids = @{ 'PC1' = @() } }).Count | Should -Be 4
+        # Erfolg in derselben Minute (Wiederholung) erledigt den Fehler
+        @(Get-HMAuOpenFailures @([pscustomobject]@{ Date = (D 1); Computer = 'PC9'; Id = 'Q'; Name = 'Q'; Status = 'Error' }, [pscustomobject]@{ Date = (D 1); Computer = 'PC9'; Id = 'Q'; Name = 'Q'; Status = 'OK' })).Count | Should -Be 0
+        $s = Get-HMStatusData -AuHistory $a -Now $script:Now -AuSearch $srch
+        @($s.Apps | Where-Object { $_.Computer -eq 'PC1' })[0].Failed | Should -Be 1
+        @($s.Apps | Where-Object { $_.Computer -eq 'PC1' })[0].FailedNames | Should -Be @('App C')
     }
     It 'Backups: neuestes je PC/Benutzer, Massenloeschung als Hinweis; App-Updates mit Fehlern' {
         $b = @(
@@ -1610,6 +1685,7 @@ Describe 'Handy-Fernbedienung: Restzeit, Verlauf mit Bericht, Zusatzanzeigen' {
     BeforeAll {
         . (Join-Path $script:Root 'Functions\Remote-Core.ps1')
         . (Join-Path $script:Root 'Functions\Remote-Web.ps1')
+        . (Join-Path $script:Root 'Functions\UI-Status.ps1')    # Get-HMAuOpenFailures
         . (Join-Path $script:Root 'Functions\UI-Remote.ps1')
         function Invoke-HMHistTest($S, [string]$Method, [string]$Path, $Body = $null, [string]$Token = '') {
             $b = if ($null -ne $Body) { $Body | ConvertTo-Json -Compress } else { '' }
@@ -1833,6 +1909,24 @@ Describe 'Handy-Fernbedienung: Restzeit, Verlauf mit Bericht, Zusatzanzeigen' {
         $r2 = (Invoke-HMHistTest $S 'POST' '/api/report' @{ id = 'abcdef01' } -Token $tok).Text | ConvertFrom-Json
         (Invoke-HMHistTest $S 'GET' $r2.url).Code | Should -Be 404
         } finally { $env:APPDATA = $oldAppData; $env:LOCALAPPDATA = $oldLocal; $script:HMRemote = $null; $script:JobReport = $null }
+    }
+    It 'App-Updates am Handy: Zeitplan-Verlauf dieses PCs dabei, erledigte Fehler fallen weg' {
+        $script:UserMode = $false
+        $oldPd = $env:ProgramData
+        try {
+            $env:ProgramData = Join-Path $TestDrive 'PD'
+            $d = Join-Path $env:ProgramData 'HUMig\AppUpdates\auto'; New-Item -ItemType Directory -Path $d -Force | Out-Null
+            $now = (Get-Date).ToString('yyyy-MM-dd HH:mm'); $vor = (Get-Date).AddHours(-2).ToString('yyyy-MM-dd HH:mm')
+            $pc = "$env:COMPUTERNAME".ToUpper()
+            ConvertTo-Json -InputObject @(@{ Date = $now; Computer = $pc; Id = 'X.Y'; Name = 'App X'; Status = 'OK'; Text = 'aktualisiert (Zeitplan)' }, @{ Date = $now; Computer = $pc; Id = 'Z.Z'; Name = 'App Z'; Status = 'Error'; Text = 'Fehler (Zeitplan)' }) | Set-Content -LiteralPath (Join-Path $d 'history.json') -Encoding UTF8
+            $script:AuHistFile = Join-Path $TestDrive 'auhist2.json'
+            ConvertTo-Json -InputObject @(@{ Date = $vor; Computer = $pc; Id = 'X.Y'; Name = 'App X'; Status = 'Error'; Text = 'Installer 1603' }, @{ Date = $now; Computer = $pc; Id = 'Z.Z'; Name = 'App Z'; Status = 'Error'; Text = 'Fehler (Zeitplan)' }) | Set-Content -LiteralPath $script:AuHistFile -Encoding UTF8
+            $script:AuLastSearch = $null; $script:AuSchedData = @{}; $script:StatusData = $null
+            $e = @((Get-HMRemoteExtra -NoQuery).apps | Where-Object { $_.pc -eq $pc })[0]
+            $e.ok | Should -Be 1          # Erfolg aus dem Zeitplan-Verlauf des PCs
+            $e.failed | Should -Be 1      # App X danach erfolgreich -> weg; App Z nur einmal (doppelter Eintrag ausgelassen)
+            $e.fails[0].name | Should -Be 'App Z'
+        } finally { $env:ProgramData = $oldPd; $script:AuHistFile = $null }
     }
     It 'Bericht-Pfad: Restore-Datei bzw. Server-Backup-Ordner (Bericht.html)' {
         $script:JobReport = $null
