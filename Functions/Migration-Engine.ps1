@@ -1782,10 +1782,12 @@ function New-HMReport {
         $col = @{ OK = '#2e7d32'; Warning = '#b26a00'; Error = '#c62828'; Cancel = '#c62828'; Cancelled = '#c62828'; Skip = '#777'; NoSpace = '#c62828' }
         $stTxt = @{ OK = 'OK'; Warning = 'Warnung'; Error = 'Fehler'; Cancel = 'Abgebrochen'; Cancelled = 'Abgebrochen'; Skip = 'nicht vorhanden'; NoSpace = 'zu wenig Platz' }
         $sb = New-Object System.Text.StringBuilder
-        [void]$sb.Append('<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>HUMig ' + $Kind + '</title><style>')
+        [void]$sb.Append('<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HUMig ' + $Kind + '</title><style>')
         [void]$sb.Append('body{font-family:Segoe UI,Arial,sans-serif;margin:24px;color:#222}h1{font-size:22px;margin:0}header{display:flex;gap:14px;align-items:center;border-bottom:2px solid #444;padding-bottom:10px;margin-bottom:14px}')
         [void]$sb.Append('table{border-collapse:collapse;width:100%;margin:8px 0 16px}td,th{border:1px solid #ccc;padding:4px 8px;text-align:left;vertical-align:top;font-size:13px}th{background:#eee}')
         [void]$sb.Append('.st{font-weight:600}.facts td:first-child{width:220px;font-weight:600;background:#f6f6f6}.sig{margin-top:40px;display:flex;gap:60px}.sig div{border-top:1px solid #444;width:260px;padding-top:4px;font-size:12px}small{color:#666}@media print{body{margin:10mm}}')
+        # Handy: gleichmaessige Schrift (keine automatische Textvergroesserung), lange Pfade umbrechen
+        [void]$sb.Append('html{-webkit-text-size-adjust:100%;text-size-adjust:100%}td{overflow-wrap:anywhere}@media (max-width:700px){body{margin:12px}.facts td:first-child{width:38%}.sig{flex-direction:column;gap:28px}.sig div{width:auto}}')
         [void]$sb.Append('</style></head><body><header>' + $logo + '<div><h1>HUMig - ' + $(if ($Kind -eq 'Backup') { 'Backup-Protokoll' } else { 'Restore-Protokoll' }) + '</h1>')
         $c = if ($col.ContainsKey($Status)) { $col[$Status] } else { '#222' }
         $t = if ($stTxt.ContainsKey($Status)) { $stTxt[$Status] } else { $Status }
