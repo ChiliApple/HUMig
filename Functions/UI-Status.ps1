@@ -11,11 +11,35 @@
     Dot-Source aus HUMig.ps1. Zielmaschine: der PC, auf dem HUMig laeuft.
 #>
 
+# App-Update-Fehler, die noch offen sind. Ausgeblendet wird ein Fehler, wenn danach am selben PC dieselbe App erfolgreich
+# aktualisiert wurde (OK, auch in derselben Minute) oder eine spaetere Suche fuer diesen PC kein Update mehr fuer sie fand.
+# $Search (optional, letzte Suche dieser Sitzung): @{ At = 'yyyy-MM-dd HH:mm'; Ids = @{ 'PC' = @(Paket-IDs mit Update, ohne Ausnahmen) } }
+# Datumswerte im Format 'yyyy-MM-dd HH:mm' (wie im Verlauf) - Vergleich als Text
+function Get-HMAuOpenFailures([object[]]$Entries, $Search = $null) {
+    $all = @(@($Entries) | Where-Object { $_ })
+    $key = { param($e) ("{0}|{1}" -f "$($e.Computer)", $(if ("$($e.Id)") { "$($e.Id)" } else { "$($e.Name)" })).ToUpperInvariant() }
+    $lastOk = @{}
+    foreach ($e in @($all | Where-Object { "$($_.Status)" -eq 'OK' })) {
+        $k = & $key $e
+        if (-not $lastOk.ContainsKey($k) -or "$($e.Date)" -gt $lastOk[$k]) { $lastOk[$k] = "$($e.Date)" }
+    }
+    $ids = $null
+    if ($Search -and $Search.Ids -and "$($Search.At)") { $ids = @{}; foreach ($pk in @($Search.Ids.Keys)) { $ids["$pk".ToUpperInvariant()] = @($Search.Ids[$pk] | ForEach-Object { "$_".ToUpperInvariant() }) } }
+    $out = foreach ($e in @($all | Where-Object { "$($_.Status)" -notin @('OK', 'Skipped') })) {
+        $k = & $key $e
+        if ($lastOk.ContainsKey($k) -and $lastOk[$k] -ge "$($e.Date)") { continue }
+        $pc = "$($e.Computer)".ToUpperInvariant()
+        if ($ids -and "$($e.Id)" -and "$($Search.At)" -gt "$($e.Date)" -and $ids.ContainsKey($pc) -and $ids[$pc] -notcontains "$($e.Id)".ToUpperInvariant()) { continue }
+        $e
+    }
+    return @($out)
+}
+
 # Alle Werte fuer die Startseite. Eingaben sind schon gelesene Daten (Zeitplaene, Backups, Server-Backup-Profile + Verlauf,
 # App-Update-Verlauf, Plattenzustand je Bezeichnung = Get-HMSbHealthSummary); $Now und $StaleDays fuer Tests.
 # Rueckgabe: Warnings (Text, Level), Schedules, Backups, Server, Apps
 function Get-HMStatusData {
-    param($BsRows = @(), $Backups = @(), $SbProfiles = @(), $SbHistory = @(), $AuHistory = @(), [datetime]$Now = (Get-Date), [int]$StaleDays = 8, $SbHealth = @{})
+    param($BsRows = @(), $Backups = @(), $SbProfiles = @(), $SbHistory = @(), $AuHistory = @(), [datetime]$Now = (Get-Date), [int]$StaleDays = 8, $SbHealth = @{}, $AuSearch = $null)
     if ($null -eq $SbHealth) { $SbHealth = @{} }
     $warn = New-Object System.Collections.Generic.List[object]
     $parse = {
@@ -121,7 +145,7 @@ function Get-HMStatusData {
     $recent = @(@($AuHistory) | Where-Object { $_ -and ($d = & $parse "$($_.Date)") -and $d -ge $since })
     foreach ($g in @($recent | Group-Object { "$($_.Computer)".ToUpperInvariant() } | Sort-Object Name)) {
         $ok = @($g.Group | Where-Object { "$($_.Status)" -eq 'OK' }).Count
-        $bad = @($g.Group | Where-Object { "$($_.Status)" -notin @('OK', 'Skipped') })
+        $bad = @(Get-HMAuOpenFailures $g.Group $AuSearch)
         $au += [pscustomobject]@{ Computer = "$($g.Group[0].Computer)"; Ok = $ok; Failed = $bad.Count; FailedNames = @($bad | ForEach-Object { "$($_.Name)" } | Select-Object -Unique -First 4); Level = $(if ($bad.Count) { 'Warning' } else { 'OK' }) }
     }
     return [pscustomobject]@{ Warnings = $warn.ToArray(); Schedules = $sched; Backups = $bk; Server = $sb; Apps = $au; Time = $Now }
@@ -182,7 +206,7 @@ function Update-HMStatusPage([switch]$StartUp) {
         try { if ($sbp.Count) { $sbHealth = Get-HMSbHealthSummary (Read-HMSbHealthStore $script:SbHealthFile) } } catch { }
         try { if (Test-Path -LiteralPath $script:AuHistFile) { $aj = Get-Content -LiteralPath $script:AuHistFile -Raw -Encoding UTF8 | ConvertFrom-Json; $au = @($aj) } } catch { }
     }
-    $data = Get-HMStatusData -BsRows $bs -Backups @($script:BackupInfos) -SbProfiles $sbp -SbHistory $sbh -AuHistory $au -StaleDays $sd -SbHealth $sbHealth
+    $data = Get-HMStatusData -BsRows $bs -Backups @($script:BackupInfos) -SbProfiles $sbp -SbHistory $sbh -AuHistory $au -StaleDays $sd -SbHealth $sbHealth -AuSearch $script:AuLastSearch
     $script:StatusData = $data
     $nw = @($data.Warnings).Count
     if ($ui.tabStatus) { $ui.tabStatus.Header = $(if ($nw) { "Status ($nw)" } else { 'Status' }) }

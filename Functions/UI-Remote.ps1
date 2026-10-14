@@ -423,6 +423,9 @@ function Get-HMRemoteExtra([switch]$NoQuery) {
     # --- App-Updates: Verlauf (letzte 7 Tage), letzte Suche (diese Sitzung), Zeitplan (gelesen bzw. dieser PC)
     $h = @()
     try { if ($script:AuHistFile -and (Test-Path -LiteralPath $script:AuHistFile)) { $h = @(Get-Content -LiteralPath $script:AuHistFile -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { $_ }) } } catch { }
+    # Zeitplan-Laeufe dieses PCs direkt dazu (auch wenn noch nicht in den Verlauf uebernommen) - doppelte Eintraege auslassen
+    $have = @{}; foreach ($x in @($h | Where-Object { $_ })) { $have["$($x.Date)|$("$($x.Computer)".ToUpperInvariant())|$($x.Id)"] = $true }
+    foreach ($x in @(Read-HMRemoteLocalAuHistory)) { $hk = "$($x.Date)|$("$($x.Computer)".ToUpperInvariant())|$($x.Id)"; if (-not $have.ContainsKey($hk)) { $have[$hk] = $true; $h += $x } }
     $since = (Get-Date).AddDays(-7).ToString('yyyy-MM-dd HH:mm')
     $pcs = @{}
     foreach ($x in @($h | Where-Object { $_ -and "$($_.Date)" -ge $since })) { $k = "$($x.Computer)".ToUpperInvariant(); if (-not $pcs[$k]) { $pcs[$k] = @() }; $pcs[$k] += $x }
@@ -432,7 +435,8 @@ function Get-HMRemoteExtra([switch]$NoQuery) {
     if ($loc -and -not $pcs.ContainsKey("$env:COMPUTERNAME".ToUpperInvariant())) { $pcs["$env:COMPUTERNAME".ToUpperInvariant()] = @() }
     foreach ($k in @($pcs.Keys | Sort-Object)) {
         $g = @($pcs[$k])
-        $bad = @($g | Where-Object { "$($_.Status)" -notin @('OK', 'Skipped') } | Sort-Object Date -Descending)
+        # offene Fehler: spaeter erfolgreich aktualisierte bzw. laut letzter Suche nicht mehr anstehende Apps fallen weg
+        $bad = @(Get-HMAuOpenFailures $g $script:AuLastSearch | Sort-Object Date -Descending)
         $e = [ordered]@{ pc = $k; ok = @($g | Where-Object { "$($_.Status)" -eq 'OK' }).Count; failed = $bad.Count; last = "$(@($g | Sort-Object Date -Descending | Select-Object -First 1).Date)"
             fails = @($bad | Select-Object -First 5 | ForEach-Object { [ordered]@{ name = "$($_.Name)"; text = "$($_.Text)"; date = "$($_.Date)" } }) }
         if ($script:AuLastSearch -and $script:AuLastSearch.ByPc.ContainsKey($k)) { $e.found = [int]$script:AuLastSearch.ByPc[$k]; $e.foundAt = "$($script:AuLastSearch.Time)" }
@@ -814,6 +818,14 @@ function Update-HMRemoteSchedWatch($Res) {
     }
 }
 # Ergebnis des App-Updates-Zeitplans auf DIESEM PC (falls eingerichtet): %ProgramData%\HUMig\AppUpdates\auto\last.json
+# Verlauf des App-Updates-Zeitplans auf diesem PC (je Programm, nur Eintraege mit Datum und Paket-ID)
+function Read-HMRemoteLocalAuHistory {
+    try {
+        $f = Join-Path $env:ProgramData 'HUMig\AppUpdates\auto\history.json'
+        if (Test-Path -LiteralPath $f -PathType Leaf) { return @(Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { $_ } | Where-Object { $_ -and "$($_.Date)" -and "$($_.Id)" }) }
+    } catch { }
+    return @()
+}
 function Read-HMRemoteLocalAuLast {
     try {
         $f = Join-Path $env:ProgramData 'HUMig\AppUpdates\auto\last.json'

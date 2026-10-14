@@ -413,10 +413,56 @@ namespace HMFs
 '@
 function Initialize-HMFs { if (-not ('HMFs.Tree' -as [type])) { Add-Type -TypeDefinition $script:HMFsCs -ErrorAction Stop } }
 
+# ============================================================================
+# ARCHIV: Backup einfrieren
+# ============================================================================
+# Markierung = schreibgeschuetzte Datei im Backup-Ordner (keine Aenderung von Rechten - funktioniert auf USB, NAS, Freigabe).
+# Ein Archiv wird nie fortlaufend weitergefuehrt (der naechste Lauf legt ein neues Backup an), nie von der Aufbewahrung
+# vorgeschlagen oder geloescht, seine beiseitegelegten Dateien (_GELOESCHT) werden nie geleert. Loeschen erst nach Aufheben.
+# Dateiname steht in den Funktionen selbst (auch einzeln geladen gueltig)
+$script:HMArchiveFile = 'HUMig-Archiv.txt'
+function Test-HMBackupArchived([string]$Path) {
+    if (-not $Path) { return $false }
+    try { return [System.IO.File]::Exists([System.IO.Path]::Combine($Path, 'HUMig-Archiv.txt')) } catch { return $false }
+}
+# Liegt der Pfad in einem Archiv (Backup-Ordner selbst oder darunter, z. B. _GELOESCHT\<Zeit>)? Prueft bis zu 3 Ebenen nach oben
+function Test-HMInArchive([string]$Path) {
+    $p = "$Path".TrimEnd('\')
+    for ($i = 0; $i -lt 4 -and $p; $i++) {
+        if (Test-HMBackupArchived $p) { return $true }
+        try { $p = [System.IO.Path]::GetDirectoryName($p) } catch { $p = $null }
+    }
+    return $false
+}
+# Markierung setzen ($On) oder aufheben. Rueckgabe 'OK' oder 'FEHLER: ...'
+function Set-HMBackupArchive([string]$Path, [bool]$On) {
+    if (-not $Path -or -not [System.IO.Directory]::Exists($Path)) { return 'FEHLER: Backup-Ordner nicht gefunden' }
+    try {
+        if (([System.IO.File]::GetAttributes($Path) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return 'FEHLER: Backup-Ordner ist eine Verknuepfung - wird nicht markiert' }
+        $f = [System.IO.Path]::Combine($Path, 'HUMig-Archiv.txt')
+        if ($On) {
+            if ([System.IO.File]::Exists($f)) { return 'OK' }
+            $t = "Dieses Backup ist als ARCHIV markiert (HUMig) - seit $(Get-Date -Format 'dd.MM.yyyy HH:mm').`r`n`r`n" +
+                "HUMig schreibt nicht mehr hinein (ein fortlaufendes Backup legt stattdessen ein neues an), schlaegt es bei der Aufbewahrung nicht vor, " +
+                "loescht es nicht und leert die beiseitegelegten Dateien (_GELOESCHT) nicht.`r`n" +
+                "Aufheben: HUMig > Restore > Backup markieren > Knopf 'Archiv aufheben'. Diese Datei bitte nicht von Hand loeschen.`r`n"
+            [System.IO.File]::WriteAllText($f, $t, (New-Object System.Text.UTF8Encoding($true)))
+            [System.IO.File]::SetAttributes($f, ([System.IO.File]::GetAttributes($f) -bor [System.IO.FileAttributes]::ReadOnly))
+        } else {
+            if (-not [System.IO.File]::Exists($f)) { return 'OK' }
+            [System.IO.File]::SetAttributes($f, [System.IO.FileAttributes]::Normal)
+            [System.IO.File]::Delete($f)
+        }
+        return 'OK'
+    } catch { return "FEHLER: $($_.Exception.Message)" }
+}
+
 # Backup-Ordner loeschen - nur ganz oder gar nicht: vorher fuer JEDE Datei pruefen, ob sie geloescht werden darf
 # (Loeschrecht, nicht geoeffnet). Sonst bleibt ein halb geloeschtes, unbrauchbares Backup zurueck. Lange Pfade und schreibgeschuetzte Dateien werden unterstuetzt.
+# Archiv (oder Ordner darin, z. B. _GELOESCHT) wird nie geloescht - erst Markierung aufheben.
 function Remove-HMBackupFolder([string]$Path) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return 'OK' }
+    if (Test-HMInArchive $Path) { return 'FEHLER: nichts geloescht - Backup ist als Archiv markiert (zuerst Markierung aufheben: Restore > Archiv aufheben)' }
     # Backup-Ordner selbst ist eine Verknuepfung (Junction/Symlink): nur den Link entfernen, nie das Ziel durchlaufen
     try {
         $ra = [System.IO.File]::GetAttributes($Path)
@@ -1479,7 +1525,7 @@ function Read-HMBackupInfo {
             $mods = @($m.Modules | Where-Object { $_.Status -in @('OK', 'Warning') } | ForEach-Object { $_.Id })
             return [pscustomobject]@{ Path = $Path; Name = (Split-Path $Path -Leaf); Legacy = $false; Created = $m.Created
                 Computer = $m.SourceComputer; User = $m.UserName; Account = $m.Account; Sid = $m.UserSid; ProfilePath = $m.ProfilePath
-                Modules = $mods; SizeBytes = [long]$m.SizeBytes; Status = $m.Status; Manifest = $m }
+                Modules = $mods; SizeBytes = [long]$m.SizeBytes; Status = $m.Status; Manifest = $m; Archived = (Test-HMBackupArchived $Path) }
         } catch { }
     }
     # Legacy-Erkennung
@@ -1504,7 +1550,7 @@ function Read-HMBackupInfo {
     }
     if ((Test-Path -LiteralPath (Join-Path $Path 'FOLDER1')) -or (Test-Path -LiteralPath (Join-Path $Path 'FOLDER2'))) { $found = @($found) + 'ExtraFolders' }
     return [pscustomobject]@{ Path = $Path; Name = $leaf; Legacy = $true; Created = $created; Computer = $comp; User = $user; Account = $null
-        Sid = $sid; ProfilePath = "C:\Users\$user"; Modules = @($found | Select-Object -Unique); SizeBytes = [long]0; Status = 'Legacy'; Manifest = $null }
+        Sid = $sid; ProfilePath = "C:\Users\$user"; Modules = @($found | Select-Object -Unique); SizeBytes = [long]0; Status = 'Legacy'; Manifest = $null; Archived = (Test-HMBackupArchived $Path) }
 }
 
 function Get-HMBackupList {
@@ -2433,6 +2479,9 @@ function Start-HMBackup {
 
     # Inkrementell: vorhandenes Backup desselben Benutzers weiterfuehren (Robocopy kopiert nur Neues/Geaendertes)
     $prev = $null
+    # Archiv nie weiterfuehren (auch wenn ein Aufrufer es uebergibt) - stattdessen neues Backup unter $Ctx.BackupPath
+    $archSkip = $null
+    if ($Ctx.ExistingBackup -and (Test-HMBackupArchived $Ctx.ExistingBackup)) { $archSkip = Split-Path "$($Ctx.ExistingBackup)" -Leaf; $Ctx.ExistingBackup = $null }
     if ($Ctx.ExistingBackup -and (Test-Path -LiteralPath (Join-Path $Ctx.ExistingBackup 'manifest.json'))) {
         try { $prev = Get-Content -LiteralPath (Join-Path $Ctx.ExistingBackup 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $prev = $null }
         if ($prev) { $Ctx.BackupPath = $Ctx.ExistingBackup }
@@ -2441,6 +2490,7 @@ function Start-HMBackup {
     $Ctx.PrevExcludePaths = $null
     if ($prev -and $prev.PSObject.Properties['ExcludePaths']) { $Ctx.PrevExcludePaths = @($prev.ExcludePaths | Where-Object { $_ }) }
     Write-HMLog $Job "BACKUP  $($Ctx.Computer) \ $($Ctx.UserFolder)  ->  $target" 'Header'
+    if ($archSkip) { Write-HMLog $Job "Fortlaufend: '$archSkip' ist als Archiv markiert und bleibt unveraendert - es wird ein neues Backup angelegt" 'Info' }
     if ($prev) { Write-HMLog $Job "Inkrementell: vorhandenes Backup vom $($prev.Created) wird aktualisiert (nur neue/geaenderte Dateien)" 'Info' }
 
     $shareRoot = $null

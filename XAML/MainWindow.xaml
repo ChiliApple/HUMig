@@ -374,13 +374,15 @@
                                 <Button x:Name="btnCompare" Content="Vergleichen ..." Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup mit einem anderen vergleichen: was ist neu, was fehlt, was hat sich geaendert"/>
                                 <Button x:Name="btnBackupSearch" Content="Im Backup suchen ..." Style="{StaticResource BtnTeal}" ToolTip="Dateien im markierten Backup suchen und einzeln herauskopieren (auch unter Werkzeuge)"/>
                                 <Button x:Name="btnOverview" Content="Uebersicht (HTML)" Style="{StaticResource BtnDefault}" ToolTip="HTML-Uebersicht aller Backups im Backup-Ordner erstellen und oeffnen (Backups.html)"/>
-                                <Button x:Name="btnDeleteBackup" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Markiertes Backup loeschen (mit Bestaetigung)"/>
+                                <Button x:Name="btnArchiveBackup" Content="Als Archiv" Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup einfrieren: kein fortlaufendes Backup schreibt mehr hinein (der naechste Lauf legt ein neues an), Aufbewahrung und Loeschen lassen es in Ruhe, _GELOESCHT bleibt erhalten. Nochmals klicken = Markierung aufheben"/>
+                                <Button x:Name="btnDeleteBackup" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Markiertes Backup loeschen (mit Bestaetigung) - Archiv erst nach 'Archiv aufheben'"/>
                                 <Button x:Name="btnCleanupBackups" Content="Alte loeschen" Style="{StaticResource BtnPeach}" ToolTip="Backups aelter als die Aufbewahrungsdauer (Einstellungen) anzeigen und loeschen"/>
                                 <Button x:Name="btnEmptyDeleted" Content="Geloeschte leeren" Style="{StaticResource BtnPeach}" ToolTip="Im markierten (fortlaufenden) Backup die beiseitegelegten, an der Quelle geloeschten Dateien (_GELOESCHT) endgueltig loeschen - mit Rueckfrage"/>
                             </WrapPanel>
                             <DataGrid x:Name="dgBackups" Style="{StaticResource DarkGrid}" SelectionMode="Single">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="Auto"/>
+                                    <DataGridTextColumn Header="Archiv" Binding="{Binding Archiv}" Width="Auto"/>
                                     <DataGridTextColumn Header="Computer" Binding="{Binding Computer}" Width="Auto"/>
                                     <DataGridTextColumn Header="Benutzer" Binding="{Binding Benutzer}" Width="Auto"/>
                                     <DataGridTextColumn Header="Groesse" Binding="{Binding Groesse}" Width="Auto"/>

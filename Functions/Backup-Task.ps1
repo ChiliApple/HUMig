@@ -288,14 +288,17 @@ $ctx = @{
 }
 $ctx.BackupPath = Join-Path $targetRoot ('{0}_{1}_{2}' -f (Get-Date -Format 'yyyy-MM-dd_HHmm'), (ConvertTo-HMSafeName $env:COMPUTERNAME), (ConvertTo-HMSafeName $prof.Folder))
 
-# Fortlaufend: neuestes Backup dieses PCs + Benutzers im Ziel weiterfuehren
+# Fortlaufend: neuestes Backup dieses PCs + Benutzers im Ziel weiterfuehren. Ist das neueste ein Archiv: neues Backup anlegen
 $mine = @()
+$archived = $null
 try {
     $all = Get-HMBackupList -Root $targetRoot -Modules $script:Modules
     $mine = @(@($all) | Where-Object { $_ -and -not $_.Legacy -and "$($_.Sid)" -eq $sid -and ("$($_.Computer)" -ieq $env:COMPUTERNAME -or "$($_.Computer)".Split('.')[0] -ieq $env:COMPUTERNAME) } | Sort-Object Name -Descending)
+    if ($mine.Count -and $mine[0].Archived) { $archived = $mine[0].Name }
 } catch { Write-TaskLog "Backup-Liste nicht lesbar: $($_.Exception.Message)" 'Warning' }
 if ("$($script:Def.Kind)" -eq 'Update') {
-    if ($mine.Count) { $ctx.ExistingBackup = $mine[0].Path; Write-TaskLog "Fortlaufend: vorhandenes Backup wird aktualisiert ($($mine[0].Name))" 'Info' }
+    if ($archived) { Write-TaskLog "Fortlaufend: neuestes Backup '$archived' ist als Archiv markiert und bleibt unveraendert - es wird ein neues angelegt" 'Info' }
+    elseif ($mine.Count) { $ctx.ExistingBackup = $mine[0].Path; Write-TaskLog "Fortlaufend: vorhandenes Backup wird aktualisiert ($($mine[0].Name))" 'Info' }
     else { Write-TaskLog 'Fortlaufend: noch kein Backup dieses PCs/Benutzers im Ziel - es wird ein neues angelegt' 'Info' }
 } else { Write-TaskLog 'Neues Backup (eigener Stand)' 'Info' }
 Write-TaskLog ("Module ({0}): {1}" -f $mods.Count, (@($mods | ForEach-Object { $_.Name }) -join ', ')) 'Info'

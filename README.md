@@ -141,6 +141,7 @@ Aufbau der Einträge mit allen Feldern: Anleitung, Kapitel *Programme*.
 | Checkliste | Nacharbeiten abhaken, Stand landet im Protokoll |
 | Backup prüfen · Vergleichen | gegen den Prüfsummen-Katalog · zwei Backups gegenüberstellen |
 | Alte Backups | Aufbewahrung je PC und Benutzer, Löschen immer mit Rückfrage |
+| Archiv | Backup einfrieren: kein fortlaufendes Backup schreibt mehr hinein, Aufbewahrung und Löschen lassen es in Ruhe, `_GELOESCHT` bleibt |
 
 OneDrive-Dateien werden nie in den Sync-Ordner zurückgeschrieben.
 
