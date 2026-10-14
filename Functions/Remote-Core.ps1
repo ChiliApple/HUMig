@@ -741,6 +741,7 @@ function New-HMRemoteState {
         Lines = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList)); LineSeq = 0
         CancelReq = $null; RefreshReq = $false; Static = @{}; FailIp = [hashtable]::Synchronized(@{}); LogFile = ''; PushKey = ''
         HistJson = '[]'; ExtraJson = 'null'; Notice = $null
+        SchedJson = '[]'; SchedMsg = 'null'; SchedMap = [hashtable]::Synchronized(@{}); SchedNonce = [hashtable]::Synchronized(@{}); SchedReq = $null
         Reports = [hashtable]::Synchronized(@{}); Tickets = [hashtable]::Synchronized(@{})
         Events = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
     })
@@ -864,7 +865,7 @@ function Get-HMRemoteResponse($S, $Req) {
             $head = [ordered]@{ ok = $true; pc = "$($S.Pc)"; version = "$($S.Version)"; userMode = [bool]$S.UserMode; device = "$($dev.Name)"; until = $until; seq = [int]$S.LineSeq; lines = $lines }
             $hj = ConvertTo-Json -InputObject $head -Depth 4 -Compress
             # Status und Vorgang sind fertiges JSON (von der Oberflaeche erzeugt)
-            $txt = $hj.Substring(0, $hj.Length - 1) + ',"status":' + "$($S.StatusJson)" + ',"job":' + "$($S.JobJson)" + ',"hist":' + "$($S.HistJson)" + ',"extra":' + "$($S.ExtraJson)" + ',"notice":' + $(Get-HMRemoteNoticeJson $S) + '}'
+            $txt = $hj.Substring(0, $hj.Length - 1) + ',"status":' + "$($S.StatusJson)" + ',"job":' + "$($S.JobJson)" + ',"hist":' + "$($S.HistJson)" + ',"extra":' + "$($S.ExtraJson)" + ',"notice":' + $(Get-HMRemoteNoticeJson $S) + ',"sched":' + "$($S.SchedJson)" + ',"schedMsg":' + "$($S.SchedMsg)" + '}'
             return (New-HMRemoteJson 200 $txt)
         }
         '/api/cancel' {
@@ -896,6 +897,43 @@ function Get-HMRemoteResponse($S, $Req) {
             $tk = New-HMRemoteToken
             $S.Tickets[$tk] = @{ Path = "$($S.Reports[$rid])"; Until = $now.AddSeconds(60) }
             return (New-HMRemoteJson 200 @{ ok = $true; url = "/report/$tk" } "Bericht angefordert ($($dev.Name))")
+        }
+        '/api/schedule/prepare' {
+            # Zeitplan vom Handy starten, Schritt 1: Einmal-Bestaetigung (30 s, an Geraet und Eintrag gebunden).
+            # Das Handy kennt nur die Kennung - welche Aufgabe dahinter steht, legt HUMig am PC fest.
+            if ($method -ne 'POST') { return (New-HMRemoteJson 405 @{ ok = $false; error = 'Methode nicht erlaubt' }) }
+            $sid = "$($body.id)"
+            $m = $null; if ($sid -match '^[0-9a-f]{16}$') { $m = $S.SchedMap[$sid] }
+            if (-not $m) { return (New-HMRemoteJson 404 @{ ok = $false; error = 'Zeitplan nicht (mehr) vorhanden - Liste wird gleich aktualisiert' }) }
+            $nb = Get-HMRemoteRandomBytes 16   # liefert ,@() - erst zuweisen
+            $nonce = -join ($nb | ForEach-Object { $_.ToString('x2') })
+            # Aufraeumen, Zaehlen und Eintragen unter Sperre (mehrere Anfrage-Runspaces): je Handy hoechstens 3 offen, insgesamt 50
+            $full = $false
+            [System.Threading.Monitor]::Enter($S.SchedNonce.SyncRoot)
+            try {
+                foreach ($k in @($S.SchedNonce.Keys)) { if ($S.SchedNonce[$k].Exp -lt $now) { $S.SchedNonce.Remove($k) } }
+                if ($S.SchedNonce.Count -ge 50 -or @($S.SchedNonce.Values | Where-Object { $_.Dev -eq $dh }).Count -ge 3) { $full = $true }
+                else { $S.SchedNonce[$nonce] = @{ Dev = $dh; Id = $sid; Exp = $now.AddSeconds(30) } }
+            } finally { [System.Threading.Monitor]::Exit($S.SchedNonce.SyncRoot) }
+            if ($full) { return (New-HMRemoteJson 429 @{ ok = $false; error = 'Zu viele offene Anfragen - kurz warten' }) }
+            return (New-HMRemoteJson 200 @{ ok = $true; nonce = $nonce; title = "$($m.Title)"; text = "$($m.Confirm)" })
+        }
+        '/api/schedule/run' {
+            # Schritt 2: nur mit der Einmal-Bestaetigung; ausgefuehrt wird am PC (UI) nach erneuter Pruefung der Aufgabe
+            if ($method -ne 'POST') { return (New-HMRemoteJson 405 @{ ok = $false; error = 'Methode nicht erlaubt' }) }
+            $sid = "$($body.id)"; $nonce = "$($body.nonce)"
+            if ($sid -notmatch '^[0-9a-f]{16}$' -or $nonce -notmatch '^[0-9a-f]{32}$') { return (New-HMRemoteJson 400 @{ ok = $false; error = 'Ungueltige Anfrage' }) }
+            # holen und verbrauchen in einem Schritt (zwei gleichzeitige Anfragen mit derselben Bestaetigung: nur eine gilt)
+            [System.Threading.Monitor]::Enter($S.SchedNonce.SyncRoot)
+            try { $e = $S.SchedNonce[$nonce]; if ($e) { $S.SchedNonce.Remove($nonce) } } finally { [System.Threading.Monitor]::Exit($S.SchedNonce.SyncRoot) }
+            if (-not $e -or $e.Dev -ne $dh -or $e.Id -ne $sid -or $e.Exp -lt $now) { return (New-HMRemoteJson 403 @{ ok = $false; error = 'Bestaetigung abgelaufen - bitte erneut antippen' } 'Zeitplan-Start abgelehnt (Bestaetigung)') }
+            $m = $S.SchedMap[$sid]
+            if (-not $m) { return (New-HMRemoteJson 404 @{ ok = $false; error = 'Zeitplan nicht (mehr) vorhanden' }) }
+            $busy = $false
+            [System.Threading.Monitor]::Enter($S.SchedNonce.SyncRoot)
+            try { if ($S.SchedReq) { $busy = $true } else { $S.SchedReq = @{ Entry = $m; By = "$($dev.Name)"; DevId = "$($dev.Id)"; Ip = "$($Req.Ip)"; At = $now } } } finally { [System.Threading.Monitor]::Exit($S.SchedNonce.SyncRoot) }
+            if ($busy) { return (New-HMRemoteJson 409 @{ ok = $false; error = 'Ein Start wird gerade bearbeitet - kurz warten' }) }
+            return (New-HMRemoteJson 202 @{ ok = $true } "Zeitplan-Start angefordert: $($m.Title) ($($dev.Name))")
         }
         '/api/push/off' {
             if ($method -ne 'POST') { return (New-HMRemoteJson 405 @{ ok = $false; error = 'Methode nicht erlaubt' }) }
