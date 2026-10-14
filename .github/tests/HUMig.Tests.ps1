@@ -545,7 +545,8 @@ Describe 'Fortlaufendes Backup: an der Quelle geloeschte Dateien beiseitelegen' 
         Set-HMBackupArchive $bk $true | Should -Be 'OK'
         $f = Join-Path $bk 'HUMig-Archiv.txt'
         Test-Path -LiteralPath $f | Should -BeTrue
-        [int]((Get-Item -LiteralPath $f -Force).Attributes -band [System.IO.FileAttributes]::ReadOnly) | Should -Not -Be 0
+        # ohne Schreibschutz (manche NAS lassen ihn sonst nicht mehr entfernen)
+        [int]((Get-Item -LiteralPath $f -Force).Attributes -band [System.IO.FileAttributes]::ReadOnly) | Should -Be 0
         Set-HMBackupArchive $bk $true | Should -Be 'OK'   # schon markiert: bleibt so
         @(Get-HMBackupList -Root $root -Modules @())[0].Archived | Should -BeTrue
         # nie loeschen: Backup selbst, beiseitegelegte Laeufe (Ablauf und von Hand)
@@ -564,6 +565,12 @@ Describe 'Fortlaufendes Backup: an der Quelle geloeschte Dateien beiseitelegen' 
         Remove-HMBackupFolder $bk | Should -Be 'OK'
         Test-Path -LiteralPath $bk | Should -BeFalse
         Set-HMBackupArchive (Join-Path $root 'gibtsnicht') $true | Should -Match '^FEHLER'
+        # schreibgeschuetzte Markierung aus 2.1.5 laesst sich aufheben
+        New-Item -ItemType Directory -Path $bk -Force | Out-Null
+        [System.IO.File]::WriteAllText($f, 'alt'); [System.IO.File]::SetAttributes($f, [System.IO.FileAttributes]::ReadOnly)
+        Test-HMBackupArchived $bk | Should -BeTrue
+        Set-HMBackupArchive $bk $false | Should -Be 'OK'
+        Test-Path -LiteralPath $f | Should -BeFalse
     }
     It 'Archiv: fortlaufendes Backup (Engine, Zeitplan, Oberflaeche) schreibt nie hinein' {
         $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Migration-Engine.ps1')

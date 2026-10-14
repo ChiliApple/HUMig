@@ -416,7 +416,8 @@ function Initialize-HMFs { if (-not ('HMFs.Tree' -as [type])) { Add-Type -TypeDe
 # ============================================================================
 # ARCHIV: Backup einfrieren
 # ============================================================================
-# Markierung = schreibgeschuetzte Datei im Backup-Ordner (keine Aenderung von Rechten - funktioniert auf USB, NAS, Freigabe).
+# Markierung = Datei im Backup-Ordner (keine Aenderung von Rechten oder Attributen - funktioniert auf USB, NAS, Freigabe).
+# Ohne Schreibschutz: manche NAS bilden ihn als Dateirechte ab und lassen ihn danach von Windows aus nicht mehr entfernen.
 # Ein Archiv wird nie fortlaufend weitergefuehrt (der naechste Lauf legt ein neues Backup an), nie von der Aufbewahrung
 # vorgeschlagen oder geloescht, seine beiseitegelegten Dateien (_GELOESCHT) werden nie geleert. Loeschen erst nach Aufheben.
 # Dateiname steht in den Funktionen selbst (auch einzeln geladen gueltig)
@@ -445,13 +446,15 @@ function Set-HMBackupArchive([string]$Path, [bool]$On) {
             $t = "Dieses Backup ist als ARCHIV markiert (HUMig) - seit $(Get-Date -Format 'dd.MM.yyyy HH:mm').`r`n`r`n" +
                 "HUMig schreibt nicht mehr hinein (ein fortlaufendes Backup legt stattdessen ein neues an), schlaegt es bei der Aufbewahrung nicht vor, " +
                 "loescht es nicht und leert die beiseitegelegten Dateien (_GELOESCHT) nicht.`r`n" +
-                "Aufheben: HUMig > Restore > Backup markieren > Knopf 'Archiv aufheben'. Diese Datei bitte nicht von Hand loeschen.`r`n"
+                "Aufheben: HUMig > Restore > Backup markieren > Knopf 'Archiv aufheben' (oder diese Datei loeschen).`r`n"
             [System.IO.File]::WriteAllText($f, $t, (New-Object System.Text.UTF8Encoding($true)))
-            [System.IO.File]::SetAttributes($f, ([System.IO.File]::GetAttributes($f) -bor [System.IO.FileAttributes]::ReadOnly))
         } else {
             if (-not [System.IO.File]::Exists($f)) { return 'OK' }
-            [System.IO.File]::SetAttributes($f, [System.IO.FileAttributes]::Normal)
-            [System.IO.File]::Delete($f)
+            # Markierung aus 2.1.5 ist schreibgeschuetzt: Attribut entfernen versuchen (auf manchen NAS verweigert), dann loeschen
+            try { if (([System.IO.File]::GetAttributes($f) -band [System.IO.FileAttributes]::ReadOnly) -ne 0) { [System.IO.File]::SetAttributes($f, [System.IO.FileAttributes]::Normal) } } catch { }
+            try { [System.IO.File]::Delete($f) }
+            catch { return "FEHLER: Markierung nicht entfernbar ($($_.Exception.Message)). Die Datei $f bitte direkt am Server bzw. NAS (als Administrator, z. B. ueber dessen Dateiverwaltung) loeschen - danach ist das Backup wieder normal." }
+            if ([System.IO.File]::Exists($f)) { return "FEHLER: Markierung noch vorhanden - Datei $f bitte direkt am Server bzw. NAS loeschen." }
         }
         return 'OK'
     } catch { return "FEHLER: $($_.Exception.Message)" }
