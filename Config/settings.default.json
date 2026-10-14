@@ -8,7 +8,7 @@
   "DeletedMassPercent": 20,
   "DeletedMassMin": 50,
   "ShowStatusPage": true,
-  "Remote": { "AutoStart": false, "Port": 8443, "Minutes": 0, "Networks": [] },
+  "Remote": { "AutoStart": false, "Port": 8443, "Minutes": 0, "Networks": [], "SchedBackup": false, "SchedServer": false, "SchedAu": false },
   "StatusStaleDays": 8,
   "UsmtPath": "",
   "SoftwareFolder": "",

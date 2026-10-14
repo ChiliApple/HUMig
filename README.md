@@ -190,6 +190,7 @@ Status und laufende Vorgänge am Handy (mit Live-Anzeige Durchsatz, CPU, RAM und
 - Knopf **Handy** unten rechts: QR-Code scannen, 6-stelligen Code bestätigen, fertig
 - Startseite (Hinweise, Zeitpläne, letzte Sicherungen, Server-Backup, App-Updates je PC), laufender Vorgang mit Restzeit, Live-Anzeige und Konsole, *Abbrechen* mit Bestätigung
 - Verlauf der letzten Vorgänge mit Bericht, Push-Meldung bei Vorgangsende
+- Zeitpläne (Profil-Backup, Server-Backup, App-Updates) vom Handy sofort starten – je Art einzeln einschaltbar, Standard aus
 - HTTPS mit eigener, auf diesen PC beschränkter Zertifizierungsstelle; Zugriff nur für gekoppelte Handys, Firewall-Regel nur solange aktiv
 
 <table>

@@ -94,6 +94,7 @@ $script:HMRemoteHtml = @'
       </div>
     </div>
     <button class="btn danger wide hidden" id="jCancel">Abbrechen</button>
+    <div class="hidden" id="jSchedBox"><h2>Zeitplan jetzt starten</h2><p class="small hidden" id="jSchedMsg"></p><div id="jSched"></div></div>
     <div class="card mon hidden" id="jMon">
       <div class="mt"><div><div class="ml">KOPIEREN (Lesen / Schreiben)</div><div class="mv" id="mIo">-</div><div class="ms" id="mIoS"></div></div>
         <svg class="spark" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"><polyline class="rd" id="pRd"></polyline><polyline class="wr" id="pWr"></polyline></svg></div>
@@ -202,6 +203,7 @@ ol{margin:6px 0 4px 18px;padding:0;color:var(--sub)}li{margin:6px 0}
 .spark .wr{stroke:var(--blue)}.spark .rd{stroke:var(--ov)}.spark .cpu{stroke:var(--green)}.spark .ram{stroke:var(--mauve)}
 .item .s.ml{white-space:pre-line;font-weight:400;line-height:1.45}
 .item .act{margin-top:8px}.btn.mini{padding:5px 12px;font-size:13px;border-radius:9px}
+#jSchedMsg{margin:4px 0 8px}#jSchedMsg.ok{color:var(--green)}#jSchedMsg.bad{color:var(--red)}
 .jinfo{min-width:0}.jtitle{font-size:18px;font-weight:700;word-break:break-word}
 .console{background:var(--crust);border:1px solid var(--s0);border-radius:14px;padding:10px 12px;height:46vh;overflow:auto;
 font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
@@ -313,6 +315,7 @@ $script:HMRemoteJs = @'
     $('mUntil').textContent = j.until ? j.until + ' Uhr' : 'solange HUMig laeuft';
     renderStatus(j.status, j.extra);
     renderHist(j.hist);
+    renderSched(j.sched, j.schedMsg);
     renderJob(j.job || {});
     var lines = j.lines || [];
     if (lines.length) {
@@ -421,6 +424,46 @@ $script:HMRemoteJs = @'
       }
       box.appendChild(d);
     });
+  }
+  // Zeitplaene vom Handy starten (nur wenn am PC freigeschaltet): Kennung -> Einmal-Bestaetigung -> Start am PC
+  function schedNote(ok, t) { var p = $('jSchedMsg'); p.textContent = t || ''; p.className = 'small ' + (ok ? 'ok' : 'bad'); show('jSchedMsg', !!t); }
+  function renderSched(list, msg) {
+    list = Array.isArray(list) ? list : [];
+    if (msg && typeof msg.t === 'number' && msg.t !== S.schedT) {
+      if (S.schedT !== undefined && typeof msg.text === 'string') { schedNote(!!msg.ok, msg.text); }
+      S.schedT = msg.t;
+    }
+    var key = JSON.stringify(list);
+    if (key === S.schedKey) { return; }
+    S.schedKey = key;
+    var box = $('jSched'); clear(box);
+    show('jSchedBox', list.length > 0);
+    list.forEach(function (x) {
+      var sub = [String(x.kind || ''), String(x.sub || ''), String(x.note || '')].filter(Boolean).join(' · ');
+      var d = item(x.running ? 'Info' : (x.ok ? 'OK' : 'Grey'), String(x.title || ''), sub);
+      if (x.ok && typeof x.id === 'string' && /^[0-9a-f]{16}$/.test(x.id)) {
+        var b = el('button', 'btn mini', 'Starten');
+        b.addEventListener('click', function () { startSched(x.id, b); });
+        var a = el('div', 'act'); a.appendChild(b); d.lastChild.appendChild(a);
+      }
+      box.appendChild(d);
+    });
+  }
+  function startSched(id, b) {
+    b.disabled = true;
+    api('POST', '/api/schedule/prepare', { id: id }).then(function (j) {
+      if (j.__status === 401) { b.disabled = false; needPair('Nicht mehr gekoppelt.'); return; }
+      if (!j.ok || typeof j.nonce !== 'string') { b.disabled = false; schedNote(false, j.error || 'Start nicht moeglich'); return; }
+      ask('Zeitplan starten?', String(j.text || j.title || ''), 'Ja, starten', 'primary').then(function (ok) {
+        if (!ok) { b.disabled = false; return; }
+        api('POST', '/api/schedule/run', { id: id, nonce: j.nonce }).then(function (r) {
+          b.disabled = false;
+          if (!r.ok) { schedNote(false, r.error || 'Start nicht moeglich'); return; }
+          schedNote(true, 'Angefordert - HUMig prueft die Aufgabe und startet sie ...');
+          schedule(500);
+        }).catch(function () { b.disabled = false; schedNote(false, 'HUMig nicht erreichbar'); });
+      });
+    }).catch(function () { b.disabled = false; schedNote(false, 'HUMig nicht erreichbar'); });
   }
   function openReport(id, b) {
     b.disabled = true;
@@ -574,9 +617,10 @@ $script:HMRemoteJs = @'
   }
 
   // --- Aktionen
-  function ask(title, text) {
+  function ask(title, text, yes, cls) {
     return new Promise(function (res) {
       $('mTitle').textContent = title; $('mText').textContent = text; show('modal', true);
+      $('mYes').textContent = yes || 'Ja, abbrechen'; $('mYes').className = 'btn ' + (cls || 'danger');
       var done = function (v) { show('modal', false); $('mYes').onclick = null; $('mNo').onclick = null; res(v); };
       $('mYes').onclick = function () { done(true); }; $('mNo').onclick = function () { done(false); };
     });
