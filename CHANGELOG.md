@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## v2.1.6 - 2026-10-14
+### Backup
+- **Archiv aufheben auf NAS/Freigaben behoben:** die Markierung `HUMig-Archiv.txt` wurde schreibgeschuetzt angelegt - manche NAS bilden das als Dateirechte ab und lassen es danach von Windows aus (auch als Administrator) nicht mehr entfernen. Neue Markierungen ohne Schreibschutz; *Archiv aufheben* versucht bei alten den Schreibschutz zu entfernen und loescht die Datei. Geht das nicht, nennt HUMig die Datei, die am Server bzw. NAS geloescht werden muss
+
 ## v2.1.5 - 2026-10-14
 ### Backup
 - **Backup als Archiv einfrieren** (Reiter *Restore* > *Als Archiv*, mit Rueckfrage): kein fortlaufendes Backup - auch kein Zeitplan - schreibt mehr hinein; ist es das neueste dieses PCs/Benutzers, legt der naechste Lauf ein neues Backup an. Die Aufbewahrung zaehlt Archive nicht mit und schlaegt sie nie vor (auch nicht im Zeitplan), *Loeschen* und *Geloeschte leeren* lehnen ab, beiseitegelegte Dateien (`_GELOESCHT`) bleiben dauerhaft. Spalte *Archiv* in der Backup-Liste, Hinweis in der Uebersicht `Backups.html`. Markierung = schreibgeschuetzte Datei `HUMig-Archiv.txt` im Backup-Ordner (keine Aenderung von Rechten, geht auf USB, NAS, Freigabe); *Archiv aufheben* macht es wieder normal. Typischer Fall: erstes Backup mit fast allem "zur Sicherheit", danach engere Auswahl
