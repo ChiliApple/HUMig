@@ -101,6 +101,15 @@ jobs:
         run: |
           # Pruefsummen immer aus dem Stand des Tags (bei nachgereichter Datei kann main schon weiter sein)
           git fetch --depth=1 origin "+refs/tags/$TAG:refs/tags/$TAG" && git checkout -q "$TAG"
+          # Erstinstallation in einer Zeile (irm .../releases/latest/download/Install.ps1 | iex): Install.ps1 und Pull.ps1
+          # als Release-Dateien, Install.ps1 ohne BOM (wird als Text ausgefuehrt); Pull.ps1 unveraendert (Pruefsumme)
+          mkdir -p dist
+          for f in Install.ps1 Pull.ps1; do
+            [ -f "$f" ] || continue
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx "$f"; then continue; fi
+            if [ "$f" = "Install.ps1" ]; then sed '1s/^\xEF\xBB\xBF//' "$f" > "dist/$f"; else cp "$f" "dist/$f"; fi
+            gh release upload "$TAG" "dist/$f" --repo "$GITHUB_REPOSITORY"
+          done
           # vorhandene Datei nie ersetzen (kann schon signiert sein - eine neue wuerde die Signatur ungueltig machen)
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx 'HUMig-files.sha256'; then
             echo "HUMig-files.sha256 ist an $TAG schon vorhanden - nicht ersetzt"; exit 0
