@@ -24,7 +24,9 @@ function Get-HMRemoteConfig {
     $r = $null; try { $r = $script:Settings.Remote } catch { }
     $port = 8443; try { if ($r -and [int]$r.Port -ge 1025 -and [int]$r.Port -le 65535) { $port = [int]$r.Port } } catch { }
     $min = 0; try { if ($r -and [int]$r.Minutes -gt 0) { $min = [int]$r.Minutes } } catch { }
-    return [pscustomobject]@{ AutoStart = [bool]($r -and $r.AutoStart); Port = $port; Minutes = $min; Networks = @($(if ($r) { @($r.Networks) } else { @() }) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() }) }
+    return [pscustomobject]@{ AutoStart = [bool]($r -and $r.AutoStart); Port = $port; Minutes = $min; Networks = @($(if ($r) { @($r.Networks) } else { @() }) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
+        # Zeitplaene vom Handy starten - je Art einzeln, Standard aus
+        SchedBackup = [bool]($r -and $r.SchedBackup -eq $true); SchedServer = [bool]($r -and $r.SchedServer -eq $true); SchedAu = [bool]($r -and $r.SchedAu -eq $true) }
 }
 function Get-HMRemoteSetupFile { return (Join-Path $script:ConfigDir 'remote-setup.json') }
 function Get-HMRemoteTempFile { return (Join-Path $script:ConfigDir 'remote-temp.json') }
@@ -284,6 +286,12 @@ function Update-HMRemoteTick {
     }
     $S.JobJson = ConvertTo-HMRemoteJobJson $script:CurrentJob "$($script:JobTitle)" $script:HMRemoteLast -Mon $script:MonSnap
     try { Update-HMRemotePushRuns } catch { }
+    # Zeitplaene vom Handy: Anfrage ausfuehren, Liste regelmaessig im Hintergrund lesen (bei beobachteten Laeufen oefter)
+    try { Invoke-HMRemoteSchedReq $S } catch { Out-Console "Zeitplan-Start vom Handy: $($_.Exception.Message)" 'Warning' }
+    if (Test-HMRemoteSchedAny) {
+        $iv = if (@($script:HMSchedWatch | Where-Object { $_.At -gt (Get-Date).AddMinutes(-10) }).Count) { 20 } elseif ($script:HMSchedWatch.Count) { 60 } else { 120 }
+        if (-not $r.SchedAt -or ((Get-Date) - $r.SchedAt).TotalSeconds -ge $iv) { $r.SchedAt = Get-Date; try { Start-HMRemoteSchedScan } catch { } }
+    } elseif ("$($S.SchedJson)" -ne '[]') { $S.SchedMap = [hashtable]::Synchronized(@{}); $S.SchedJson = '[]' }
     # Zusatzanzeigen (App-Updates je PC, Server-Backup-Kachel) hoechstens alle 2 Minuten bzw. nach neuem Status
     $volNew = $false; try { $volNew = Receive-HMRemoteBg } catch { }
     if ($volNew) {
@@ -489,8 +497,8 @@ function Receive-HMRemoteBg([switch]$Final) {
             }
             continue
         }
-        $res = @(); $ok = $true
-        try { $res = @($run.PS.EndInvoke($run.Handle)) } catch { $ok = $false }
+        $res = @(); $ok = $true; $endOk = $true
+        try { $res = @($run.PS.EndInvoke($run.Handle)) } catch { $ok = $false; $endOk = $false }
         try { if ($run.PS.HadErrors) { $ok = $false } } catch { }
         try { $run.PS.Dispose() } catch { }
         $script:HMRemoteBg.Remove($run)
@@ -498,6 +506,12 @@ function Receive-HMRemoteBg([switch]$Final) {
             # nur bei Erfolg uebernehmen - sonst bleiben die zuletzt bekannten Platten stehen (z. B. schlafende Platte, Zeitlimit)
             'Vol' { if ($ok) { $script:HMRemoteVols = $res; $refresh = $true } }
             'Copy' { if ($ok -and "$($res | Select-Object -Last 1)" -eq 'OK') { Set-HMRemoteHistoryReport $run.Data.Id $run.Data.Dst } }
+            'SchedScan' {
+                $sr = @($res | Where-Object { $_ -is [hashtable] })[0]
+                # Zeitplan-Skript faengt eigene Fehler ab: Ergebnis zaehlt, wenn es geliefert wurde (HadErrors kann durch abgefangene Fehler gesetzt sein)
+                if ($endOk -and $sr -and $script:HMRemote) { Set-HMRemoteSchedList $script:HMRemote.S $sr; Update-HMRemoteSchedWatch $sr }
+            }
+            'SchedRun' { if ($script:HMRemote) { Receive-HMRemoteSchedRun $script:HMRemote.S $res $endOk $run.Data } }
         }
     }
     return $refresh
@@ -510,6 +524,294 @@ function Set-HMRemoteHistoryReport([string]$Id, [string]$Path) {
     if (-not $hit) { return }
     try { [IO.File]::WriteAllText((Get-HMRemoteHistFile), (ConvertTo-Json -InputObject @($list) -Depth 3), (New-Object Text.UTF8Encoding $false)) } catch { }
     if ($script:HMRemote) { Set-HMRemoteHistory $script:HMRemote.S $list }
+}
+# ----------------------------------------------------------------------------
+# Zeitplaene vom Handy starten (Einstellungen > Handy, je Art einzeln, Standard aus)
+# Liste und Pruefung laufen im Hintergrund (Aufgabenplanung kann haengen). Gestartet wird nur eine Aufgabe, die
+# exakt dem entspricht, was HUMig selbst anlegt: Ordner, Konto, genau eine Aktion mit HUMigs eigenem Skript.
+# Das Handy kennt nur eine zufaellige Kennung je Listenaufbau - Pfade/Namen/Optionen kommen nie vom Handy.
+# ----------------------------------------------------------------------------
+$script:HMSchedScript = {
+    param([string]$Mode, [hashtable]$Kinds, [string]$AppRoot, [bool]$Admin, [string]$Key, [string[]]$AdminSids = @())
+    $ErrorActionPreference = 'Stop'
+    $sysPs = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    function Get-SidOf([string]$u) {
+        if ($u -match '^S-1-') { return $u }
+        try { return (New-Object Security.Principal.NTAccount($u)).Translate([Security.Principal.SecurityIdentifier]).Value } catch { return '' }
+    }
+    # Ordner/Datei duerfen nur SYSTEM, Administratoren, TrustedInstaller, CREATOR OWNER und Konten, die selbst Administrator
+    # sind, veraendern (Freigabeliste wie die Pruefung des Programmordners beim Start); Besitzer ebenso. Sonst: nicht sicher.
+    $safe = @('S-1-5-18', 'S-1-5-32-544', 'S-1-3-0', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464') + @($AdminSids | Where-Object { $_ })
+    function Test-NoUserWrite([string]$p) {
+        if (-not (Test-Path -LiteralPath $p)) { return $false }
+        $mask = 0x2 -bor 0x4 -bor 0x40 -bor 0x100 -bor 0x10 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000
+        try {
+            $acl = Get-Acl -LiteralPath $p
+            $own = ''; try { $own = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { return $false }
+            if ($safe -notcontains $own) { return $false }
+            foreach ($a in @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))) {
+                if ("$($a.AccessControlType)" -ne 'Allow') { continue }
+                if (-not (([int64][int]$a.FileSystemRights) -band $mask)) { continue }
+                if ($safe -notcontains "$($a.IdentityReference.Value)") { return $false }
+            }
+            return $true
+        } catch { return $false }
+    }
+    # Uebergeordnete Ordner bis zum Laufwerk: niemand ausser der Freigabeliste darf sie umbenennen/ersetzen
+    # (Loeschen, Unterordner loeschen, Rechte/Besitzer aendern, Vollzugriff; Besitzer ebenso) - sonst koennte ein
+    # Benutzer den abgesicherten Ordner wegbenennen und einen eigenen gleichen Namens hinlegen
+    function Test-ParentsSafe([string]$p) {
+        try {
+            $d = [IO.DirectoryInfo]$p
+            if ($d.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }   # Verknuepfung: Kette dahinter unbekannt
+            $d = $d.Parent
+            while ($d) {
+                if ($d.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+                # Laufwerkswurzel laesst sich nicht umbenennen: dort zaehlt Loeschen nicht (D:\ hat standardmaessig "Aendern")
+                $mask = 0x40 -bor 0x40000 -bor 0x80000 -bor 0x10000000
+                if ($d.Parent) { $mask = $mask -bor 0x10000 }
+                $acl = Get-Acl -LiteralPath $d.FullName
+                $own = ''; try { $own = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { return $false }
+                if ($safe -notcontains $own) { return $false }
+                foreach ($a in @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))) {
+                    if ("$($a.AccessControlType)" -ne 'Allow') { continue }
+                    if (([int]$a.PropagationFlags) -band 2) { continue }   # InheritOnly: gilt nicht fuer diesen Ordner selbst
+                    if (-not (([int64][int]$a.FileSystemRights) -band $mask)) { continue }
+                    if ($safe -notcontains "$($a.IdentityReference.Value)") { return $false }
+                }
+                $d = $d.Parent
+            }
+            return $true
+        } catch { return $false }
+    }
+    function Test-SafeName([string]$n) { return ($n -and $n -notmatch '[*?\[\]]') }
+    # genau eine Aktion, erwartetes Programm, Argumente genau so, wie HUMig sie anlegt (verankert, kein -Command, kein zweites -File)
+    function Test-Act($t, [string[]]$Exe, [string]$ArgRx) {
+        $acts = @($t.Actions)
+        if ($acts.Count -ne 1) { return $false }
+        $x = "$($acts[0].Execute)".Trim('"')
+        if (-not @($Exe | Where-Object { $_ -and [string]::Equals($_, $x, [StringComparison]::OrdinalIgnoreCase) }).Count) { return $false }
+        return ("$($acts[0].Arguments)".Trim() -match $ArgRx)   # Muster ist verankert (^...$): nichts davor/danach erlaubt
+    }
+    $hd = '(?i)^-NoProfile -ExecutionPolicy Bypass (-WindowStyle Hidden )?-File "'
+    function Get-Info($t) {
+        $o = @{ Running = ("$($t.State)" -in @('Running', 'Queued')); Disabled = ("$($t.State)" -eq 'Disabled'); Next = ''; Last = ''; LastRun = $null; Result = $null }
+        try {
+            $i = Get-ScheduledTaskInfo -TaskPath $t.TaskPath -TaskName $t.TaskName
+            if ($i.NextRunTime) { $o.Next = $i.NextRunTime.ToString('dd.MM. HH:mm') }
+            if ($i.LastRunTime -and $i.LastRunTime.Year -gt 2000) { $o.Last = $i.LastRunTime.ToString('dd.MM. HH:mm'); $o.LastRun = $i.LastRunTime; $o.Result = [int64]$i.LastTaskResult }
+        } catch { }
+        return $o
+    }
+    $out = New-Object System.Collections.ArrayList
+    # --- Profil-Backups dieses Kontos (nur ohne Adminrechte angelegte - RunLevel Limited)
+    if ($Kinds.Backup) { try {
+        $cur = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $me = $cur.User.Value; $meName = "$($cur.Name)"; $meShort = ($meName -split '\\')[-1]
+        $dir = Join-Path $env:LOCALAPPDATA 'HUMig\Zeitplaene'
+        foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+            $d = $null; try { $d = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8 | ConvertFrom-Json } catch { continue }
+            if (-not $d -or "$($d.Id)" -notmatch '^[A-Za-z0-9]{8,40}$' -or -not (Test-SafeName "$($d.TaskName)") -or -not (Test-SafeName "$($d.TaskPath)")) { continue }
+            $o = @{ Kind = 'Backup'; Title = "$($d.Name)"; TaskPath = "$($d.TaskPath)"; TaskName = "$($d.TaskName)"; Problem = ''; As = 'Benutzer' }
+            $t = $null
+            if ("$($d.TaskPath)" -match '^\\') { try { $t = Get-ScheduledTask -TaskPath "$($d.TaskPath)" -TaskName "$($d.TaskName)" -ErrorAction Stop } catch { $t = $null } }
+            if (-not $t) { $o.Problem = 'Aufgabe fehlt' }
+            elseif ([bool]$d.Elevated -or "$($t.Principal.RunLevel)" -ne 'Limited') { continue }   # mit Adminrechten angelegt: vom Handy vorerst nicht
+            elseif ("$($d.Computer)" -ne "$env:COMPUTERNAME" -or "$($d.Sid)" -ne $me) { $o.Problem = 'Aufgabe gehoert nicht zu diesem Konto' }
+            elseif ((Get-SidOf "$($t.Principal.UserId)") -ne $me -and -not [string]::Equals("$($t.Principal.UserId)", $meName, [StringComparison]::OrdinalIgnoreCase) -and -not [string]::Equals("$($t.Principal.UserId)", $meShort, [StringComparison]::OrdinalIgnoreCase)) { $o.Problem = 'Aufgabe gehoert nicht zu diesem Konto' }   # Vergleich nur mit dem angemeldeten Konto (nicht mit der Zeitplan-Datei)
+            elseif (-not (Test-Act $t @($sysPs) ($hd + [regex]::Escape("$AppRoot\Functions\Backup-Task.ps1") + '" -Id ' + [regex]::Escape("$($d.Id)") + '\z'))) { $o.Problem = 'Aufgabe veraendert - am PC pruefen' }
+            if ($t) { $o.Info = Get-Info $t; $o.Task = $t }
+            $o.Key = "B|$($o.TaskPath)|$($o.TaskName)"
+            [void]$out.Add($o)
+        }
+    } catch { } }
+    # --- Server-Backup (SYSTEM) und App-Updates dieses PCs (SYSTEM): nur als Administrator
+    $wb = $false; try { $wb = ("$((Get-Service -Name wbengine -ErrorAction Stop).Status)" -eq 'Running') } catch { }
+    if ($Admin -and $Kinds.Server) { try {
+        $progOk = (Test-NoUserWrite $AppRoot) -and (Test-NoUserWrite "$AppRoot\Functions") -and (Test-NoUserWrite "$AppRoot\Config") -and (Test-ParentsSafe $AppRoot)
+        if ($progOk -and (Test-Path -LiteralPath "$AppRoot\Config\ServerBackup") -and -not (Test-NoUserWrite "$AppRoot\Config\ServerBackup")) { $progOk = $false }
+        if ($progOk) { foreach ($x in @(Get-ChildItem -LiteralPath "$AppRoot\Functions" -Filter '*.ps1' -File)) { if (-not (Test-NoUserWrite $x.FullName)) { $progOk = $false; break } } }
+        if ($progOk -and (Test-Path -LiteralPath "$AppRoot\Config\serverbackup.json") -and -not (Test-NoUserWrite "$AppRoot\Config\serverbackup.json")) { $progOk = $false }
+        $cfg = $null; try { $cfg = Get-Content -LiteralPath "$AppRoot\Config\serverbackup.json" -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+        $tasks = @(); try { $tasks = @(Get-ScheduledTask -TaskPath '\HUMig\' -ErrorAction Stop | Where-Object { $_.TaskName -like 'Server-Backup*' }) } catch { }
+        foreach ($t in $tasks) {
+            $o = @{ Kind = 'Server'; Title = "$($t.TaskName)"; TaskPath = "$($t.TaskPath)"; TaskName = "$($t.TaskName)"; Problem = ''; As = 'SYSTEM'; Info = (Get-Info $t); Task = $t }
+            $prof = ''
+            if ("$(@($t.Actions)[0].Arguments)" -match '-ProfileName "([^"]+)"') {
+                $n = $Matches[1]
+                for ($i = 0; $i -lt 20 -and $cfg; $i++) { $r = @(@($cfg.Renames) | Where-Object { $_ -and "$($_.Old)" -eq $n })[0]; if (-not $r) { break }; $n = "$($r.New)" }
+                if ($cfg -and @(@($cfg.Profiles) | Where-Object { $_ -and "$($_.Name)" -eq $n }).Count) { $prof = $n }
+            }
+            if ("$($t.TaskPath)" -ne '\HUMig\' -or (Get-SidOf "$($t.Principal.UserId)") -ne 'S-1-5-18') { $o.Problem = 'Aufgabe veraendert - am PC pruefen' }
+            elseif (-not (Test-SafeName "$($t.TaskName)") -or -not (Test-Act $t @($sysPs) ($hd + [regex]::Escape("$AppRoot\Functions\ServerBackup-Task.ps1") + '" -ProfileName "[^"]+"( -VMs "[^"]*")?( -Volumes "[^"]*")?( -HostConfig)?( -HostSystem)?( -NoVerify)?( -Explicit)?\z'))) { $o.Problem = 'Aufgabe veraendert - am PC pruefen' }
+            elseif (-not $prof) { $o.Problem = 'Profil nicht gefunden' }
+            elseif (-not $progOk) { $o.Problem = 'Programmordner fuer Benutzer beschreibbar - Start vom Handy gesperrt' }
+            $o.Title = ("$($t.TaskName)" -replace '^Server-Backup - ', '')
+            $o.Server = $true
+            $o.Key = "S|$($o.TaskPath)|$($o.TaskName)"
+            [void]$out.Add($o)
+        }
+    } catch { } }
+    if ($Admin -and $Kinds.Au) { try {
+        $t = $null; try { $t = Get-ScheduledTask -TaskPath '\HUMig\' -TaskName 'HUMig App-Updates' -ErrorAction Stop } catch { $t = $null }
+        if ($t) {
+            $auDir = Join-Path $env:ProgramData 'HUMig\AppUpdates\auto'
+            $pw7 = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+            $pwH = Join-Path $env:ProgramFiles 'HUMig\PowerShell7\pwsh.exe'
+            $o = @{ Kind = 'Au'; Title = 'App-Updates dieses PCs'; TaskPath = "$($t.TaskPath)"; TaskName = "$($t.TaskName)"; Problem = ''; As = 'SYSTEM'; Info = (Get-Info $t); Task = $t }
+            if ((Get-SidOf "$($t.Principal.UserId)") -ne 'S-1-5-18' -or -not (Test-Act $t @($pw7, $pwH, $sysPs) ('(?i)^-NoProfile -ExecutionPolicy Bypass -File "' + [regex]::Escape("$auDir\auto.ps1") + '"\z'))) { $o.Problem = 'Aufgabe veraendert - am PC pruefen' }
+            else {
+                $x = "$(@($t.Actions)[0].Execute)".Trim('"')
+                foreach ($p in @($auDir, "$auDir\auto.ps1", "$auDir\config.json", (Split-Path $x -Parent), $x)) { if ((Test-Path -LiteralPath $p) -and -not (Test-NoUserWrite $p)) { $o.Problem = 'Ordner fuer Benutzer beschreibbar - Start vom Handy gesperrt'; break } }
+                if (-not $o.Problem -and (-not (Test-ParentsSafe $auDir) -or -not (Test-ParentsSafe (Split-Path $x -Parent)))) { $o.Problem = 'Ordner fuer Benutzer beschreibbar - Start vom Handy gesperrt' }
+            }
+            $o.Key = "A|$($o.TaskPath)|$($o.TaskName)"
+            [void]$out.Add($o)
+        }
+    } catch { } }
+    if ($Mode -ne 'Run') { return @{ Items = @($out); Wb = $wb } }
+    # --- Start: dieselbe Aufgabe frisch gefunden und unveraendert?
+    $hit = @($out | Where-Object { $_.Key -eq $Key })[0]
+    if (-not $hit) { return @{ Ok = $false; Text = 'Zeitplan nicht mehr vorhanden' } }
+    if ($hit.Problem) { return @{ Ok = $false; Text = "$($hit.Problem)" } }
+    if ($hit.Info.Running) { return @{ Ok = $false; Text = 'laeuft bereits' } }
+    if ($hit.Info.Disabled) { return @{ Ok = $false; Text = 'Aufgabe ist deaktiviert' } }
+    if ($hit.Kind -eq 'Server') {
+        if ($wb) { return @{ Ok = $false; Text = 'eine Server-Sicherung laeuft gerade (Windows Server-Sicherung)' } }
+        if (@($out | Where-Object { $_.Kind -eq 'Server' -and $_.Info.Running }).Count) { return @{ Ok = $false; Text = 'ein anderes Server-Backup laeuft gerade' } }
+        $busy = @(); try { $busy = @(Get-ScheduledTask -TaskPath '\HUMig\' -ErrorAction Stop | Where-Object { "$($_.State)" -in @('Running', 'Queued') }) } catch { }
+        if ($busy.Count) { return @{ Ok = $false; Text = "ein anderer HUMig-Zeitplan laeuft gerade ($($busy[0].TaskName))" } }
+    }
+    $at = Get-Date
+    # Start ueber das eben gepruefte Objekt. Start-ScheduledTask loest dabei Ordner+Name erneut auf - eine Aenderung in
+    # dieser kurzen Luecke kann nur, wer die Aufgabe ohnehin aendern darf (Besitzer der Benutzer-Aufgabe bzw. Administrator)
+    try { $hit.Task | Start-ScheduledTask -ErrorAction Stop } catch { return @{ Ok = $false; Text = "Start nicht moeglich: $($_.Exception.Message)" } }
+    return @{ Ok = $true; Text = 'gestartet'; At = $at; Title = "$($hit.Title)"; Kind = "$($hit.Kind)" }
+}
+$script:HMSchedWatch = New-Object System.Collections.ArrayList
+$script:HMSchedRate = New-Object System.Collections.ArrayList
+$script:HMSchedIds = @{}
+$script:HMSchedKindName = @{ Backup = 'Profil-Backup'; Server = 'Server-Backup'; Au = 'App-Updates' }
+function Get-HMRemoteSchedWhat([string]$Kind, [string]$Title) { if ($Kind -eq 'Au') { return $Title }; return "$($script:HMSchedKindName[$Kind]) '$Title'" }
+# Freigeschaltete Arten (Einstellungen); Server-Backup und App-Updates nur als Administrator
+function Get-HMRemoteSchedKinds {
+    $c = Get-HMRemoteConfig
+    $adm = -not $script:UserMode
+    return @{ Backup = [bool]$c.SchedBackup; Server = ($adm -and [bool]$c.SchedServer); Au = ($adm -and [bool]$c.SchedAu) }
+}
+function Test-HMRemoteSchedAny { $k = Get-HMRemoteSchedKinds; return ($k.Backup -or $k.Server -or $k.Au) }
+# Konten, die selbst Administrator sind (fuer die Rechtepruefung des Programmordners wie beim Start von HUMig)
+function Get-HMRemoteSchedAdminSids { try { if (Get-Command Get-HMAppAdminSids -ErrorAction SilentlyContinue) { return @(Get-HMAppAdminSids) } } catch { }; return @() }
+function Start-HMRemoteSchedScan {
+    if (Test-HMRemoteBgBusy 'SchedScan') { return }
+    [void](Start-HMRemoteBg 'SchedScan' $script:HMSchedScript @('List', (Get-HMRemoteSchedKinds), "$($script:AppRoot)", (-not $script:UserMode), '', [string[]]@(Get-HMRemoteSchedAdminSids)) @{} 60)
+}
+# Liste fuer das Handy: Kennung (zufaellig, je Aufbau neu) -> Eintrag nur am PC
+function Set-HMRemoteSchedList($S, $Res) {
+    $map = [hashtable]::Synchronized(@{})
+    $list = @()
+    foreach ($o in @($Res.Items | Where-Object { $_ })) {
+        # zufaellige Kennung je Aufgabe, fuer die Sitzung gleich (sonst scheitert eine Bestaetigung, wenn die Liste dazwischen neu aufgebaut wird)
+        $id = "$($script:HMSchedIds["$($o.Key)"])"
+        if ($id -notmatch '^[0-9a-f]{16}$') {
+            $rb = Get-HMRemoteRandomBytes 8   # liefert ,@() - erst zuweisen
+            $id = -join ($rb | ForEach-Object { $_.ToString('x2') })
+            $script:HMSchedIds["$($o.Key)"] = $id
+        }
+        $kn = $script:HMSchedKindName["$($o.Kind)"]
+        $i = $o.Info
+        $run = [bool]($i -and $i.Running)
+        $sub = @()
+        if ($run) { $sub += 'laeuft gerade' }
+        elseif ($i) { if ($i.Last) { $sub += "zuletzt $($i.Last)$(if ($null -ne $i.Result -and $i.Result -ne 267011) { ' (' + (Format-HMRemoteSchedResult $o.Kind $i.Result) + ')' })" }; if ($i.Next) { $sub += "naechster $($i.Next)" } }
+        $note = "$($o.Problem)"
+        if (-not $note -and $o.Kind -eq 'Server' -and $Res.Wb -and -not $run) { $note = 'Server-Sicherung laeuft gerade' }
+        $ok = (-not $note -and -not $run -and -not ($i -and $i.Disabled))
+        if ($i -and $i.Disabled -and -not $note) { $note = 'deaktiviert' }
+        if ($ok) {
+            $map[$id] = @{ Key = "$($o.Key)"; Kind = "$($o.Kind)"; Title = "$($o.Title)"
+                Confirm = "$(Get-HMRemoteSchedWhat "$($o.Kind)" "$($o.Title)") am PC $($S.Pc) jetzt starten? Laeuft im Hintergrund als $($o.As)$(if ($o.Kind -eq 'Server') { ' - VMs werden gesichert, die Platte danach evtl. ausgeworfen' })." }
+        }
+        $list += [ordered]@{ id = $(if ($ok) { $id } else { '' }); kind = "$kn"; title = "$($o.Title)"; sub = ($sub -join ' · '); running = $run; ok = $ok; note = $note }
+    }
+    $S.SchedMap = $map
+    $S.SchedJson = ConvertTo-Json -Compress -Depth 3 -InputObject @($list)
+}
+function Format-HMRemoteSchedResult([string]$Kind, $Code) {
+    $c = [int64]$Code
+    if ($c -eq 0) { return 'erfolgreich' }
+    if ($Kind -ne 'Au' -and $c -eq 1) { return 'mit Warnungen' }
+    if ($c -eq 267009) { return 'laeuft' }
+    if ($Kind -ne 'Au' -and $c -eq 2) { return 'mit Fehlern' }
+    return ('Fehler 0x{0:X}' -f $c)
+}
+function Set-HMRemoteSchedMsg($S, [bool]$Ok, [string]$Text) {
+    $S.SchedMsg = ConvertTo-Json -Compress -InputObject ([ordered]@{ t = [int64](([datetime]::UtcNow - [datetime]'1970-01-01').TotalMilliseconds); ok = $Ok; text = $Text })
+}
+# Anfrage vom Handy (im UI-Timer): Grenzen pruefen, dann Start im Hintergrund (dort erneute Pruefung der Aufgabe)
+function Invoke-HMRemoteSchedReq($S) {
+    $q = $S.SchedReq
+    if (-not $q) { return }
+    $S.SchedReq = $null
+    $e = $q.Entry
+    $now = Get-Date
+    $msg = ''
+    if (-not (Test-HMRemoteSchedAny) -or -not (Get-HMRemoteSchedKinds)["$($e.Kind)"]) { $msg = 'Start vom Handy ist fuer diese Art ausgeschaltet' }
+    elseif (Test-HMRemoteBgBusy 'SchedRun') { $msg = 'Ein Start laeuft gerade - kurz warten' }
+    elseif ("$($e.Kind)" -eq 'Server' -and $script:CurrentJob) { $msg = "In HUMig laeuft gerade ein Vorgang ($($script:JobTitle))" }
+    else {
+        foreach ($x in @($script:HMSchedRate)) { if ($x.At -lt $now.AddMinutes(-10)) { $script:HMSchedRate.Remove($x) } }
+        if (@($script:HMSchedRate | Where-Object { $_.Dev -eq $q.DevId -and $_.Key -eq $e.Key -and $_.At -gt $now.AddSeconds(-60) }).Count) { $msg = 'Diesen Zeitplan hoechstens einmal pro Minute starten' }
+        elseif (@($script:HMSchedRate).Count -ge 5) { $msg = 'Hoechstens 5 Starts in 10 Minuten' }
+    }
+    $what = Get-HMRemoteSchedWhat "$($e.Kind)" "$($e.Title)"
+    if ($msg) {
+        Set-HMRemoteSchedMsg $S $false "$what nicht gestartet: $msg"
+        Write-HMRemoteLog $S "$($q.Ip)  Zeitplan-Start abgelehnt: $($e.Key) ($($q.By)) - $msg"
+        Out-Console "Handy '$($q.By)': $what nicht gestartet - $msg" 'Warning'
+        return
+    }
+    [void]$script:HMSchedRate.Add(@{ At = $now; Dev = "$($q.DevId)"; Key = "$($e.Key)" })
+    [void](Start-HMRemoteBg 'SchedRun' $script:HMSchedScript @('Run', (Get-HMRemoteSchedKinds), "$($script:AppRoot)", (-not $script:UserMode), "$($e.Key)", [string[]]@(Get-HMRemoteSchedAdminSids)) @{ Entry = $e; By = "$($q.By)"; Ip = "$($q.Ip)" } 60)
+}
+# Ergebnis eines Starts; beobachten bis zum Ende (Push-Meldung)
+function Receive-HMRemoteSchedRun($S, $Res, [bool]$Ok, $Data) {
+    $e = $Data.Entry
+    $what = Get-HMRemoteSchedWhat "$($e.Kind)" "$($e.Title)"
+    $r = @($Res | Where-Object { $_ -is [hashtable] })[0]
+    if (-not $Ok -or -not $r) { $r = @{ Ok = $false; Text = 'Pruefung/Start nicht moeglich' } }
+    if ($r.Ok) {
+        Set-HMRemoteSchedMsg $S $true "$what gestartet"
+        Write-HMRemoteLog $S "$($Data.Ip)  Zeitplan gestartet: $($e.Key) ($($Data.By))"
+        Out-Console "Zeitplan vom Handy '$($Data.By)' gestartet: $what (laeuft im Hintergrund)" 'Success'
+        [void]$script:HMSchedWatch.Add(@{ Key = "$($e.Key)"; Kind = "$($e.Kind)"; What = $what; At = [datetime]$r.At })
+    } else {
+        Set-HMRemoteSchedMsg $S $false "$what nicht gestartet: $($r.Text)"
+        Write-HMRemoteLog $S "$($Data.Ip)  Zeitplan-Start abgelehnt: $($e.Key) ($($Data.By)) - $($r.Text)"
+        Out-Console "Handy '$($Data.By)': $what nicht gestartet - $($r.Text)" 'Warning'
+    }
+    $script:HMRemote.SchedAt = $null   # Liste gleich neu lesen
+}
+# nach einer Listen-Abfrage: vom Handy gestartete Laeufe fertig? (erst wenn LastRunTime >= Start und nicht mehr laufend)
+function Update-HMRemoteSchedWatch($Res) {
+    foreach ($w in @($script:HMSchedWatch)) {
+        $o = @($Res.Items | Where-Object { $_ -and $_.Key -eq $w.Key })[0]
+        if ((Get-Date) -gt $w.At.AddHours(24)) { $script:HMSchedWatch.Remove($w); continue }
+        if (-not $o) { if ((Get-Date) -gt $w.At.AddMinutes(10)) { $script:HMSchedWatch.Remove($w) }; continue }   # Liste kurz unvollstaendig: abwarten
+        $i = $o.Info
+        if ($i -and -not $i.Running -and (-not $i.LastRun -or $i.LastRun -lt $w.At.AddSeconds(-5)) -and (Get-Date) -gt $w.At.AddMinutes(2)) {
+            # Aufgabe hat nicht angefangen (z. B. Bedingungen der Aufgabe) - melden statt stundenlang zu warten
+            $script:HMSchedWatch.Remove($w)
+            $t = "Zeitplan $($w.What) - nicht gelaufen (am PC pruefen)"
+            Out-Console $t 'Warning'; try { Send-HMRemotePush -Text $t } catch { }
+            continue
+        }
+        if (-not $i -or $i.Running -or -not $i.LastRun -or $i.LastRun -lt $w.At.AddSeconds(-5) -or $null -eq $i.Result -or $i.Result -in @(267009, 267011)) { continue }
+        $script:HMSchedWatch.Remove($w)
+        $t = "Zeitplan $($w.What) - $(Format-HMRemoteSchedResult $w.Kind $i.Result)"
+        Out-Console $t $(if ($i.Result -eq 0) { 'Success' } else { 'Warning' })
+        try { Send-HMRemotePush -Text $t } catch { }
+    }
 }
 # Ergebnis des App-Updates-Zeitplans auf DIESEM PC (falls eingerichtet): %ProgramData%\HUMig\AppUpdates\auto\last.json
 function Read-HMRemoteLocalAuLast {
@@ -698,13 +1000,14 @@ function Initialize-HMRemoteSettingsTab($F) {
     if ($c.Minutes -gt 0 -and -not @($script:HMRemoteTimes | Where-Object { $_[0] -eq $c.Minutes }).Count) { [void]$F.cmbRemoteTime.Items.Add("$($c.Minutes) Minuten"); $sel = $F.cmbRemoteTime.Items.Count - 1 }
     $F.cmbRemoteTime.SelectedIndex = $sel
     $F.txtRemoteNets.Text = (@($c.Networks) -join "`r`n")
+    $F.chkSchedBackup.IsChecked = $c.SchedBackup; $F.chkSchedServer.IsChecked = $c.SchedServer; $F.chkSchedAu.IsChecked = $c.SchedAu
     $acc = ''
     try { $acc = "$((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName)" } catch { }
     $su = Read-HMRemoteSetup
     $F.txtRemoteUser.Text = if ($su) { "$($su.Account)" } else { $acc }
     $F.lblRemoteSetup.Text = Get-HMRemoteSetupText
     $adm = Test-HMRemoteAdmin
-    foreach ($x in @($F.btnRemoteSetup, $F.btnRemoteUnsetup, $F.txtRemoteUser)) { $x.IsEnabled = $adm }
+    foreach ($x in @($F.btnRemoteSetup, $F.btnRemoteUnsetup, $F.txtRemoteUser, $F.chkSchedServer, $F.chkSchedAu)) { $x.IsEnabled = $adm }
     if (-not $adm) { $F.lblRemoteSetup.Text += '  (nur als Administrator einstellbar)' }
     $F.btnRemoteSetup.Add_Click({
         $F2 = $script:SetDlg.F; $W2 = $script:SetDlg.Win
@@ -739,7 +1042,11 @@ function Get-HMRemoteSettingsFromTab($F, $W) {
     $su = Read-HMRemoteSetup
     if ($su -and [int]$su.Port -ne $p) { Out-Console "Fernbedienung: Port geaendert - die Einrichtung fuer den Benutzer-Modus nutzt weiter Port $($su.Port) (dort neu einrichten, wenn gewuenscht)." 'Warning' }
     if ($script:HMRemote -and $script:HMRemote.Port -ne $p) { Out-Console 'Fernbedienung: neuer Port gilt nach Aus- und Einschalten.' 'Info' }
-    return [ordered]@{ AutoStart = [bool]$F.chkRemoteAuto.IsChecked; Port = $p; Minutes = $min; Networks = $nets }
+    $sch = @(@('SchedBackup', $F.chkSchedBackup, 'Profil-Backups'), @('SchedServer', $F.chkSchedServer, 'Server-Backups'), @('SchedAu', $F.chkSchedAu, 'App-Updates') | Where-Object { [bool]$_[1].IsChecked })
+    $old = Get-HMRemoteConfig
+    foreach ($x in $sch) { if (-not $old."$($x[0])") { Out-Console "Fernbedienung: $($x[2]) duerfen jetzt vom Handy gestartet werden (gekoppelte Handys, mit Bestaetigung; im Zugriffsprotokoll)." 'Warning' } }
+    return [ordered]@{ AutoStart = [bool]$F.chkRemoteAuto.IsChecked; Port = $p; Minutes = $min; Networks = $nets
+        SchedBackup = [bool]$F.chkSchedBackup.IsChecked; SchedServer = [bool]$F.chkSchedServer.IsChecked; SchedAu = [bool]$F.chkSchedAu.IsChecked }
 }
 
 # ----------------------------------------------------------------------------

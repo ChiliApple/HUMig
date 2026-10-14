@@ -1462,6 +1462,8 @@ function New-HMSbSchedule {
             if ($ans -ne 'Yes') { return }
         }
     } catch { Out-Console "Pruefung auf andere Sicherungsaufgaben nicht moeglich: $($_.Exception.Message)" 'Warning' }
+    # laeuft als SYSTEM aus dem HUMig-Ordner: Ordner und Ordner darueber duerfen Nicht-Administratoren nicht aendern/ersetzen
+    if ((Get-Command Confirm-HMAppFolderSafe -ErrorAction SilentlyContinue) -and -not (Confirm-HMAppFolderSafe 'Das Server-Backup (als SYSTEM)')) { return }
     $task = Join-Path $script:AppRoot 'Functions\ServerBackup-Task.ps1'
     $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$task`" -ProfileName `"$($p.Name)`""
     if ($vms.Count) { $arg += " -VMs `"$($vms -join '|')`"" }

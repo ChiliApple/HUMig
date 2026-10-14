@@ -17,6 +17,11 @@ Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen; `Logs` bleibt fuer den
 `Pull.ps1` stellt `BACKUPS` bei Installation/Update als Administrator so ein. Pruefen: `icacls C:\Tools\HUMig`.
 HUMig nicht im persoenlichen Ordner (OneDrive, Desktop) eines Benutzers betreiben, wenn es dort als Administrator gestartet wird.
 
+**Ordner darueber:** `C:\Tools` hat standardmaessig die Rechte von `C:\` (angemeldete Benutzer: *Aendern*) - damit kann ein normaler Benutzer
+`C:\Tools` umbenennen und ein eigenes `C:\Tools\HUMig` anlegen, auch wenn der HUMig-Ordner selbst abgesichert ist. HUMig prueft
+deshalb auch die Ordner ueber dem Tool-Ordner und sichert auf Wunsch nur den Ordner selbst ab (Unterordner anderer Programme
+bleiben unveraendert). Empfohlen fuer Server und gemeinsam genutzte PCs: `C:\Program Files\HUMig`.
+
 ## USMT (optional)
 Noetig fuer das Modul *Windows-Einstellungen (USMT)* - und damit auch fuer den **Restore auf einen neuen PC, auf dem der Benutzer noch kein Profil hat**: LoadState legt das Profil an (Domaenenkonten). Ohne USMT muss sich der Benutzer vorher einmal am Ziel-PC anmelden, sonst werden die Benutzer-Module uebersprungen. Einrichten: Werkzeug *USMT einrichten (ADK)* oder siehe `BIN\LIESMICH.txt`.
 

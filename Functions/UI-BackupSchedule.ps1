@@ -184,10 +184,12 @@ function New-HMBackupSchedule {
     # HUMig selbst muss zur Laufzeit erreichbar sein
     $appQ = $script:AppRoot.Substring(0, [Math]::Min(2, $script:AppRoot.Length)).ToUpper()
     if ($script:AppRoot -like '\\*') {
-        if (-not (Confirm-Action "HUMig liegt auf einer Netzwerkfreigabe ($($script:AppRoot)).`nDie geplante Aufgabe startet HUMig von dort - die Freigabe muss beim Lauf erreichbar sein.`nEmpfehlung: HUMig lokal ablegen (z.B. C:\Tools\HUMig).`n`nTrotzdem planen?" 'Zeitplan')) { return }
+        if (-not (Confirm-Action "HUMig liegt auf einer Netzwerkfreigabe ($($script:AppRoot)).`nDie geplante Aufgabe startet HUMig von dort - die Freigabe muss beim Lauf erreichbar sein.`nEmpfehlung: HUMig lokal ablegen (z.B. C:\Program Files\HUMig).`n`nTrotzdem planen?" 'Zeitplan')) { return }
     } elseif ($appQ -ne $env:SystemDrive.ToUpper()) {
-        if (-not (Confirm-Action "HUMig liegt auf $appQ (nicht auf $($env:SystemDrive)).`nDie geplante Aufgabe startet HUMig von dort - ist das Laufwerk (z.B. USB) beim Lauf nicht angesteckt, laeuft das Backup nicht.`nEmpfehlung: HUMig lokal ablegen (z.B. C:\Tools\HUMig) und dort planen.`n`nTrotzdem planen?" 'Zeitplan')) { return }
+        if (-not (Confirm-Action "HUMig liegt auf $appQ (nicht auf $($env:SystemDrive)).`nDie geplante Aufgabe startet HUMig von dort - ist das Laufwerk (z.B. USB) beim Lauf nicht angesteckt, laeuft das Backup nicht.`nEmpfehlung: HUMig lokal ablegen (z.B. C:\Program Files\HUMig) und dort planen.`n`nTrotzdem planen?" 'Zeitplan')) { return }
     }
+    # mit Adminrechten: laeuft mit hoechsten Rechten aus dem HUMig-Ordner - Ordner und Ordner darueber pruefen
+    if ($elev -and (Get-Command Confirm-HMAppFolderSafe -ErrorAction SilentlyContinue) -and -not (Confirm-HMAppFolderSafe 'Das Profil-Backup (mit Administratorrechten)')) { return }
     $defs = Get-HMBsDefinitions
     $defs = @($defs)
     $opt = Get-BackupOptions

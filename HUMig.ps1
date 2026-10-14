@@ -166,6 +166,21 @@ function Get-HMAppAdminSids {
     if ($null -eq $script:HMAppAdmSids) {
         $c = @{ Ok = $false; M = @() }
         try { $c = @{ Ok = $true; M = @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop | ForEach-Object { "$($_.SID)" }) } } catch { }
+        # Rueckfall (Domaenencontroller, verwaiste/Entra-SIDs in der Gruppe - dort scheitert Get-LocalGroupMember): ADSI
+        if (-not $c.Ok) {
+            try {
+                $gn = (New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-32-544').Translate([System.Security.Principal.NTAccount]).Value.Split('\')[-1]
+                $m = @(([ADSI]"WinNT://./$gn,group").Invoke('Members') | ForEach-Object {
+                        try { (New-Object System.Security.Principal.SecurityIdentifier ([byte[]]$_.GetType().InvokeMember('objectSid', 'GetProperty', $null, $_, $null)), 0).Value } catch { }
+                    } | Where-Object { $_ })
+                $c = @{ Ok = $true; M = $m }
+            } catch { }
+        }
+        # das eigene Konto, wenn es gerade mit Administratorrechten laeuft
+        try {
+            $wi = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+            if ((New-Object System.Security.Principal.WindowsPrincipal $wi).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator) -and @($c.M) -notcontains $wi.User.Value) { $c.M = @(@($c.M) + $wi.User.Value) }
+        } catch { }
         $script:HMAppAdmSids = $c
     }
     return @($script:HMAppAdmSids.M)
@@ -332,6 +347,129 @@ function Protect-HMAppFolder([string]$Root, [string[]]$BackupDirs = @(), [switch
     else { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte abgesichert: $rt (Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen)"; Level = 'Success' }) }
     return $msgs
 }
+# Uebergeordnete Ordner bis zum Laufwerk: Darf ein Nicht-Administrator einen davon umbenennen oder ersetzen (Loeschen,
+# Unterordner loeschen, Rechte oder Besitzer aendern, Vollzugriff - auf den Ordner selbst, nicht nur vererbbar) oder gehoert
+# er einem Nicht-Administrator? Dann koennte jemand den abgesicherten HUMig-Ordner wegbenennen und einen eigenen an dieselbe
+# Stelle legen (Zeitplaene als SYSTEM und der naechste Start als Administrator fuehren dann fremden Code aus).
+# Typisch: C:\Tools mit den Standardrechten von C:\ (Authentifizierte Benutzer: Aendern).
+# Laufwerkswurzel: laesst sich nicht umbenennen - dort zaehlt Loeschen nicht (D:\ hat standardmaessig "Aendern" fuer alle).
+function Test-HMAppInProfile([string]$Path) {
+    $u = if ($env:PUBLIC) { Split-Path $env:PUBLIC -Parent } else { "$env:SystemDrive\Users" }
+    $p = $Path.TrimEnd('\')
+    return ($p -ieq $u -or $p.StartsWith($u + '\', [StringComparison]::OrdinalIgnoreCase))
+}
+# Allgemeine Rechte (GENERIC_*) in Datei-Rechte umrechnen (sonst lehnt FileSystemRights den Wert ab)
+function ConvertTo-HMAppFileRights([int]$Rights) {
+    $r = $Rights
+    if ($r -band 0x80000000) { $r = ($r -band 0x7FFFFFFF) -bor 0x120089 }
+    if ($r -band 0x40000000) { $r = ($r -band (-bnot 0x40000000)) -bor 0x120116 }
+    if ($r -band 0x20000000) { $r = ($r -band (-bnot 0x20000000)) -bor 0x1200A0 }
+    if ($r -band 0x10000000) { $r = ($r -band (-bnot 0x10000000)) -bor 0x1F01FF }
+    return ($r -band 0x1F01FF)
+}
+function Get-HMAppParentMask([switch]$DriveRoot) {
+    $m = 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000
+    if ($DriveRoot) { $m = $m -band (-bnot 0x10000) }
+    return $m
+}
+# riskante Eintraege (gelten fuer den Ordner selbst). -Explicit: nur eigene (nicht geerbte)
+function Get-HMAppParentRisk([System.Security.AccessControl.FileSystemSecurity]$Acl, [int]$Mask, [switch]$Explicit) {
+    $safe = @('S-1-5-18', 'S-1-5-32-544', 'S-1-3-0', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $out = New-Object System.Collections.Generic.List[object]
+    foreach ($r in @($Acl.GetAccessRules($true, (-not $Explicit), [System.Security.Principal.SecurityIdentifier]))) {
+        if ("$($r.AccessControlType)" -ne 'Allow') { continue }
+        if (([int]$r.PropagationFlags) -band 2) { continue }   # nur vererbbar: gilt nicht fuer den Ordner selbst
+        if (-not ([int]$r.FileSystemRights -band $Mask)) { continue }
+        $sid = "$($r.IdentityReference.Value)"
+        if ($safe -contains $sid) { continue }
+        if ($sid -like 'S-1-5-21-*' -and $sid -notmatch '-(513|515|545)$' -and @(Get-HMAppAdminSids) -contains $sid) { continue }
+        $out.Add($r)
+    }
+    return $out
+}
+# Rueckgabe: Liste mit Path, Text, Profile (Profile = Ordner liegt unter C:\Users - wird nicht abgesichert). Leer = sicher.
+function Get-HMAppParentFindings([string]$Root) {
+    $safe = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $res = New-Object System.Collections.Generic.List[object]
+    $d = New-Object System.IO.DirectoryInfo ([System.IO.Path]::GetFullPath($Root).TrimEnd('\'))
+    while ($d) {
+        # Verknuepfung (Junction/Link) im Pfad: dahinter liegt ein anderer Ordner mit eigener Kette - nicht verlaesslich pruefbar
+        $rp = $false; try { $rp = [bool]($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) } catch { }
+        if ($rp) { $res.Add([pscustomobject]@{ Path = $d.FullName; Text = 'Verknuepfung (Junction/Link) im Pfad - HUMig bitte in einen echten Ordner legen'; Profile = $false; Link = $true }) }
+        if ("$($d.FullName)".TrimEnd('\') -ieq [System.IO.Path]::GetFullPath($Root).TrimEnd('\')) { $d = $d.Parent; continue }   # HUMig-Ordner selbst: eigene Pruefung
+        $acl = $null; try { $acl = Get-Acl -LiteralPath $d.FullName -ErrorAction Stop } catch { }
+        if (-not $acl) { $d = $d.Parent; continue }   # nicht lesbar: kein Befund (Absichern koennte dort ohnehin nichts)
+        $f = @()
+        $own = ''; try { $own = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value } catch { }
+        if ($own -and $safe -notcontains $own -and @(Get-HMAppAdminSids) -notcontains $own) { $f += "Besitzer $($acl.Owner)" }
+        foreach ($r in @(Get-HMAppParentRisk $acl (Get-HMAppParentMask -DriveRoot:($null -eq $d.Parent)))) {
+            $nt = ''; try { $nt = $r.IdentityReference.Translate([System.Security.Principal.NTAccount]).Value } catch { $nt = "$($r.IdentityReference)" }
+            $f += "$nt`: $($r.FileSystemRights)"
+        }
+        if ($f.Count -and -not $rp) { $res.Add([pscustomobject]@{ Path = $d.FullName; Text = (@($f | Select-Object -Unique) -join '; '); Profile = (Test-HMAppInProfile $d.FullName); Link = $false }) }
+        $d = $d.Parent
+    }
+    return $res
+}
+# Einen uebergeordneten Ordner absichern - nur den Ordner selbst: Besitzer Administratoren; Nicht-Administratoren verlieren
+# auf diesem Ordner Loeschen, Unterordner loeschen, Rechte/Besitzer aendern und Vollzugriff (Lesen/Anlegen bleibt). Was der
+# Ordner an Unterordner/Dateien vererbt (andere Programme darin), bleibt gleich. Geschrieben wird nur die Rechteliste dieses
+# Ordners (SetFileSecurity) - keine Verteilung durch den ganzen Unterbaum (schnell auch bei grossen Ordnern).
+# Der Ordner erbt danach nichts mehr von oben (spaetere Aenderungen an z.B. C:\ wirken nicht mehr auf ihn).
+# Nie unter C:\Users, nie eine Verknuepfung. Rueckgabe: '' = abgesichert, sonst Fehlertext.
+function Protect-HMAppParent([string]$Dir) {
+    if (Test-HMAppInProfile $Dir) { return 'liegt in einem Benutzerprofil - nicht geaendert' }
+    try {
+        $di = New-Object System.IO.DirectoryInfo ($Dir)
+        if ($di.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return 'Verknuepfung (Junction/Link) - nicht geaendert' }
+        $mask = Get-HMAppParentMask -DriveRoot:($null -eq $di.Parent)
+        $safe = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+        $old = Get-Acl -LiteralPath $Dir -ErrorAction Stop
+        $risk = @(Get-HMAppParentRisk $old $mask)
+        if ($risk.Count) {
+            # geerbte Verweigerungen: nach dem Umbau (alles eigen) kaemen sie vor eigene Erlaubnisse - Wirkung wuerde sich aendern
+            if (@($old.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | Where-Object { $_.IsInherited -and "$($_.AccessControlType)" -eq 'Deny' }).Count) {
+                return 'geerbte Verweigerung (Deny) in den Rechten - bitte von Hand pruefen, HUMig aendert hier nichts'
+            }
+            # neue Rechteliste: alle bisherigen Eintraege (eigene und geerbte) als eigene, riskante aufgeteilt in
+            # "nur vererben" (unveraendert fuer Unterordner) + "dieser Ordner" ohne die riskanten Rechte
+            $new = New-Object System.Security.AccessControl.DirectorySecurity
+            $new.SetAccessRuleProtection($true, $false)
+            foreach ($r in @($old.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
+                $rights = ConvertTo-HMAppFileRights ([int]$r.FileSystemRights)
+                if (-not $rights) { continue }
+                $isRisk = @($risk | Where-Object { [object]::ReferenceEquals($_, $r) -or ("$($_.IdentityReference)" -eq "$($r.IdentityReference)" -and [int]$_.FileSystemRights -eq [int]$r.FileSystemRights -and "$($_.InheritanceFlags)" -eq "$($r.InheritanceFlags)" -and "$($_.PropagationFlags)" -eq "$($r.PropagationFlags)" -and "$($_.AccessControlType)" -eq "$($r.AccessControlType)") }).Count -gt 0
+                if (-not $isRisk) {
+                    $new.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($r.IdentityReference, [System.Security.AccessControl.FileSystemRights]$rights, $r.InheritanceFlags, $r.PropagationFlags, $r.AccessControlType)))
+                    continue
+                }
+                if ("$($r.InheritanceFlags)" -ne 'None') {
+                    $new.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($r.IdentityReference, [System.Security.AccessControl.FileSystemRights]$rights, $r.InheritanceFlags, [System.Security.AccessControl.PropagationFlags](([int]$r.PropagationFlags) -bor 2), 'Allow')))   # NoPropagateInherit bleibt erhalten
+                }
+                $rest = $rights -band (-bnot $mask)
+                if ($rest -band 0xFFFF) {
+                    $new.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($r.IdentityReference, [System.Security.AccessControl.FileSystemRights]$rest, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
+                }
+            }
+            if (-not ('HMAppSecNative' -as [type])) {
+                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class HMAppSecNative { [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool SetFileSecurity(string name, uint info, byte[] sd); }'
+            }
+            # DACL_SECURITY_INFORMATION (4) + PROTECTED_DACL_SECURITY_INFORMATION (0x80000000)
+            if (-not [HMAppSecNative]::SetFileSecurity($di.FullName, [uint32]2147483652, $new.GetSecurityDescriptorBinaryForm())) {
+                return "Rechte nicht gesetzt (Fehler $([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
+            }
+        }
+        # Besitzer erst nach den Rechten (scheitert das Schreiben der Rechte, bleibt alles wie es war)
+        $own = ''; try { $own = (Get-Acl -LiteralPath $Dir -ErrorAction Stop).GetOwner([System.Security.Principal.SecurityIdentifier]).Value } catch { }
+        if ($safe -notcontains $own -and @(Get-HMAppAdminSids) -notcontains $own) {
+            $o = & icacls.exe "$Dir" /setowner '*S-1-5-32-544' /C /Q 2>&1
+            if ($LASTEXITCODE -ne 0) { return "Besitzer: $(@($o) -join ' ')" }
+        }
+        $left = @(Get-HMAppParentRisk (Get-Acl -LiteralPath $Dir -ErrorAction Stop) $mask)
+        if ($left.Count) { return "noch: $(@($left | ForEach-Object { "$($_.IdentityReference): $($_.FileSystemRights)" }) -join '; ')" }
+        return ''
+    } catch { return "$($_.Exception.Message)" }
+}
 #endregion HMAppAcl
 
 # Pruefen und bei Bedarf fragen (Ja = absichern, Nein = diesmal nicht, Abbrechen = nie mehr fragen).
@@ -344,17 +482,72 @@ function Invoke-HMAppFolderCheck($Owner = $null) {
     if (Test-HMAclCheckOff (Join-Path $root 'Config')) { return $r }
     $w = ''
     try { $w = Get-HMAppAclFindings $root } catch { return $r }   # z.B. FAT/exFAT-USB-Stick: keine Rechte
-    if (-not $w) { return $r }
-    $m = "Im HUMig-Ordner duerfen auch Nicht-Administratoren schreiben bzw. Dateien anlegen:`n$w`n`n" +
-        "HUMig laeuft als Administrator. Wer hier Dateien anlegen kann (z.B. Einstellungen mit einem Nach-Skript), koennte Code mit Administratorrechten ausfuehren lassen.`n`n" +
-        "Ja = absichern: Vererbung aus, Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen (gilt fuer alle Dateien darin; Protokolle und Backup-Ordner bleiben fuer den Benutzer-Modus beschreibbar - nur eigene Dateien)`n" +
-        "Nein = diesmal nicht`nAbbrechen = nie mehr fragen"
+    # uebergeordnete Ordner (z.B. C:\Tools): duerfen Nicht-Administratoren den HUMig-Ordner wegbenennen und ersetzen?
+    $pf = @(); try { $pf = @(Get-HMAppParentFindings $root) } catch { $pf = @() }
+    $pfFix = @($pf | Where-Object { -not $_.Profile })
+    $pfProf = @($pf | Where-Object { $_.Profile })
+    if ($pfProf.Count) { $r.Msgs.Add([pscustomobject]@{ Text = "Ordnerrechte: HUMig liegt in einem Benutzerprofil ($($pfProf[-1].Path)) - fuer Zeitplaene mit Administrator-/SYSTEM-Rechten und Server gehoert HUMig nach C:\Program Files\HUMig."; Level = 'Warning' }) }
+    if (-not $w -and -not $pfFix.Count) { return $r }
+    $m = ''
+    if ($w) {
+        $m += "Im HUMig-Ordner duerfen auch Nicht-Administratoren schreiben bzw. Dateien anlegen:`n$w`n`n" +
+            "HUMig laeuft als Administrator. Wer hier Dateien anlegen kann (z.B. Einstellungen mit einem Nach-Skript), koennte Code mit Administratorrechten ausfuehren lassen.`n`n"
+    }
+    if ($pfFix.Count) {
+        $m += "Nicht-Administratoren duerfen einen Ordner ueber dem HUMig-Ordner umbenennen oder ersetzen:`n$(@($pfFix | ForEach-Object { "$($_.Path): $($_.Text)" }) -join "`n")`n`n" +
+            "Dann koennte jemand den HUMig-Ordner wegbenennen und einen eigenen an dieselbe Stelle legen - geplante Aufgaben (z.B. Server-Backup als SYSTEM) und der naechste Start als Administrator wuerden fremden Code ausfuehren.`n`n"
+    }
+    $m += "Ja = absichern:`n"
+    if ($w) { $m += "- HUMig-Ordner: Vererbung aus, Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen (gilt fuer alle Dateien darin; Protokolle und Backup-Ordner bleiben fuer den Benutzer-Modus beschreibbar - nur eigene Dateien)`n" }
+    if ($pfFix.Count) { $m += "- Ordner darueber: nur der Ordner selbst - Nicht-Administratoren duerfen ihn nicht mehr umbenennen, loeschen oder seine Rechte aendern; Lesen und Anlegen bleiben, die Rechte der Unterordner (z.B. anderer Programme) bleiben unveraendert`n" }
+    $m += "Nein = diesmal nicht`nAbbrechen = nie mehr fragen"
     $a = if ($Owner) { "$([System.Windows.MessageBox]::Show($Owner, $m, 'HUMig - Ordnerrechte', 'YesNoCancel', 'Warning', 'Yes'))" } else { "$([System.Windows.MessageBox]::Show($m, 'HUMig - Ordnerrechte', 'YesNoCancel', 'Warning', 'Yes'))" }
     if ($a -eq 'Cancel') { $r.CheckOff = $true; $r.Msgs.Add([pscustomobject]@{ Text = 'Ordnerrechte: Pruefung abgeschaltet (Einstellung AclCheckOff in settings.json).'; Level = 'Warning' }); return $r }
-    if ($a -ne 'Yes') { $r.Msgs.Add([pscustomobject]@{ Text = "Ordnerrechte: Nicht-Administratoren duerfen in $root schreiben/anlegen ($($w -replace "`n", ' | '))."; Level = 'Warning' }); return $r }
-    try { foreach ($x in @(Protect-HMAppFolder $root @(Get-HMAppBackupRoot $root))) { $r.Msgs.Add($x) } }
-    catch { $r.Msgs.Add([pscustomobject]@{ Text = "Ordnerrechte konnten nicht gesetzt werden: $($_.Exception.Message)"; Level = 'Error' }) }
+    if ($a -ne 'Yes') {
+        if ($w) { $r.Msgs.Add([pscustomobject]@{ Text = "Ordnerrechte: Nicht-Administratoren duerfen in $root schreiben/anlegen ($($w -replace "`n", ' | '))."; Level = 'Warning' }) }
+        foreach ($x in $pfFix) { $r.Msgs.Add([pscustomobject]@{ Text = "Ordnerrechte: Nicht-Administratoren duerfen $($x.Path) umbenennen/ersetzen ($($x.Text))."; Level = 'Warning' }) }
+        return $r
+    }
+    foreach ($x in @(Protect-HMAppAll $root -Parents $pfFix -Folder:([bool]$w))) { $r.Msgs.Add($x) }
     return $r
+}
+# Absichern: HUMig-Ordner (wenn noetig) und die gemeldeten uebergeordneten Ordner. Rueckgabe: Meldungen (Text, Level).
+function Protect-HMAppAll([string]$Root, $Parents = @(), [switch]$Folder) {
+    $msgs = New-Object System.Collections.Generic.List[object]
+    if ($Folder) {
+        try { foreach ($x in @(Protect-HMAppFolder $Root @(Get-HMAppBackupRoot $Root))) { $msgs.Add($x) } }
+        catch { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte konnten nicht gesetzt werden: $($_.Exception.Message)"; Level = 'Error' }) }
+    }
+    foreach ($p in @($Parents)) {
+        $e = Protect-HMAppParent "$($p.Path)"
+        if ($e) { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte $($p.Path): $e"; Level = 'Warning' }) }
+        else { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte abgesichert: $($p.Path) (Nicht-Administratoren koennen ihn nicht mehr umbenennen oder ersetzen; Unterordner unveraendert)"; Level = 'Success' }) }
+    }
+    return $msgs
+}
+# Vor dem Planen einer Aufgabe mit hoeheren Rechten (Server-Backup als SYSTEM, Profil-Backup mit Adminrechten):
+# Programmordner und Ordner darueber pruefen. Rueckgabe: $true = weiter planen.
+function Confirm-HMAppFolderSafe([string]$What) {
+    if (-not $isAdmin -or $script:UserMode) { return $true }
+    $root = $script:AppRoot
+    if ($root -like '\\*') { return $true }
+    $w = ''; try { $w = Get-HMAppAclFindings $root } catch { return $true }
+    $pf = @(); try { $pf = @(Get-HMAppParentFindings $root) } catch { $pf = @() }
+    $fix = @($pf | Where-Object { -not $_.Profile })
+    if (-not $w -and -not $pf.Count) { return $true }
+    $m = "$What laeuft spaeter mit hoeheren Rechten aus dem HUMig-Ordner $root.`n`n"
+    if ($w) { $m += "Nicht-Administratoren duerfen im HUMig-Ordner schreiben:`n$w`n`n" }
+    if ($pf.Count) { $m += "Nicht-Administratoren duerfen einen Ordner darueber umbenennen oder ersetzen:`n$(@($pf | ForEach-Object { "$($_.Path): $($_.Text)" }) -join "`n")`n`n" }
+    $m += "Dann koennte jemand eigenen Code an die Stelle von HUMig legen, der mit diesen Rechten laeuft.`n`n"
+    if (-not $w -and -not $fix.Count) {
+        $m += "HUMig liegt in einem Benutzerprofil - das sichert HUMig nicht ab. Empfehlung: HUMig nach C:\Program Files\HUMig verschieben und dort planen.`n`nOK = trotzdem planen`nAbbrechen = nicht planen"
+        return ("$([System.Windows.MessageBox]::Show($script:Window, $m, 'HUMig - Ordnerrechte', 'OKCancel', 'Warning', 'Cancel'))" -eq 'OK')
+    }
+    $m += "Ja = jetzt absichern und planen`nNein = trotzdem planen`nAbbrechen = nicht planen"
+    $a = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'HUMig - Ordnerrechte', 'YesNoCancel', 'Warning', 'Yes'))"
+    if ($a -eq 'Cancel') { return $false }
+    if ($a -eq 'Yes') { foreach ($x in @(Protect-HMAppAll $root -Parents $fix -Folder:([bool]$w))) { Out-Console $x.Text $x.Level } }
+    return $true
 }
 # Frueh pruefen (Frage ueber dem Startbildschirm). Meldungen und "nie mehr fragen" werden nach dem Laden nachgeholt.
 $script:AclChecked = $false
