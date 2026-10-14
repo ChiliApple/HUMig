@@ -237,6 +237,7 @@ function Stop-HMRemote([string]$Why = '', [switch]$Silent) {
     try { $r.RS.Dispose() } catch { }
     try { if ($r.S.DevDirty) { Save-HMRemoteDevices $r.S.Devices } } catch { }
     try { Update-HMRemotePushRuns -Final } catch { }
+    try { [void](Receive-HMRemoteBg -Final) } catch { }
     if ($r.Admin) {
         if ($r.TempFw) { Remove-HMRemoteFirewall $script:HMRemoteRuleTemp }
         if ($r.TempBind) { Remove-HMRemoteBinding $r.Port }
@@ -284,6 +285,11 @@ function Update-HMRemoteTick {
     $S.JobJson = ConvertTo-HMRemoteJobJson $script:CurrentJob "$($script:JobTitle)" $script:HMRemoteLast -Mon $script:MonSnap
     try { Update-HMRemotePushRuns } catch { }
     # Zusatzanzeigen (App-Updates je PC, Server-Backup-Kachel) hoechstens alle 2 Minuten bzw. nach neuem Status
+    $volNew = $false; try { $volNew = Receive-HMRemoteBg } catch { }
+    if ($volNew) {
+        # neue Datentraeger-Daten: nur die Zusatzanzeige neu (ohne neue Abfrage und ohne den 2-Minuten-Takt zu verschieben)
+        try { $S.ExtraJson = ConvertTo-Json -Compress -Depth 6 -InputObject (Get-HMRemoteExtra -NoQuery) } catch { }
+    }
     if (-not $r.ExtraAt -or ((Get-Date) - $r.ExtraAt).TotalSeconds -ge 120 -or -not [object]::ReferenceEquals($script:StatusData, $r.ExtraObj)) {
         $r.ExtraAt = Get-Date; $r.ExtraObj = $script:StatusData
         try { $S.ExtraJson = ConvertTo-Json -Compress -Depth 6 -InputObject (Get-HMRemoteExtra) } catch { }
@@ -312,6 +318,41 @@ function Get-HMRemoteReportPath($Job) {
     if ($rp -match '\.html?$') { return $rp }
     return ("$($rp.TrimEnd('\'))\Bericht.html")   # ohne Join-Path: Platte evtl. schon ausgeworfen
 }
+# Ordner fuer lokale Kopien von Berichten (Profil des Kontos). HUMig laeuft meist erhoeht, der Ordner ist fuer das Konto auch
+# ohne Erhoehung beschreibbar: ist ein Teil des Pfads eine Verknuepfung (Junction/Symlink), wird nichts kopiert oder geloescht.
+function Get-HMRemoteReportDir([switch]$Create) {
+    if (-not $env:LOCALAPPDATA) { return '' }
+    $b = "$($env:LOCALAPPDATA)\HUMig"; $d = "$b\remote-reports"
+    try {
+        if ($Create -and -not (Test-Path -LiteralPath $d)) { [void](New-Item -ItemType Directory -Path $d -Force) }
+        foreach ($x in @($b, $d)) {
+            if (-not (Test-Path -LiteralPath $x)) { return '' }
+            if ((Get-Item -LiteralPath $x -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { return '' }
+        }
+        return $d
+    } catch { return '' }
+}
+# lokale Kopien entfernen, die nicht mehr im Verlauf stehen (nur eigene Namen <8 hex>.html, keine Verknuepfungen)
+function Clear-HMRemoteReportCopies($List) {
+    try {
+        $ld = Get-HMRemoteReportDir
+        if (-not $ld) { return }
+        $keep = @($List | Where-Object { $_ } | ForEach-Object { "$($_.Id).html" })
+        foreach ($x in @(Get-ChildItem -LiteralPath $ld -Filter '*.html' -File -Force -ErrorAction SilentlyContinue)) {
+            if ($x.Name -notmatch '^[0-9a-f]{8}\.html$' -or $keep -contains $x.Name) { continue }
+            if ($x.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+            # Ordner kann zwischenzeitlich getauscht worden sein: Datei muss noch im geprueften Ordner liegen
+            if (-not (Get-HMRemoteReportDir) -or (([IO.Path]::GetDirectoryName($x.FullName) -replace '[\\/]+', '\').TrimEnd('\') -ne ($ld -replace '[\\/]+', '\').TrimEnd('\'))) { return }
+            Remove-Item -LiteralPath $x.FullName -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
+}
+# Netzpfad (UNC oder verbundenes Netzlaufwerk)?
+function Test-HMRemoteNetPath([string]$Path) {
+    if ($Path -match '^\\\\') { return $true }
+    if ($Path -match '^([A-Za-z]):') { try { return ((New-Object IO.DriveInfo($Matches[1])).DriveType -eq [IO.DriveType]::Network) } catch { return $false } }
+    return $false
+}
 function Add-HMRemoteHistory($Job, [string]$Title, [string]$Result, [string]$Code, $Res) {
     $lvl = switch ($Code) { 'OK' { 'OK' } 'Created' { 'OK' } 'Warning' { 'Warning' } 'NoCatalog' { 'Warning' } 'Cancelled' { 'Info' } default { 'Error' } }
     $rb = Get-HMRemoteRandomBytes 4   # liefert ,@() - erst zuweisen
@@ -321,7 +362,27 @@ function Add-HMRemoteHistory($Job, [string]$Title, [string]$Result, [string]$Cod
         Id = (-join ($rb | ForEach-Object { $_.ToString('x2') })); Title = $Title; Result = $Result; Level = $lvl
         Time = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Seconds = [int]($(if ($Job.Ended) { [datetime]$Job.Ended } else { Get-Date }) - $Job.Started).TotalSeconds; Bytes = $bytes; Report = (Get-HMRemoteReportPath $Job)
     }
+    # Bericht auf Netzpfad: hier NICHT anfassen (Freigabe evtl. weg - Oberflaeche wuerde haengen). Bei laufender Fernbedienung
+    # im Hintergrund lokal kopieren und danach eintragen; der Webserver liest nie von einer Freigabe.
+    $netSrc = ''
+    if ($e.Report -and (Test-HMRemoteNetPath $e.Report)) { $netSrc = "$($e.Report)"; $e.Report = '' }
     $list = @(@($e) + @(Read-HMRemoteHistory) | Select-Object -First 10)
+    Clear-HMRemoteReportCopies $list
+    if ($netSrc -and $script:HMRemote) {
+        $ld = Get-HMRemoteReportDir -Create
+        if ($ld) {
+            [void](Start-HMRemoteBg 'Copy' {
+                    param($src, $dst)
+                    # unmittelbar vor dem Kopieren nochmals: Zielordner und HUMig-Ordner keine Verknuepfung
+                    $dd = [IO.Path]::GetDirectoryName($dst)
+                    foreach ($x in @([IO.Path]::GetDirectoryName($dd), $dd)) { if ((Get-Item -LiteralPath $x -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { return 'NO' } }
+                    $fi = New-Object IO.FileInfo($src)
+                    if (-not $fi.Exists -or $fi.Length -gt 10MB -or $fi.Extension -notin @('.html', '.htm')) { return 'NO' }
+                    [IO.File]::Copy($fi.FullName, $dst, $true)
+                    return 'OK'
+                } @($netSrc, "$ld\$($e.Id).html") @{ Id = "$($e.Id)"; Dst = "$ld\$($e.Id).html" } 120)
+        }
+    }
     try {
         $f = Get-HMRemoteHistFile; $d = Split-Path $f -Parent
         if (-not (Test-Path -LiteralPath $d)) { [void](New-Item -ItemType Directory -Path $d -Force) }
@@ -334,9 +395,12 @@ function Set-HMRemoteHistory($S, $List) {
     $map = [hashtable]::Synchronized(@{})   # neu aufbauen und dann tauschen (Webserver liest gleichzeitig)
     $out = @()
     foreach ($x in @($List | Where-Object { $_ })) {
-        $has = [bool]("$($x.Report)" -and "$($x.Id)" -match '^[0-9a-f]{8}$')
+        # Netzpfade (z. B. Verlauf aus 2.1.1) nie an den Webserver - er wuerde bei getrennter Freigabe haengen
+        $has = [bool]("$($x.Report)" -and "$($x.Id)" -match '^[0-9a-f]{8}$' -and -not (Test-HMRemoteNetPath "$($x.Report)"))
         if ($has) { $map["$($x.Id)"] = "$($x.Report)" }
-        $out += [ordered]@{ id = "$($x.Id)"; title = "$($x.Title)"; result = "$($x.Result)"; level = "$($x.Level)"; time = "$($x.Time)"; sec = [int]$x.Seconds; bytes = [long]$x.Bytes; report = $has }
+        $sec = 0; $by = [long]0
+        try { $sec = [int]$x.Seconds } catch { }; try { $by = [long]$x.Bytes } catch { }   # defekter Eintrag soll nicht den ganzen Verlauf leeren
+        $out += [ordered]@{ id = "$($x.Id)"; title = "$($x.Title)"; result = "$($x.Result)"; level = "$($x.Level)"; time = "$($x.Time)"; sec = $sec; bytes = $by; report = $has }
     }
     $S.Reports = $map
     $S.HistJson = ConvertTo-Json -Compress -Depth 3 -InputObject @($out)
@@ -345,7 +409,7 @@ function Set-HMRemoteHistory($S, $List) {
 # ----------------------------------------------------------------------------
 # Zusatzanzeigen fuer das Handy: App-Updates je PC, Server-Backup-Kachel
 # ----------------------------------------------------------------------------
-function Get-HMRemoteExtra {
+function Get-HMRemoteExtra([switch]$NoQuery) {
     $o = [ordered]@{ apps = @(); sb = @() }
     if ($script:UserMode) { return $o }
     # --- App-Updates: Verlauf (letzte 7 Tage), letzte Suche (diese Sitzung), Zeitplan (gelesen bzw. dieser PC)
@@ -370,13 +434,17 @@ function Get-HMRemoteExtra {
         $o.apps += $e
     }
     # --- Server-Backup: naechste Platte laut Rotation, angesteckte Platten (Bezeichnung, frei)
+    # nur mit Server-Backup-Profilen; Abfrage im Hintergrund (schlafende USB-Platte haelt die Oberflaeche nicht an), Ergebnis des letzten Laufs
     $vols = @()
-    # nur mit Server-Backup-Profilen; mit Zeitlimit (schlafende USB-Platte soll die Oberflaeche nicht lange anhalten)
     if (@($script:StatusData.Server | Where-Object { $_ }).Count) {
-        try {
-            $vols = @(Get-CimInstance -Namespace 'root/Microsoft/Windows/Storage' -ClassName MSFT_Volume -OperationTimeoutSec 5 -ErrorAction Stop |
-                    Where-Object { "$($_.FileSystemLabel)" -and "$($_.DriveLetter)" -match '^[A-Za-z]$' })
-        } catch { }
+        if ($script:HMRemoteVols) { $vols = @($script:HMRemoteVols) }
+        if (-not $NoQuery -and -not (Test-HMRemoteBgBusy 'Vol')) {
+            [void](Start-HMRemoteBg 'Vol' {
+                    @(Get-CimInstance -Namespace 'root/Microsoft/Windows/Storage' -ClassName MSFT_Volume -OperationTimeoutSec 5 -ErrorAction Stop |
+                        Where-Object { "$($_.FileSystemLabel)" -and "$($_.DriveLetter)" -match '^[A-Za-z]$' } |
+                        ForEach-Object { [pscustomobject]@{ FileSystemLabel = "$($_.FileSystemLabel)"; DriveLetter = "$($_.DriveLetter)"; SizeRemaining = [long]$_.SizeRemaining; Size = [long]$_.Size } })
+                } @() @{} 60)
+        }
     }
     foreach ($p in @($script:StatusData.Server | Where-Object { $_ })) {
         $rot = @($p.Disks | Where-Object { $_ -and -not $_.Archive })
@@ -390,6 +458,58 @@ function Get-HMRemoteExtra {
         $o.sb += [ordered]@{ name = "$($p.Name)"; next = "$(if ($nx) { $nx.Label })"; conn = @($conn); archiveAge = $p.ArchiveAge }
     }
     return $o
+}
+# Hintergrund-Arbeiten der Fernbedienung (Datentraeger lesen, Bericht kopieren) - die Oberflaeche wartet nie darauf.
+# Abholung im UI-Timer (Receive-HMRemoteBg); haengt eine Arbeit, wird sie abgebrochen und erst nach Ende des Abbruchs entsorgt.
+$script:HMRemoteBg = New-Object System.Collections.ArrayList
+function Start-HMRemoteBg([string]$Kind, [scriptblock]$Script, [object[]]$Arguments, [hashtable]$Data, [int]$LimitSec) {
+    try {
+        $ps = [powershell]::Create()
+        [void]$ps.AddScript($Script)
+        foreach ($a in @($Arguments)) { [void]$ps.AddArgument($a) }
+        [void]$script:HMRemoteBg.Add(@{ Kind = $Kind; PS = $ps; Handle = $ps.BeginInvoke(); Started = Get-Date; Limit = $LimitSec; Data = $Data; StopH = $null })
+        return $true
+    } catch { return $false }
+}
+# laeuft (oder wird gerade abgebrochen) eine Arbeit dieser Art? Dann keine neue starten
+function Test-HMRemoteBgBusy([string]$Kind) { return [bool](@($script:HMRemoteBg | Where-Object { $_.Kind -eq $Kind }).Count) }
+# Ergebnisse uebernehmen; $true wenn die Zusatzanzeige neu berechnet werden soll. -Final: beim Ausschalten nicht warten
+function Receive-HMRemoteBg([switch]$Final) {
+    $refresh = $false
+    foreach ($run in @($script:HMRemoteBg)) {
+        if ($run.StopH) {
+            if ($run.StopH.IsCompleted) { try { $run.PS.EndStop($run.StopH) } catch { }; try { $run.PS.Dispose() } catch { }; $script:HMRemoteBg.Remove($run) }
+            elseif ($Final) { $script:HMRemoteBg.Remove($run) }
+            continue
+        }
+        if (-not $run.Handle.IsCompleted) {
+            if ($Final -or ((Get-Date) - $run.Started).TotalSeconds -ge $run.Limit) {
+                try { $run.StopH = $run.PS.BeginStop($null, $null) } catch { try { $run.PS.Dispose() } catch { }; $script:HMRemoteBg.Remove($run); continue }
+                if ($Final) { $script:HMRemoteBg.Remove($run) }
+            }
+            continue
+        }
+        $res = @(); $ok = $true
+        try { $res = @($run.PS.EndInvoke($run.Handle)) } catch { $ok = $false }
+        try { if ($run.PS.HadErrors) { $ok = $false } } catch { }
+        try { $run.PS.Dispose() } catch { }
+        $script:HMRemoteBg.Remove($run)
+        switch ($run.Kind) {
+            # nur bei Erfolg uebernehmen - sonst bleiben die zuletzt bekannten Platten stehen (z. B. schlafende Platte, Zeitlimit)
+            'Vol' { if ($ok) { $script:HMRemoteVols = $res; $refresh = $true } }
+            'Copy' { if ($ok -and "$($res | Select-Object -Last 1)" -eq 'OK') { Set-HMRemoteHistoryReport $run.Data.Id $run.Data.Dst } }
+        }
+    }
+    return $refresh
+}
+# Kopie fertig: Bericht beim Eintrag nachtragen (nur wenn der Eintrag noch im Verlauf steht)
+function Set-HMRemoteHistoryReport([string]$Id, [string]$Path) {
+    $list = @(Read-HMRemoteHistory)
+    $hit = $false
+    foreach ($x in $list) { if ($x -and "$($x.Id)" -eq $Id) { $x.Report = $Path; $hit = $true } }
+    if (-not $hit) { return }
+    try { [IO.File]::WriteAllText((Get-HMRemoteHistFile), (ConvertTo-Json -InputObject @($list) -Depth 3), (New-Object Text.UTF8Encoding $false)) } catch { }
+    if ($script:HMRemote) { Set-HMRemoteHistory $script:HMRemote.S $list }
 }
 # Ergebnis des App-Updates-Zeitplans auf DIESEM PC (falls eingerichtet): %ProgramData%\HUMig\AppUpdates\auto\last.json
 function Read-HMRemoteLocalAuLast {
@@ -413,12 +533,30 @@ function Test-HMRemoteAuSchedule {
 # Push-Meldung (ohne Inhalt) an alle Handys mit eingeschalteten Meldungen - nach dem Ende eines Vorgangs.
 # Gesendet wird im Hintergrund (Oberflaeche blockiert nicht); Ergebnis wertet Update-HMRemotePushRuns aus.
 $script:HMPushRuns = New-Object System.Collections.ArrayList
+# Kurzform fuer die Push-Meldung: "Backup - erfolgreich · 8,01 GB · 5 min 12 s" (Menge nur wenn bekannt)
+function New-HMRemotePushText([string]$Title, [string]$Result, $Seconds, $Bytes) {
+    $p = @("$Title - $Result")
+    try { if ($Bytes -and [long]$Bytes -gt 0) { $p += Format-HMSize ([double]$Bytes) } } catch { }
+    try { if ($null -ne $Seconds -and [double]$Seconds -ge 0) { $p += Format-HMDuration ([TimeSpan]::FromSeconds([double]$Seconds)) } } catch { }
+    $sep = ' ' + [char]0x00B7 + ' '
+    return ($p -join $sep)
+}
 function Send-HMRemotePush([string]$Text = '') {
     $r = $script:HMRemote
     if (-not $r -or -not $script:HMPushVapid) { return }
     $S = $r.S
     # Text der Meldung: holt das Handy nach dem Anklopfen ab (nie im Push selbst)
-    if ($Text) { try { $S.NoticeJson = ConvertTo-Json -Compress -InputObject ([ordered]@{ t = [int64](([datetime]::UtcNow - [datetime]'1970-01-01').TotalMilliseconds); text = $Text }) } catch { } }
+    if ($Text) {
+        try {
+            # mehrere Meldungen kurz hintereinander: Texte sammeln (hoechstens 3), statt den vorigen zu ueberschreiben
+            $now = [datetime]::UtcNow
+            $txt = $Text
+            $old = $S.Notice
+            if ($old -and $old.At -and ($now - [datetime]$old.At).TotalSeconds -lt 120 -and $old.Text) { $txt = (@(@("$($old.Text)" -split "`n") + $Text) | Select-Object -Last 3) -join "`n" }
+            $js = ConvertTo-Json -Compress -InputObject ([ordered]@{ t = [int64](($now - [datetime]'1970-01-01').TotalMilliseconds); text = $txt })
+            $S.Notice = @{ Json = $js; At = $now; Text = $txt }   # ein Tausch (Webserver liest gleichzeitig)
+        } catch { }
+    }
     # Stand sofort bereitstellen - das Handy fragt gleich nach dem Anklopfen nach
     try { $S.JobJson = ConvertTo-HMRemoteJobJson $script:CurrentJob "$($script:JobTitle)" $script:HMRemoteLast -Mon $script:MonSnap } catch { }
     $reqs = Get-HMRemotePushRequests $S.Devices $script:HMPushVapid   # liefert ,@() - nicht in @() wickeln
@@ -432,7 +570,8 @@ function Update-HMRemotePushRuns([switch]$Final) {
     foreach ($run in @($script:HMPushRuns)) {
         # laeuft ein Abbruch: erst nach dessen Ende aufraeumen (blockiert die Oberflaeche nicht)
         if ($run.StopH) {
-            if ($run.StopH.IsCompleted -or $Final) { try { $run.PS.EndStop($run.StopH) } catch { }; try { $run.PS.Dispose() } catch { }; $script:HMPushRuns.Remove($run) }
+            if ($run.StopH.IsCompleted) { try { $run.PS.EndStop($run.StopH) } catch { }; try { $run.PS.Dispose() } catch { }; $script:HMPushRuns.Remove($run) }
+            elseif ($Final) { $script:HMPushRuns.Remove($run) }   # beim Ausschalten nicht auf den haengenden Versand warten
             continue
         }
         $late = ((Get-Date) - $run.Started).TotalSeconds -gt [int]$run.Limit

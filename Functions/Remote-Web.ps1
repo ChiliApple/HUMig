@@ -424,15 +424,28 @@ $script:HMRemoteJs = @'
   }
   function openReport(id, b) {
     b.disabled = true;
+    // iPhone-App (Home-Bildschirm): kein Vorab-Fenster - nach der Adresse ein echter Link zum Antippen (60 s gueltig)
+    var ios = (window.navigator.standalone === true);
+    // sonst Fenster sofort im Tippen oeffnen (Popup-Sperre), Adresse danach setzen
+    var w = null;
+    if (!ios) { try { w = window.open('', '_blank'); if (w) { w.opener = null; } } catch (e) { w = null; } }
+    function fail(msg) { b.disabled = false; if (w) { try { w.close(); } catch (e) { } } banner(msg); }
     api('POST', '/api/report', { id: String(id) }).then(function (j) {
-      b.disabled = false;
       if (j.ok && typeof j.url === 'string' && /^\/report\/[A-Za-z0-9_-]{43}$/.test(j.url)) {
-        // eigenes Fenster (in der App gibt es sonst keinen Weg zurueck); blockiert der Browser das, in der App oeffnen
-        var w = null; try { w = window.open(j.url, '_blank'); } catch (e) { w = null; }
-        if (!w) { location.href = j.url; }
+        b.disabled = false;
+        if (w) { try { w.location.href = j.url; return; } catch (e) { try { w.close(); } catch (e2) { } } }
+        // Link statt Knopf (eigene Geste oeffnet das Fenster); nach 60 s wieder der Knopf
+        var a = el('a', 'btn mini', 'Bericht oeffnen');
+        a.setAttribute('href', j.url); a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer');
+        var p = b.parentNode;
+        if (!p) { location.href = j.url; return; }
+        p.replaceChild(a, b);
+        var back = function () { if (a.parentNode) { a.parentNode.replaceChild(b, a); } };
+        a.addEventListener('click', function () { setTimeout(back, 500); });
+        setTimeout(back, 55000);
       }
-      else { banner(j.error || 'Bericht nicht verfuegbar'); }
-    }).catch(function () { b.disabled = false; banner('HUMig nicht erreichbar'); });
+      else { fail(j.error || 'Bericht nicht verfuegbar'); }
+    }).catch(function () { fail('HUMig nicht erreichbar'); });
   }
   function renderJob(job) {
     S.running = !!job.running;
@@ -666,7 +679,8 @@ self.addEventListener('push', function (e) {
   }).then(function (j) {
     var job = (j && j.job) || {}, nt = j && j.notice;
     // Text vom PC (z. B. Fehler im App-Updates-Zeitplan), wenn er frisch ist - sonst Stand des Vorgangs
-    if (nt && typeof nt.text === 'string' && nt.text && Math.abs(Date.now() - Number(nt.t)) < 15 * 60000) {
+    var fresh = nt && (typeof nt.age === 'number' ? (nt.age >= 0 && nt.age < 900) : Math.abs(Date.now() - Number(nt.t)) < 15 * 60000);
+    if (fresh && typeof nt.text === 'string' && nt.text) {
       return self.registration.showNotification('HUMig ' + String((j && j.pc) || pc), { body: nt.text, icon: '/icon-192.png', tag: 'humig-job', renotify: true });
     }
     var body = job.running ? (String(job.title || 'Vorgang') + ' laeuft') : (job.lastTitle ? String(job.lastTitle) + ' - ' + String(job.lastResult || 'fertig') : 'Vorgang beendet');
