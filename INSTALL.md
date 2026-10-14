@@ -1,9 +1,22 @@
 ﻿# Installation
 
-## Portabel (USB-Laufwerk) oder lokal
-1. Ordner auf das Laufwerk kopieren bzw. `Pull.ps1` in den Zielordner legen und ausfuehren:
+## Erstinstallation in einer Zeile (empfohlen)
+PowerShell **als Administrator** oeffnen und einfuegen:
+
+    irm https://github.com/ChiliApple/HUMig/releases/latest/download/Install.ps1 | iex
+
+[Install.ps1](Install.ps1) fragt nach dem Zielordner (Vorschlag `C:\Program Files\HUMig` - dort koennen normale Benutzer nichts
+veraendern), laedt `Pull.ps1` aus dem freigegebenen Release, prueft dessen Pruefsumme und startet es. `Pull.ps1` laedt HUMig,
+prueft jede Datei (Pruefsumme und Signatur) und startet HUMig. Wer Skripte aus dem Internet nicht direkt ausfuehren will:
+die Adresse im Browser oeffnen und lesen - oder den Weg unten.
+
+## Mit Pull.ps1 (lokal oder portabel auf USB-Laufwerk)
+1. `Pull.ps1` in einen **leeren** Zielordner legen (z. B. `C:\Program Files\HUMig` oder ein Ordner am USB-Laufwerk) und ausfuehren:
    `powershell -ExecutionPolicy Bypass -File Pull.ps1`
-2. Erster Start mit **Start.cmd** (fragt nach Administratorrechten). Dabei wird **HUMig.exe** erzeugt - ab dann damit starten
+   Zielordner: liegt `Pull.ps1` in einer HUMig-Installation, wird dort aktualisiert; allein in einem leeren Ordner wird dort
+   installiert; sonst (z. B. aus *Downloads* gestartet) nach `Desktop\HUMig`. Immer moeglich: `-Target "C:\Program Files\HUMig"`.
+   Meldet Windows "nicht digital signiert": genau so mit `powershell -ExecutionPolicy Bypass -File ...` starten.
+2. Erster Start mit **Start.cmd** (fragt nach Administratorrechten; Pull startet ihn am Ende selbst). Dabei wird **HUMig.exe** erzeugt - ab dann damit starten
    (kein Konsolenfenster, Logo in der Taskleiste, anheftbar). Neu erzeugen / Desktop-Verknuepfung: Einstellungen > Allgemein.
 3. Backups landen standardmaessig in `BACKUPS\` neben dem Tool (aenderbar im Tool: Backup-Ordner `...`).
 4. **Benutzer-Modus** fuer Benutzer ohne Administratorrechte: **HUMig-Benutzer.exe** (wird zusammen mit HUMig.exe erzeugt) oder **Start-Benutzer.cmd**.
@@ -14,7 +27,7 @@ HUMig laeuft als Administrator. Liegt der Tool-Ordner z. B. unter `C:\Tools`, du
 HUMig prueft das beim Start, bevor es etwas aus dem Ordner laedt, und bietet an abzusichern: Besitzer Administratoren,
 Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen; `Logs` bleibt fuer den Benutzer-Modus beschreibbar. Im Backup-Ordner
 `BACKUPS` im Tool-Ordner legt jeder Benutzer eigene Backups an und oeffnet nur diese (Administratoren sehen alle).
-`Pull.ps1` stellt `BACKUPS` bei Installation/Update als Administrator so ein. Pruefen: `icacls C:\Tools\HUMig`.
+`Pull.ps1` stellt `BACKUPS` bei Installation/Update als Administrator so ein. Pruefen: `icacls "C:\Program Files\HUMig"`.
 HUMig nicht im persoenlichen Ordner (OneDrive, Desktop) eines Benutzers betreiben, wenn es dort als Administrator gestartet wird.
 
 **Ordner darueber:** `C:\Tools` hat standardmaessig die Rechte von `C:\` (angemeldete Benutzer: *Aendern*) - damit kann ein normaler Benutzer

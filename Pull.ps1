@@ -6,7 +6,11 @@
     Zielordner:
       1. -Target angegeben                          -> gewinnt immer
       2. Pull.ps1 liegt in einer HUMig-Installation -> Update an Ort und Stelle (USB-Laufwerk, Desktop, Share ...)
-      3. Pull.ps1 liegt allein                      -> $env:USERPROFILE\Desktop\HUMig
+      3. Pull.ps1 liegt allein in einem leeren Ordner -> Erstinstallation genau dort (z.B. C:\Program Files\HUMig)
+         (nicht in Laufwerkswurzel, Windows-, Programm-, Temp-, Benutzer-, Desktop- oder Downloads-Ordner)
+      4. sonst                                      -> $env:USERPROFILE\Desktop\HUMig
+      Erstinstallation in einer Zeile (PowerShell als Administrator):
+        irm https://github.com/ChiliApple/HUMig/releases/latest/download/Install.ps1 | iex
 
     Welche Version:
       -Version 2.0.53     -> genau diese Version (auch aelter = "Vorversion")
@@ -23,7 +27,7 @@
     Lokale Daten bleiben unangetastet: BACKUPS\, Logs\, BIN\USMT\, Softwareverteilung\, Treiberverteilung\, HUMig.exe, Config\settings.json, exceptions.json, modules.json, update.json.
     Token nur fuer private Repos: Umgebungsvariable HUMIG_GITHUB_TOKEN oder Config\GitHubToken_<DOMAIN>_<USER>.xml (DPAPI).
 .NOTES
-    Manuell: powershell -ExecutionPolicy Bypass -File Pull.ps1 [-Version 2.0.53] [-Channel Test]
+    Manuell: powershell -ExecutionPolicy Bypass -File Pull.ps1 [-Target "C:\Program Files\HUMig"] [-Version 2.0.53] [-Channel Test]
     Zielmaschine: der PC / das Laufwerk, auf dem HUMig liegt.
 #>
 param(
@@ -536,10 +540,24 @@ function Get-HMGitHubRateLimit($Err) {
     return $reset.ToString('yyyy-MM-ddTHH:mm:ss')
 }
 
+# Zielordner ohne -Target: HUMig-Installation daneben = Update dort; Pull.ps1 allein in einem leeren Ordner = dort installieren;
+# sonst Desktop\HUMig. Nie in Laufwerkswurzel, Windows-, Programm-, Temp-, Benutzer-, Desktop- oder Downloads-Ordner selbst.
+function Resolve-HMPullTarget([string]$Here) {
+    $desk = @{ Target = (Join-Path $env:USERPROFILE 'Desktop\HUMig'); Mode = 'Erstinstallation (Desktop)' }
+    if (-not $Here) { return $desk }
+    if ((Test-Path -LiteralPath (Join-Path $Here 'HUMig.ps1')) -or (Test-Path -LiteralPath (Join-Path $Here 'Functions'))) { return @{ Target = $Here; Mode = 'Update (an Ort und Stelle)' } }
+    $full = ''; try { $full = [IO.Path]::GetFullPath($Here).TrimEnd('\') } catch { return $desk }
+    $bad = @(@([IO.Path]::GetPathRoot($full), $env:SystemRoot, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData, $env:TEMP, $env:USERPROFILE,
+            $(if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'Desktop' }), $(if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'Downloads' }),
+            [Environment]::GetFolderPath('Desktop')) | Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\') })
+    if ($bad -contains $full) { return $desk }
+    $others = @(Get-ChildItem -LiteralPath $full -Force -ErrorAction SilentlyContinue | Where-Object { @('Pull.ps1', 'desktop.ini', 'Thumbs.db') -notcontains $_.Name })
+    if ($others.Count) { return $desk }
+    return @{ Target = $full; Mode = 'Erstinstallation (Ordner von Pull.ps1)' }
+}
 if (-not $Target) {
-    $here = $PSScriptRoot
-    if ($here -and ((Test-Path (Join-Path $here 'HUMig.ps1')) -or (Test-Path (Join-Path $here 'Functions')))) { $Target = $here; $mode = 'Update (an Ort und Stelle)' }
-    else { $Target = Join-Path $env:USERPROFILE 'Desktop\HUMig'; $mode = 'Erstinstallation (Desktop)' }
+    $rt = Resolve-HMPullTarget $PSScriptRoot
+    $Target = $rt.Target; $mode = $rt.Mode
 } else { $mode = 'Ziel per -Target' }
 $Target = $Target.TrimEnd('\')
 # Erstinstallation (noch kein HUMig im Zielordner)? Fuer die Ordnerrechte am Ende (Schritt 7)
