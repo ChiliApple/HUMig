@@ -369,6 +369,94 @@ function Protect-HMAppFolder([string]$Root, [string[]]$BackupDirs = @(), [switch
     else { $msgs.Add([pscustomobject]@{ Text = "Ordnerrechte abgesichert: $rt (Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen)"; Level = 'Success' }) }
     return $msgs
 }
+# Uebergeordnete Ordner bis zum Laufwerk: Darf ein Nicht-Administrator einen davon umbenennen oder ersetzen (Loeschen,
+# Unterordner loeschen, Rechte oder Besitzer aendern, Vollzugriff - auf den Ordner selbst, nicht nur vererbbar) oder gehoert
+# er einem Nicht-Administrator? Dann koennte jemand den abgesicherten HUMig-Ordner wegbenennen und einen eigenen an dieselbe
+# Stelle legen (Zeitplaene als SYSTEM und der naechste Start als Administrator fuehren dann fremden Code aus).
+# Typisch: C:\Tools mit den Standardrechten von C:\ (Authentifizierte Benutzer: Aendern).
+# Rueckgabe: Liste mit Path, Text, Profile (Profile = Ordner liegt unter C:\Users - wird nicht abgesichert). Leer = sicher.
+function Test-HMAppInProfile([string]$Path) {
+    $u = if ($env:PUBLIC) { Split-Path $env:PUBLIC -Parent } else { "$env:SystemDrive\Users" }
+    $p = $Path.TrimEnd('\')
+    return ($p -ieq $u -or $p.StartsWith($u + '\', [StringComparison]::OrdinalIgnoreCase))
+}
+function Get-HMAppParentRisk([System.Security.AccessControl.FileSystemSecurity]$Acl, [switch]$Rules) {
+    $safe = @('S-1-5-18', 'S-1-5-32-544', 'S-1-3-0', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $mask = 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000
+    $out = New-Object System.Collections.Generic.List[object]
+    foreach ($r in @($Acl.GetAccessRules($true, (-not $Rules), [System.Security.Principal.SecurityIdentifier]))) {
+        if ("$($r.AccessControlType)" -ne 'Allow') { continue }
+        if (([int]$r.PropagationFlags) -band 2) { continue }   # nur vererbbar: gilt nicht fuer den Ordner selbst
+        if (-not ([int]$r.FileSystemRights -band $mask)) { continue }
+        $sid = "$($r.IdentityReference.Value)"
+        if ($safe -contains $sid) { continue }
+        if ($sid -like 'S-1-5-21-*' -and $sid -notmatch '-(513|515|545)$' -and @(Get-HMAppAdminSids) -contains $sid) { continue }
+        $out.Add($r)
+    }
+    return $out
+}
+function Get-HMAppParentFindings([string]$Root) {
+    $safe = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $res = New-Object System.Collections.Generic.List[object]
+    $d = (New-Object System.IO.DirectoryInfo ([System.IO.Path]::GetFullPath($Root).TrimEnd('\'))).Parent
+    while ($d) {
+        $acl = $null; try { $acl = Get-Acl -LiteralPath $d.FullName -ErrorAction Stop } catch { }
+        if (-not $acl) { $d = $d.Parent; continue }   # nicht lesbar: kein Befund (Absichern koennte dort ohnehin nichts)
+        $f = @()
+        $own = ''; try { $own = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value } catch { }
+        if ($own -and $safe -notcontains $own -and @(Get-HMAppAdminSids) -notcontains $own) { $f += "Besitzer $($acl.Owner)" }
+        foreach ($r in @(Get-HMAppParentRisk $acl)) {
+            $nt = ''; try { $nt = $r.IdentityReference.Translate([System.Security.Principal.NTAccount]).Value } catch { $nt = "$($r.IdentityReference)" }
+            $f += "$nt`: $($r.FileSystemRights)"
+        }
+        if ($f.Count) { $res.Add([pscustomobject]@{ Path = $d.FullName; Text = (@($f | Select-Object -Unique) -join '; '); Profile = (Test-HMAppInProfile $d.FullName) }) }
+        $d = $d.Parent
+    }
+    return $res
+}
+# Einen uebergeordneten Ordner absichern - nur den Ordner selbst: Besitzer Administratoren; Nicht-Administratoren verlieren
+# auf diesem Ordner Loeschen, Unterordner loeschen, Rechte/Besitzer aendern und Vollzugriff (Lesen/Anlegen bleibt). Was der
+# Ordner an Unterordner/Dateien vererbt (andere Programme darin), bleibt unveraendert. Nie unter C:\Users.
+# Rueckgabe: '' = abgesichert, sonst Fehlertext.
+function Protect-HMAppParent([string]$Dir) {
+    if (Test-HMAppInProfile $Dir) { return 'liegt in einem Benutzerprofil - nicht geaendert' }
+    $mask = 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000
+    try {
+        $safe = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+        $own = ''; try { $own = (Get-Acl -LiteralPath $Dir -ErrorAction Stop).GetOwner([System.Security.Principal.SecurityIdentifier]).Value } catch { }
+        if ($safe -notcontains $own -and @(Get-HMAppAdminSids) -notcontains $own) {
+            $o = & icacls.exe "$Dir" /setowner '*S-1-5-32-544' /C /Q 2>&1
+            if ($LASTEXITCODE -ne 0) { return "Besitzer: $(@($o) -join ' ')" }
+        }
+        $di = New-Object System.IO.DirectoryInfo ($Dir)
+        $acl = $di.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Access)
+        if (@(Get-HMAppParentRisk $acl).Count) {
+            # geerbte Eintraege zu eigenen machen (gleiche Wirkung), damit sie geaendert werden koennen
+            if (-not $acl.AreAccessRulesProtected) {
+                $acl.SetAccessRuleProtection($true, $true)
+                $di.SetAccessControl($acl)
+                $acl = $di.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Access)
+            }
+            foreach ($r in @(Get-HMAppParentRisk $acl -Rules)) {
+                [void]$acl.RemoveAccessRuleSpecific($r)
+                $rights = [int]$r.FileSystemRights
+                if ("$($r.InheritanceFlags)" -ne 'None') {
+                    # an Unterordner/Dateien weiter wie bisher vererben
+                    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($r.IdentityReference, [System.Security.AccessControl.FileSystemRights]$rights, $r.InheritanceFlags, [System.Security.AccessControl.PropagationFlags]::InheritOnly, 'Allow')))
+                }
+                $rest = $rights -band (-bnot $mask)
+                if ($rights -band 0x10000000) { $rest = $rest -bor 0x1200A9 }   # Vollzugriff (allgemein): Lesen/Ausfuehren behalten
+                if ($rest -band 0xFFFF) {
+                    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($r.IdentityReference, [System.Security.AccessControl.FileSystemRights]$rest, [System.Security.AccessControl.InheritanceFlags]::None, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
+                }
+            }
+            $di.SetAccessControl($acl)
+        }
+        $left = @(Get-HMAppParentRisk (Get-Acl -LiteralPath $Dir -ErrorAction Stop))
+        if ($left.Count) { return "noch: $(@($left | ForEach-Object { "$($_.IdentityReference): $($_.FileSystemRights)" }) -join '; ')" }
+        return ''
+    } catch { return "$($_.Exception.Message)" }
+}
 #endregion HMAppAcl
 
 function Stop-HMPull([string]$Msg) {
@@ -667,7 +755,9 @@ try {
     if ($elev -and $tFull -notlike '\\*' -and $fsType -eq 'NTFS' -and -not (Test-HMAclCheckOff (Join-Path $tFull 'Config'))) {
         $aclNeed = ''; $aclOk = $true
         try { $aclNeed = Get-HMAppAclFindings $tFull } catch { $aclNeed = ''; $aclOk = $false }
-        if ($aclNeed) { Write-Host "Ordnerrechte: $($aclNeed -replace "`n", ' | ') - HUMig fragt beim naechsten Start als Administrator nach dem Absichern." -ForegroundColor Yellow }
+        if ($aclNeed) { Write-Host "Ordnerrechte: $($aclNeed -replace "`n", ' | ') - HUMig fragt beim naechsten Start als Administrator nach dem Absichern." -ForegroundColor Yellow }
+        $aclPar = @(); try { $aclPar = @(Get-HMAppParentFindings $tFull | Where-Object { -not $_.Profile }) } catch { }
+        foreach ($x in $aclPar) { Write-Host "Ordnerrechte: Nicht-Administratoren duerfen $($x.Path) umbenennen/ersetzen ($($x.Text)) - HUMig fragt beim naechsten Start als Administrator nach dem Absichern." -ForegroundColor Yellow }
         if ($aclOk -and (-not $aclNeed -or $pullFirst)) {
             $aclBr = Get-HMAppBackupRoot $tFull
             $aclPub = @(@($aclBr, (Join-Path $tFull 'BACKUPS')) | Where-Object { $_ -and "$_".StartsWith($tFull + '\', [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $_) -and -not (Test-HMAppBackupPrivate $_) })

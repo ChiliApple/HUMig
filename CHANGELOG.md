@@ -1,5 +1,17 @@
 ﻿# Changelog
 
+## v2.1.3 - 2026-10-14
+### Handy-Fernbedienung
+- **Zeitplaene vom Handy sofort starten** (Reiter *Vorgang* > *Zeitplan jetzt starten*): Profil-Backups (eigene, ohne Adminrechte angelegt), Server-Backups und App-Updates dieses PCs. **Standard aus**, je Art einzeln einschaltbar unter Einstellungen > Handy; Server-Backup und App-Updates nur als Administrator
+- Schutz: Handy sieht nur eine zufaellige Kennung; vor jedem Start prueft HUMig die Aufgabe erneut (Ordner, Konto, genau ein Befehl mit HUMigs eigenem Skript) - eine veraenderte oder gleichnamige fremde Aufgabe wird nicht gestartet; SYSTEM-Aufgaben nur, wenn normale Benutzer den Programmordner und die uebergeordneten Ordner nicht aendern koennen; Einmal-Bestaetigung (30 s, je Handy, hoechstens 3 offen); nicht wenn schon laufend; Server-Backup nicht, solange eine Server-Sicherung, ein anderer HUMig-Zeitplan oder in HUMig ein Vorgang laeuft; hoechstens 1 Start je Aufgabe und Minute, 5 in 10 Minuten; Zugriffsprotokoll mit Geraet und Aufgabe; Push-Meldung am Ende des Laufs
+- Liste und Pruefung der Zeitplaene im Hintergrund (Oberflaeche wartet nicht auf die Aufgabenplanung)
+### Sicherheit
+- **Ordnerrechte: auch die Ordner ueber dem HUMig-Ordner** werden geprueft (beim Start als Administrator, in `Pull.ps1` als Hinweis). Duerfen normale Benutzer einen davon umbenennen oder ersetzen - z. B. `C:\Tools` mit den Standardrechten von `C:\` -, koennten sie den abgesicherten HUMig-Ordner wegbenennen und einen eigenen hinlegen, den geplante Aufgaben (Server-Backup als SYSTEM) und der naechste Start als Administrator ausfuehren wuerden. HUMig fragt und sichert auf Wunsch **nur den Ordner selbst** ab (Besitzer Administratoren; kein Umbenennen/Loeschen/Rechte aendern fuer Nicht-Administratoren; Lesen/Anlegen und die Rechte der Unterordner anderer Programme bleiben). Ordner unter `C:\Users` werden nie geaendert, nur gemeldet. **Funktionsaenderung:** bestehende Installationen z. B. unter `C:\Tools` bekommen beim naechsten Start diese Rueckfrage
+- Dieselbe Pruefung beim Anlegen eines Server-Backup-Zeitplans und eines Profil-Backup-Zeitplans mit Administratorrechten (absichern und planen / trotzdem planen / nicht planen)
+- Empfehlung fuer Server und gemeinsam genutzte PCs jetzt `C:\Program Files\HUMig` (Anleitung, INSTALL, Hinweise beim Planen)
+### Berichte
+- Backup-, Restore- und Server-Backup-Bericht am Handy gut lesbar (einheitliche Schriftgroesse, lange Pfade umbrochen); am PC unveraendert
+
 ## v2.1.2 - 2026-10-14
 ### Handy-Fernbedienung
 - **Push-Meldung in Kurzform** mit Menge und Dauer, z. B. "Backup - erfolgreich · 8,01 GB · 5 min 12 s"; mehrere Meldungen kurz hintereinander erscheinen gemeinsam (bis 3 Zeilen)

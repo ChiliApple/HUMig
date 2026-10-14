@@ -1679,6 +1679,110 @@ Describe 'Handy-Fernbedienung: Restzeit, Verlauf mit Bericht, Zusatzanzeigen' {
             (Test-Path (Join-Path $d 'fremd.html')) | Should -BeTrue
         } finally { $env:LOCALAPPDATA = $old }
     }
+    It 'Zeitplaene vom Handy: nur mit Einmal-Bestaetigung (Geraet, Kennung, 30 s), eine Anfrage zur Zeit' {
+        $S = New-HMRemoteState; $S.Pc = 'PC'; $S.Version = '1'
+        $code = Open-HMRemotePairing $S
+        $tok = ((Invoke-HMHistTest $S 'POST' '/api/pair' @{ code = $code; name = 'A' }).Text | ConvertFrom-Json).token
+        $code2 = $S.Pair.Code
+        $tok2 = ((Invoke-HMHistTest $S 'POST' '/api/pair' @{ code = $code2; name = 'B' }).Text | ConvertFrom-Json).token
+        $S.SchedMap['0123456789abcdef'] = @{ Key = 'S|\HUMig\|Server-Backup - X'; Kind = 'Server'; Title = 'X'; Confirm = 'Server-Backup X starten?' }
+        # unbekannte/ungueltige Kennung
+        (Invoke-HMHistTest $S 'POST' '/api/schedule/prepare' @{ id = '../x' } -Token $tok).Code | Should -Be 404
+        (Invoke-HMHistTest $S 'POST' '/api/schedule/prepare' @{ id = 'ffffffffffffffff' } -Token $tok).Code | Should -Be 404
+        # ohne Bestaetigung kein Start
+        (Invoke-HMHistTest $S 'POST' '/api/schedule/run' @{ id = '0123456789abcdef'; nonce = ('a' * 32) } -Token $tok).Code | Should -Be 403
+        $p = (Invoke-HMHistTest $S 'POST' '/api/schedule/prepare' @{ id = '0123456789abcdef' } -Token $tok).Text | ConvertFrom-Json
+        $p.ok | Should -BeTrue; $p.nonce | Should -Match '^[0-9a-f]{32}$'; $p.text | Should -Be 'Server-Backup X starten?'
+        # Bestaetigung gilt nur fuer dieses Geraet
+        (Invoke-HMHistTest $S 'POST' '/api/schedule/run' @{ id = '0123456789abcdef'; nonce = $p.nonce } -Token $tok2).Code | Should -Be 403
+        $p = (Invoke-HMHistTest $S 'POST' '/api/schedule/prepare' @{ id = '0123456789abcdef' } -Token $tok).Text | ConvertFrom-Json
+        $r = Invoke-HMHistTest $S 'POST' '/api/schedule/run' @{ id = '0123456789abcdef'; nonce = $p.nonce } -Token $tok
+        $r.Code | Should -Be 202
+        $S.SchedReq.Entry.Key | Should -Be 'S|\HUMig\|Server-Backup - X'; $S.SchedReq.By | Should -Be 'A'
+        # einmalig verbraucht
+        (Invoke-HMHistTest $S 'POST' '/api/schedule/run' @{ id = '0123456789abcdef'; nonce = $p.nonce } -Token $tok).Code | Should -Be 403
+        # solange eine Anfrage offen ist, keine zweite
+        $p = (Invoke-HMHistTest $S 'POST' '/api/schedule/prepare' @{ id = '0123456789abcdef' } -Token $tok).Text | ConvertFrom-Json
+        (Invoke-HMHistTest $S 'POST' '/api/schedule/run' @{ id = '0123456789abcdef'; nonce = $p.nonce } -Token $tok).Code | Should -Be 409
+        # abgelaufen
+        $S.SchedReq = $null
+        $p = (Invoke-HMHistTest $S 'POST' '/api/schedule/prepare' @{ id = '0123456789abcdef' } -Token $tok).Text | ConvertFrom-Json
+        $S.SchedNonce[$p.nonce].Exp = (Get-Date).AddSeconds(-1)
+        (Invoke-HMHistTest $S 'POST' '/api/schedule/run' @{ id = '0123456789abcdef'; nonce = $p.nonce } -Token $tok).Code | Should -Be 403
+        # je Handy hoechstens 3 offene Bestaetigungen - ein anderes Handy ist davon nicht betroffen
+        $S.SchedNonce.Clear()
+        1..3 | ForEach-Object { (Invoke-HMHistTest $S 'POST' '/api/schedule/prepare' @{ id = '0123456789abcdef' } -Token $tok).Code | Should -Be 200 }
+        (Invoke-HMHistTest $S 'POST' '/api/schedule/prepare' @{ id = '0123456789abcdef' } -Token $tok).Code | Should -Be 429
+        (Invoke-HMHistTest $S 'POST' '/api/schedule/prepare' @{ id = '0123456789abcdef' } -Token $tok2).Code | Should -Be 200
+        $S.SchedNonce.Clear()
+        # Liste fuer das Handy: nur Kennung und Text, keine Pfade; nicht startbare ohne Kennung
+        Set-HMRemoteSchedList $S @{ Wb = $false; Items = @(
+                @{ Kind = 'Server'; Title = 'Gym - taeglich'; TaskPath = '\HUMig\'; TaskName = 'Server-Backup - Gym'; Problem = ''; As = 'SYSTEM'; Key = 'S|\HUMig\|Server-Backup - Gym'; Info = @{ Running = $false; Disabled = $false; Next = '15.10. 22:00'; Last = '14.10. 22:00'; Result = 0 } },
+                @{ Kind = 'Au'; Title = 'App-Updates dieses PCs'; TaskPath = '\HUMig\'; TaskName = 'HUMig App-Updates'; Problem = 'Aufgabe veraendert - am PC pruefen'; As = 'SYSTEM'; Key = 'A|\HUMig\|HUMig App-Updates'; Info = $null }) }
+        $l = @($S.SchedJson | ConvertFrom-Json | ForEach-Object { $_ })
+        $l.Count | Should -Be 2
+        $l[0].id | Should -Match '^[0-9a-f]{16}$'; $l[0].ok | Should -BeTrue; $l[0].sub | Should -Match 'erfolgreich'
+        $l[1].id | Should -Be ''; $l[1].ok | Should -BeFalse; $l[1].note | Should -Match 'veraendert'
+        $S.SchedJson | Should -Not -Match 'HUMig\\\\|Server-Backup - Gym'
+        $S.SchedMap.Count | Should -Be 1
+        $S.SchedMap[$l[0].id].Key | Should -Be 'S|\HUMig\|Server-Backup - Gym'
+        # Kennung bleibt bei neuem Listenaufbau gleich (laufende Bestaetigung scheitert nicht)
+        $id1 = $l[0].id
+        Set-HMRemoteSchedList $S @{ Wb = $false; Items = @(@{ Kind = 'Server'; Title = 'Gym - taeglich'; TaskPath = '\HUMig\'; TaskName = 'Server-Backup - Gym'; Problem = ''; As = 'SYSTEM'; Key = 'S|\HUMig\|Server-Backup - Gym'; Info = @{ Running = $false; Disabled = $false; Next = ''; Last = ''; Result = $null } }) }
+        @($S.SchedJson | ConvertFrom-Json | ForEach-Object { $_ })[0].id | Should -Be $id1
+        (Invoke-HMHistTest $S 'GET' '/api/state' -Token $tok).Text | ConvertFrom-Json | ForEach-Object { @($_.sched).Count } | Should -Be 1
+    }
+    It 'Zeitplaene vom Handy: Grenzen im UI (ausgeschaltet, 1/min je Aufgabe, 5 in 10 min), Ende erst nach dem Lauf' {
+        $S = New-HMRemoteState
+        $script:HMSchedRate.Clear(); $script:HMSchedWatch.Clear(); $script:HMRemoteBg.Clear()
+        $script:UserMode = $false
+        $script:Settings = [pscustomobject]@{ Remote = [pscustomobject]@{ SchedServer = $false } }
+        function Start-HMRemoteBg { param($Kind, $Script, $Arguments, $Data, $LimitSec) $script:BgStarts += , @($Kind, $Arguments[4]); return $true }
+        function Out-Console { param($t, $l) }
+        $script:BgStarts = @()
+        $e = @{ Key = 'S|\HUMig\|Server-Backup - X'; Kind = 'Server'; Title = 'X' }
+        $S.SchedReq = @{ Entry = $e; By = 'A'; DevId = 'd1'; Ip = '10.0.0.9'; At = (Get-Date) }
+        Invoke-HMRemoteSchedReq $S
+        $script:BgStarts.Count | Should -Be 0
+        ($S.SchedMsg | ConvertFrom-Json).text | Should -Match 'ausgeschaltet'
+        $script:Settings.Remote.SchedServer = $true
+        $S.SchedReq = @{ Entry = $e; By = 'A'; DevId = 'd1'; Ip = '10.0.0.9'; At = (Get-Date) }
+        Invoke-HMRemoteSchedReq $S
+        $script:BgStarts.Count | Should -Be 1; $script:BgStarts[0][1] | Should -Be 'S|\HUMig\|Server-Backup - X'
+        $S.SchedReq = @{ Entry = $e; By = 'A'; DevId = 'd1'; Ip = '10.0.0.9'; At = (Get-Date) }
+        Invoke-HMRemoteSchedReq $S
+        $script:BgStarts.Count | Should -Be 1
+        ($S.SchedMsg | ConvertFrom-Json).text | Should -Match 'einmal pro Minute'
+        foreach ($i in 2..6) { $S.SchedReq = @{ Entry = @{ Key = "K$i"; Kind = 'Server'; Title = "T$i" }; By = 'A'; DevId = 'd1'; Ip = '10.0.0.9'; At = (Get-Date) }; Invoke-HMRemoteSchedReq $S }
+        $script:BgStarts.Count | Should -Be 5
+        ($S.SchedMsg | ConvertFrom-Json).text | Should -Match '5 Starts'
+        # Benutzer-Modus: Server-Backup und App-Updates nie
+        $script:UserMode = $true
+        (Get-HMRemoteSchedKinds).Server | Should -BeFalse
+        $script:UserMode = $false
+        # Ende: erst wenn LastRunTime >= Start und nicht mehr laufend; 267009 (laeuft) zaehlt nicht
+        Remove-Item function:\Start-HMRemoteBg; Remove-Item function:\Out-Console
+        $script:Pushes = @()
+        function Send-HMRemotePush { param($Text) $script:Pushes += $Text }
+        $at = (Get-Date).AddSeconds(-30)
+        [void]$script:HMSchedWatch.Add(@{ Key = 'K'; Kind = 'Server'; What = "Server-Backup 'X'"; At = $at })
+        function Out-Console { param($t, $l) }
+        Update-HMRemoteSchedWatch @{ Items = @(@{ Key = 'K'; Info = @{ Running = $true; LastRun = $at.AddSeconds(2); Result = 267009 } }) }
+        $script:Pushes.Count | Should -Be 0
+        Update-HMRemoteSchedWatch @{ Items = @(@{ Key = 'K'; Info = @{ Running = $false; LastRun = $at.AddMinutes(-60); Result = 0 } }) }
+        $script:Pushes.Count | Should -Be 0
+        Update-HMRemoteSchedWatch @{ Items = @(@{ Key = 'K'; Info = @{ Running = $false; LastRun = $at.AddSeconds(2); Result = 1 } }) }
+        $script:Pushes.Count | Should -Be 1; $script:Pushes[0] | Should -Match 'mit Warnungen'
+        $script:HMSchedWatch.Count | Should -Be 0
+        # nicht angefangen: nach 2 Minuten Meldung statt stundenlang zu warten
+        $at2 = (Get-Date).AddMinutes(-3)
+        [void]$script:HMSchedWatch.Add(@{ Key = 'K'; Kind = 'Server'; What = "Server-Backup 'X'"; At = $at2 })
+        Update-HMRemoteSchedWatch @{ Items = @(@{ Key = 'K'; Info = @{ Running = $false; LastRun = $at2.AddHours(-20); Result = 0 } }) }
+        $script:Pushes.Count | Should -Be 2; $script:Pushes[1] | Should -Match 'nicht gelaufen'
+        $script:HMSchedWatch.Count | Should -Be 0
+        Remove-Item function:\Send-HMRemotePush; Remove-Item function:\Out-Console
+        $script:HMSchedRate.Clear(); $script:Settings = $null
+    }
     It 'Push-Meldung: Kurzform mit Menge und Dauer' {
         if (-not (Get-Command Format-HMSize -ErrorAction SilentlyContinue)) { . (Join-Path $script:Root 'Functions\Migration-Engine.ps1') }
         $d = [char]0x00B7
@@ -1758,6 +1862,58 @@ Describe 'Handy-Fernbedienung: Restzeit, Verlauf mit Bericht, Zusatzanzeigen' {
         $sw | Should -Match 'nt\.text'; $sw | Should -Not -Match 'e\.data'
         $js = [Text.Encoding]::UTF8.GetString($f['/app.js'].Bytes)
         $js | Should -Match 'function renderHist'; $js | Should -Match 'function openReport'; $js | Should -Not -Match 'innerHTML'
+    }
+}
+
+Describe 'Handy-Fernbedienung: Zeitplaene vom Handy - echte Aufgabenplanung (Windows, Administrator)' {
+    It 'Zeitplaene vom Handy: echte Aufgaben pruefen - unveraendert startbar, veraendert/fremd gesperrt' -Skip:(-not (([Environment]::OSVersion.Platform -eq 'Win32NT') -and ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))) {
+        . (Join-Path $script:Root 'Functions\Remote-Core.ps1')
+        . (Join-Path $script:Root 'Functions\Remote-Web.ps1')
+        . (Join-Path $script:Root 'Functions\UI-Remote.ps1')
+        $app = Join-Path $TestDrive 'app'
+        New-Item -ItemType Directory -Path (Join-Path $app 'Functions'), (Join-Path $app 'Config') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $app 'Functions\ServerBackup-Task.ps1') -Value '# Test'
+        '{"Profiles":[{"Name":"CITest"}],"Renames":[]}' | Set-Content -LiteralPath (Join-Path $app 'Config\serverbackup.json')
+        $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $pr = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $trg = New-ScheduledTaskTrigger -Once -At (Get-Date).AddYears(5)
+        $good = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$app\Functions\ServerBackup-Task.ps1`" -ProfileName `"CITest`" -Explicit"
+        $more = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$app\Functions\ServerBackup-Task.ps1`" -ProfileName `"CITest`" -Command `"x`""
+        $evil = New-ScheduledTaskAction -Execute 'C:\Windows\System32\cmd.exe' -Argument '/c echo x'
+        try {
+            Register-ScheduledTask -TaskPath '\HUMig\' -TaskName 'Server-Backup - CITest - ok' -Action $good -Principal $pr -Trigger $trg -Force | Out-Null
+            Register-ScheduledTask -TaskPath '\HUMig\' -TaskName 'Server-Backup - CITest - zwei' -Action @($good, $evil) -Principal $pr -Trigger $trg -Force | Out-Null
+            Register-ScheduledTask -TaskPath '\HUMig\' -TaskName 'Server-Backup - CITest - fremd' -Action $evil -Principal $pr -Trigger $trg -Force | Out-Null
+            Register-ScheduledTask -TaskPath '\HUMig\' -TaskName 'Server-Backup - CITest - mehr' -Action $more -Principal $pr -Trigger $trg -Force | Out-Null
+            $adm = @(); try { $adm = @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop | ForEach-Object { "$($_.SID)" }) } catch { }
+            $res = & $script:HMSchedScript 'List' @{ Backup = $false; Server = $true; Au = $false } $app $true '' ([string[]]$adm)
+            $mine = @($res.Items | Where-Object { $_.TaskName -like 'Server-Backup - CITest*' })
+            $mine.Count | Should -Be 4
+            (@($mine | Where-Object { $_.TaskName -like '*mehr' })[0]).Problem | Should -Match 'veraendert'
+            (@($mine | Where-Object { $_.TaskName -like '*ok' })[0]).Problem | Should -BeIn @('', 'Programmordner fuer Benutzer beschreibbar - Start vom Handy gesperrt')
+            (@($mine | Where-Object { $_.TaskName -like '*zwei' })[0]).Problem | Should -Match 'veraendert'
+            (@($mine | Where-Object { $_.TaskName -like '*fremd' })[0]).Problem | Should -Match 'veraendert'
+            # Start einer veraenderten Aufgabe wird abgelehnt (vor Start-ScheduledTask)
+            $r = & $script:HMSchedScript 'Run' @{ Backup = $false; Server = $true; Au = $false } $app $true 'S|\HUMig\|Server-Backup - CITest - zwei'
+            $r.Ok | Should -BeFalse; $r.Text | Should -Match 'veraendert'
+            # Benutzer-Modus: keine SYSTEM-Aufgaben
+            $res2 = & $script:HMSchedScript 'List' @{ Backup = $false; Server = $true; Au = $false } $app $false ''
+            @($res2.Items).Count | Should -Be 0
+            # abgesicherter Programmordner, aber im uebergeordneten Ordner duerfen Benutzer aendern (umbenennen) -> gesperrt
+            $open = Join-Path $TestDrive 'offen'; $app2 = Join-Path $open 'app'
+            New-Item -ItemType Directory -Path (Join-Path $app2 'Functions'), (Join-Path $app2 'Config') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $app2 'Functions\ServerBackup-Task.ps1') -Value '# Test'
+            '{"Profiles":[{"Name":"CITest"}],"Renames":[]}' | Set-Content -LiteralPath (Join-Path $app2 'Config\serverbackup.json')
+            & icacls.exe $app2 /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' /Q | Out-Null
+            & icacls.exe $app2 /setowner '*S-1-5-32-544' /T /Q | Out-Null
+            & icacls.exe $open /grant '*S-1-5-32-545:(OI)(CI)M' /Q | Out-Null
+            $a2 = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$app2\Functions\ServerBackup-Task.ps1`" -ProfileName `"CITest`""
+            Register-ScheduledTask -TaskPath '\HUMig\' -TaskName 'Server-Backup - CITest - offen' -Action $a2 -Principal $pr -Trigger $trg -Force | Out-Null
+            $res3 = & $script:HMSchedScript 'List' @{ Backup = $false; Server = $true; Au = $false } $app2 $true '' ([string[]]$adm)
+            (@($res3.Items | Where-Object { $_.TaskName -eq 'Server-Backup - CITest - offen' })[0]).Problem | Should -Match 'Programmordner'
+        } finally {
+            foreach ($n in 'ok', 'zwei', 'fremd', 'mehr', 'offen') { Unregister-ScheduledTask -TaskPath '\HUMig\' -TaskName "Server-Backup - CITest - $n" -Confirm:$false -ErrorAction SilentlyContinue }
+        }
     }
 }
 
@@ -1957,5 +2113,72 @@ Describe 'Pruefung 2.0.137: Formatierung, Quelle, Ausnahmen, Profil, Port-Freiga
         Test-HMRemoteUrlAclOurs "Reserved URL : https://+:8443/`n SDDL: D:(A;;GX;;;S-1-5-20)" 8443 $sid | Should -BeFalse
         $c = [pscustomobject]@{ RawData = [byte[]](1, 2, 3) }
         Get-HMRemoteFingerprint $c | Should -Match '^([0-9A-F]{4} ){15}[0-9A-F]{4}$'
+    }
+}
+
+Describe 'Ordnerrechte: Ordner ueber dem HUMig-Ordner (Windows, Administrator)' {
+    It 'Ordner darueber mit Standardrechten von C:\ wird erkannt, ein Benutzer kann ihn umbenennen; nach dem Absichern nicht mehr, Unterordner unveraendert' -Skip:(-not (([Environment]::OSVersion.Platform -eq 'Win32NT') -and ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))) {
+        $code = [regex]::Match((Get-Content (Join-Path $script:Root 'HUMig.ps1') -Raw -Encoding UTF8), '(?s)#region HMAppAcl.*?#endregion HMAppAcl').Value
+        . ([scriptblock]::Create($code))
+        if (-not ('HMCiLogon' -as [type])) {
+            Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class HMCiLogon { [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] public static extern bool LogonUser(string u, string d, string p, int t, int v, out IntPtr h); [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h); }'
+        }
+        $rnd = -join ((48..57) + (97..102) | Get-Random -Count 6 | ForEach-Object { [char]$_ })
+        $top = "C:\HMCi_$rnd"; $tools = Join-Path $top 'Tools'; $app = Join-Path $tools 'HUMig'; $other = Join-Path $tools 'Anderes'
+        $user = "hmci_$rnd"; $pwPlain = 'Ci!' + [guid]::NewGuid().ToString('N').Substring(0, 16) + 'aA9'
+        $tok = [IntPtr]::Zero
+        # als Testbenutzer versuchen, $From in $To umzubenennen (und zurueck); Rueckgabe: $true = ging
+        $tryRename = {
+            param($From, $To)
+            $ctx = [Security.Principal.WindowsIdentity]::Impersonate($tok)
+            $ok = $false
+            try { [IO.Directory]::Move($From, $To); $ok = $true } catch { $ok = $false } finally { $ctx.Undo() }
+            if ($ok) { [IO.Directory]::Move($To, $From) }
+            return $ok
+        }
+        # als Testbenutzer eine Datei in $Dir anlegen und wieder loeschen; Rueckgabe: $true = ging
+        $tryWrite = {
+            param($Dir, $Name)
+            $ctx = [Security.Principal.WindowsIdentity]::Impersonate($tok)
+            $ok = $false
+            try { $fp = Join-Path $Dir $Name; [IO.File]::WriteAllText($fp, 'x'); [IO.File]::Delete($fp); $ok = $true } catch { $ok = $false } finally { $ctx.Undo() }
+            return $ok
+        }
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $app 'Functions'), $other -Force | Out-Null
+            & icacls.exe $app /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' /Q | Out-Null
+            & icacls.exe $app /setowner '*S-1-5-32-544' /T /Q | Out-Null
+            # wie C:\Tools mit den Standardrechten von C:\ (unabhaengig von den Rechten auf C:\ des Testrechners)
+            & icacls.exe $top /grant '*S-1-5-11:(OI)(CI)M' /Q | Out-Null
+            $pw = New-Object System.Security.SecureString
+            foreach ($ch in $pwPlain.ToCharArray()) { $pw.AppendChar($ch) }
+            New-LocalUser -Name $user -Password $pw -AccountNeverExpires -PasswordNeverExpires | Out-Null
+            Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $user
+            $ok = [HMCiLogon]::LogonUser($user, '.', $pwPlain, 2, 0, [ref]$tok)
+            if (-not $ok) { $ok = [HMCiLogon]::LogonUser($user, '.', $pwPlain, 3, 0, [ref]$tok) }
+            $ok | Should -BeTrue
+            # vorher: beide Ordner darueber gemeldet, Benutzer kann Tools umbenennen
+            $f = @(Get-HMAppParentFindings $app | Where-Object { $_.Path -eq $tools -or $_.Path -eq $top })
+            @($f | Where-Object { $_.Path -eq $tools -and -not $_.Profile }).Count | Should -Be 1
+            @($f | Where-Object { $_.Path -eq $top -and -not $_.Profile }).Count | Should -Be 1
+            (& $tryRename $tools "$tools-weg") | Should -BeTrue
+            (& $tryWrite $other 'a.txt') | Should -BeTrue
+            (& $tryWrite (Join-Path $app 'Functions') 'a.txt') | Should -BeFalse
+            # absichern (nur die beiden Testordner, nie C:\ des Testrechners)
+            foreach ($x in $f) { Protect-HMAppParent $x.Path | Should -Be '' }
+            @(Get-HMAppParentFindings $app | Where-Object { $_.Path -eq $tools -or $_.Path -eq $top }).Count | Should -Be 0
+            (& $tryRename $tools "$tools-weg") | Should -BeFalse
+            (& $tryRename $top "$top-weg") | Should -BeFalse
+            # Unterordner anderer Programme: Benutzer duerfen dort weiter schreiben wie vorher
+            (& $tryWrite $other 'b.txt') | Should -BeTrue
+            (& $tryWrite $tools 'c.txt') | Should -BeTrue
+            # Ordner unter C:\Users werden nie geaendert
+            Test-HMAppInProfile (Join-Path $env:PUBLIC 'x') | Should -BeTrue
+            Protect-HMAppParent $env:PUBLIC | Should -Match 'Benutzerprofil'
+        } finally {
+            if ($tok -ne [IntPtr]::Zero) { [void][HMCiLogon]::CloseHandle($tok) }
+            Remove-LocalUser -Name $user -ErrorAction SilentlyContinue
+            foreach ($p in $top, "$top-weg") { if (Test-Path -LiteralPath $p) { cmd.exe /c "icacls `"$p`" /reset /T /C /Q >nul 2>&1"; Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue } }
+        }
     }
 }
