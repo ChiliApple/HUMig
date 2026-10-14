@@ -1191,7 +1191,13 @@ function Start-EngineJob {
         # Verlauf fuer das Handy (letzte 10 Vorgaenge, mit Bericht)
         if ($long -or $rs -ne 'OK') { try { Add-HMRemoteHistory $j $ttl $stTxt $rs $res } catch { } }
         # Push-Meldung ans Handy (nur bei laengeren Vorgaengen, nur wenn dort eingeschaltet)
-        if ($long -and $script:HMRemote) { try { Send-HMRemotePush -Text "$ttl - $stTxt" } catch { } }
+        if ($long -and $script:HMRemote) {
+            try {
+                $pb = [long]0
+                try { if ($res -and $res.SizeBytes) { $pb = [long]$res.SizeBytes } elseif ($res -and $res.Total) { $pb = [long]$res.Total } elseif ($j.DoneBytes) { $pb = [long]$j.DoneBytes } } catch { }
+                Send-HMRemotePush -Text (New-HMRemotePushText $ttl $stTxt ($j.Ended - $j.Started).TotalSeconds $pb)
+            } catch { }
+        }
     }
 }
 # Laufenden Vorgang abbrechen. -Confirmed: ohne Rueckfrage (z.B. am Handy schon bestaetigt)

@@ -188,8 +188,18 @@ Installierte Programme per **WinGet** aktualisieren – am gewählten PC oder in
 Status und laufende Vorgänge am Handy (mit Live-Anzeige Durchsatz, CPU, RAM und Push-Meldung bei Vorgangsende) – im selben Netz, als App auf dem Startbildschirm:
 
 - Knopf **Handy** unten rechts: QR-Code scannen, 6-stelligen Code bestätigen, fertig
-- Startseite (Hinweise, Zeitpläne, letzte Sicherungen, Server-Backup, App-Updates), laufender Vorgang mit Fortschritt und Konsole, *Abbrechen* mit Bestätigung
+- Startseite (Hinweise, Zeitpläne, letzte Sicherungen, Server-Backup, App-Updates je PC), laufender Vorgang mit Restzeit, Live-Anzeige und Konsole, *Abbrechen* mit Bestätigung
+- Verlauf der letzten Vorgänge mit Bericht, Push-Meldung bei Vorgangsende
 - HTTPS mit eigener, auf diesen PC beschränkter Zertifizierungsstelle; Zugriff nur für gekoppelte Handys, Firewall-Regel nur solange aktiv
+
+<table>
+  <tr>
+    <td align="center" valign="top"><a href="Docs/img/handy_status.png"><img src="Docs/img/handy_status.png" width="190" alt="Status"/></a><br><sub>Status</sub></td>
+    <td align="center" valign="top"><a href="Docs/img/handy_vorgang.png"><img src="Docs/img/handy_vorgang.png" width="190" alt="Vorgang"/></a><br><sub>Vorgang</sub></td>
+    <td align="center" valign="top"><a href="Docs/img/handy_verlauf.png"><img src="Docs/img/handy_verlauf.png" width="190" alt="Letzte Vorgänge"/></a><br><sub>Letzte Vorgänge</sub></td>
+    <td align="center" valign="top"><a href="Docs/img/handy_push.png"><img src="Docs/img/handy_push.png" width="190" alt="Push-Meldung"/></a><br><sub>Push-Meldung</sub></td>
+  </tr>
+</table>
 
 ## Update und Sicherheit
 

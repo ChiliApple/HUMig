@@ -887,29 +887,40 @@ Describe 'Fortschritt nach Datenmenge (Backup)' {
 
 Describe 'Listen-Rueckgaben (return ,@()) erst zuweisen' {
     It 'keine Funktion mit "return ,..." wird in @() gewickelt oder in eine Pipeline gegeben (alle Skripte)' {
-        $files = @(Get-ChildItem -Path (Join-Path $script:Root 'Functions'), $script:Root -Filter *.ps1 -File)
-        $names = @()
+        $files = @(Get-ChildItem -Path $script:Root -Filter *.ps1 -File -Recurse | Where-Object { $_.FullName -notmatch '[\\/]\.github[\\/]' })
+        $names = @(); $asts = @{}
         foreach ($f in $files) {
             $ast = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$null)
+            $asts[$f.FullName] = $ast
             foreach ($fd in $ast.FindAll({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
                 $rets = $fd.Body.FindAll({ param($a) $a -is [System.Management.Automation.Language.ReturnStatementAst] -and $a.Pipeline -and $a.Pipeline.Extent.Text -match '^\s*,' }, $false)
-                if (@($rets).Count) { $names += $fd.Name }
+                # auch "..., $x" als letzte Anweisung ohne return
+                $last = $null; if ($fd.Body.EndBlock -and $fd.Body.EndBlock.Statements.Count) { $last = $fd.Body.EndBlock.Statements[$fd.Body.EndBlock.Statements.Count - 1] }
+                if (@($rets).Count -or ($last -is [System.Management.Automation.Language.PipelineAst] -and $last.Extent.Text -match '^\s*,')) { $names += $fd.Name }
             }
         }
         $names = @($names | Select-Object -Unique)
         $names | Should -Contain 'Get-HMRemotePushRequests'
         $names | Should -Contain 'Get-HMHUPilotRisk'
-        $rx = ($names | ForEach-Object { [regex]::Escape($_) }) -join '|'
+        # Verwendung per AST: Aufruf in einer Pipeline mit mehreren Gliedern oder als einziger Inhalt von @(...)
         $bad = @()
-        foreach ($f in $files) {
-            $n = 0
-            foreach ($l in @(Get-Content -LiteralPath $f.FullName -Encoding UTF8)) {
-                $n++
-                if ($l -match '^\s*function\s') { continue }
-                if ($l -match "@\(\s*($rx)\b" -or $l -match "(?<![\w-])($rx)\b[^|;)]*\|") { $bad += "$($f.Name):$n" }
+        foreach ($k in $asts.Keys) {
+            $calls = $asts[$k].FindAll({ param($a) $a -is [System.Management.Automation.Language.CommandAst] -and $names -contains $a.GetCommandName() }, $true)
+            foreach ($c in $calls) {
+                $p = $c.Parent
+                if ($p -is [System.Management.Automation.Language.PipelineAst]) {
+                    $isBad = $p.PipelineElements.Count -gt 1
+                    $sb = $p.Parent
+                    if ($sb -is [System.Management.Automation.Language.StatementBlockAst] -and $sb.Parent -is [System.Management.Automation.Language.ArrayExpressionAst] -and $sb.Statements.Count -eq 1) { $isBad = $true }
+                    if ($isBad) { $bad += "$([IO.Path]::GetFileName($k)):$($c.Extent.StartLineNumber)" }
+                }
             }
         }
         $bad | Should -BeNullOrEmpty
+        # Gegenprobe: der Test erkennt die Fehlverwendung auch ueber Zeilenumbrueche
+        $probe = [System.Management.Automation.Language.Parser]::ParseInput("`$x = @(`n Get-HMRemotePushRequests `$a)`nGet-HMHUPilotRisk `$a (`$b) | Where-Object { `$_ }", [ref]$null, [ref]$null)
+        $pc = $probe.FindAll({ param($a) $a -is [System.Management.Automation.Language.CommandAst] -and $names -contains $a.GetCommandName() }, $true)
+        @($pc | Where-Object { ($_.Parent.PipelineElements.Count -gt 1) -or ($_.Parent.Parent.Parent -is [System.Management.Automation.Language.ArrayExpressionAst]) }).Count | Should -Be 2
     }
     It 'Get-HMSbAllHistory / Read-HMSbHistory werden nie direkt in @() oder einer Pipeline verwendet' {
         # die Funktionen geben die Liste als EIN Objekt zurueck - @(Aufruf) bzw. Aufruf | Where-Object sehen nur 1 Element
@@ -1605,6 +1616,76 @@ Describe 'Handy-Fernbedienung: Restzeit, Verlauf mit Bericht, Zusatzanzeigen' {
             return (Get-HMRemoteResponse $S @{ Method = $Method; Path = $Path; Query = @{}; Auth = $(if ($Token) { "Bearer $Token" } else { '' }); Origin = ''; Host = '10.0.0.5:8443'; Body = $b; Ip = '10.0.0.9'; Now = (Get-Date) })
         }
     }
+    It 'Pruefung v2.1.1: Verlauf tolerant, Meldungsalter vom PC, Netzpfad, Datentraeger aus dem Hintergrund' {
+        # N-4: ein defekter Eintrag leert nicht den ganzen Verlauf
+        $S = New-HMRemoteState
+        Set-HMRemoteHistory $S @([pscustomobject]@{ Id = 'abcdef01'; Title = 'A'; Result = 'ok'; Level = 'OK'; Time = 't'; Seconds = 'abc'; Bytes = 1e30; Report = '' }, [pscustomobject]@{ Id = 'abcdef02'; Title = 'B'; Result = 'ok'; Level = 'OK'; Time = 't'; Seconds = 5; Bytes = 10; Report = '' })
+        $h = @($S.HistJson | ConvertFrom-Json | ForEach-Object { $_ })   # 5.1: Array aus ConvertFrom-Json erst entpacken
+        $h.Count | Should -Be 2; $h[1].sec | Should -Be 5
+        # N-3: Alter nach der Uhr des PCs
+        $S.Notice = @{ Json = '{"t":1,"text":"x"}'; At = [datetime]::UtcNow.AddSeconds(-30); Text = 'x' }
+        $n = Get-HMRemoteNoticeJson $S | ConvertFrom-Json
+        $n.text | Should -Be 'x'; $n.age | Should -BeGreaterOrEqual 29; $n.age | Should -BeLessThan 40
+        $S.Notice = $null; Get-HMRemoteNoticeJson $S | Should -Be 'null'
+        # B5: Netzpfade (z. B. aus altem Verlauf) gehen nie an den Webserver
+        Set-HMRemoteHistory $S @([pscustomobject]@{ Id = 'abcdef03'; Title = 'A'; Result = 'ok'; Level = 'OK'; Time = 't'; Seconds = 1; Bytes = 1; Report = '\\srv\s\Bericht.html' })
+        $S.Reports.ContainsKey('abcdef03') | Should -BeFalse
+        @($S.HistJson | ConvertFrom-Json | ForEach-Object { $_ })[0].report | Should -BeFalse
+        # N-2: Netzpfad erkennen
+        Test-HMRemoteNetPath '\\srv\share\Bericht.html' | Should -BeTrue
+        Test-HMRemoteNetPath '' | Should -BeFalse
+        # N-5: Datentraeger aus dem letzten Hintergrund-Lauf, ohne neue Abfrage
+        $script:StatusData = [pscustomobject]@{ Server = @([pscustomobject]@{ Name = 'Gym'; ArchiveAge = 1; Disks = @([pscustomobject]@{ Label = 'H-1'; Age = 0 }) }) }
+        $script:HMRemoteVols = @([pscustomobject]@{ FileSystemLabel = 'H-1'; DriveLetter = 'E'; SizeRemaining = [long]5; Size = [long]10 })
+        $x = Get-HMRemoteExtra -NoQuery
+        $x.sb[0].conn[0].drive | Should -Be 'E:'; [long]$x.sb[0].conn[0].free | Should -Be 5
+        $script:HMRemoteVols = $null; $script:StatusData = $null
+    }
+    It 'Hintergrund-Arbeiten: Ergebnis abholen, haengende abbrechen ohne neue zu starten, Kopien aufraeumen nur eigene Namen' {
+        $script:HMRemoteBg.Clear()
+        [void](Start-HMRemoteBg 'Vol' { @([pscustomobject]@{ FileSystemLabel = 'X'; DriveLetter = 'E'; SizeRemaining = [long]1; Size = [long]2 }) } @() @{} 60)
+        for ($i = 0; $i -lt 50 -and -not $script:HMRemoteBg[0].Handle.IsCompleted; $i++) { Start-Sleep -Milliseconds 100 }
+        Receive-HMRemoteBg | Should -BeTrue
+        $script:HMRemoteVols[0].DriveLetter | Should -Be 'E'
+        $script:HMRemoteBg.Count | Should -Be 0
+        # haengt: nach Zeitlimit Abbruch, solange er laeuft gilt die Art als belegt (keine weitere Abfrage -> kein Leck)
+        [void](Start-HMRemoteBg 'Vol' { Start-Sleep -Seconds 30 } @() @{} 0)
+        Start-Sleep -Milliseconds 200
+        Receive-HMRemoteBg | Should -BeFalse
+        Test-HMRemoteBgBusy 'Vol' | Should -BeTrue
+        for ($i = 0; $i -lt 50 -and $script:HMRemoteBg.Count; $i++) { Start-Sleep -Milliseconds 100; [void](Receive-HMRemoteBg) }
+        $script:HMRemoteBg.Count | Should -Be 0
+        # B7: Abfrage scheitert -> zuletzt bekannte Platten bleiben
+        $script:HMRemoteVols = @([pscustomobject]@{ FileSystemLabel = 'H-1'; DriveLetter = 'E'; SizeRemaining = [long]1; Size = [long]2 })
+        [void](Start-HMRemoteBg 'Vol' { throw 'Zeitlimit' } @() @{} 60)
+        for ($i = 0; $i -lt 50 -and -not $script:HMRemoteBg[0].Handle.IsCompleted; $i++) { Start-Sleep -Milliseconds 100 }
+        Receive-HMRemoteBg | Should -BeFalse
+        @($script:HMRemoteVols).Count | Should -Be 1
+        [void](Start-HMRemoteBg 'Vol' { Write-Error 'Speicherdienst'; @() } @() @{} 60)
+        for ($i = 0; $i -lt 50 -and -not $script:HMRemoteBg[0].Handle.IsCompleted; $i++) { Start-Sleep -Milliseconds 100 }
+        Receive-HMRemoteBg | Should -BeFalse
+        @($script:HMRemoteVols).Count | Should -Be 1
+        $script:HMRemoteVols = $null
+        # Aufraeumen: nur <8 hex>.html, die nicht mehr im Verlauf stehen
+        $old = $env:LOCALAPPDATA
+        try {
+            $env:LOCALAPPDATA = Join-Path $TestDrive 'lad'
+            $d = Get-HMRemoteReportDir -Create
+            $d | Should -Not -BeNullOrEmpty
+            foreach ($n in 'aaaaaaaa.html', 'bbbbbbbb.html', 'fremd.html') { Set-Content -LiteralPath (Join-Path $d $n) -Value 'x' }
+            Clear-HMRemoteReportCopies @([pscustomobject]@{ Id = 'aaaaaaaa' })
+            (Test-Path (Join-Path $d 'aaaaaaaa.html')) | Should -BeTrue
+            (Test-Path (Join-Path $d 'bbbbbbbb.html')) | Should -BeFalse
+            (Test-Path (Join-Path $d 'fremd.html')) | Should -BeTrue
+        } finally { $env:LOCALAPPDATA = $old }
+    }
+    It 'Push-Meldung: Kurzform mit Menge und Dauer' {
+        if (-not (Get-Command Format-HMSize -ErrorAction SilentlyContinue)) { . (Join-Path $script:Root 'Functions\Migration-Engine.ps1') }
+        $d = [char]0x00B7
+        New-HMRemotePushText 'Backup' 'erfolgreich' 312 8600000000 | Should -Match ('^Backup - erfolgreich ' + $d + ' 8[.,]01 GB ' + $d + ' 5 min 12 s$')
+        New-HMRemotePushText 'App-Updates' 'mit Fehlern' 420 0 | Should -Be ('App-Updates - mit Fehlern ' + $d + ' 7 min')
+        New-HMRemotePushText 'Backup' 'abgebrochen' $null $null | Should -Be 'Backup - abgebrochen'
+    }
     It 'Vorgang: Menge (geplant/geschrieben) und geschaetzte Restzeit' {
         $job = @{ Started = (Get-Date).AddSeconds(-60); Progress = 25; Status = 'x'; Cancel = $false; PlanTotal = [long]4GB; DoneBytes = [long]1GB; CurBytes = [long]512MB }
         $j = ConvertTo-HMRemoteJobJson $job 'Backup' | ConvertFrom-Json
@@ -1616,8 +1697,8 @@ Describe 'Handy-Fernbedienung: Restzeit, Verlauf mit Bericht, Zusatzanzeigen' {
         $j2.PSObject.Properties.Name | Should -Not -Contain 'bytesTotal'
     }
     It 'Verlauf: hoechstens 10, Anzeige ohne Pfade; Bericht nur ueber Einmal-Adresse (60 s), mit eigener Richtlinie' {
-        $oldAppData = $env:APPDATA
-        $env:APPDATA = Join-Path $TestDrive 'appdata'
+        $oldAppData = $env:APPDATA; $oldLocal = $env:LOCALAPPDATA
+        $env:APPDATA = Join-Path $TestDrive 'appdata'; $env:LOCALAPPDATA = Join-Path $TestDrive 'localappdata'   # echte Berichtskopien nie anfassen
         try {
         $S = New-HMRemoteState; $S.Pc = 'PC'; $S.Version = '1'
         $code = Open-HMRemotePairing $S
@@ -1647,7 +1728,7 @@ Describe 'Handy-Fernbedienung: Restzeit, Verlauf mit Bericht, Zusatzanzeigen' {
         $S.Reports['abcdef01'] = (Join-Path $TestDrive 'x.txt'); Set-Content -LiteralPath (Join-Path $TestDrive 'x.txt') -Value 'geheim'
         $r2 = (Invoke-HMHistTest $S 'POST' '/api/report' @{ id = 'abcdef01' } -Token $tok).Text | ConvertFrom-Json
         (Invoke-HMHistTest $S 'GET' $r2.url).Code | Should -Be 404
-        } finally { $env:APPDATA = $oldAppData; $script:HMRemote = $null; $script:JobReport = $null }
+        } finally { $env:APPDATA = $oldAppData; $env:LOCALAPPDATA = $oldLocal; $script:HMRemote = $null; $script:JobReport = $null }
     }
     It 'Bericht-Pfad: Restore-Datei bzw. Server-Backup-Ordner (Bericht.html)' {
         $script:JobReport = $null
@@ -1853,15 +1934,16 @@ Describe 'Pruefung 2.0.137: Formatierung, Quelle, Ausnahmen, Profil, Port-Freiga
     }
     It 'Paket-ID und Quelle an winget.exe: nur unauffaellige Zeichen (Ziel, Worker, Zeitplan)' {
         foreach ($f in 'AppUpdates-Target.ps1', 'AppUpdates-Worker.ps1', 'AppUpdates-Auto.ps1') {
-            (Get-Content (Join-Path $script:Root "Functions\$f") -Raw -Encoding UTF8) | Should -Match ([regex]::Escape("-notmatch '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$'"))
+            (Get-Content (Join-Path $script:Root "Functions\$f") -Raw -Encoding UTF8) | Should -Match ([regex]::Escape("-notmatch '^(?=.{1,64}\z)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?\z'"))
         }
-        'winget' -match '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$' | Should -BeTrue
-        'winget" --override "x' -match '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$' | Should -BeFalse
+        'winget' -match '^(?=.{1,64}\z)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?\z' | Should -BeTrue
+        'winget" --override "x' -match '^(?=.{1,64}\z)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?\z' | Should -BeFalse
         # Leerzeichen im Namen erlaubt (eigene Quellen wie "Firma Intern"), aber kein fuehrendes - / Leerzeichen, kein \ oder "
-        foreach ($ok in 'Firma Intern', 'msstore', 'a.b_c-d') { $ok -match '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$' | Should -BeTrue -Because $ok }
-        foreach ($bad in '-x', ' x', 'x ', 'x\', 'a"b', ('a' * 65), '') { $bad -match '^(?=.{1,64}$)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?$' | Should -BeFalse -Because $bad }
-        '7zip.7zip' -match '^[^\s\-"][^\s"]{0,254}$' | Should -BeTrue
-        'a"b' -match '^[^\s\-"][^\s"]{0,254}$' | Should -BeFalse
+        foreach ($ok in 'Firma Intern', 'msstore', 'a.b_c-d') { $ok -match '^(?=.{1,64}\z)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?\z' | Should -BeTrue -Because $ok }
+        foreach ($bad in '-x', ' x', 'x ', 'x\', 'a"b', ('a' * 65), '', "winget`n") { $bad -match '^(?=.{1,64}\z)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?\z' | Should -BeFalse -Because $bad }
+        '7zip.7zip' -match '^[^\s\-"][^\s"]{0,254}\z' | Should -BeTrue
+        'a"b' -match '^[^\s\-"][^\s"]{0,254}\z' | Should -BeFalse
+        "7zip.7zip`n" -match '^[^\s\-"][^\s"]{0,254}\z' | Should -BeFalse
     }
     It 'Testinstallation: C:\Users\Public ist kein Benutzerprofil' {
         $e = [pscustomobject]@{ Key = 'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\X'; DisplayName = 'X 1.0'; DisplayVersion = '1.0'; Publisher = 'P'; UninstallString = '"C:\Users\Public\X\unins000.exe"'; QuietUninstallString = ''; InstallLocation = 'C:\Users\Public\X\'; DisplayIcon = '' }
