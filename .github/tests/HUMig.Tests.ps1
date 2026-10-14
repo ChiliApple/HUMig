@@ -2171,6 +2171,7 @@ Describe 'Ordnerrechte: Ordner ueber dem HUMig-Ordner (Windows, Administrator)' 
             (& $tryRename $tools "$tools-weg") | Should -BeTrue
             (& $tryWrite $other 'a.txt') | Should -BeTrue
             (& $tryWrite (Join-Path $app 'Functions') 'a.txt') | Should -BeFalse
+            $sddlOther = (Get-Acl -LiteralPath $other).Sddl
             # absichern (nur die beiden Testordner, nie C:\ des Testrechners)
             foreach ($x in $f) { Protect-HMAppParent $x.Path | Should -Be '' }
             @(Get-HMAppParentFindings $app | Where-Object { $_.Path -eq $tools -or $_.Path -eq $top }).Count | Should -Be 0
@@ -2179,6 +2180,27 @@ Describe 'Ordnerrechte: Ordner ueber dem HUMig-Ordner (Windows, Administrator)' 
             # Unterordner anderer Programme: Benutzer duerfen dort weiter schreiben wie vorher
             (& $tryWrite $other 'b.txt') | Should -BeTrue
             (& $tryWrite $tools 'c.txt') | Should -BeTrue
+            # nur die Rechteliste des Ordners selbst geschrieben - Unterordner nicht angefasst
+            (Get-Acl -LiteralPath $other).Sddl | Should -Be $sddlOther
+            # Eintrag mit allgemeinen Rechten (GENERIC_ALL, vererbbar) wird umgerechnet statt abzubrechen
+            $g = Join-Path $top 'Gen'; New-Item -ItemType Directory -Path (Join-Path $g 'HUMig') -Force | Out-Null
+            & icacls.exe $g /grant '*S-1-5-11:(OI)(CI)(GA)' /Q | Out-Null
+            @(Get-HMAppParentFindings (Join-Path $g 'HUMig') | Where-Object { $_.Path -eq $g }).Count | Should -Be 1
+            Protect-HMAppParent $g | Should -Be ''
+            @(Get-HMAppParentFindings (Join-Path $g 'HUMig') | Where-Object { $_.Path -eq $g }).Count | Should -Be 0
+            (& $tryWrite $g 'd.txt') | Should -BeTrue
+            (& $tryRename $g "$g-weg") | Should -BeFalse
+            # Verknuepfung im Pfad: gemeldet, nie geaendert
+            $j = Join-Path $top 'Link'
+            cmd.exe /c "mklink /J `"$j`" `"$tools`" >nul 2>&1"
+            @(Get-HMAppParentFindings (Join-Path $j 'HUMig') | Where-Object { $_.Link }).Count | Should -BeGreaterThan 0
+            Protect-HMAppParent $j | Should -Match 'Verknuepfung'
+            cmd.exe /c "rmdir `"$j`""
+            # Laufwerkswurzel: Loeschen zaehlt nicht (Standard eines Datenlaufwerks: Authentifizierte Benutzer Aendern)
+            $ds = New-Object System.Security.AccessControl.DirectorySecurity
+            $ds.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-11'), 'Modify, Synchronize', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+            @(Get-HMAppParentRisk $ds (Get-HMAppParentMask -DriveRoot)).Count | Should -Be 0
+            @(Get-HMAppParentRisk $ds (Get-HMAppParentMask)).Count | Should -Be 1
             # Ordner unter C:\Users werden nie geaendert
             Test-HMAppInProfile (Join-Path $env:PUBLIC 'x') | Should -BeTrue
             Protect-HMAppParent $env:PUBLIC | Should -Match 'Benutzerprofil'

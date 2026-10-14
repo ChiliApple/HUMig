@@ -561,10 +561,15 @@ $script:HMSchedScript = {
     # (Loeschen, Unterordner loeschen, Rechte/Besitzer aendern, Vollzugriff; Besitzer ebenso) - sonst koennte ein
     # Benutzer den abgesicherten Ordner wegbenennen und einen eigenen gleichen Namens hinlegen
     function Test-ParentsSafe([string]$p) {
-        $mask = 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000
         try {
-            $d = ([IO.DirectoryInfo]$p).Parent
+            $d = [IO.DirectoryInfo]$p
+            if ($d.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }   # Verknuepfung: Kette dahinter unbekannt
+            $d = $d.Parent
             while ($d) {
+                if ($d.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+                # Laufwerkswurzel laesst sich nicht umbenennen: dort zaehlt Loeschen nicht (D:\ hat standardmaessig "Aendern")
+                $mask = 0x40 -bor 0x40000 -bor 0x80000 -bor 0x10000000
+                if ($d.Parent) { $mask = $mask -bor 0x10000 }
                 $acl = Get-Acl -LiteralPath $d.FullName
                 $own = ''; try { $own = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { return $false }
                 if ($safe -notcontains $own) { return $false }
