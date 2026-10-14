@@ -740,7 +740,7 @@ function New-HMRemoteState {
         Pair = $null; StatusJson = 'null'; JobJson = '{"running":false}'
         Lines = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList)); LineSeq = 0
         CancelReq = $null; RefreshReq = $false; Static = @{}; FailIp = [hashtable]::Synchronized(@{}); LogFile = ''; PushKey = ''
-        HistJson = '[]'; ExtraJson = 'null'; NoticeJson = 'null'
+        HistJson = '[]'; ExtraJson = 'null'; Notice = $null
         Reports = [hashtable]::Synchronized(@{}); Tickets = [hashtable]::Synchronized(@{})
         Events = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
     })
@@ -767,6 +767,16 @@ function Add-HMRemoteFail($S, [string]$Ip, [datetime]$Now) {
     $f.Count++
     if ($f.Count -ge 10) { $f.Until = $Now.AddMinutes(15) }
     $S.FailIp[$Ip] = $f
+}
+# Meldungstext fuer das Handy mit Alter in Sekunden nach der Uhr DIESES PCs (Handy-Uhr darf abweichen)
+# Text und Zeitpunkt liegen in EINEM Objekt (wird als Ganzes getauscht) - nie alter Text mit neuem Zeitpunkt
+function Get-HMRemoteNoticeJson($S) {
+    $n = $S.Notice
+    if (-not $n -or -not $n.At) { return 'null' }
+    $nj = "$($n.Json)"
+    if (-not $nj -or $nj -notmatch '^\{.*\}$') { return 'null' }
+    try { $age = [int][Math]::Max([double]0, ([datetime]::UtcNow - [datetime]$n.At).TotalSeconds) } catch { return 'null' }
+    return ($nj.Substring(0, $nj.Length - 1) + ',"age":' + $age + '}')
 }
 # Bericht ueber eine Einmal-Adresse ausliefern: nur .html bis 10 MB, eigene strenge Richtlinie (keine Skripte, sandbox)
 function Get-HMRemoteReportResponse($S, [string]$Ticket, [datetime]$Now) {
@@ -854,7 +864,7 @@ function Get-HMRemoteResponse($S, $Req) {
             $head = [ordered]@{ ok = $true; pc = "$($S.Pc)"; version = "$($S.Version)"; userMode = [bool]$S.UserMode; device = "$($dev.Name)"; until = $until; seq = [int]$S.LineSeq; lines = $lines }
             $hj = ConvertTo-Json -InputObject $head -Depth 4 -Compress
             # Status und Vorgang sind fertiges JSON (von der Oberflaeche erzeugt)
-            $txt = $hj.Substring(0, $hj.Length - 1) + ',"status":' + "$($S.StatusJson)" + ',"job":' + "$($S.JobJson)" + ',"hist":' + "$($S.HistJson)" + ',"extra":' + "$($S.ExtraJson)" + ',"notice":' + "$($S.NoticeJson)" + '}'
+            $txt = $hj.Substring(0, $hj.Length - 1) + ',"status":' + "$($S.StatusJson)" + ',"job":' + "$($S.JobJson)" + ',"hist":' + "$($S.HistJson)" + ',"extra":' + "$($S.ExtraJson)" + ',"notice":' + $(Get-HMRemoteNoticeJson $S) + '}'
             return (New-HMRemoteJson 200 $txt)
         }
         '/api/cancel' {

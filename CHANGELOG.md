@@ -1,5 +1,20 @@
 ﻿# Changelog
 
+## v2.1.2 - 2026-10-14
+### Handy-Fernbedienung
+- **Push-Meldung in Kurzform** mit Menge und Dauer, z. B. "Backup - erfolgreich · 8,01 GB · 5 min 12 s"; mehrere Meldungen kurz hintereinander erscheinen gemeinsam (bis 3 Zeilen)
+- *Bericht*: oeffnet sich zuverlaessig im eigenen Fenster; in der iPhone-App (Home-Bildschirm) erscheint ein Link *Bericht oeffnen* zum Antippen
+- Berichte auf einer Freigabe/einem Netzlaufwerk werden bei laufender Fernbedienung im Hintergrund nach `%LOCALAPPDATA%\HUMig\remote-reports` kopiert (hoechstens 10, aufgeraeumt mit dem Verlauf) - eine spaeter getrennte Freigabe haelt die Handy-Seite nicht mehr an; ohne Fernbedienung bzw. aus aelteren Verlaeufen bleibt so ein Bericht am Handy ohne Knopf
+- Datentraeger fuer die Server-Backup-Kachel werden im Hintergrund gelesen (schlafende Platte friert die Oberflaeche nicht mehr ein); scheitert die Abfrage, bleiben die zuletzt bekannten Platten stehen
+- Alter der Push-Meldung rechnet der PC (Handy-Uhr darf abweichen); ein defekter Eintrag in `remote-history.json` leert nicht mehr den ganzen Verlauf; Ausschalten der Fernbedienung wartet nicht mehr auf einen haengenden Versand
+### Sicherheit
+- Lokale Berichtskopien: kein Kopieren/Loeschen, wenn der Ordner eine Verknuepfung (Junction/Symlink) ist; geloescht werden nur eigene Dateinamen
+- App-Updates: Paket-ID und Quellname duerfen keinen Zeilenumbruch am Ende haben (Pruefung mit `\z`)
+### Doku und Tests
+- Anleitung und README: Bilder der Handy-Seite (Status, Vorgang, Letzte Vorgaenge, Push, Koppeln) mit Beispieldaten
+- Logo-Dateien ohne eingebettete Herkunfts-Metadaten (Bild unveraendert)
+- Test der Listen-Rueckgaben prueft jetzt alle Skripte ueber den Syntaxbaum; neue Tests fuer Verlauf, Meldungsalter, Netzpfade, Hintergrund-Arbeiten und Kurzform
+
 ## v2.1.1 - 2026-10-13
 ### Handy-Fernbedienung
 - Reiter *Vorgang*: **geschaetzte Restzeit** ("noch ca. 3 min") und beim Backup die **Menge** ("1,18 GB von 2,47 GB")
