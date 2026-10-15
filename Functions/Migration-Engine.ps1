@@ -1680,6 +1680,13 @@ function Set-HMBackupFolderAcl {
     $grants = @(foreach ($k in $exp.Keys) { "*${k}:(OI)(CI)$($exp[$k])" })
     $o = & icacls.exe "$Path" /inheritance:r /grant:r @grants /C /Q 2>&1
     if ($LASTEXITCODE -ne 0) { $r.Error = "icacls Exitcode ${LASTEXITCODE}: $((@($o) | Where-Object { "$_".Trim() } | Select-Object -First 2) -join ' ')"; return [pscustomobject]$r }
+    # /grant:r ersetzt nur die genannten Konten - fruehere Eintraege (z. B. eine nicht mehr eingestellte Gruppe) entfernen
+    $extra = @()
+    try { $extra = @(@((Get-Acl -LiteralPath $Path -ErrorAction Stop).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])) | ForEach-Object { "$($_.IdentityReference.Value)" } | Where-Object { -not $exp.Contains($_) } | Select-Object -Unique) } catch { }
+    if ($extra.Count) {
+        $o = & icacls.exe "$Path" /remove @($extra | ForEach-Object { "*$_" }) /C /Q 2>&1
+        if ($LASTEXITCODE -ne 0) { $r.Notes += "weitere Eintraege nicht entfernt ($($extra -join ', ')): $((@($o) | Where-Object { "$_".Trim() } | Select-Object -First 1) -join ' ')" }
+    }
     $r.Ok = $true
     return [pscustomobject]$r
 }
