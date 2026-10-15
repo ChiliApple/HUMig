@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## v2.1.11 - 2026-10-15
+### Backup
+- **Rechte der Backup-Ordner:** jeder Backup-Ordner auf einem lokalen Laufwerk bekommt eigene Rechte - egal ob im HUMig-Ordner oder auf einer USB-Platte: Vererbung aus, Vollzugriff SYSTEM, Administratoren und das ausfuehrende Konto, dazu der gesicherte Benutzer (Admin-Backup: lesen, Benutzer-Modus: aendern). Stimmen die Rechte schon (fortlaufendes Backup), schreibt HUMig nichts. Netzwerkfreigaben (UNC, Netzlaufwerk) bleiben unveraendert - dort waeren SYSTEM/Administratoren die Konten des Dateiservers; wer lesen darf, regeln die Rechte der Freigabe. Bisher erbte ein Backup ausserhalb von `BACKUPS` die Rechte des Ziels (z. B. lesbar fuer alle Benutzer einer USB-Platte). Neue Einstellung `Backup.ExtraReadGroup` (settings.json, Name oder SID): diese Gruppe darf alle Backups lesen (z. B. Techniker ohne Adminrechte). Kennt das Ziel keine Rechte (FAT32/exFAT) oder scheitert das Setzen: Warnung im Protokoll, das Backup laeuft weiter. Entra-ID-Konten (S-1-12-1) werden jetzt ebenfalls berechtigt
+### Server-Backup
+- Teams-Karte: Rotations-/Archiv-Erinnerungen stehen nur noch als Zeile auf der Karte, die Farbe bleibt gruen (bisher orange). Ein auffaelliger Plattenzustand einer anderen Platte faerbt weiter orange
+- Teams-Karte: "Hinweis: Hinweis: ..." (doppelter Praefix, z. B. bei offline gesicherten VMs) behoben
+- Lange Sicherungen: alle 30 min eine Logzeile "laeuft noch (Phase) - seit ..., zuletzt gemeldet xx %, ca. xx GB auf die Platte geschrieben", auch wenn wbadmin lange nichts ausgibt
+
 ## v2.1.10 - 2026-10-15
 ### Restore
 - **Verknuepfungen im Zielprofil:** vor dem Zurueckkopieren in ein Benutzerprofil (als Administrator) prueft HUMig Zielordner, Ordner darueber und - nur Ordner, die es im Backup gibt - darunter auf Junctions/symbolische Links - jede Verknuepfung zaehlt, auch mit Ziel im Profil (sonst per Kette umgehbar). Zielordner selbst betroffen: Modul nicht zurueckgespielt (Fehler); darunter: nur dieser Ordner ausgelassen (Warnung). Windows-eigene Verknuepfungen stoeren nicht (nie im Backup). Bei einer gewollten Ordner-Umleitung per Verknuepfung sagt die Meldung, wohin von Hand zu kopieren ist. Gilt lokal und per Fernzugriff, nicht im Benutzer-Modus

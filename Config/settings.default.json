@@ -47,7 +47,8 @@
     "NoProfileFileExceptions": false,
     "MinimalSystemExceptions": false,
     "NoSystemFileExceptions": false,
-    "Catalog": false
+    "Catalog": false,
+    "ExtraReadGroup": ""
   },
   "Network": {
     "SubnetMask": "255.255.255.0",

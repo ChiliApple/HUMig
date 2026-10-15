@@ -3070,3 +3070,106 @@ Describe '2.1.10: Praxistest-Befunde und Verknuepfungen beim Restore' {
         Test-Path -LiteralPath "$o\Sub\a.txt" | Should -BeFalse
     }
 }
+
+Describe '2.1.11: Teams-Karte, Lebenszeichen, Rechte der Backup-Ordner' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Core-Notify.ps1')
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        . (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1')
+        $script:On = Get-HMNotifyDefaultCats; foreach ($k in @($script:On.Keys)) { $script:On[$k] = $true }
+        function New-T21Res([string]$St = 'OK', [string[]]$Notes = @()) {
+            [pscustomobject]@{ Status = $St; Notes = $Notes; Health = 'OK'; HealthText = ''; Report = ''; Minutes = 0; SizeBytes = [long]0; FreeBytes = [long]1500GB; TotalBytes = [long]2000GB; LowSpace = $false
+                VersionCount = 0; OldestVersion = ''; NewestVersion = ''; VMs = ''; Volumes = ''; HostSystem = '' }
+        }
+    }
+    It 'Hinweis-Notizen bekommen den Praefix nur einmal' {
+        $m = New-HMSbNotifyMessage -Result (New-T21Res -Notes @('Hinweis: VM1 offline gesichert', 'Fehler: x')) -ProfileName 'P' -Disk 'D1' -Cats $script:On
+        ($m.Lines -join '|') | Should -Match 'Hinweis: VM1 offline gesichert'
+        ($m.Lines -join '|') | Should -Not -Match 'Hinweis: Hinweis:'
+        ($m.Lines -join '|') | Should -Match 'Hinweis: Fehler: x'
+    }
+    It 'Rotations-/Archiv-Erinnerung: nur eine Zeile, Karte bleibt gruen' {
+        $rem = @("Server-Backup 'P': Platte P-1 seit 16 Tagen nicht gesichert - Platte wechseln (Rotation)", "Server-Backup 'P': Archiv-Sicherung faellig (letzte vor 40 Tagen)")
+        $m = New-HMSbNotifyMessage -Result (New-T21Res) -ProfileName 'P' -Disk 'D1' -Reminders $rem -Cats $script:On
+        $m.Level | Should -Be 'OK'
+        $m.Title | Should -Match 'erfolgreich'
+        ($m.Lines -join '|') | Should -Match 'Erinnerung: .*Platte wechseln'
+        $c = Get-HMNotifyDefaultCats
+        $m2 = New-HMSbNotifyMessage -Result (New-T21Res) -ProfileName 'P' -Disk 'D1' -Reminders $rem -Cats $c
+        if ($c['Reminder']) { $m2.Level | Should -Be 'OK'; @($m2.Lines).Count | Should -BeGreaterThan 0 }
+    }
+    It 'Muster der gruenen Erinnerungen passen zu den Texten der Statusseite (B39)' {
+        $st = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\UI-Status.ps1')
+        $st | Should -Match 'Platte wechseln \(Rotation\)'
+        $st | Should -Match 'Archiv-Sicherung faellig'
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1')
+        $eng | Should -Match ([regex]::Escape("'Platte wechseln \(Rotation\)|Archiv-Sicherung faellig'"))
+    }
+    It 'auffaelliger Plattenzustand einer anderen Platte faerbt weiter orange' {
+        $m = New-HMSbNotifyMessage -Result (New-T21Res) -ProfileName 'P' -Disk 'D1' -Reminders @("Server-Backup 'P': Platte P-2 - SMART meldet Fehler") -Cats $script:On
+        $m.Level | Should -Be 'Warning'
+    }
+    It 'Lebenszeichen-Zeile bei langen wbadmin-Laeufen' {
+        $script:HMSbAliveMinutes | Should -Be 30
+        $t = Format-HMSbAliveLine -Phase 'VMs' -Elapsed ([TimeSpan]::FromMinutes(95)) -PctText '45 %' -UsedStart ([long]100GB) -UsedNow ([long]220GB)
+        $t | Should -Match '^laeuft noch \(VMs\) - seit 1 h 35 min'
+        $t | Should -Match 'zuletzt gemeldet 45 %'
+        $t | Should -Match 'ca\. 120[,.]0 GB auf die Platte geschrieben'
+        Format-HMSbAliveLine -Phase '' -Elapsed ([TimeSpan]::FromMinutes(30)) -UsedStart $null -UsedNow ([long]1GB) | Should -Be 'laeuft noch - seit 30 min'
+        Format-HMSbAliveLine -Phase 'X' -Elapsed ([TimeSpan]::FromMinutes(30)) -UsedStart ([long]5GB) -UsedNow ([long]4GB) | Should -Not -Match 'geschrieben'
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1')
+        $eng | Should -Match 'ReadLineAsync\(\)'
+        $eng | Should -Match '\$rl\.Wait\(5000\)'
+    }
+    It 'Backup-Ordner-Rechte: fehlender Ordner, Dateisystem, Einbindung' {
+        $r = Set-HMBackupFolderAcl -Path (Join-Path $TestDrive 'gibtsnicht') -UserSid 'S-1-5-21-1-2-3-1001'
+        $r.Ok | Should -BeFalse
+        $r.Error | Should -Be 'Ordner fehlt'
+        Get-HMPathFileSystem '\\srv\share\x' | Should -Be ''
+        Test-HMNetworkPath '\\srv\share\BACKUPS' | Should -BeTrue
+        Test-HMNetworkPath '//srv/share' | Should -BeTrue
+        Test-HMNetworkPath 'relativ\x' | Should -BeFalse
+        (Set-HMBackupFolderAcl -Path '\\srv\share\BACKUPS\x' -UserSid 'S-1-5-21-1-2-3-1001').Ok | Should -BeFalse
+        Get-HMPathFileSystem '' | Should -Be ''
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        $eng | Should -Match "/inheritance:r /grant:r @grants"
+        $eng | Should -Match 'Set-HMBackupFolderAcl -Path \$Ctx\.BackupPath'
+        $eng | Should -Match "Backup-Ordner-Rechte NICHT gesetzt"
+        $def = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Config\settings.default.json') | ConvertFrom-Json
+        $def.Backup.PSObject.Properties.Name | Should -Contain 'ExtraReadGroup'
+    }
+    It 'Backup-Ordner-Rechte unter Windows: nur SYSTEM, Administratoren, Benutzer' -Skip:(-not (($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows)) {
+        $d = Join-Path $TestDrive 'acl1'; New-Item -ItemType Directory -Path $d | Out-Null
+        $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $r = Set-HMBackupFolderAcl -Path $d -UserSid $me -UserMode -ExtraGroup 'S-1-5-32-545'
+        $r.Ok | Should -BeTrue
+        $a = Get-Acl -LiteralPath $d
+        $a.AreAccessRulesProtected | Should -BeTrue
+        $sids = @($a.Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } | Select-Object -Unique)
+        $sids | Should -Contain 'S-1-5-18'
+        $sids | Should -Contain 'S-1-5-32-544'
+        $sids | Should -Contain $me
+        $sids | Should -Contain 'S-1-5-32-545'
+        $r2 = Set-HMBackupFolderAcl -Path $d -UserSid $me -ExtraGroup 'GibtEsNicht\KeineGruppe4711'
+        $r2.Ok | Should -BeTrue
+        @($r2.Notes).Count | Should -Be 1
+        $r2.Unchanged | Should -BeFalse
+        # fortlaufendes Backup: gleiche Rechte -> nichts schreiben; Abweichung -> neu setzen
+        $r3 = Set-HMBackupFolderAcl -Path $d -UserSid $me
+        $r3.Ok | Should -BeTrue
+        $r3.Unchanged | Should -BeTrue
+        # weiteres Konto (z. B. Explorer-ACE eines Admins ohne Erhoehung) wird geduldet - kein Neusetzen ueber den Baum
+        $null = & icacls.exe "$d" /grant '*S-1-5-32-545:(OI)(CI)RX' 2>&1
+        (Set-HMBackupFolderAcl -Path $d -UserSid $me).Unchanged | Should -BeTrue
+        # fremdes Verweigern dagegen nicht; beim Neusetzen werden auch die weiteren Konten entfernt
+        $null = & icacls.exe "$d" /deny '*S-1-5-32-545:(OI)(CI)W' 2>&1
+        (Set-HMBackupFolderAcl -Path $d -UserSid $me).Unchanged | Should -BeFalse
+        $left = @((Get-Acl -LiteralPath $d).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value })
+        $left | Should -Not -Contain 'S-1-5-32-545'
+        (Set-HMBackupFolderAcl -Path $d -UserSid $me).Unchanged | Should -BeTrue
+        $null = & icacls.exe "$d" /inheritance:e 2>&1
+        (Set-HMBackupFolderAcl -Path $d -UserSid $me).Unchanged | Should -BeFalse
+        Test-HMFolderAclMatch $d @{ 'S-1-5-18' = 'F'; 'S-1-5-32-544' = 'F'; $me = 'F' } | Should -BeTrue
+        Test-HMFolderAclMatch $d @{ 'S-1-5-18' = 'F'; 'S-1-5-32-544' = 'F'; $me = 'RX' } | Should -BeFalse
+    }
+}
