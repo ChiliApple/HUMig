@@ -31,6 +31,134 @@ function New-HMRestoreCtx([switch]$Quiet) {
 }
 
 # ----------------------------------------------------------------------------
+# Restore: Ziel-Konto passend zum Backup (Vorschlag) und fehlendes lokales Konto anlegen
+# ----------------------------------------------------------------------------
+# Rein auswertbar (testbar). $Profiles = Profile am Ziel (Account, Folder). Rueckgabe:
+#   Kind  = 'Domain' | 'Local' | 'Entra' | '' (Konto im Backup unbekannt)
+#   Name  = Benutzername ohne Domaene; Suggest = vorgeschlagenes Ziel-Konto; Hit = vorhandenes Profil am Ziel oder $null
+#   Differs = gewaehltes Ziel ist ein anderer Benutzer als im Backup
+function Get-HMRestoreAccountPlan([string]$BackupAccount, [string]$BackupFolder, [string]$SourcePc, [string]$TargetAccount, [string]$TargetPc, [object[]]$Profiles = @()) {
+    $o = [pscustomobject]@{ Kind = ''; Name = ''; Suggest = ''; Hit = $null; Differs = $false }
+    if ("$BackupAccount".Trim() -notmatch '^([^\\]+)\\([^\\]+)$') { return $o }
+    $dom = $Matches[1]; $o.Name = $Matches[2]
+    $src = "$SourcePc".Trim().Split('.')[0]
+    $o.Kind = if ($dom -ieq 'AzureAD') { 'Entra' } elseif ($src -and $dom -ieq $src) { 'Local' } else { 'Domain' }
+    $o.Hit = @($Profiles | Where-Object { $_ -and (("$($_.Account)" -split '\\')[-1] -ieq $o.Name -or ("$BackupFolder" -and "$($_.Folder)" -ieq "$BackupFolder")) })[0]
+    $o.Suggest = if ($o.Hit) { "$($o.Hit.Account)" } elseif ($o.Kind -eq 'Local') { "$("$TargetPc".Trim().Split('.')[0])\$($o.Name)" } else { "$BackupAccount".Trim() }
+    $o.Differs = (("$TargetAccount" -split '\\')[-1] -ine $o.Name)
+    return $o
+}
+# Lokales Konto am Ziel? (ohne Domaene oder Domaene = Computername des Ziels)
+function Test-HMLocalTargetAccount([string]$Account, [string]$TargetPc) {
+    $a = "$Account".Trim()
+    if ($a -notmatch '\\') { return $true }
+    return (($a -split '\\')[0] -ieq "$TargetPc".Trim().Split('.')[0])
+}
+# Kennwort fuer ein neues lokales Konto (zweimal), optional Administrator. Rueckgabe @{ Password (SecureString); Admin } oder $null
+function Show-HMNewLocalAccountDialog([string]$Name, [string]$Computer) {
+    $x = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Lokales Konto anlegen" Width="480" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#FF1E1E2E">
+  <StackPanel Margin="14">
+    <TextBlock x:Name="info" Foreground="#FFCDD6F4" TextWrapping="Wrap" Margin="0,0,0,10"/>
+    <TextBlock Text="Kennwort:" Foreground="#FFA6ADC8"/>
+    <PasswordBox x:Name="pw1" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,2" Margin="0,2,0,6"/>
+    <TextBlock Text="Kennwort wiederholen:" Foreground="#FFA6ADC8"/>
+    <PasswordBox x:Name="pw2" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,2" Margin="0,2,0,8"/>
+    <CheckBox x:Name="chkAdmin" Content="Mitglied der Administratoren (sonst normaler Benutzer)" Foreground="#FFCDD6F4" Margin="0,2,0,8"/>
+    <TextBlock Foreground="#FF6C7086" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,12" Text="Das Kennwort wird nur zum Anlegen verwendet - nicht gespeichert, nicht protokolliert und nie auf einer Befehlszeile uebergeben."/>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button x:Name="ok" Content="Anlegen" Width="110" Height="28" Background="#FFA6E3A1" Foreground="#FF1E1E2E" FontWeight="SemiBold" Margin="0,0,6,0" IsDefault="True"/>
+      <Button x:Name="cancel" Content="Abbrechen" Width="100" Height="28" Background="#FF45475A" Foreground="#FFCDD6F4" IsCancel="True"/>
+    </StackPanel>
+  </StackPanel>
+</Window>
+"@
+    $w = [System.Windows.Markup.XamlReader]::Parse($x)
+    if ($script:AppIcon) { $w.Icon = $script:AppIcon }
+    $w.FindName('info').Text = "Lokales Konto '$Name' an $Computer anlegen. Danach legt USMT beim Restore das Profil an (Modul Windows-Einstellungen) - sonst einmal mit dem Konto anmelden."
+    $pw1 = $w.FindName('pw1'); $pw2 = $w.FindName('pw2'); $chk = $w.FindName('chkAdmin')
+    $res = @{ V = $null }
+    $w.FindName('ok').Add_Click({
+        if ($pw1.SecurePassword.Length -lt 1) { [void][System.Windows.MessageBox]::Show($w, 'Bitte ein Kennwort eingeben (ein leeres Kennwort legt HUMig nicht an).', 'Lokales Konto', 'OK', 'Warning'); return }
+        $b1 = [IntPtr]::Zero; $b2 = [IntPtr]::Zero; $same = $false
+        try {
+            $b1 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($pw1.SecurePassword); $b2 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($pw2.SecurePassword)
+            $same = [string]::Equals([Runtime.InteropServices.Marshal]::PtrToStringBSTR($b1), [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b2), [StringComparison]::Ordinal)
+        } finally { if ($b1 -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b1) }; if ($b2 -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b2) } }
+        if (-not $same) { [void][System.Windows.MessageBox]::Show($w, 'Die Kennwoerter stimmen nicht ueberein.', 'Lokales Konto', 'OK', 'Warning'); return }
+        $sp = $pw1.SecurePassword.Copy(); $sp.MakeReadOnly()
+        $res.V = @{ Password = $sp; Admin = [bool]$chk.IsChecked }
+        $w.DialogResult = $true
+    }.GetNewClosure())
+    $w.Owner = $script:Window; Set-HMWindowScale $w
+    [void]$w.ShowDialog()
+    $pw1.Clear(); $pw2.Clear()
+    return $res.V
+}
+# Vor dem Restore: anderer Benutzer als im Backup -> Konto des Backups vorschlagen; lokales Konto ohne Profil, das es am Ziel
+# nicht gibt -> anlegen (Kennwort-Abfrage). Setzt ggf. die Auswahl oben. Rueckgabe: $true = weiter, $false = Restore abbrechen
+function Invoke-HMRestoreAccountCheck($Backup, $Target, [object[]]$Modules, [string]$Computer) {
+    if ($script:UserMode -or -not $Backup -or -not $Target) { return $true }
+    $tctx = @{ Computer = $Computer; IsRemote = -not (Test-HMIsLocal $Computer); Credential = $script:RemoteCred }
+    $tpc = ''; try { $tpc = "$(Invoke-HMTarget $tctx { $env:COMPUTERNAME })".Trim() } catch { }
+    if (-not $tpc) { $tpc = "$Computer".Split('.')[0] }
+    $src = ''; try { $src = Get-HMManifestComputerName $Backup.Manifest } catch { }
+    if (-not $src) { $src = "$($Backup.Computer)" }
+    $pl = Get-HMRestoreAccountPlan "$($Backup.Account)" "$($Backup.User)" $src "$($Target.Account)" $tpc @($script:Profiles)
+    if (-not $pl.Kind) { return $true }
+    $sel = $Target
+    if ($pl.Differs -and $pl.Kind -ne 'Entra') {
+        $m = "Im Backup ist das Konto $($Backup.Account) - oben gewaehlt ist $(if ($Target.Account) { $Target.Account } else { $Target.Folder }) (anderer Benutzer).`n`nJa = Ziel auf $($pl.Suggest) setzen$(if (-not $pl.Hit) { ' (hat am Ziel noch kein Profil)' })`nNein = trotzdem nach $(if ($Target.Account) { $Target.Account } else { $Target.Folder }) zurueckspielen`nAbbrechen = nichts tun"
+        $a = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'Restore - Ziel-Benutzer', 'YesNoCancel', 'Question', 'Yes'))"
+        if ($a -eq 'Cancel') { return $false }
+        if ($a -eq 'Yes') {
+            if ($pl.Hit) { $ui.cmbUser.SelectedIndex = [array]::IndexOf(@($script:Profiles), $pl.Hit) }
+            else { $ui.cmbUser.SelectedIndex = -1; $ui.cmbUser.Text = $pl.Suggest }
+            try { Update-SidLabel } catch { }
+            $sel = Get-SelectedProfile
+            Out-Console "Ziel-Benutzer: $($pl.Suggest)$(if (-not $pl.Hit) { ' (noch kein Profil)' })" 'Info'
+        }
+    }
+    # Konto ohne Profil, ohne Domaene eingetragen: als <Ziel-PC>\<Name> fuehren (USMT-Zuordnung und Profilsuche danach)
+    if ($sel.NoProfile -and "$($sel.Account)" -notmatch '\\') {
+        $ui.cmbUser.SelectedIndex = -1; $ui.cmbUser.Text = "$tpc\$($sel.Account)"
+        try { Update-SidLabel } catch { }
+        $sel = Get-SelectedProfile
+    }
+    if (-not $sel.NoProfile -or -not (Test-HMLocalTargetAccount "$($sel.Account)" $tpc)) { return $true }
+    # lokales Konto ohne Profil: gibt es das Konto am Ziel?
+    $name = ("$($sel.Account)" -split '\\')[-1]
+    $have = $null
+    try { $have = Invoke-HMTarget $tctx { param($n) if (-not (Get-Command Get-LocalUser -ErrorAction SilentlyContinue)) { return $null }; [bool](Get-LocalUser -Name $n -ErrorAction SilentlyContinue) } @($name) } catch { $have = $null }
+    if ($have -eq $true) { return $true }
+    if ($null -eq $have) { Out-Console "Lokale Konten an $Computer nicht pruefbar - ist '$name' dort nicht vorhanden, legt USMT kein Profil an (Code 14)." 'Warning'; return $true }
+    $m = "Das lokale Konto '$name' gibt es an $tpc noch nicht.`n`nUSMT legt fehlende lokale Konten nicht an (dafuer muesste das Kennwort im Klartext auf der Befehlszeile stehen, und Programm-Einstellungen wuerden nicht uebertragen).`n`nJa = Konto jetzt anlegen (Kennwort eingeben)`nNein = nicht anlegen (nur Computer-Module, Benutzer-Module werden uebersprungen)`nAbbrechen = nichts tun"
+    $a = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'Restore - lokales Konto', 'YesNoCancel', 'Question', 'Yes'))"
+    if ($a -eq 'Cancel') { return $false }
+    if ($a -ne 'Yes') { return $true }
+    $d = Show-HMNewLocalAccountDialog $name $tpc
+    if (-not $d) { return $false }
+    $r = ''
+    try {
+        $r = "$(Invoke-HMTarget $tctx {
+            param($n, $pw, $adm)
+            try {
+                $u = New-LocalUser -Name $n -Password $pw -AccountNeverExpires -ErrorAction Stop
+                try { Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $u -ErrorAction Stop } catch { if ("$($_.FullyQualifiedErrorId)" -notlike '*MemberExists*') { throw } }
+                if ($adm) { Add-LocalGroupMember -SID 'S-1-5-32-544' -Member $u -ErrorAction Stop }
+                'OK'
+            } catch { "FEHLER $($_.Exception.Message)" }
+        } @($name, $d.Password, $d.Admin))"
+    } catch { $r = "FEHLER $($_.Exception.Message)" }
+    finally { try { $d.Password.Dispose() } catch { } }
+    if ($r -ne 'OK') { Out-Console "Lokales Konto '$name' an $tpc nicht angelegt: $($r -replace '^FEHLER ', '')" 'Error'; return $false }
+    Out-Console "Lokales Konto '$name' an $tpc angelegt$(if ($d.Admin) { ' (Administratoren)' } else { ' (Benutzer)' })." 'Success'
+    if (-not @($Modules | Where-Object { $_.Id -eq 'Usmt' }).Count) { Out-Console "   Ohne Modul 'Windows-Einstellungen (USMT)' hat '$name' noch kein Profil: einmal mit dem Konto anmelden und abmelden, dann Restore - oder USMT mitwaehlen." 'Warning' }
+    return $true
+}
+
+# ----------------------------------------------------------------------------
 # Backup pruefen / Katalog erstellen
 # ----------------------------------------------------------------------------
 function Start-HMVerifyBackup([bool]$CreateCatalog) {

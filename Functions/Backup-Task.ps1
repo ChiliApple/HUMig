@@ -267,6 +267,16 @@ try {
     if ($openApps.Count) { Write-TaskLog "Geoeffnet: $($openApps -join ', ') - deren geoeffnete Dateien (Outlook-PST, Browser-Datenbanken) koennen fehlen" 'Warning' }
 } catch { }
 
+# ---- Outlook/Browser vor der Sicherung schliessen (Einstellung im Zeitplan, sonst nur Hinweis) ----
+$closeApps = ($script:Def.CloseApps -eq $true)
+$procDec = @{}
+if ($closeApps) {
+    foreach ($m in $mods) {
+        if (@($m.CloseProcess | Where-Object { "$_".Trim() }).Count -and ("$($m.CloseDefault)" -eq 'Copy' -or (Test-HMBrowserModule $m))) { $procDec["$($m.Id)"] = 'CloseForce' }
+    }
+    if ($procDec.Count) { Write-TaskLog "Laufende Programme dieser Module werden geschlossen (notfalls beendet): $(@($mods | Where-Object { $procDec.ContainsKey("$($_.Id)") } | ForEach-Object { $_.Name }) -join ', ')" 'Info' }
+}
+
 # ---- Optionen / Kontext ----
 $o = $script:Def.Options
 $opt = @{
@@ -285,6 +295,7 @@ $ctx = @{
     UserSid = $prof.SID; ProfilePath = $prof.LocalPath; UserFolder = $prof.Folder; Account = $(if ($prof.Account) { $prof.Account } else { $me.Name })
     Settings = $script:Settings; Exceptions = $script:Exceptions; Threads = $threads
     BackupRoot = $targetRoot; Options = $opt; AppCatalog = @($script:AppCatalog); Modules = $mods.ToArray()
+    ProcDecisions = $procDec; ScheduledOpenHint = (-not $closeApps)
 }
 $ctx.BackupPath = Join-Path $targetRoot ('{0}_{1}_{2}' -f (Get-Date -Format 'yyyy-MM-dd_HHmm'), (ConvertTo-HMSafeName $env:COMPUTERNAME), (ConvertTo-HMSafeName $prof.Folder))
 
@@ -321,7 +332,12 @@ if ($st -eq 'NoSpace') {
 $size = if ($res -and $res.SizeBytes) { Format-HMSize ([long]$res.SizeBytes) } else { '' }
 $dur = if ($res -and $res.Duration) { "$($res.Duration)" } else { '' }
 $msg = (@($size, $(if ($dur) { "Dauer $dur" })) | Where-Object { $_ }) -join ', '
-if ($openApps.Count) { $msg += $(if ($st -eq 'OK') { " - Hinweis: geoeffnet waren $($openApps -join ', ') (gesperrte Dateien wie Cookies fehlen evtl.)" } else { " - geoeffnet waren: $($openApps -join ', ')" }) }
+# Module, deren Programm lief (trotzdem kopiert / ausgelassen): bald von Hand nachsichern
+$openMods = @(@($(if ($res) { $res.Modules } else { @() })) | Where-Object { $_ -and -not $_.FromPrevious -and "$($_.Process)" -match 'trotzdem kopiert|uebersprungen|nicht geschlossen' } | ForEach-Object { "$($_.Name)" })
+if ($openMods.Count) {
+    $msg += " - Hinweis: Programm lief bei $($openMods -join ', ') - gesperrte Dateien (z.B. PST, Cookies) fehlen evtl.; diese Module bald von Hand nachsichern (Programm vorher schliessen)$(if (-not $closeApps) { " oder im Zeitplan 'Outlook/Browser schliessen' einschalten" })"
+    Write-TaskLog "Bald von Hand nachsichern: $($openMods -join ', ')" 'Warning'
+} elseif ($openApps.Count) { $msg += $(if ($st -eq 'OK') { " - Hinweis: geoeffnet waren $($openApps -join ', ') (gesperrte Dateien wie Cookies fehlen evtl.)" } else { " - geoeffnet waren: $($openApps -join ', ')" }) }
 # Massenloeschung an der Quelle: typisches Zeichen fuer einen Verschluesselungstrojaner - immer melden
 $script:MassDelete = $false
 if ($ctx.Manifest -and $ctx.Manifest.MassDeleteAlert) {

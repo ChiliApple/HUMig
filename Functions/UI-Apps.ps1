@@ -324,10 +324,11 @@ function Get-HMBackupSoftware($Backup) {
 # Fehlende Programme: Programmliste des Backups mit dem Ziel vergleichen (ohne Oberflaeche, testbar).
 # $Have = Anzeigenamen am Ziel. Rueckgabe: Rows (Status, Programm, Version, Paket, Zuordnung, Lizenz), Packages (Id -> Paket),
 # Winget ('winget:<Id>' -> Id/Name), NoPkg (Anzahl ohne Paket), Installable (Anzahl mit Paket/WinGet)
+# -Restrict: nur Programme der Katalog-Eintraege in $OnlyApps (Restore: angehakte Programm-Module); andere fehlende zaehlen in Other
 function Get-HMMissingAppPlan {
-    param([object[]]$Src = @(), [string[]]$Have = @(), [object[]]$Packages = @(), [object[]]$Catalog = @())
+    param([object[]]$Src = @(), [string[]]$Have = @(), [object[]]$Packages = @(), [object[]]$Catalog = @(), [string[]]$OnlyApps = @(), [switch]$Restrict)
     $rows = New-Object System.Collections.Generic.List[object]
-    $pkgs = @{}; $wgs = @{}; $noPkg = 0
+    $pkgs = @{}; $wgs = @{}; $noPkg = 0; $other = 0
     foreach ($s in @($Src | Where-Object { $_ -and "$($_.Name)" } | Sort-Object Name -Unique)) {
         if ($Have -contains $s.Name) { continue }
         # schon installiert in anderer Version? (gleicher Name ohne Versionsnummer)
@@ -335,6 +336,7 @@ function Get-HMMissingAppPlan {
         if ($base.Length -ge 4 -and @($Have | Where-Object { "$_".StartsWith($base, [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
         $pkg = $null; $how = ''
         $app = @($Catalog | Where-Object { "$($_.Detect)" -and $s.Name -match "$($_.Detect)" })[0]
+        if ($Restrict -and (-not $app -or @($OnlyApps) -notcontains "$($app.Id)")) { $other++; continue }
         if ($app) { $pkg = Find-HMAppPackage $app $Packages; $how = 'Katalog' }
         if (-not $pkg) { foreach ($p in @($Packages)) { if ("$($p.Settings.DetectName)" -and $s.Name -like "$($p.Settings.DetectName)") { $pkg = $p; $how = 'Paket-Erkennung'; break } } }
         # sonst WinGet (Katalog-Eintrag mit WingetId) - Softwareverteilung hat Vorrang
@@ -343,7 +345,7 @@ function Get-HMMissingAppPlan {
         if ($pkg) { $pkgs["$($pkg.Id)"] = $pkg } elseif (-not $wg) { $noPkg++ }
         $rows.Add(@($(if ($pkg) { 'Paket vorhanden' } elseif ($wg) { 'WinGet' } else { 'kein Paket' }), "$($s.Name)", "$($s.Version)", $(if ($pkg) { "$($pkg.Id)" } elseif ($wg) { "winget:$wg" } else { '' }), $how, $(if ($app) { "$($app.License)" } else { '' })))
     }
-    return [pscustomobject]@{ Rows = $rows.ToArray(); Packages = $pkgs; Winget = $wgs; NoPkg = $noPkg; Installable = ($pkgs.Count + $wgs.Count) }
+    return [pscustomobject]@{ Rows = $rows.ToArray(); Packages = $pkgs; Winget = $wgs; NoPkg = $noPkg; Installable = ($pkgs.Count + $wgs.Count); Other = $other }
 }
 
 # Programm-Module (eigene Katalog-Module) im Restore, deren Programm am Ziel NICHT installiert ist.
@@ -453,14 +455,17 @@ function Start-HMRestorePrep([hashtable]$Ctx) {
         $plan = $null
         if (@($st.State.Src).Count) {
             $pk = @(); try { $pk = @(Get-SwPackages) } catch { }
-            $plan = Get-HMMissingAppPlan -Src $st.State.Src -Have @($sw | ForEach-Object { "$($_.Name)" }) -Packages $pk -Catalog $script:AppCatalog
+            # nur Programme der angehakten Module anbieten (Programm-Module des Katalogs, dazu Edge/Chrome/Firefox/Office)
+            $only = @(Get-HMRestoreModuleApps $c.Modules)
+            $plan = Get-HMMissingAppPlan -Src $st.State.Src -Have @($sw | ForEach-Object { "$($_.Name)" }) -Packages $pk -Catalog $script:AppCatalog -OnlyApps $only -Restrict
+            if ([int]$plan.Other -gt 0) { Out-Console "Weitere $([int]$plan.Other) Programm(e) aus dem Backup fehlen an $($c.Computer) (ohne angehaktes Modul) - Liste und Installation: Knopf 'Fehlende Programme installieren ...'" 'Info' }
         }
         if ($plan -and $plan.Installable -gt 0) {
             $script:ReinstallPackages = $plan.Packages
             $script:ReinstallWinget = $plan.Winget
             $names = @(@($plan.Rows) | Where-Object { $_[3] } | ForEach-Object { "  $($_[1])$(if ("$($_[3])".StartsWith('winget:')) { ' (WinGet)' })" })
             $miss = @($plan.Rows).Count
-            $msg = "An $($c.Computer) fehlen $miss Programm(e) aus dem Backup, $($plan.Installable) davon installierbar (Softwareverteilung/WinGet):`n`n$(($names | Select-Object -First 15) -join "`n")$(if ($names.Count -gt 15) { "`n  ..." })`n`n" +
+            $msg = "An $($c.Computer) fehlen $miss Programm(e) zu den angehakten Modulen, $($plan.Installable) davon installierbar (Softwareverteilung/WinGet):`n`n$(($names | Select-Object -First 15) -join "`n")$(if ($names.Count -gt 15) { "`n  ..." })`n`n" +
                 "Microsoft empfiehlt, Programme VOR dem Zurueckspielen der Einstellungen zu installieren.`n`n" +
                 "Ja = zuerst installieren, danach startet der Restore automatisch`nNein = nur Restore (Programm-Module fehlender Programme werden ausgelassen)`nAbbrechen = nichts tun"
             $a = "$([System.Windows.MessageBox]::Show($script:Window, $msg, 'Restore - fehlende Programme', 'YesNoCancel', 'Question', 'Yes'))"
@@ -482,10 +487,18 @@ function Start-HMRestorePrep([hashtable]$Ctx) {
                 return
             }
         } elseif ($plan -and @($plan.Rows).Count) {
-            Out-Console "$(@($plan.Rows).Count) Programm(e) aus dem Backup fehlen an $($c.Computer) (kein Paket/WinGet) - Liste: Knopf 'Fehlende Programme installieren ...'" 'Warning'
+            Out-Console "$(@($plan.Rows).Count) Programm(e) zu den angehakten Modulen fehlen an $($c.Computer) (kein Paket/WinGet) - Liste: Knopf 'Fehlende Programme installieren ...'" 'Warning'
         }
         Resume-HMRestoreWithApps $c $sw
     }
+}
+# Katalog-Eintraege (Programme) der angehakten Restore-Module: Programm-Module und die festen Module Edge/Chrome/Firefox/Office
+function Get-HMRestoreModuleApps([object[]]$Modules) {
+    $core = @{ Edge = 'App_Edge'; Chrome = 'App_Chrome'; Firefox = 'App_Firefox'; Office = 'App_Office' }
+    return @(foreach ($m in @($Modules | Where-Object { $_ })) {
+        if ($m.Catalog -and "$($m.AppId)") { "$($m.AppId)" }
+        elseif ($core.ContainsKey("$($m.Id)")) { $core["$($m.Id)"] }
+    }) | Select-Object -Unique
 }
 # Nach der Installation: Software neu lesen, dann wie ohne Installation weiter
 function Start-HMRestoreAfterApps([hashtable]$Ctx) {

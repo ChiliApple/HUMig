@@ -647,7 +647,7 @@ $script:HMSchedScript = {
                 if ($cfg -and @(@($cfg.Profiles) | Where-Object { $_ -and "$($_.Name)" -eq $n }).Count) { $prof = $n }
             }
             if ("$($t.TaskPath)" -ne '\HUMig\' -or (Get-SidOf "$($t.Principal.UserId)") -ne 'S-1-5-18') { $o.Problem = 'Aufgabe veraendert - am PC pruefen' }
-            elseif (-not (Test-SafeName "$($t.TaskName)") -or -not (Test-Act $t @($sysPs) ($hd + [regex]::Escape("$AppRoot\Functions\ServerBackup-Task.ps1") + '" -ProfileName "[^"]+"( -VMs "[^"]*")?( -Volumes "[^"]*")?( -HostConfig)?( -HostSystem)?( -NoVerify)?( -Explicit)?\z'))) { $o.Problem = 'Aufgabe veraendert - am PC pruefen' }
+            elseif (-not (Test-SafeName "$($t.TaskName)") -or -not (Test-Act $t @($sysPs) ($hd + [regex]::Escape("$AppRoot\Functions\ServerBackup-Task.ps1") + '" -ProfileName "[^"]+"( -VMs "[^"]*")?( -Volumes "[^"]*")?( -HostConfig)?( -HostSystem)?( -NoVerify)?( -Explicit)?( -DiskLabel "[A-Za-z0-9_\-]{1,32}")?\z'))) { $o.Problem = 'Aufgabe veraendert - am PC pruefen' }
             elseif (-not $prof) { $o.Problem = 'Profil nicht gefunden' }
             elseif (-not $progOk) { $o.Problem = 'Programmordner fuer Benutzer beschreibbar - Start vom Handy gesperrt' }
             $o.Title = ("$($t.TaskName)" -replace '^Server-Backup - ', '')

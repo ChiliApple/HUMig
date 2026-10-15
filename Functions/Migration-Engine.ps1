@@ -985,7 +985,8 @@ function Get-HMTargetEnv {
         $e = @{
             SYSTEMDRIVE = $env:SystemDrive; WINDIR = $env:windir; PROGRAMDATA = $env:ProgramData
             PROGRAMFILES = $env:ProgramFiles; PROGRAMFILESX86 = ${env:ProgramFiles(x86)}; PUBLIC = $env:PUBLIC
-            PROFILE = $pp; APPDATA = (Join-Path $pp 'AppData\Roaming'); LOCALAPPDATA = (Join-Path $pp 'AppData\Local')
+            # ohne Profil (Restore nur der Computer-Module): keine Profilpfade
+            PROFILE = $pp; APPDATA = $(if ($pp) { Join-Path $pp 'AppData\Roaming' } else { '' }); LOCALAPPDATA = $(if ($pp) { Join-Path $pp 'AppData\Local' } else { '' })
             APPDATA_REDIRECTED = $false
         }
         if ($s) {
@@ -1134,12 +1135,13 @@ function Enter-HMModule([hashtable]$Ctx, $Job, $Module, [hashtable]$TEnv, [strin
                     if ($Phase -eq 'Backup' -and "$($Module.CloseDefault)" -eq 'Copy') {
                         # Browser: laufen oft dauerhaft - vom Programm gesperrte Dateien (Cookies, Sitzung) sind nur ein Hinweis, kein Fehler
                         $st.LockedHint = $true
-                        $st.Info += "$pn lief - trotzdem kopiert; vom Programm gesperrte Dateien (z.B. Cookies, Sitzung, geoeffnete PST-Dateien) fehlen evtl. - fuer eine vollstaendige Sicherung vorher schliessen"
+                        $st.Info += "$pn lief - trotzdem kopiert; vom Programm gesperrte Dateien (z.B. Cookies, Sitzung, geoeffnete PST-Dateien) fehlen evtl. - fuer eine vollstaendige Sicherung vorher schliessen$(if ($Ctx.ScheduledOpenHint) { ". Geplantes Backup: dieses Modul bald von Hand nachsichern oder im Zeitplan 'Outlook/Browser schliessen' einschalten" })"
                     } else { $st.Warn += "$pn lief - trotzdem kopiert (Daten evtl. nicht aktuell/inkonsistent)" }
                 }
                 { $_ -in @('Close', 'CloseForce') } {
                     Write-HMLog $Job "   $pn wird geschlossen ..." 'Info'
-                    $left = @(Close-HMProcs $Ctx $Job $run ($dec -eq 'CloseForce'))
+                    # Outlook (RestoreClose) braucht laenger zum sauberen Beenden (PST/OST schliessen) als ein Browser
+                    $left = @(Close-HMProcs $Ctx $Job $run ($dec -eq 'CloseForce') $(if ($Module.RestoreClose -eq $true) { 60 } else { 20 }))
                     if ($left.Count) {
                         $st.Skip = $true; $st.ProcAction = 'uebersprungen (liess sich nicht schliessen)'
                         $st.Warn += "$pn liess sich nicht schliessen - Modul uebersprungen"
@@ -2423,6 +2425,7 @@ function Get-HMUsmtCodeText([int]$Code, [string]$Version) {
         -1073741511 { return " = Einsprungpunkt nicht gefunden: diese USMT-Version passt nicht zum Windows des PCs$(if ($Version) { " (USMT $Version)" }). USMT aus dem ADK 10.1.26100.x verwenden (Werkzeuge > USMT einrichten)" }
         -1073741515 { return ' = DLL fehlt: USMT-Ordner unvollstaendig - neu einrichten (Werkzeuge > USMT einrichten)' }
         -1073741701 { return ' = falsche Architektur (amd64/arm64/x86 passt nicht zum PC)' }
+        14 { return ' = lokales Konto fehlt am Ziel-PC (USMT legt lokale Konten nur mit /lac an - HUMig verwendet das nicht): Restore erneut starten, HUMig bietet an, das Konto mit Kennwort anzulegen' }
         default { return '' }
     }
 }
