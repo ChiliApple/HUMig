@@ -2347,3 +2347,144 @@ Describe 'Ordnerrechte: Ordner ueber dem HUMig-Ordner (Windows, Administrator)' 
         }
     }
 }
+
+Describe 'Browser: Lesezeichen zusammenfuehren (Chromium)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        function New-HMTestBm([string]$Prefix, [int]$Count, [int]$StartId = 5) {
+            $kids = @(for ($i = 0; $i -lt $Count; $i++) { @{ id = [string]($StartId + $i); guid = [guid]::NewGuid().ToString(); name = "$Prefix $i"; type = 'url'; url = "https://example.org/$Prefix/$i"; date_added = '13300000000000000'; meta_info = @{ x = '1' } } })
+            return @{ checksum = 'abc'; version = 1; sync_metadata = 'xyz'
+                roots = @{ bookmark_bar = @{ id = '1'; name = 'Lesezeichenleiste'; type = 'folder'; children = $kids }
+                    other = @{ id = '2'; name = 'Weitere'; type = 'folder'; children = @(@{ id = '90'; name = "$Prefix weitere"; type = 'url'; url = 'https://example.org/o' }) }
+                    synced = @{ id = '3'; name = 'Mobil'; type = 'folder'; children = @() } } }
+        }
+        function Get-HMTestIds($Node) {
+            $out = @()
+            if ($Node -is [System.Collections.IDictionary]) {
+                if ($Node.Contains('id')) { $out += "$($Node['id'])" }
+                foreach ($c in @($Node['children'])) { if ($c) { $out += @(Get-HMTestIds $c) } }
+            }
+            return $out
+        }
+        $script:Mf = [pscustomobject]@{ MachineGuid = 'AAAA-1'; SourceComputer = 'PC01'; UserSid = 'S-1-5-21-1' }
+    }
+    It 'Gleicher PC nur, wenn Computer-ID, Computername und SID stimmen' {
+        Test-HMSameMachine $script:Mf 'aaaa-1' 'pc01.schule.local' 'S-1-5-21-1' | Should -BeTrue
+        Test-HMSameMachine $script:Mf 'BBBB-2' 'PC01' 'S-1-5-21-1' | Should -BeFalse
+        Test-HMSameMachine $script:Mf 'AAAA-1' 'PC02' 'S-1-5-21-1' | Should -BeFalse
+        Test-HMSameMachine $script:Mf 'AAAA-1' 'PC01' 'S-1-5-21-2' | Should -BeFalse
+        Test-HMSameMachine $script:Mf '' 'PC01' 'S-1-5-21-1' | Should -BeFalse
+        Test-HMSameMachine $null 'AAAA-1' 'PC01' 'S-1-5-21-1' | Should -BeFalse
+    }
+    It 'Alte Backups ohne Computer-ID zaehlen als neuer PC; Bericht nennt den Grund' {
+        $old = [pscustomobject]@{ SourceComputer = 'PC01'; UserSid = 'S-1-5-21-1' }
+        Test-HMSameMachine $old 'AAAA-1' 'PC01' 'S-1-5-21-1' | Should -BeFalse
+        Get-HMSameMachineText $old 'AAAA-1' 'PC01' 'S-1-5-21-1' | Should -Match 'ohne Computer-ID'
+        Get-HMSameMachineText $script:Mf 'BBBB-2' 'PC01' 'S-1-5-21-1' | Should -Match 'neu installiert'
+        Get-HMSameMachineText $script:Mf 'AAAA-1' 'PC01' 'S-1-5-21-1' | Should -Match '^gleicher PC'
+    }
+    It 'Profil-Zuordnung: gleiches Konto, Name, einziges Profil, Ziel ohne Profil' {
+        $s = @([pscustomobject]@{ Folder = 'Default'; Name = 'Person 1'; Gaia = 'g1'; User = 'a@x.at' }, [pscustomobject]@{ Folder = 'Profile 2'; Name = 'Arbeit'; Gaia = ''; User = '' })
+        $t = @([pscustomobject]@{ Folder = 'Default'; Name = 'Person 1'; Gaia = 'g1'; User = 'a@x.at' }, [pscustomobject]@{ Folder = 'Profile 1'; Name = 'Arbeit'; Gaia = 'g9'; User = 'b@x.at' })
+        $m = @(Resolve-HMChromiumMap $s 'Default' $t 'Default')
+        $m[0].Mode | Should -Be 'SameAccount'
+        $m[1].Mode | Should -Be 'Merge'; $m[1].Dst | Should -Be 'Profile 1'
+        $one = @(Resolve-HMChromiumMap @($s[1]) '' @([pscustomobject]@{ Folder = 'Default'; Name = 'X'; Gaia = ''; User = '' }) '')
+        $one[0].Dst | Should -Be 'Default'; $one[0].Mode | Should -Be 'Merge'
+        $new = @(Resolve-HMChromiumMap $s 'Profile 2' @() '')
+        @($new | Where-Object { $_.Mode -eq 'Copy' }).Count | Should -Be 1
+        @($new | Where-Object { $_.Mode -eq 'Copy' })[0].Src.Folder | Should -Be 'Profile 2'
+        @($new | Where-Object { $_.Mode -eq 'None' }).Count | Should -Be 1
+    }
+    It 'Zusammenfuehren: eigener Ordner, eindeutige neue ids, keine Sync-Daten, kein zweites Mal' {
+        $tgt = ConvertFrom-HMJsonText (ConvertTo-HMJsonText (New-HMTestBm 'neu' 2 5))
+        $src = ConvertFrom-HMJsonText (ConvertTo-HMJsonText (New-HMTestBm 'alt' 3 5))
+        $r = Merge-HMChromiumBookmarks $tgt $src 'Uebernommen von PC01 (01.10.2026)'
+        $r.Added | Should -Be 4
+        $j = ConvertTo-HMJsonText $r.Result
+        $j | Should -Not -Match 'checksum'
+        $back = ConvertFrom-HMJsonText $j
+        $bar = (Get-HMJ (Get-HMJ $back 'roots') 'bookmark_bar')
+        @($bar['children']).Count | Should -Be 3
+        $f = @($bar['children'])[2]
+        $f['name'] | Should -Be 'Uebernommen von PC01 (01.10.2026)'
+        @($f['children'] | Where-Object { $_['name'] -eq 'Weitere Lesezeichen' }).Count | Should -Be 1
+        @($f['children'] | Where-Object { $_['name'] -eq 'Mobile Lesezeichen' }).Count | Should -Be 0
+        (ConvertTo-HMJsonText $f) | Should -Not -Match 'meta_info|sync_metadata'
+        $ids = @(foreach ($k in @('bookmark_bar', 'other', 'synced')) { Get-HMTestIds (Get-HMJ (Get-HMJ $back 'roots') $k) })
+        @($ids | Select-Object -Unique).Count | Should -Be $ids.Count
+        $r2 = Merge-HMChromiumBookmarks $back $src 'Uebernommen von PC01 (01.10.2026)'
+        $r2.Result | Should -BeNullOrEmpty
+        $r2.Note | Should -Match 'schon vorhanden'
+    }
+    It 'JSON-Schreiber: Sonderzeichen, Zahlen, leere Listen, PowerShell-Huellen' {
+        $l = New-Object System.Collections.Generic.List[object]
+        $l.Add((Write-Output ([ordered]@{ n = 'a' })))
+        $h = [ordered]@{ a = "x`"y\z"; b = @(1, 2.5, $true, $null, "t`tab"); c = [ordered]@{ d = 'Grüße' }; e = @(); f = [long]13300000000000000; g = $l.ToArray() }
+        $j = ConvertTo-HMJsonText $h
+        $j | Should -Be ('{"a":"x\"y\\z","b":[1,2.5,true,null,"t\u0009ab"],"c":{"d":"Grüße"},"e":[],"f":13300000000000000,"g":[{"n":"a"}]}')
+        $back = ConvertFrom-HMJsonText $j
+        (Get-HMJ $back 'a') | Should -Be "x`"y\z"
+    }
+    It 'Ziel ohne Lesezeichen: Backup wird uebernommen (ohne Pruefsumme/Sync)' {
+        $src = ConvertFrom-HMJsonText (ConvertTo-HMJsonText (New-HMTestBm 'alt' 2))
+        $r = Merge-HMChromiumBookmarks $null $src 'X'
+        $r.Added | Should -Be 3
+        (ConvertTo-HMJsonText $r.Result) | Should -Not -Match 'sync_metadata|checksum'
+    }
+    It 'HTML-Export (Netscape-Format) mit maskierten Zeichen' {
+        $b = ConvertFrom-HMJsonText (ConvertTo-HMJsonText (New-HMTestBm 'a<b>&' 1))
+        $h = ConvertTo-HMBookmarkHtml $b 'Edge - Default'
+        $h | Should -Match 'NETSCAPE-Bookmark-file-1'
+        $h | Should -Match 'HREF="https://example.org/a&lt;b&gt;&amp;/0"'
+        $h | Should -Match 'PERSONAL_TOOLBAR_FOLDER'
+    }
+    It 'Restore an anderem PC: Ordner eingefuegt, vorheriger Stand gesichert, Fall im Bericht' {
+        $bk = Join-Path $TestDrive 'bk'; $ud = Join-Path $bk 'User Data'; $tg = Join-Path $TestDrive 'ziel'; $tud = Join-Path $tg 'User Data'
+        foreach ($d in @((Join-Path $ud 'Default'), (Join-Path $tud 'Default'))) { [void][System.IO.Directory]::CreateDirectory($d) }
+        [System.IO.File]::WriteAllText((Join-Path (Join-Path $ud 'Default') 'Bookmarks'), (ConvertTo-HMJsonText (New-HMTestBm 'alt' 2)))
+        [System.IO.File]::WriteAllText((Join-Path (Join-Path $tud 'Default') 'Bookmarks'), (ConvertTo-HMJsonText (New-HMTestBm 'neu' 1)))
+        [System.IO.File]::WriteAllText((Join-Path (Join-Path $ud 'Default') 'Login Data'), 'geheim')
+        $ctx = @{ IsRemote = $false; BrowserSameMachine = $false; BrowserCase = 'anderer PC angenommen: Test'; RestoredUserDirs = (New-Object System.Collections.Generic.List[string])
+            Backup = [pscustomobject]@{ Computer = 'ALTPC'; Created = '2026-10-01 10:00:00'; Manifest = $null } }
+        $mod = [pscustomobject]@{ Id = 'Edge'; Name = 'Edge-Profil'; CloseProcess = @() }
+        $it = [pscustomobject]@{ Type = 'Folder'; Name = 'EDGE'; Chromium = 'User Data' }
+        $r = Restore-HMChromiumItem -Ctx $ctx -Job $null -Module $mod -Item $it -Src $bk -DstLocal $tg
+        $r.Msg | Should -Match 'Ordner .Uebernommen von ALTPC \(01\.10\.2026\). mit 3 Lesezeichen'
+        $r.Status | Should -Be 'OK'
+        $r.Msg | Should -Match 'Erkannter Fall: anderer PC'
+        $r.Msg | Should -Match 'Nicht uebertragbar'
+        $res = ConvertFrom-HMJsonText ([System.IO.File]::ReadAllText((Join-Path (Join-Path $tud 'Default') 'Bookmarks')))
+        @((Get-HMJ (Get-HMJ $res 'roots') 'bookmark_bar')['children'] | ForEach-Object { $_['name'] }) | Should -Contain 'Uebernommen von ALTPC (01.10.2026)'
+        Test-Path -LiteralPath (Join-Path (Join-Path $tud 'Default') 'Bookmarks.humig-vorher') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path (Join-Path $tud 'Default') 'Login Data') | Should -BeFalse
+        $r2 = Restore-HMChromiumItem -Ctx $ctx -Job $null -Module $mod -Item $it -Src $bk -DstLocal $tg
+        $r2.Msg | Should -Match 'schon vorhanden'
+    }
+    It 'Backup: Lesezeichen als HTML und Erweiterungsliste' {
+        $bp = Join-Path $TestDrive 'bk2'; $pd = Join-Path (Join-Path (Join-Path $bp 'Edge') 'EDGE') 'User Data'; $pd = Join-Path $pd 'Default'
+        $ext = Join-Path (Join-Path (Join-Path $pd 'Extensions') ('a' * 32)) '1.0_0'
+        [void][System.IO.Directory]::CreateDirectory($ext)
+        [System.IO.File]::WriteAllText((Join-Path $pd 'Bookmarks'), (ConvertTo-HMJsonText (New-HMTestBm 'alt' 2)))
+        [System.IO.File]::WriteAllText((Join-Path $ext 'manifest.json'), '{"name":"Testerweiterung","version":"1.0"}')
+        $lines = @(Save-HMBrowserExtras @{ BackupPath = $bp } ([pscustomobject]@{ Id = 'Edge'; Name = 'Edge-Profil' }) ([pscustomobject]@{ Type = 'Folder'; Name = 'EDGE'; Path = '{LOCALAPPDATA}\Microsoft\Edge'; Chromium = 'User Data' }))
+        $lines.Count | Should -Be 2
+        $out = Join-Path $bp 'Browser-Lesezeichen'
+        Test-Path -LiteralPath (Join-Path $out 'Edge_Default.html') | Should -BeTrue
+        [System.IO.File]::ReadAllText((Join-Path $out 'Edge_Default_Erweiterungen.html')) | Should -Match 'microsoftedge\.microsoft\.com/addons/detail/a{32}'
+    }
+    It 'Katalog und Engine: Chromium-Eintraege, PreferenceMACs nur am gleichen PC, Browser beim Restore schliessen' {
+        $mods = (Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Config\modules.default.json') | ConvertFrom-Json).Modules
+        foreach ($id in @('Edge', 'Chrome')) {
+            $m = @($mods | Where-Object { $_.Id -eq $id })[0]
+            @($m.Items | Where-Object { $_.Type -eq 'Folder' })[0].Chromium | Should -Be 'User Data'
+            @($m.Items | Where-Object { $_.Type -eq 'Reg' })[0].SameMachineOnly | Should -BeTrue
+        }
+        $apps = (Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Config\apps.default.json') -Encoding UTF8 | ConvertFrom-Json).Apps
+        foreach ($id in @('App_Brave', 'App_Vivaldi')) { Test-HMChromiumItem (@($apps | Where-Object { $_.Id -eq $id })[0].Items[0]) | Should -BeTrue }
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        $eng | Should -Match "Phase -eq 'Restore' -and \(Test-HMBrowserModule \`$Module\)\) \{ \`$dec = 'CloseForce' \}"
+        $eng | Should -Match 'SameMachineOnly -and -not \(Test-HMBrowserSameMachine'
+        $eng | Should -Match 'MachineGuid = \(Get-HMMachineGuid'
+    }
+}
