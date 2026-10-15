@@ -1110,7 +1110,7 @@ function Test-HMServiceItem($Item) { return ("$($Item.Role)" -eq 'Database' -and
 # Vor einem Modul: Programm schliessen, Dienste stoppen, Access-Sperrdateien pruefen.
 # Rueckgabe: @{ Skip; Warn (Liste); Info (Hinweise); LockedHint; ProcAction; ServiceAction; Stopped (Dienste zum Wiederstarten); SkipServiceItems }
 function Enter-HMModule([hashtable]$Ctx, $Job, $Module, [hashtable]$TEnv, [string]$Phase) {
-    $st = @{ Skip = $false; Warn = @(); Info = @(); LockedHint = $false; ProcAction = ''; ServiceAction = ''; Stopped = @(); SkipServiceItems = $false }
+    $st = @{ Skip = $false; Warn = @(); Info = @(); LockedHint = $false; ProcAction = ''; ServiceAction = ''; Stopped = @(); SkipServiceItems = $false; SkipItems = @() }
     # --- Programm schliessen ---
     $names = @($Module.CloseProcess | Where-Object { "$_".Trim() })
     if ($names.Count) {
@@ -1125,13 +1125,16 @@ function Enter-HMModule([hashtable]$Ctx, $Job, $Module, [hashtable]$TEnv, [strin
             elseif ("$($Module.CloseDefault)" -eq 'Copy') { $dec = 'Copy' }
             # Restore eines Browsers: immer schliessen (notfalls beenden) - ein laufender Browser ueberschreibt die zurueckgespielten Dateien
             if ($Phase -eq 'Restore' -and (Test-HMBrowserModule $Module)) { $dec = 'CloseForce' }
+            # Restore eines Moduls mit RestoreClose (Outlook): nur SANFT schliessen (bis 60 s), nie hart beenden - ein beendetes Outlook
+            # kann eine offene PST/OST beschaedigen. Bleibt es offen, werden nur die Eintraege aus RestoreCloseSkip (PST) ausgelassen.
+            elseif ($Phase -eq 'Restore' -and $Module.RestoreClose -eq $true -and $dec -ne 'Skip') { $dec = 'CloseSoft' }
             switch ($dec) {
                 'Copy' {
                     $st.ProcAction = 'trotzdem kopiert'
                     if ($Phase -eq 'Backup' -and "$($Module.CloseDefault)" -eq 'Copy') {
                         # Browser: laufen oft dauerhaft - vom Programm gesperrte Dateien (Cookies, Sitzung) sind nur ein Hinweis, kein Fehler
                         $st.LockedHint = $true
-                        $st.Info += "$pn lief - trotzdem kopiert; vom Programm gesperrte Dateien (z.B. Cookies, Sitzung) fehlen evtl. - fuer eine vollstaendige Sicherung vorher schliessen"
+                        $st.Info += "$pn lief - trotzdem kopiert; vom Programm gesperrte Dateien (z.B. Cookies, Sitzung, geoeffnete PST-Dateien) fehlen evtl. - fuer eine vollstaendige Sicherung vorher schliessen"
                     } else { $st.Warn += "$pn lief - trotzdem kopiert (Daten evtl. nicht aktuell/inkonsistent)" }
                 }
                 { $_ -in @('Close', 'CloseForce') } {
@@ -1142,6 +1145,19 @@ function Enter-HMModule([hashtable]$Ctx, $Job, $Module, [hashtable]$TEnv, [strin
                         $st.Warn += "$pn liess sich nicht schliessen - Modul uebersprungen"
                     } else {
                         $st.ProcAction = $(if ($dec -eq 'CloseForce') { 'geschlossen (notfalls beendet)' } else { 'geschlossen' })
+                        Write-HMLog $Job "   $pn geschlossen" 'Success'
+                    }
+                }
+                'CloseSoft' {
+                    Write-HMLog $Job "   $pn wird geschlossen (sanft, bis 60 s) ..." 'Info'
+                    $left = @(Close-HMProcs $Ctx $Job $run $false 60)
+                    if ($left.Count) {
+                        $skipIt = @($Module.RestoreCloseSkip | Where-Object { "$_".Trim() })
+                        $st.SkipItems = $skipIt
+                        $st.ProcAction = "nicht geschlossen - $(if ($skipIt.Count) { "ausgelassen: $($skipIt -join ', ')" } else { 'trotzdem kopiert' })"
+                        $st.Warn += "$pn liess sich nicht sanft schliessen und wird nicht hart beendet (offene Dateien wie PST/OST koennten beschaedigt werden)$(if ($skipIt.Count) { " - ausgelassen: $($skipIt -join ', ')" }). Programm schliessen und Restore nur fuer dieses Modul wiederholen"
+                    } else {
+                        $st.ProcAction = 'geschlossen'
                         Write-HMLog $Job "   $pn geschlossen" 'Success'
                     }
                 }
@@ -2019,7 +2035,7 @@ function Backup-HMFolderItem {
         if ($Ctx.LockedHint -and $onlyLocks -and $st -ne 'Cancel' -and [int]$rc.ExitCode -lt 16) {
             # Browser lief (Modul mit CloseDefault Copy): gesperrte Dateien nur als Hinweis
             $lockHint = $true
-            $msg += ", Hinweis: $($rc.FilesFailed) Datei(en) vom laufenden Programm gesperrt und nicht gesichert (z.B. Cookies, Sitzung - fuer eine vollstaendige Sicherung das Programm vorher schliessen)$fl"
+            $msg += ", Hinweis: $($rc.FilesFailed) Datei(en) vom laufenden Programm gesperrt und nicht gesichert (z.B. Cookies, Sitzung, geoeffnete PST-Datei - fuer eine vollstaendige Sicherung das Programm vorher schliessen)$fl"
             $st = if (([int]$rc.ExitCode -band 4) -ne 0) { 'Warning' } else { 'OK' }
         } else {
             $msg += ", $($rc.FilesFailed) FEHLGESCHLAGEN (gesperrt/keine Rechte - siehe Robocopy-Log)$fl"
@@ -4429,6 +4445,11 @@ function Start-HMRestore {
                 if ($pre.Skip) { $done++; continue }
                 if ($pre.SkipServiceItems -and (Test-HMServiceItem $it)) {
                     $itemLog += [pscustomobject]@{ Name = $it.Name; Status = 'Warning'; Msg = 'ausgelassen: Dienst-Datenbank (Dienst nicht gestoppt)' }
+                    if ($worst -eq 'OK') { $worst = 'Warning' }
+                    $done++; continue
+                }
+                if (@($pre.SkipItems) -contains "$($it.Name)") {
+                    $itemLog += [pscustomobject]@{ Name = $it.Name; Status = 'Warning'; Msg = 'ausgelassen: Programm lief noch (nicht hart beendet, um offene Dateien nicht zu beschaedigen)' }
                     if ($worst -eq 'OK') { $worst = 'Warning' }
                     $done++; continue
                 }

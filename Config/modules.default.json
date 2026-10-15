@@ -34,8 +34,8 @@
         { "Type": "Folder", "Name": "FIREFOX_LOCAL", "Path": "{LOCALAPPDATA}\\Mozilla\\Firefox", "XD": [ "cache2", "startupCache", "thumbnails" ] }
       ] },
 
-    { "Id": "Office", "Name": "Office (Signaturen, Vorlagen, PST, OneNote)", "Group": "Office", "Default": true, "Scope": "User", "Remote": true,
-      "Hint": "Outlook-Signaturen, Office-Vorlagen, lokale PST-Dateien, OneNote-Cache. OST-Dateien werden nicht gesichert (kommen vom Server).",
+    { "Id": "Office", "Name": "Office (Signaturen, Vorlagen, PST, OneNote)", "Group": "Office", "Default": true, "Scope": "User", "Remote": true, "CloseProcess": [ "outlook" ], "CloseDefault": "Copy", "RestoreClose": true, "RestoreCloseSkip": [ "PST" ],
+      "Hint": "Outlook-Signaturen, Office-Vorlagen, lokale PST-Dateien, OneNote-Cache. OST-Dateien werden nicht gesichert (kommen vom Server). Laeuft Outlook, fragt HUMig vor dem Backup nach dem Schliessen (geoeffnete PST-Dateien sind gesperrt); ohne Abfrage (Zeitplan) wird trotzdem kopiert - gesperrte Dateien sind dann nur ein Hinweis. Vor dem Restore wird Outlook sanft geschlossen (nie hart beendet); bleibt es offen, werden die PST-Dateien ausgelassen. Neues Outlook (olk): Signaturen liegen in der Cloud, nicht in %APPDATA%\\Microsoft\\Signatures.",
       "Items": [
         { "Type": "Folder", "Name": "SIGNATURES", "Path": "{APPDATA}\\Microsoft\\Signatures", "Legacy": "OFFICE\\Signatures" },
         { "Type": "Folder", "Name": "TEMPLATES", "Path": "{APPDATA}\\Microsoft\\Templates", "Legacy": "OFFICE\\Templates" },

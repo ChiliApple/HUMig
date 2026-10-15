@@ -327,7 +327,10 @@
         {
           "Type": "Folder",
           "Name": "USER",
-          "Path": "{APPDATA}\\Code\\User"
+          "Path": "{APPDATA}\\Code\\User",
+          "XD": [
+            "askpass"
+          ]
         },
         {
           "Type": "Folder",
