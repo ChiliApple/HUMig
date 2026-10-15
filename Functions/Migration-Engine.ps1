@@ -1123,6 +1123,8 @@ function Enter-HMModule([hashtable]$Ctx, $Job, $Module, [hashtable]$TEnv, [strin
             # ohne Abfrage (geplantes Backup, Mehrfachaktion): Module mit CloseDefault = Copy (Browser) trotzdem kopieren statt auslassen -
             # Browser laufen oft dauerhaft im Hintergrund; gesperrte Dateien (z.B. Cookies) fehlen dann im Backup
             elseif ("$($Module.CloseDefault)" -eq 'Copy') { $dec = 'Copy' }
+            # Restore eines Browsers: immer schliessen (notfalls beenden) - ein laufender Browser ueberschreibt die zurueckgespielten Dateien
+            if ($Phase -eq 'Restore' -and (Test-HMBrowserModule $Module)) { $dec = 'CloseForce' }
             switch ($dec) {
                 'Copy' {
                     $st.ProcAction = 'trotzdem kopiert'
@@ -2607,6 +2609,7 @@ function Start-HMBackup {
             Network = $(if ($prev) { @($prev.Network) } else { @() }); ExtraFolders = @($Ctx.Options.ExtraFolders); ExcludePaths = @($Ctx.Options.ExcludePaths)
             OneDriveMode = $(if ($Ctx.Options.OneDriveLocal) { 'Local' } else { 'Skip' }); SyncRoots = @(); SpaceCheck = $Ctx.SpaceCheck; Verify = $null
             Status = 'Running'; SizeBytes = 0; Duration = $null; Modules = @()
+            MachineGuid = (Get-HMMachineGuid $Ctx); SourceComputerName = (Get-HMTargetComputerName $Ctx); Browsers = [ordered]@{}
             Software = $(if (@($Ctx.SoftwareList).Count) { @($Ctx.SoftwareList) } elseif ($prev -and $prev.Software) { @($prev.Software) } else { @() })
             Apps = $(if (@($Ctx.SoftwareList).Count) { @($Ctx.AppsFound) } elseif ($prev -and $prev.Apps) { @($prev.Apps) } else { @() })
         }
@@ -2658,6 +2661,17 @@ function Start-HMBackup {
                     }
                 } catch {
                     $r = [pscustomobject]@{ Name = "$($it.Name)$($it.Handler)"; Status = 'Error'; Msg = $_.Exception.Message; Bytes = 0; Source = '' }
+                }
+                # Chromium-Browser: Lesezeichen zusaetzlich als HTML, Liste der Erweiterungen, Browser-Version ins Manifest
+                if ($it.Type -eq 'Folder' -and $r.Status -in @('OK', 'Warning') -and (Test-HMChromiumItem $it)) {
+                    try {
+                        $ex = @(Save-HMBrowserExtras $Ctx $mod $it)
+                        if ($ex.Count) { $r.Msg = "$($r.Msg)`n" + ($ex -join "`n") }
+                        $ud = Get-HMItemTargetPath $Ctx.BackupPath $mod $it
+                        if ("$($it.Chromium)") { $ud = Join-Path $ud "$($it.Chromium)" }
+                        $bv = Get-HMChromiumVersion $ud
+                        if ($bv) { $Ctx.Manifest.Browsers["$($mod.Id)"] = $bv }
+                    } catch { Write-HMLog $Job "   Lesezeichen-Export: $($_.Exception.Message)" 'Warning' }
                 }
                 $lvl = switch ($r.Status) { 'OK' { 'Success' } 'Skip' { 'Debug' } 'Warning' { 'Warning' } default { 'Error' } }
                 Write-HMLog $Job ("   {0}: {1}" -f $r.Name, ("$($r.Msg)" -replace "`r?`n", "`n      ")) $lvl
@@ -2875,6 +2889,765 @@ function Measure-HMBackup {
 }
 
 # ============================================================================
+# BROWSER (Chromium: Edge, Chrome, Brave, Vivaldi): Lesezeichen zuverlaessig uebertragen
+# ============================================================================
+# Kennwoerter, Cookies und Zahlungsdaten sind an Windows-Konto und PC gebunden (DPAPI, App-Bound Encryption) und werden
+# bewusst weder entschluesselt noch auf einen anderen PC kopiert. Lesezeichen (Datei Bookmarks, Klartext-JSON) werden
+# auf einem anderen PC ZUSAMMENGEFUEHRT: Ordner "Uebernommen von <PC> (<Datum>)" in der Lesezeichenleiste.
+# Gleicher PC + gleiches Konto (Computer-ID + Computername + SID): kompletter Ordner wie bisher.
+# Eintraege mit Eigenschaft Chromium (relativer Pfad zu "User Data", leer = Eintrag ist "User Data") nutzen diesen Weg.
+
+# JSON lesen/schreiben ohne Groessen-/Tiefengrenze von ConvertFrom-Json (Windows PowerShell 5.1); Woerterbuecher + object[]
+function New-HMJsonSerializer {
+    Add-Type -AssemblyName System.Web.Extensions -ErrorAction Stop
+    $js = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+    $js.MaxJsonLength = [int]::MaxValue; $js.RecursionLimit = 1000
+    return $js
+}
+function ConvertFrom-HMJsonText([string]$Text) {
+    if ($PSVersionTable.PSVersion.Major -ge 6) { return , (ConvertFrom-Json -InputObject $Text -AsHashtable -Depth 1000) }   # PowerShell 7
+    return , (New-HMJsonSerializer).DeserializeObject($Text)
+}
+# Eigener JSON-Schreiber (C#, schnell auch bei grossen Lesezeichen-Dateien): JavaScriptSerializer scheitert an
+# PowerShell-Huellen (PSObject) in Listen, ConvertTo-Json an der Tiefe. Woerterbuecher, Listen, Texte, Zahlen, true/false/null.
+$script:HMJsonCs = @'
+using System;
+using System.Collections;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Text;
+namespace HMJ {
+    public static class Writer {
+        public static string Write(object o) { var sb = new StringBuilder(); W(sb, o, 0); return sb.ToString(); }
+        static void U(StringBuilder sb, char c) { sb.Append("\\u").Append(((int)c).ToString("x4")); }
+        static void S(StringBuilder sb, string s) {
+            sb.Append('"');
+            for (int i = 0; i < s.Length; i++) {
+                char c = s[i];
+                if (c == '"') sb.Append("\\\"");
+                else if (c == '\\') sb.Append("\\\\");
+                else if (c < ' ') U(sb, c);
+                else if (char.IsHighSurrogate(c)) {
+                    if (i + 1 < s.Length && char.IsLowSurrogate(s[i + 1])) { sb.Append(c).Append(s[i + 1]); i++; }
+                    else U(sb, c);   // einzelnes Surrogat (kaputter Titel) nicht still verlieren
+                }
+                else if (char.IsLowSurrogate(c)) U(sb, c);
+                else sb.Append(c);
+            }
+            sb.Append('"');
+        }
+        static void W(StringBuilder sb, object v, int d) {
+            if (d > 1000) throw new InvalidOperationException("JSON zu tief verschachtelt");
+            var ps = v as System.Management.Automation.PSObject;
+            if (ps != null) v = ps.BaseObject;
+            if (v == null) { sb.Append("null"); return; }
+            if (v is string || v is char || v is Guid) { S(sb, v.ToString()); return; }
+            if (v is DateTime) { S(sb, ((DateTime)v).ToString("o", CultureInfo.InvariantCulture)); return; }
+            if (v is bool) { sb.Append((bool)v ? "true" : "false"); return; }
+            var dict = v as IDictionary;
+            if (dict != null) {
+                sb.Append('{'); bool first = true;
+                foreach (DictionaryEntry e in dict) { if (!first) sb.Append(','); first = false; S(sb, Convert.ToString(e.Key, CultureInfo.InvariantCulture)); sb.Append(':'); W(sb, e.Value, d + 1); }
+                sb.Append('}'); return;
+            }
+            var list = v as IEnumerable;
+            if (list != null) {
+                sb.Append('['); bool first = true;
+                foreach (object x in list) { if (!first) sb.Append(','); first = false; W(sb, x, d + 1); }
+                sb.Append(']'); return;
+            }
+            if (v is double || v is float) {
+                double f = Convert.ToDouble(v, CultureInfo.InvariantCulture);
+                if (double.IsNaN(f) || double.IsInfinity(f)) sb.Append("null"); else sb.Append(f.ToString("R", CultureInfo.InvariantCulture));
+                return;
+            }
+            // BigInteger (PowerShell 7 bei grossen Zahlen) - per Typname, damit es auch unter .NET Framework ohne Verweis uebersetzt
+            if (v.GetType().FullName == "System.Numerics.BigInteger") { sb.Append(Convert.ToString(v, CultureInfo.InvariantCulture)); return; }
+            var cv = v as IConvertible;
+            if (cv != null) { sb.Append(cv.ToString(CultureInfo.InvariantCulture)); return; }
+            S(sb, v.ToString());
+        }
+    }
+    // Endgueltiger Pfad eines geoeffneten Ordners/einer Datei (loest Verknuepfungen/Junctions in JEDEM Pfadteil auf)
+    public static class PathCheck {
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern uint GetFinalPathNameByHandleW(IntPtr h, StringBuilder buf, uint len, uint flags);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern uint GetLongPathNameW(string shortPath, StringBuilder buf, uint len);
+        [StructLayout(LayoutKind.Sequential)]
+        struct BHFI { public uint Attr; public long C; public long A; public long W; public uint Vol; public uint SizeHi; public uint SizeLo; public uint Links; public uint IdxHi; public uint IdxLo; }
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool GetFileInformationByHandle(IntPtr h, out BHFI info);
+        // Anzahl harter Links einer Datei (>1 = dieselben Daten liegen noch unter einem anderen Namen, evtl. ausserhalb des Profils); -1 = unbekannt
+        public static int LinkCount(string path) {
+            IntPtr h = CreateFileW(path, 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+            if (h == new IntPtr(-1)) return -1;
+            try { BHFI i; if (!GetFileInformationByHandle(h, out i)) return -1; return (int)i.Links; } finally { CloseHandle(h); }
+        }
+        // Kurznamen (8.3, z.B. RUNNER~1) in lange Namen umwandeln, damit der Vergleich mit dem aufgeloesten Pfad stimmt
+        public static string LongPath(string path) {
+            var sb = new StringBuilder(1024);
+            uint n = GetLongPathNameW(path, sb, (uint)sb.Capacity);
+            if (n == 0) return path;
+            if (n >= sb.Capacity) { sb = new StringBuilder((int)n + 1); n = GetLongPathNameW(path, sb, (uint)sb.Capacity); if (n == 0) return path; }
+            return sb.ToString();
+        }
+        public static string FinalPath(string path) {
+            // 0x80 = FILE_READ_ATTRIBUTES, Share = Lesen/Schreiben/Loeschen, 3 = OPEN_EXISTING, 0x02000000 = BACKUP_SEMANTICS (Ordner)
+            IntPtr h = CreateFileW(path, 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+            if (h == new IntPtr(-1)) return null;
+            try {
+                var sb = new StringBuilder(1024);
+                uint n = GetFinalPathNameByHandleW(h, sb, (uint)sb.Capacity, 0);
+                if (n == 0) return null;
+                if (n >= sb.Capacity) { sb = new StringBuilder((int)n + 1); n = GetFinalPathNameByHandleW(h, sb, (uint)sb.Capacity, 0); if (n == 0) return null; }
+                string r = sb.ToString();
+                if (r.StartsWith(@"\\?\UNC\")) r = @"\\" + r.Substring(8);
+                else if (r.StartsWith(@"\\?\")) r = r.Substring(4);
+                return r;
+            } finally { CloseHandle(h); }
+        }
+    }
+}
+'@
+function Initialize-HMJson { if (-not ('HMJ.Writer' -as [type])) { Add-Type -TypeDefinition $script:HMJsonCs -ErrorAction Stop } }
+function ConvertTo-HMJsonText($Object) {
+    Initialize-HMJson
+    return [HMJ.Writer]::Write($Object)
+}
+# Wert aus einem JSON-Woerterbuch (Gross-/Kleinschreibung exakt, fehlender Schluessel = $null)
+function Get-HMJ($Dict, [string]$Key) {
+    if ($null -eq $Dict -or -not ($Dict -is [System.Collections.IDictionary])) { return $null }
+    foreach ($k in @($Dict.Keys)) { if ([string]$k -ceq $Key) { return $Dict[$k] } }
+    return $null
+}
+# Datei lesen, auch wenn ein Programm sie offen haelt; $null bei Fehler/fehlend
+function Read-HMSharedText([string]$Path) {
+    if (-not $Path -or -not [System.IO.File]::Exists($Path)) { return $null }
+    try {
+        $fs = [System.IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+        try { $sr = New-Object System.IO.StreamReader($fs, (New-Object System.Text.UTF8Encoding($false)), $true); return $sr.ReadToEnd() } finally { $fs.Dispose() }
+    } catch { return $null }
+}
+function Read-HMJsonFileSafe([string]$Path) {
+    $t = Read-HMSharedText $Path
+    if (-not $t) { return $null }
+    try { return , (ConvertFrom-HMJsonText $t) } catch { return $null }
+}
+
+# Profile eines Chromium-"User Data"-Ordners: Ordner (Default, Profile N), Anzeigename, Konto (gaia_id/user_name)
+function Get-HMChromiumProfiles([string]$UserData, $LocalState) {
+    $out = New-Object System.Collections.Generic.List[object]
+    if (-not $UserData -or -not [System.IO.Directory]::Exists($UserData)) { return $out.ToArray() }
+    $cache = Get-HMJ (Get-HMJ $LocalState 'profile') 'info_cache'
+    foreach ($d in @([System.IO.Directory]::GetDirectories($UserData))) {
+        $f = [System.IO.Path]::GetFileName($d)
+        if ($f -ne 'Default' -and $f -notmatch '^Profile \d+$') { continue }
+        if (-not [System.IO.File]::Exists((Join-Path $d 'Preferences')) -and -not [System.IO.File]::Exists((Join-Path $d 'Bookmarks'))) { continue }
+        $ci = Get-HMJ $cache $f
+        $acct = "$(Get-HMJ $ci 'gaia_id')"
+        $mail = "$(Get-HMJ $ci 'user_name')"
+        $out.Add([pscustomobject]@{ Folder = $f; Name = "$(Get-HMJ $ci 'name')"; Gaia = $acct; User = $mail })
+    }
+    return $out.ToArray()
+}
+
+# Zuordnung Quellprofil -> Zielprofil (rein, testbar). Mode: Copy (Ziel hat noch kein Profil), Merge, SameAccount, None
+# Regeln: gleiches Konto -> nichts einfuegen (kommt ueber die Synchronisierung); sonst gleicher Anzeigename; sonst einziges
+# Zielprofil; sonst zuletzt benutztes; Ziel ohne Profil -> Hauptprofil der Quelle nach Default, weitere nur als HTML.
+function Resolve-HMChromiumMap([object[]]$Source, [string]$SourceLastUsed, [object[]]$Target, [string]$TargetLastUsed) {
+    $src = @($Source | Where-Object { $_ }); $dst = @($Target | Where-Object { $_ })
+    $out = New-Object System.Collections.Generic.List[object]
+    if (-not $src.Count) { return $out.ToArray() }
+    $same = { param($a, $b) ("$a".Trim() -and "$b".Trim() -and "$a".Trim().ToLowerInvariant() -eq "$b".Trim().ToLowerInvariant()) }
+    if (-not $dst.Count) {
+        $main = @($src | Where-Object { $_.Folder -eq $SourceLastUsed })[0]
+        if (-not $main) { $main = @($src | Where-Object { $_.Folder -eq 'Default' })[0] }
+        if (-not $main) { $main = $src[0] }
+        foreach ($s in $src) {
+            if ($s -eq $main) { $out.Add([pscustomobject]@{ Src = $s; Dst = 'Default'; Mode = 'Copy'; Reason = 'Browser am Ziel noch ohne Profil' }) }
+            else { $out.Add([pscustomobject]@{ Src = $s; Dst = ''; Mode = 'None'; Reason = 'weiteres Profil - Browser am Ziel hat noch kein Profil dafuer' }) }
+        }
+        return $out.ToArray()
+    }
+    foreach ($s in $src) {
+        # gleiches Konto: sind beide Konto-IDs (gaia_id) gesetzt, entscheiden nur diese; sonst der Anmeldename
+        $hit = @($dst | Where-Object { if ("$($s.Gaia)".Trim() -and "$($_.Gaia)".Trim()) { & $same $s.Gaia $_.Gaia } else { & $same $s.User $_.User } })[0]
+        if ($hit) { $out.Add([pscustomobject]@{ Src = $s; Dst = $hit.Folder; Mode = 'SameAccount'; Reason = 'gleiches Konto' }); continue }
+        $hit = @($dst | Where-Object { & $same $s.Name $_.Name })[0]
+        $why = 'gleicher Profilname'
+        if (-not $hit -and $dst.Count -eq 1) { $hit = $dst[0]; $why = 'einziges Profil am Ziel' }
+        if (-not $hit) { $hit = @($dst | Where-Object { $_.Folder -eq $TargetLastUsed })[0]; $why = 'zuletzt benutztes Profil am Ziel' }
+        if (-not $hit) { $hit = @($dst | Where-Object { $_.Folder -eq 'Default' })[0]; $why = 'Standardprofil am Ziel' }
+        if (-not $hit) { $hit = $dst[0]; $why = 'erstes Profil am Ziel' }
+        $out.Add([pscustomobject]@{ Src = $s; Dst = $hit.Folder; Mode = 'Merge'; Reason = $why })
+    }
+    return $out.ToArray()
+}
+
+# Gleicher PC und gleiches Konto? Nur wenn Computer-ID (MachineGuid), Computername und Benutzer-SID alle stimmen
+function Test-HMSameMachine($Manifest, [string]$TargetGuid, [string]$TargetComputer, [string]$TargetSid) {
+    if (-not $Manifest) { return $false }
+    $g = "$($Manifest.MachineGuid)".Trim(); $c = (Get-HMManifestComputerName $Manifest); $s = "$($Manifest.UserSid)".Trim()
+    if (-not $g -or -not $c -or -not $s -or -not "$TargetGuid".Trim() -or -not "$TargetComputer".Trim() -or -not "$TargetSid".Trim()) { return $false }
+    return ($g -ieq "$TargetGuid".Trim() -and $c.Split('.')[0] -ieq "$TargetComputer".Trim().Split('.')[0] -and $s -ieq "$TargetSid".Trim())
+}
+# Computername der Quelle: echter Name (SourceComputerName, ab 2.1.7), sonst der eingegebene Name (kann IP/Alias sein)
+function Get-HMManifestComputerName($Manifest) {
+    if (-not $Manifest) { return '' }
+    $n = "$($Manifest.SourceComputerName)".Trim()
+    if ($n) { return $n }
+    return "$($Manifest.SourceComputer)".Trim()
+}
+# Fall fuer den Bericht (rein, testbar): F1 = gleicher PC + gleiches Konto, sonst Grund
+function Get-HMSameMachineText($Manifest, [string]$TargetGuid, [string]$TargetComputer, [string]$TargetSid) {
+    if (Test-HMSameMachine $Manifest $TargetGuid $TargetComputer $TargetSid) { return 'gleicher PC und gleiches Konto (Computer-ID, Computername und Benutzer-SID stimmen)' }
+    if (-not $Manifest) { return 'anderer PC angenommen: Backup ohne Manifest (Vorgaengerversion)' }
+    if (-not "$($Manifest.MachineGuid)".Trim()) { return 'anderer PC angenommen: Backup ohne Computer-ID (mit aelterer HUMig-Version erstellt)' }
+    if (-not "$TargetGuid".Trim()) { return 'anderer PC angenommen: Computer-ID des Ziel-PCs nicht lesbar' }
+    $why = @()
+    if ((Get-HMManifestComputerName $Manifest).Split('.')[0] -ine "$TargetComputer".Trim().Split('.')[0]) { $why += 'anderer Computername' }
+    if ("$($Manifest.MachineGuid)".Trim() -ine "$TargetGuid".Trim()) { $why += 'andere Computer-ID (anderer PC oder Windows neu installiert)' }
+    if ("$($Manifest.UserSid)".Trim() -ine "$TargetSid".Trim()) { $why += 'anderes Benutzerkonto (SID)' }
+    if (-not $why.Count) { $why = @('Angaben unvollstaendig') }
+    return "anderer PC oder anderes Konto: $($why -join ', ')"
+}
+$script:HMMachineGuidScript = {
+    try {
+        $k = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+        $c = $k.OpenSubKey('SOFTWARE\Microsoft\Cryptography')
+        if ($c) { "$($c.GetValue('MachineGuid'))" } else { '' }
+    } catch { '' }
+}
+function Get-HMMachineGuid([hashtable]$Ctx) { try { return "$(@(Invoke-HMTarget $Ctx $script:HMMachineGuidScript)[0])" } catch { return '' } }
+# echter Computername des Ziels (bei Fernzugriff ueber IP/Alias steht in $Ctx.Computer nicht der Name)
+function Get-HMTargetComputerName([hashtable]$Ctx) {
+    $n = ''
+    try { $n = "$(@(Invoke-HMTarget $Ctx { $env:COMPUTERNAME })[0])".Trim() } catch { }
+    if (-not $n) { $n = "$($Ctx.Computer)" }
+    return $n
+}
+function Test-HMBrowserSameMachine([hashtable]$Ctx) {
+    if ($null -eq $Ctx.BrowserSameMachine) {
+        $mf = if ($Ctx.Backup) { $Ctx.Backup.Manifest } else { $null }
+        $g = Get-HMMachineGuid $Ctx
+        $n = Get-HMTargetComputerName $Ctx
+        $Ctx.BrowserSameMachine = [bool](Test-HMSameMachine $mf $g $n "$($Ctx.UserSid)")
+        $Ctx.BrowserCase = Get-HMSameMachineText $mf $g $n "$($Ctx.UserSid)"
+    }
+    return [bool]$Ctx.BrowserSameMachine
+}
+# Eintrag mit Eigenschaft Chromium (PSCustomObject aus JSON oder Hashtable)
+function Test-HMChromiumItem($Item) {
+    if ($null -eq $Item) { return $false }
+    if ($Item -is [System.Collections.IDictionary]) { return (@($Item.Keys) -contains 'Chromium') }
+    return ($null -ne $Item.PSObject.Properties['Chromium'])
+}
+function Test-HMBrowserModule($Module) {
+    if ("$($Module.Group)" -eq 'Browser') { return $true }
+    return (@($Module.Items | Where-Object { Test-HMChromiumItem $_ }).Count -gt 0)
+}
+# Browser-Version aus "User Data\Last Version" ('' wenn unbekannt)
+function Get-HMChromiumVersion([string]$UserData) {
+    $t = Read-HMSharedText (Join-Path $UserData 'Last Version')
+    if ($t -and "$t".Trim() -match '^[\d.]{3,30}$') { return "$t".Trim() }
+    return ''
+}
+
+# Lesezeichen-Baum: Anzahl Links, hoechste id
+function Get-HMBookmarkStats($Bookmarks) {
+    $st = [pscustomobject]@{ Urls = 0; MaxId = [long]0 }
+    $stack = New-Object System.Collections.Generic.Stack[object]
+    $roots = Get-HMJ $Bookmarks 'roots'
+    if ($roots -is [System.Collections.IDictionary]) { foreach ($k in @($roots.Keys)) { if ($roots[$k] -is [System.Collections.IDictionary]) { $stack.Push($roots[$k]) } } }
+    while ($stack.Count) {
+        $n = $stack.Pop()
+        $id = [long]0; if ([long]::TryParse("$(Get-HMJ $n 'id')", [ref]$id) -and $id -gt $st.MaxId) { $st.MaxId = $id }
+        if ("$(Get-HMJ $n 'type')" -eq 'url') { $st.Urls++ }
+        foreach ($c in @(Get-HMJ $n 'children')) { if ($c -is [System.Collections.IDictionary]) { $stack.Push($c) } }
+    }
+    return $st
+}
+function Get-HMWebKitNow { return [string][long](([DateTime]::UtcNow - (New-Object DateTime(1601, 1, 1, 0, 0, 0, [DateTimeKind]::Utc))).Ticks / 10) }
+
+# Markierung "von HUMig aus diesem Backup uebernommen" (meta_info.humig_backup) an den Wurzeln oder Ordnern der Leiste
+function Test-HMBookmarkMarker($Bookmarks, [string]$Marker) {
+    if (-not $Marker -or -not $Bookmarks) { return $false }
+    $roots = Get-HMJ $Bookmarks 'roots'
+    if (-not ($roots -is [System.Collections.IDictionary])) { return $false }
+    foreach ($k in @($roots.Keys)) {
+        $r = $roots[$k]
+        if (-not ($r -is [System.Collections.IDictionary])) { continue }
+        if ("$(Get-HMJ (Get-HMJ $r 'meta_info') 'humig_backup')" -eq $Marker) { return $true }
+        foreach ($c in @(Get-HMJ $r 'children')) { if ($c -is [System.Collections.IDictionary] -and "$(Get-HMJ (Get-HMJ $c 'meta_info') 'humig_backup')" -eq $Marker) { return $true } }
+    }
+    return $false
+}
+# Hat der Baum ueberhaupt Eintraege (auch leere Ordner)?
+function Test-HMBookmarkHasNodes($Bookmarks) {
+    $roots = Get-HMJ $Bookmarks 'roots'
+    if (-not ($roots -is [System.Collections.IDictionary])) { return $false }
+    foreach ($k in @($roots.Keys)) { if ($roots[$k] -is [System.Collections.IDictionary] -and @(Get-HMJ $roots[$k] 'children' | Where-Object { $_ }).Count) { return $true } }
+    return $false
+}
+function Set-HMBookmarkMeta($Node, [string]$Marker) {
+    if (-not $Marker -or -not ($Node -is [System.Collections.IDictionary])) { return }
+    $m = Get-HMJ $Node 'meta_info'
+    if (-not ($m -is [System.Collections.IDictionary])) { $m = New-Object System.Collections.Specialized.OrderedDictionary; $Node['meta_info'] = $m }
+    $m['humig_backup'] = $Marker
+}
+
+# Zusammenfuehren (rein, testbar): alte Lesezeichen als neuer Ordner in die Lesezeichenleiste des Ziels.
+# Source = Bookmarks der Quelle, Account = AccountBookmarks der Quelle (Konto-Lesezeichen neuerer Chrome-Versionen), beide optional.
+# Ziel ganz leer (keine Eintraege, auch keine Ordner) -> Quelle 1:1 (ohne Sync-Metadaten), Konto-Lesezeichen als Ordner dazu.
+# Sonst Ordner $FolderName. Neue ids/guids, keine meta_info/sync_metadata der Quelle, checksum entfernt.
+# Marker (Kennung des Backups) verhindert ein zweites Einfuegen, auch wenn der Ordner umbenannt wurde.
+# Rueckgabe: Result (Woerterbuch oder $null = nichts schreiben), Added, Note
+function Merge-HMChromiumBookmarks($Target, $Source, [string]$FolderName, $Account = $null, [string]$Marker = '') {
+    $res = [pscustomobject]@{ Result = $null; Added = 0; Note = '' }
+    $zero = [pscustomobject]@{ Urls = 0; MaxId = [long]0 }
+    $ss = if ($Source) { Get-HMBookmarkStats $Source } else { $zero }
+    $as = if ($Account) { Get-HMBookmarkStats $Account } else { $zero }
+    if (-not ($ss.Urls + $as.Urls)) { $res.Note = 'keine Lesezeichen im Backup'; return $res }
+    if (Test-HMBookmarkMarker $Target $Marker) { $res.Note = 'Lesezeichen aus diesem Backup sind schon uebernommen - nicht noch einmal eingefuegt'; return $res }
+    $hasTarget = $Target -and (Get-HMJ (Get-HMJ $Target 'roots') 'bookmark_bar') -and (Test-HMBookmarkHasNodes $Target)
+    if ($hasTarget) {
+        foreach ($c in @(Get-HMJ (Get-HMJ (Get-HMJ $Target 'roots') 'bookmark_bar') 'children')) {
+            if ($c -is [System.Collections.IDictionary] -and "$(Get-HMJ $c 'type')" -eq 'folder' -and "$(Get-HMJ $c 'name')" -eq $FolderName) { $res.Note = "Ordner '$FolderName' ist schon vorhanden - nicht noch einmal eingefuegt"; return $res }
+        }
+    }
+    $now = Get-HMWebKitNow
+    $strip = { param($b) foreach ($k in @('checksum', 'sync_metadata')) { if ($null -ne (Get-HMJ $b $k)) { [void]$b.Remove($k) } } }
+    $base = $null; $useSrc = $true; $useAcc = $true; $note = ''
+    if (-not $hasTarget) {
+        # Ziel leer: Quelle (sonst Konto-Lesezeichen) als Grundlage 1:1
+        if ($ss.Urls -or -not $as.Urls) { $base = $Source; $useSrc = $false } else { $base = $Account; $useAcc = $false }
+        if (-not (Get-HMJ (Get-HMJ $base 'roots') 'bookmark_bar')) { $res.Note = 'Lesezeichen-Datei im Backup ohne Lesezeichenleiste - nicht uebernommen'; return $res }
+        & $strip $base
+        Set-HMBookmarkMeta (Get-HMJ (Get-HMJ $base 'roots') 'bookmark_bar') $Marker
+        $note = 'Ziel hatte noch keine Lesezeichen - uebernommen wie im Backup'
+    } else { $base = $Target }
+    $bs = Get-HMBookmarkStats $base
+    $ctr = @{ N = [long]$bs.MaxId }   # Hashtable: in verschachtelten Scriptblocks gemeinsam hochgezaehlt
+    $clone = $null
+    $clone = {
+        param($n)
+        $ctr.N++
+        $o = New-Object System.Collections.Specialized.OrderedDictionary
+        foreach ($k in @('date_added', 'date_last_used', 'date_modified')) { $v = Get-HMJ $n $k; if ($null -ne $v) { $o[$k] = "$v" } }
+        $o['guid'] = [guid]::NewGuid().ToString()
+        $o['id'] = [string]$ctr.N
+        $o['name'] = "$(Get-HMJ $n 'name')"
+        $t = "$(Get-HMJ $n 'type')"
+        if ($t -eq 'folder') {
+            $kids = New-Object System.Collections.Generic.List[object]
+            foreach ($c in @(Get-HMJ $n 'children')) { if ($c -is [System.Collections.IDictionary]) { $kids.Add((& $clone $c)) } }
+            $o['children'] = $kids.ToArray()
+            if ($null -eq $o['date_added']) { $o['date_added'] = $now }
+            if ($null -eq $o['date_modified']) { $o['date_modified'] = $now }
+            $o['type'] = 'folder'
+        } else {
+            $o['type'] = 'url'
+            $o['url'] = "$(Get-HMJ $n 'url')"
+            if ($null -eq $o['date_added']) { $o['date_added'] = $now }
+        }
+        return $o
+    }
+    $mkFolder = {
+        param([string]$Name, [object[]]$Kids)
+        $ctr.N++
+        $f = New-Object System.Collections.Specialized.OrderedDictionary
+        $f['children'] = @($Kids); $f['date_added'] = $now; $f['date_modified'] = $now
+        $f['guid'] = [guid]::NewGuid().ToString(); $f['id'] = [string]$ctr.N; $f['name'] = $Name; $f['type'] = 'folder'
+        return $f
+    }
+    # Inhalt eines Lesezeichen-Baums: Leiste direkt, "Weitere" und "Mobil" als Unterordner
+    $content = {
+        param($B)
+        $list = New-Object System.Collections.Generic.List[object]
+        $sr = Get-HMJ $B 'roots'
+        foreach ($c in @(Get-HMJ (Get-HMJ $sr 'bookmark_bar') 'children')) { if ($c -is [System.Collections.IDictionary]) { $list.Add((& $clone $c)) } }
+        foreach ($p in @(@('other', 'Weitere Lesezeichen'), @('synced', 'Mobile Lesezeichen'))) {
+            $kids = New-Object System.Collections.Generic.List[object]
+            foreach ($c in @(Get-HMJ (Get-HMJ $sr $p[0]) 'children')) { if ($c -is [System.Collections.IDictionary]) { $kids.Add((& $clone $c)) } }
+            if ($kids.Count) { $list.Add((& $mkFolder $p[1] $kids.ToArray())) }
+        }
+        , $list.ToArray()
+    }
+    # Rueckgabe ", Liste" erst zuweisen (nicht in @() wickeln)
+    $srcItems = @(); $accItems = @()
+    if ($useSrc -and $ss.Urls) { $srcItems = & $content $Source }
+    if ($useAcc -and $as.Urls) { $accItems = & $content $Account }
+    $add = New-Object System.Collections.Generic.List[object]
+    $folder = $null; $nm = $FolderName
+    if ($hasTarget) {
+        foreach ($x in $srcItems) { $add.Add($x) }
+        if (@($accItems).Count) { $add.Add((& $mkFolder 'Konto-Lesezeichen' $accItems)) }
+        if ($add.Count) { $folder = & $mkFolder $FolderName $add.ToArray() }
+    } elseif (@($accItems).Count) {
+        $nm = "Konto-Lesezeichen - $FolderName"
+        $folder = & $mkFolder $nm $accItems
+    }
+    $bar = Get-HMJ (Get-HMJ $base 'roots') 'bookmark_bar'
+    if ($null -ne $folder) {
+        Set-HMBookmarkMeta $folder $Marker
+        $bar['children'] = @(@(Get-HMJ $bar 'children') | Where-Object { $null -ne $_ }) + @($folder)
+        $note = if ($note) { "$note; Konto-Lesezeichen als Ordner '$nm'" } else { "Ordner '$FolderName' mit $($ss.Urls + $as.Urls) Lesezeichen eingefuegt" }
+    }
+    & $strip $base
+    if (-not $hasTarget -and -not $note) { $note = 'Ziel hatte noch keine Lesezeichen - uebernommen wie im Backup' }
+    $res.Result = $base; $res.Added = $ss.Urls + $as.Urls; $res.Note = $note
+    return $res
+}
+
+# Lesezeichen als HTML (Netscape-Format, von jedem Browser importierbar)
+function ConvertTo-HMBookmarkHtml($Bookmarks, [string]$Title) {
+    $enc = { param($s) [System.Net.WebUtility]::HtmlEncode("$s") }
+    $unix = { param($w) $x = [long]0; if ([long]::TryParse("$w", [ref]$x) -and $x -gt 11644473600000000) { [string][long](($x / 1000000) - 11644473600) } else { '0' } }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine('<!DOCTYPE NETSCAPE-Bookmark-file-1>')
+    [void]$sb.AppendLine('<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">')
+    [void]$sb.AppendLine("<TITLE>$(& $enc $Title)</TITLE>")
+    [void]$sb.AppendLine("<H1>$(& $enc $Title)</H1>")
+    [void]$sb.AppendLine('<DL><p>')
+    $walk = $null
+    $walk = {
+        param($n, [string]$Ind, [bool]$Bar)
+        if ("$(Get-HMJ $n 'type')" -eq 'folder') {
+            $attr = if ($Bar) { ' PERSONAL_TOOLBAR_FOLDER="true"' } else { '' }
+            [void]$sb.AppendLine("$Ind<DT><H3 ADD_DATE=`"$(& $unix (Get-HMJ $n 'date_added'))`" LAST_MODIFIED=`"$(& $unix (Get-HMJ $n 'date_modified'))`"$attr>$(& $enc (Get-HMJ $n 'name'))</H3>")
+            [void]$sb.AppendLine("$Ind<DL><p>")
+            foreach ($c in @(Get-HMJ $n 'children')) { if ($c -is [System.Collections.IDictionary]) { & $walk $c ($Ind + '    ') $false } }
+            [void]$sb.AppendLine("$Ind</DL><p>")
+        } else {
+            [void]$sb.AppendLine("$Ind<DT><A HREF=`"$(& $enc (Get-HMJ $n 'url'))`" ADD_DATE=`"$(& $unix (Get-HMJ $n 'date_added'))`">$(& $enc (Get-HMJ $n 'name'))</A>")
+        }
+    }
+    $roots = Get-HMJ $Bookmarks 'roots'
+    $first = $true
+    foreach ($r in @('bookmark_bar', 'other', 'synced')) {
+        $n = Get-HMJ $roots $r
+        if (-not ($n -is [System.Collections.IDictionary])) { continue }
+        if (-not @(Get-HMJ $n 'children').Count -and -not $first) { continue }
+        & $walk $n '    ' $first
+        $first = $false
+    }
+    [void]$sb.AppendLine('</DL><p>')
+    return $sb.ToString()
+}
+
+# Erweiterungen eines Profils (Ordner Extensions\<id>\<Version>\manifest.json) -> Name + Store-Link
+function Get-HMChromiumExtensions([string]$ProfileDir, [bool]$Edge) {
+    $out = New-Object System.Collections.Generic.List[object]
+    $ed = Join-Path $ProfileDir 'Extensions'
+    if (-not [System.IO.Directory]::Exists($ed)) { return $out.ToArray() }
+    foreach ($d in @([System.IO.Directory]::GetDirectories($ed))) {
+        $id = [System.IO.Path]::GetFileName($d)
+        if ($id -notmatch '^[a-p]{32}$') { continue }
+        $ver = @([System.IO.Directory]::GetDirectories($d) | Sort-Object)[-1]
+        if (-not $ver) { continue }
+        $m = Read-HMJsonFileSafe (Join-Path $ver 'manifest.json')
+        $name = "$(Get-HMJ $m 'name')"
+        if ($name -match '^__MSG_(.+)__$') {
+            $key = $Matches[1]; $loc = "$(Get-HMJ $m 'default_locale')"
+            foreach ($l in @('de', $loc, 'en') | Where-Object { $_ }) {
+                $msg = Read-HMJsonFileSafe (Join-Path $ver "_locales\$l\messages.json")
+                if ($msg) { foreach ($k in @($msg.Keys)) { if ("$k" -ieq $key) { $name = "$(Get-HMJ $msg[$k] 'message')"; break } } }
+                if ($name -notmatch '^__MSG_') { break }
+            }
+        }
+        if (-not $name -or $name -match '^__MSG_') { $name = $id }
+        $url = "$(Get-HMJ $m 'update_url')"
+        $link = if ($Edge -and $url -notmatch 'google\.com') { "https://microsoftedge.microsoft.com/addons/detail/$id" } else { "https://chromewebstore.google.com/detail/$id" }
+        $out.Add([pscustomobject]@{ Id = $id; Name = $name; Link = $link })
+    }
+    return $out.ToArray()
+}
+
+# Backup: je Profil Lesezeichen-HTML (auch Konto-Lesezeichen) und Liste der Erweiterungen in den Backup-Ordner (Browser-Lesezeichen\...)
+function Save-HMBrowserExtras([hashtable]$Ctx, $Module, $Item) {
+    $lines = New-Object System.Collections.Generic.List[string]
+    $ud = Get-HMItemTargetPath $Ctx.BackupPath $Module $Item
+    if ("$($Item.Chromium)") { $ud = Join-Path $ud "$($Item.Chromium)" }
+    if (-not [System.IO.Directory]::Exists($ud)) { return $lines.ToArray() }
+    $out = Join-Path $Ctx.BackupPath 'Browser-Lesezeichen'
+    $edge = ("$($Module.Id)" -eq 'Edge' -or "$($Item.Path)" -match '\\Microsoft\\Edge')
+    $bname = if ($Module.Name) { "$($Module.Name)" -replace '-Profil$', '' } else { "$($Module.Id)" }
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    foreach ($p in @(Get-HMChromiumProfiles $ud (Read-HMJsonFileSafe (Join-Path $ud 'Local State')))) {
+        $pd = Join-Path $ud $p.Folder
+        $label = if ($p.Name) { "$($p.Folder) ($($p.Name))" } else { $p.Folder }
+        # Ordnername immer im Dateinamen: zwei Profile mit gleichem Anzeigenamen ueberschreiben sich nicht
+        $base = ConvertTo-HMSafeName ("{0}_{1}{2}" -f $Module.Id, $p.Folder, $(if ($p.Name) { "_$($p.Name)" } else { '' }))
+        if (-not [System.IO.Directory]::Exists($out)) { [void][System.IO.Directory]::CreateDirectory($out) }
+        $bm = Read-HMJsonFileSafe (Join-Path $pd 'Bookmarks')
+        if (-not $bm) { $bm = Read-HMJsonFileSafe (Join-Path $pd 'Bookmarks.bak') }
+        if ($bm) {
+            $n = (Get-HMBookmarkStats $bm).Urls
+            [System.IO.File]::WriteAllText((Join-Path $out "$base.html"), (ConvertTo-HMBookmarkHtml $bm "$bname - $label"), $enc)
+            $lines.Add("Profil ${label}: $n Lesezeichen, zusaetzlich als Browser-Lesezeichen\$base.html (in jedem Browser importierbar)")
+        }
+        $acc = Read-HMJsonFileSafe (Join-Path $pd 'AccountBookmarks')
+        if ($acc -and (Get-HMBookmarkStats $acc).Urls) {
+            [System.IO.File]::WriteAllText((Join-Path $out "${base}_Konto.html"), (ConvertTo-HMBookmarkHtml $acc "$bname - $label - Konto-Lesezeichen"), $enc)
+            $lines.Add("Profil ${label}: $((Get-HMBookmarkStats $acc).Urls) Konto-Lesezeichen, zusaetzlich als Browser-Lesezeichen\${base}_Konto.html")
+        }
+        $ext = @(Get-HMChromiumExtensions $pd $edge)
+        if ($ext.Count) {
+            $sb = New-Object System.Text.StringBuilder
+            [void]$sb.AppendLine("<!DOCTYPE html><html lang=`"de`"><head><meta charset=`"utf-8`"><title>Erweiterungen - $([System.Net.WebUtility]::HtmlEncode("$bname - $label"))</title></head><body>")
+            [void]$sb.AppendLine("<h1>Erweiterungen - $([System.Net.WebUtility]::HtmlEncode("$bname - $label"))</h1><p>Am neuen PC ueber den Link neu installieren (oder per Synchronisierung).</p><ul>")
+            foreach ($e in $ext) { [void]$sb.AppendLine("<li><a href=`"$([System.Net.WebUtility]::HtmlEncode($e.Link))`">$([System.Net.WebUtility]::HtmlEncode($e.Name))</a></li>") }
+            [void]$sb.AppendLine('</ul></body></html>')
+            [System.IO.File]::WriteAllText((Join-Path $out "${base}_Erweiterungen.html"), $sb.ToString(), $enc)
+            $lines.Add("Profil ${label}: $($ext.Count) Erweiterung(en) als Liste mit Links: Browser-Lesezeichen\${base}_Erweiterungen.html")
+        }
+    }
+    return $lines.ToArray()
+}
+
+# ---- Schutz vor Verknuepfungen (HUMig schreibt als Administrator in das Profil eines Benutzers) ----
+# Verknuepfung (Symlink/Junction)? Nicht lesbar = wie Verknuepfung behandeln
+function Test-HMReparse([string]$Path) {
+    try {
+        if (-not [System.IO.File]::Exists($Path) -and -not [System.IO.Directory]::Exists($Path)) { return $false }
+        return (([System.IO.File]::GetAttributes($Path) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+    } catch { return $true }
+}
+# Pfad sicher? Jeder vorhandene Pfadteil bis zum Profilordner $Root ohne Verknuepfung; unter Windows zusaetzlich:
+# der vom System aufgeloeste Pfad des tiefsten vorhandenen Teils entspricht genau dem erwarteten (erkennt Verknuepfungen in JEDEM Teil)
+function Test-HMSafePath([string]$Path, [string]$Root) {
+    if (-not $Path) { return $false }
+    $p = $Path.TrimEnd('\', '/'); $r = "$Root".TrimEnd('\', '/')
+    $cur = $p
+    while ($cur) {
+        if ($r -and $cur -ieq $r) { break }
+        if (Test-HMReparse $cur) { return $false }
+        $parent = [System.IO.Path]::GetDirectoryName($cur)
+        if (-not $parent -or $parent -eq $cur) { break }
+        $cur = $parent
+    }
+    if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { return $true }
+    # Fernzugriff (\\PC\C$\...): Verknuepfungen loest der Server auf - dort gilt die Pruefung der Pfadteile oben
+    if ($p.StartsWith('\\')) { return $true }
+    $e = $p
+    while ($e -and -not [System.IO.Directory]::Exists($e) -and -not [System.IO.File]::Exists($e)) { $e = [System.IO.Path]::GetDirectoryName($e) }
+    if (-not $e) { return $true }
+    try {
+        Initialize-HMJson
+        $f = [HMJ.PathCheck]::FinalPath($e)
+        $l = [HMJ.PathCheck]::LongPath([System.IO.Path]::GetFullPath($e))
+        return ([bool]$f -and $f.TrimEnd('\') -ieq $l.TrimEnd('\'))
+    } catch { return $false }
+}
+# Datei mit mehreren Namen (harter Link)? Nur unter Windows pruefbar (unbekannt, z. B. ueber Freigabe = kein Befund)
+function Test-HMHardLinked([string]$Path) {
+    if (-not [System.IO.File]::Exists($Path)) { return $false }
+    if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) { return $false }
+    try { Initialize-HMJson; return ([HMJ.PathCheck]::LinkCount($Path) -gt 1) } catch { return $false }
+}
+# Erste Verknuepfung (Ordner oder Datei) unterhalb von $Dir, '' = keine. Verknuepfungen werden nicht verfolgt.
+function Find-HMReparseUnder([string]$Dir) {
+    if (-not [System.IO.Directory]::Exists($Dir)) { return '' }
+    $stack = New-Object System.Collections.Generic.Stack[string]
+    $stack.Push($Dir)
+    while ($stack.Count) {
+        $d = $stack.Pop()
+        $items = @()
+        try { $items = @((New-Object System.IO.DirectoryInfo($d)).GetFileSystemInfos()) } catch { return $d }
+        foreach ($i in $items) {
+            if (($i.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $i.FullName }
+            if (($i.Attributes -band [System.IO.FileAttributes]::Directory) -ne 0) { $stack.Push($i.FullName) }
+        }
+    }
+    return ''
+}
+# Datei atomar schreiben: Temp-Datei (Zufallsname, CreateNew), beim ersten Mal Sicherung $BackupName, dann ersetzen.
+# Vor dem Schreiben und unmittelbar vor dem Ersetzen: Pfad ohne Verknuepfung (sonst Abbruch, Zieldatei unveraendert)
+function Write-HMFileAtomic([string]$Path, [string]$Text, [string]$BackupName, [string]$Root = '') {
+    $dir = [System.IO.Path]::GetDirectoryName($Path)
+    $chk = {
+        if (-not (Test-HMSafePath $dir $Root) -or (Test-HMReparse $Path)) { throw "Verknuepfung im Pfad $dir - aus Sicherheitsgruenden nichts geschrieben" }
+        if ((Test-HMHardLinked $Path)) { throw "$Path hat einen zweiten Namen (harter Link) - aus Sicherheitsgruenden nichts geschrieben" }
+    }
+    & $chk
+    $tmp = "$Path.humig-$([guid]::NewGuid().ToString('N')).tmp"
+    $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($Text)
+    $fs = New-Object System.IO.FileStream($tmp, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    try { $fs.Write($bytes, 0, $bytes.Length) } finally { $fs.Dispose() }
+    try {
+        if ($BackupName -and [System.IO.File]::Exists($Path)) {
+            # Sicherung nur beim ersten Mal (Stand vor HUMig bleibt); CreateNew folgt keiner vorbereiteten Verknuepfung
+            $bk = Join-Path $dir $BackupName
+            if (-not [System.IO.File]::Exists($bk) -and -not (Test-HMReparse $bk)) {
+                $in = [System.IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+                try { $o = New-Object System.IO.FileStream($bk, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None); try { $in.CopyTo($o) } finally { $o.Dispose() } } finally { $in.Dispose() }
+            }
+        }
+        & $chk
+        if ([System.IO.File]::Exists($Path)) { [System.IO.File]::Replace($tmp, $Path, [NullString]::Value) } else { [System.IO.File]::Move($tmp, $Path) }
+    } catch {
+        try { if ([System.IO.File]::Exists($tmp)) { [System.IO.File]::Delete($tmp) } } catch { }
+        throw
+    }
+}
+# Kennung "dieses Quellprofil aus diesem Backup" (gegen doppeltes Einfuegen bei wiederholtem Restore)
+function Get-HMBookmarkMarkerId($Backup, [string]$ProfileFolder) {
+    $t = "$($Backup.Name)|$($Backup.Created)|$ProfileFolder"
+    $md5 = [System.Security.Cryptography.MD5]::Create()
+    try { return (-join ($md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($t))[0..5] | ForEach-Object { $_.ToString('x2') })) } finally { $md5.Dispose() }
+}
+# Merkliste im Zielprofil (Bookmarks.humig-uebernommen): welche Kennungen schon eingefuegt wurden
+function Test-HMMarkerFile([string]$ProfileDir, [string]$Marker) {
+    $t = Read-HMSharedText (Join-Path $ProfileDir 'Bookmarks.humig-uebernommen')
+    return ([bool]$t -and @("$t" -split "`r?`n" | ForEach-Object { $_.Trim() }) -contains $Marker)
+}
+function Add-HMMarkerFile([string]$ProfileDir, [string]$Marker, [string]$Root) {
+    $f = Join-Path $ProfileDir 'Bookmarks.humig-uebernommen'
+    $old = Read-HMSharedText $f
+    $lines = @(@("$old" -split "`r?`n" | Where-Object { "$_".Trim() }) + $Marker | Select-Object -Unique)
+    Write-HMFileAtomic $f (($lines -join "`r`n") + "`r`n") '' $Root
+}
+
+# Restore eines Chromium-Eintrags
+function Restore-HMChromiumItem {
+    param([hashtable]$Ctx, $Job, $Module, $Item, [string]$Src, [string]$DstLocal)
+    $sub = "$($Item.Chromium)"
+    $dst = Convert-HMPath $Ctx $DstLocal
+    $udSrc = if ($sub) { Join-Path $Src $sub } else { $Src }
+    $udDstLocal = if ($sub) { Join-Path $DstLocal $sub } else { $DstLocal }
+    $udDst = Convert-HMPath $Ctx $udDstLocal
+    $root = if ($Ctx.ProfilePath) { Convert-HMPath $Ctx "$($Ctx.ProfilePath)" } else { '' }
+    $mk = { param($st, $msg) [pscustomobject]@{ Name = $Item.Name; Status = $st; Msg = $msg } }
+    $unsafe = { param($d) "Zielordner $d (oder ein Ordner darueber/darin) ist eine Verknuepfung (Junction/Symlink) - aus Sicherheitsgruenden nichts zurueckgespielt. Verknuepfung pruefen und entfernen, dann Restore wiederholen; Lesezeichen liegen als HTML im Backup (Browser-Lesezeichen)" }
+    # unmittelbar vor dem Schreiben (in jedem Fall): Browser am Ziel darf nicht laufen - Hintergrundprozesse/Startup Boost schreiben sonst ihren Stand zurueck
+    $names = @($Module.CloseProcess | Where-Object { "$_".Trim() })
+    $running = { if (-not $names.Count) { return @() }; $x = @(); try { $x = @(Get-HMRunningProcs $Ctx $names $Ctx.UserSid) } catch { }; return $x }
+    $run = @(& $running)
+    if ($run.Count) { $run = @(Close-HMProcs $Ctx $Job $run $true) }
+    if ($run.Count) { return (& $mk 'Error' "$(@($names) -join ', ') laeuft am Ziel und liess sich nicht beenden - Browser nicht zurueckgespielt (sonst ueberschreibt er die Daten wieder). Browser schliessen und Restore fuer dieses Modul wiederholen") }
+    $after = {
+        param([string]$Msg, [string]$State)
+        # Nachpruefung: Browser waehrend des Schreibens wieder gestartet (Startup Boost)? Dann kann er seinen alten Stand zurueckschreiben
+        $again = @(& $running)
+        if ($again.Count) { $Msg += "`nWARNUNG: $(@($names) -join ', ') wurde waehrend des Restores wieder gestartet - Lesezeichen am Ziel pruefen (vorheriger Stand: Bookmarks.humig-vorher); bei Bedarf Browser schliessen und Restore wiederholen"; if ($State -eq 'OK') { $State = 'Warning' } }
+        return (& $mk $State $Msg)
+    }
+    $same = Test-HMBrowserSameMachine $Ctx
+    $case = "Erkannter Fall: $($Ctx.BrowserCase)"
+    # F1 - gleicher PC und gleiches Konto: kompletter Ordner 1:1 (Kennwoerter/Cookies bleiben lesbar); nie /XO (gemischte Staende beschaedigen das Profil)
+    if ($same) {
+        $bad = if (-not (Test-HMSafePath $dst $root)) { $dst } else { Find-HMReparseUnder $dst }
+        if ($bad) { return (& $mk 'Error' "$case`n$(& $unsafe $bad)") }
+        $rc = Invoke-HMRobocopy -Job $Job -Source $Src -Dest $dst -Threads $Ctx.Threads -LogFile $Ctx.RoboLog
+        if ($null -ne $Ctx.RestoredUserDirs) { [void]$Ctx.RestoredUserDirs.Add("$DstLocal") }
+        $st = switch ($rc.Level) { 'OK' { 'OK' } 'Warning' { 'Warning' } 'Cancel' { 'Cancel' } default { 'Error' } }
+        $m = "$case`n" + ("vollstaendig zurueckgespielt wie gesichert ({0} Dateien, {1}) - auch Kennwoerter, Anmeldungen und Einstellungen" -f $rc.FilesTotal, (Format-HMSize $rc.BytesTotal))
+        if ($rc.FilesFailed -gt 0) { $m += ", $($rc.FilesFailed) FEHLGESCHLAGEN (Browser geoeffnet?)"; if ($st -ne 'Cancel') { $st = 'Error' } }
+        return (& $after $m $st)
+    }
+    if (-not [System.IO.Directory]::Exists($udSrc)) { return (& $mk 'Skip' 'keine Browser-Profile im Backup') }
+    if (-not (Test-HMSafePath $udDst $root)) { return (& $mk 'Error' "$case`n$(& $unsafe $udDst)") }
+    $lines = New-Object System.Collections.Generic.List[string]
+    $st = 'OK'
+    $lines.Add($case)
+    $lines.Add('Uebernommen: Lesezeichen (zusammengefuehrt, auch Konto-Lesezeichen), bei neuem Browser-Profil auch Verlauf und Einstellungen')
+    $lines.Add('Nicht uebertragbar (an Windows-Konto und PC gebunden, bewusst weggelassen): gespeicherte Kennwoerter, Anmeldungen (Cookies), Zahlungsdaten, Sync-Zustand, Local State, geschuetzte Einstellungen (PreferenceMACs), installierte Erweiterungen - so geht''s: siehe Hinweise unten')
+    $srcLs = Read-HMJsonFileSafe (Join-Path $udSrc 'Local State')
+    $dstLs = if (Test-HMReparse (Join-Path $udDst 'Local State')) { $null } else { Read-HMJsonFileSafe (Join-Path $udDst 'Local State') }
+    $srcP = @(Get-HMChromiumProfiles $udSrc $srcLs)
+    $dstP = @(Get-HMChromiumProfiles $udDst $dstLs)
+    $map = @(Resolve-HMChromiumMap $srcP "$(Get-HMJ (Get-HMJ $srcLs 'profile') 'last_used')" $dstP "$(Get-HMJ (Get-HMJ $dstLs 'profile') 'last_used')")
+    if (-not $map.Count) { return (& $mk 'Skip' 'keine Browser-Profile im Backup') }
+    $pc = Get-HMManifestComputerName $Ctx.Backup.Manifest; if (-not $pc) { $pc = "$($Ctx.Backup.Computer)" }
+    if (-not $pc) { $pc = 'altem PC' }
+    $bd = [datetime]::MinValue
+    $date = if ([datetime]::TryParse("$($Ctx.Backup.Created)", [ref]$bd)) { $bd.ToString('dd.MM.yyyy') } else { (Get-Date).ToString('dd.MM.yyyy') }
+    $multi = @($map | Where-Object { $_.Mode -in @('Merge', 'Copy') }).Count -gt 1
+    foreach ($e in $map) {
+        if (Test-HMCancel $Job) { $st = 'Cancel'; break }
+        $sp = $e.Src
+        $label = if ($sp.Name) { "$($sp.Folder) ($($sp.Name))" } else { $sp.Folder }
+        $sDir = Join-Path $udSrc $sp.Folder
+        $marker = Get-HMBookmarkMarkerId $Ctx.Backup $sp.Folder
+        $fname = "Uebernommen von $pc ($date)" + $(if ($multi) { " - $(if ($sp.Name) { $sp.Name } else { $sp.Folder })" } else { '' })
+        # eigene Namen: $src waere der [string]-Parameter $Src (Variablen ohne Gross-/Kleinschreibung)
+        $bmAcc = Read-HMJsonFileSafe (Join-Path $sDir 'AccountBookmarks')
+        try {
+            switch ($e.Mode) {
+                'SameAccount' { $lines.Add("Profil ${label}: am Ziel mit demselben Konto angemeldet ($($e.Dst)) - Lesezeichen kommen ueber die Synchronisierung, nichts eingefuegt") }
+                'None' { $lines.Add("Profil ${label}: nicht zurueckgespielt ($($e.Reason)) - Lesezeichen liegen als HTML im Backup (Browser-Lesezeichen)") }
+                'Copy' {
+                    $dDirLocal = Join-Path $udDstLocal $e.Dst
+                    $dDir = Convert-HMPath $Ctx $dDirLocal
+                    # vor dem Kopieren: kein Teil des Zielpfads und nichts im Zielordner ist eine Verknuepfung
+                    $bad = if (-not (Test-HMSafePath $dDir $root)) { $dDir } else { Find-HMReparseUnder $dDir }
+                    if ($bad) { $lines.Add("Profil ${label}: $(& $unsafe $bad)"); $st = 'Error'; continue }
+                    if (Test-HMMarkerFile $dDir $marker) { $lines.Add("Profil ${label} -> $($e.Dst): Lesezeichen aus diesem Backup sind schon uebernommen - nicht noch einmal eingefuegt"); continue }
+                    $xf = @('Login Data*', 'Cookies*', 'Extension Cookies*', 'Safe Browsing Cookies*', 'Secure Preferences', 'Bookmarks.humig-*', 'Bookmarks.bak', 'AccountBookmarks*')
+                    $xd = @(foreach ($d in @('Sync Data', 'Network', 'Extension State', 'Extensions', 'Local Extension Settings', 'Sync Extension Settings', 'Sync App Settings')) { Join-Path $sDir $d })
+                    $rc = Invoke-HMRobocopy -Job $Job -Source $sDir -Dest $dDir -XD $xd -XF $xf -Threads $Ctx.Threads -LogFile $Ctx.RoboLog
+                    if ($null -ne $Ctx.RestoredUserDirs) { [void]$Ctx.RestoredUserDirs.Add("$dDirLocal") }
+                    $bp = Join-Path $dDir 'Bookmarks'
+                    $bm = if (Test-HMReparse $bp) { $null } else { Read-HMJsonFileSafe $bp }
+                    $txt = ''
+                    if ($bm -or ($bmAcc -and (Get-HMBookmarkStats $bmAcc).Urls)) {
+                        # kopierte Lesezeichen ohne Sync-Daten, Konto-Lesezeichen als Ordner dazu, Kennung setzen
+                        $r = Merge-HMChromiumBookmarks $null $bm $fname $bmAcc $marker
+                        if ($r.Result) { Write-HMFileAtomic $bp (ConvertTo-HMJsonText $r.Result) '' $root; $txt = " - $($r.Note)" }
+                        elseif ($bm) {
+                            # keine Lesezeichen, aber Datei kopiert: wenigstens Sync-Daten/Pruefsumme des alten Kontos entfernen
+                            foreach ($k in @('checksum', 'sync_metadata')) { if ($null -ne (Get-HMJ $bm $k)) { [void]$bm.Remove($k) } }
+                            Write-HMFileAtomic $bp (ConvertTo-HMJsonText $bm) '' $root
+                        }
+                    }
+                    Add-HMMarkerFile $dDir $marker $root
+                    $lines.Add("Profil ${label} -> $($e.Dst): $($rc.FilesTotal) Dateien (Lesezeichen, Verlauf, Einstellungen; ohne Kennwoerter/Cookies/Sync-Daten/Erweiterungen) - $($e.Reason)$txt")
+                    if ($rc.Level -in @('Error', 'Cancel')) { $st = 'Error' } elseif ($rc.Level -eq 'Warning' -and $st -eq 'OK') { $st = 'Warning' }
+                }
+                'Merge' {
+                    $bmSrc = Read-HMJsonFileSafe (Join-Path $sDir 'Bookmarks')
+                    if (-not $bmSrc) { $bmSrc = Read-HMJsonFileSafe (Join-Path $sDir 'Bookmarks.bak') }
+                    if (-not $bmSrc -and -not $bmAcc) {
+                        if ([System.IO.File]::Exists((Join-Path $sDir 'Bookmarks'))) { $lines.Add("Profil ${label}: Lesezeichen-Datei im Backup nicht lesbar - HTML im Backup verwenden"); if ($st -eq 'OK') { $st = 'Warning' } }
+                        else { $lines.Add("Profil ${label}: keine Lesezeichen im Backup") }
+                        continue
+                    }
+                    $dDirLocal = Join-Path $udDstLocal $e.Dst
+                    $dDir = Convert-HMPath $Ctx $dDirLocal
+                    $bp = Join-Path $dDir 'Bookmarks'
+                    if (-not (Test-HMSafePath $dDir $root) -or (Test-HMReparse $bp)) { $lines.Add("Profil ${label}: $(& $unsafe $dDir)"); $st = 'Error'; continue }
+                    if (Test-HMMarkerFile $dDir $marker) { $lines.Add("Profil ${label} -> $($e.Dst): Lesezeichen aus diesem Backup sind schon uebernommen - nicht noch einmal eingefuegt"); continue }
+                    $tgt = $null
+                    if ([System.IO.File]::Exists($bp)) {
+                        $tgt = Read-HMJsonFileSafe $bp
+                        if (-not $tgt) { $lines.Add("Profil ${label}: Lesezeichen-Datei am Ziel ($($e.Dst)) nicht lesbar - nichts geaendert, HTML im Backup verwenden"); if ($st -eq 'OK') { $st = 'Warning' }; continue }
+                    }
+                    $r = Merge-HMChromiumBookmarks $tgt $bmSrc $fname $bmAcc $marker
+                    if ($r.Result) {
+                        if (-not [System.IO.Directory]::Exists($dDir)) { [void][System.IO.Directory]::CreateDirectory($dDir) }
+                        Write-HMFileAtomic $bp (ConvertTo-HMJsonText $r.Result) 'Bookmarks.humig-vorher' $root
+                        Add-HMMarkerFile $dDir $marker $root
+                        if ($null -ne $Ctx.RestoredUserDirs) { [void]$Ctx.RestoredUserDirs.Add($dDirLocal) }
+                        $lines.Add("Profil ${label} -> $($e.Dst) ($($e.Reason)): $($r.Note)$(if ([System.IO.File]::Exists((Join-Path $dDir 'Bookmarks.humig-vorher'))) { '; vorheriger Stand: Bookmarks.humig-vorher' })")
+                    } else { $lines.Add("Profil ${label} -> $($e.Dst): $($r.Note)") }
+                }
+            }
+        } catch {
+            $lines.Add("Profil ${label}: FEHLER $($_.Exception.Message)"); $st = 'Error'
+        }
+    }
+    $lines.Add('Hinweis: Wird der Browser am neuen PC spaeter mit dem Konto des alten PCs angemeldet, kann der Ordner "Uebernommen von ..." doppelt erscheinen - dann einen davon loeschen. Sicherung des vorherigen Stands: Bookmarks.humig-vorher im Profilordner')
+    $lines.Add('Anmeldungen: auf den Webseiten neu anmelden; Erweiterungen: Liste mit Links im Backup (Browser-Lesezeichen\*_Erweiterungen.html) oder ueber die Browser-Synchronisierung')
+    $lines.Add('Kennwoerter: am alten PC im Browser exportieren (Einstellungen > Kennwoerter) und am neuen PC importieren - die CSV-Datei ist Klartext und danach zu loeschen - oder die Browser-Synchronisierung nutzen')
+    return (& $after ($lines -join "`n") $st)
+}
+
+# ============================================================================
 # RESTORE
 # ============================================================================
 function Get-HMRestoreSource {
@@ -2990,6 +3763,10 @@ function Restore-HMFolderItem {
             return [pscustomobject]@{ Name = $Item.Name; Status = 'Warning'; Msg = "Laufwerk ${drv}: gibt es an $($Ctx.Computer) nicht (oder nicht erreichbar) - $dstLocal nicht zurueckgeschrieben. Die Daten liegen im Backup: $src - bei Bedarf von Hand an einen anderen Ort kopieren oder Laufwerk anlegen und Restore wiederholen" }
         }
     }
+    # Chromium-Browser: je nach Fall 1:1 (gleicher PC + Konto) oder Lesezeichen zusammenfuehren (Restore-HMChromiumItem)
+    if ($Item.Type -eq 'Folder' -and -not $SourceOverride -and -not $DestOverride -and (Test-HMChromiumItem $Item)) {
+        return (Restore-HMChromiumItem -Ctx $Ctx -Job $Job -Module $Module -Item $Item -Src $src -DstLocal $dstLocal)
+    }
     $files = @(); $noRec = $false
     if ($Item.Type -eq 'Files') { $files = @($Item.Filter); $noRec = $true }
     if ("$($Item.Role)" -eq 'Database' -and $files.Count) { $files = @(Add-HMDbCompanions $files) }
@@ -3057,6 +3834,10 @@ function Restore-HMRegItem {
     if (-not $src -or -not (Test-Path -LiteralPath $src)) { return [pscustomobject]@{ Name = $Item.Name; Status = 'Skip'; Msg = 'nicht im Backup' } }
     $isUser = $Item.Key -match '^HK(CU|EY_CURRENT_USER)'
     if ($isUser -and -not $Ctx.HiveReady) { return [pscustomobject]@{ Name = $Item.Name; Status = 'Error'; Msg = 'Benutzer-Registry am Ziel nicht verfuegbar' } }
+    # an den PC gebunden (z.B. PreferenceMACs der Browser): nur am gleichen PC mit gleichem Konto zurueckspielen
+    if ($Item.SameMachineOnly -and -not (Test-HMBrowserSameMachine $Ctx)) {
+        return [pscustomobject]@{ Name = $Item.Name; Status = 'Skip'; Msg = "nicht zurueckgespielt - an PC und Konto gebunden, gilt nur am gleichen PC ($($Ctx.BrowserCase)); der Browser legt die Werte selbst neu an" }
+    }
     $r = Import-HMReg $Ctx $Job $src $Ctx.Backup.Sid $Ctx.Backup.ProfilePath $Item
     if ($r -eq 'OK') { return [pscustomobject]@{ Name = $Item.Name; Status = 'OK'; Msg = 'Registry importiert' } }
     return [pscustomobject]@{ Name = $Item.Name; Status = 'Error'; Msg = $r }
@@ -3580,6 +4361,7 @@ function Start-HMRestore {
     if (-not $Ctx.IsRemote) { $Ctx.Computer = $env:COMPUTERNAME }
     $Ctx.LogonActions = @()
     $Ctx.DesktopIconLines = @()
+    $Ctx.BrowserSameMachine = $null; $Ctx.BrowserCase = ''
     $Job.LogFile = Join-Path $Ctx.Backup.Path ("Restore_{0}_{1}.log" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))
     $Ctx.RoboLog = Join-Path $Ctx.Backup.Path ("Restore_{0}_{1}_Robocopy.log" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))
     Write-HMLog $Job "RESTORE  $($Ctx.Backup.Name)  ->  $($Ctx.Computer) \ $($Ctx.UserFolder)" 'Header'
@@ -3706,6 +4488,7 @@ function Start-HMRestore {
         'Gestartet' = $start.ToString('yyyy-MM-dd HH:mm:ss'); 'Dauer' = $dur
         'Quell-Betriebssystem' = $(if ($mf) { $mf.SourceOS } else { '' }); 'Durchgefuehrt von' = "$env:USERDOMAIN\$env:USERNAME an $env:COMPUTERNAME"
     }
+    if ($Ctx.BrowserCase) { $facts['Browser: erkannter Fall'] = $Ctx.BrowserCase }
     # Liste der am Ziel fehlenden Dateien (Kontrolle nach dem Restore)
     $missList = ''
     if ($Ctx.MissingAfter -and $Ctx.MissingAfter.Count) {

@@ -1,5 +1,22 @@
 ﻿# Changelog
 
+## v2.1.7 - 2026-10-15
+### Browser (Edge, Chrome, Brave, Vivaldi)
+- **Lesezeichen zuverlaessig auf einen neuen PC:** bisher wurde das Profil nur kopiert - auf einem anderen PC verwarf der Browser dabei oft Teile (an PC und Konto gebundene Daten). Das Backup sichert weiter alles; beim Restore entscheidet HUMig nach dem Fall:
+  - **gleicher PC und gleiches Konto** (Computer-ID, Computername und Benutzer-SID wie im Backup): alles 1:1 zurueck, auch Kennwoerter, Anmeldungen und PreferenceMACs
+  - **anderer PC, Neuinstallation oder anderes Konto:** Lesezeichen werden **zusammengefuehrt** (Ordner *Uebernommen von PC (Datum)* in der Lesezeichenleiste, vorhandene bleiben, kein zweites Mal); ist der Browser am Ziel mit demselben Konto angemeldet, wird nichts eingefuegt (Synchronisierung); Browser am Ziel ohne Profil: Hauptprofil mit Verlauf und Einstellungen. Kennwoerter, Cookies, Zahlungsdaten, Sync-Zustand, `Local State` und PreferenceMACs werden weggelassen und im Bericht als "nicht uebertragbar, so geht's" erklaert
+  - Backups aelterer Versionen (ohne Computer-ID) zaehlen immer als anderer PC
+- **Konto-Lesezeichen** neuerer Chrome-Versionen (Datei `AccountBookmarks`) werden mit gesichert (auch als HTML) und auf einem anderen PC als Unterordner *Konto-Lesezeichen* mit eingefuegt
+- **Kein doppeltes Einfuegen** bei wiederholtem Restore desselben Backups - auch wenn der Browser am Ziel beim ersten Mal noch leer oder ohne Profil war oder der Ordner umbenannt wurde (Kennung im Profil und am Ordner); eigene leere Ordner am Ziel bleiben erhalten
+- **Schutz vor Verknuepfungen:** HUMig schreibt als Administrator nie ueber eine Verknuepfung (Junction/Symlink) im Browser-Pfad des Benutzers - geprueft wird jeder Pfadteil und der Zielordner vor dem Kopieren, unmittelbar vor dem Ersetzen noch einmal; eine Lesezeichen-Datei mit zweitem Namen (harter Link) wird weder gelesen noch ueberschrieben; sonst Fehler, nichts geschrieben
+- Startet der Browser waehrend des Restores wieder (z. B. Edge-Schnellstart), steht eine Warnung im Bericht
+- Gleicher PC wird auch bei Fernzugriff ueber IP-Adresse erkannt (Manifest speichert den echten Computernamen); gleiches Konto: sind beide Konto-IDs bekannt, entscheiden nur diese
+- Restore-Bericht zeigt den **erkannten Fall** (*Browser: erkannter Fall*); vorheriger Stand der Lesezeichen am Ziel bleibt als `Bookmarks.humig-vorher` (das ist die Sicherung - nicht `Bookmarks.bak`)
+- **Funktionsaenderung:** beim Restore wird der Browser **immer geschlossen** (notfalls beendet, auch ohne Rueckfrage) - auch Firefox; laesst er sich nicht beenden, wird das Modul nicht geschrieben. *Neuere Dateien am Ziel nicht ueberschreiben* gilt fuer diese Browser nicht
+- Backup legt je Profil die Lesezeichen zusaetzlich als **HTML** (in jeden Browser importierbar) und eine **Liste der Erweiterungen** mit Store-Links in den Ordner `Browser-Lesezeichen` des Backups
+- Manifest enthaelt zusaetzlich die Computer-ID (MachineGuid), den echten Computernamen und die Browser-Versionen
+- Bei neuem Browser-Profil am Ziel werden installierte Erweiterungen nicht mehr mitkopiert (ohne die an den PC gebundenen Einstellungen waeren sie verwaist) - Liste mit Links im Backup
+
 ## v2.1.6 - 2026-10-14
 ### Backup
 - **Archiv aufheben auf NAS/Freigaben behoben:** die Markierung `HUMig-Archiv.txt` wurde schreibgeschuetzt angelegt - manche NAS bilden das als Dateirechte ab und lassen es danach von Windows aus (auch als Administrator) nicht mehr entfernen. Neue Markierungen ohne Schreibschutz; *Archiv aufheben* versucht bei alten den Schreibschutz zu entfernen und loescht die Datei. Geht das nicht, nennt HUMig die Datei, die am Server bzw. NAS geloescht werden muss
