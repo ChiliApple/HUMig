@@ -1604,6 +1604,47 @@ function Get-HMBackupList {
 # ============================================================================
 # HILFSFUNKTIONEN v0.0.3: freier Platz, Pfad-Rueckwandlung, Cloud-Ordner (OneDrive/SharePoint), Statistik
 # ============================================================================
+# Dateisystem eines Pfads (NTFS, ReFS, exFAT, FAT32 ...); '' = unbekannt (z. B. Freigabe)
+function Get-HMPathFileSystem([string]$Path) {
+    if ("$Path" -notmatch '^[A-Za-z]:') { return '' }
+    try { $d = New-Object System.IO.DriveInfo($Path.Substring(0, 2)); if ($d.IsReady) { return "$($d.DriveFormat)" } } catch { }
+    return ''
+}
+
+# Rechte eines Backup-Ordners: Vererbung aus, nur SYSTEM + Administratoren + ausfuehrendes Konto (Vollzugriff) und der gesicherte Benutzer
+# (Benutzer-Modus: aendern, damit er sein Backup fortsetzen kann; Admin-Backup: lesen), optional eine Gruppe mit Leserecht
+# (settings.json > Backup.ExtraReadGroup, Name oder SID, z. B. eine Techniker-Gruppe). Dateien darunter erben das.
+# Rueckgabe: Ok, Error (Grund, wenn nicht gesetzt), Who (berechtigte Konten), Notes (Hinweise)
+function Set-HMBackupFolderAcl {
+    param([string]$Path, [string]$UserSid = '', [switch]$UserMode, [string]$ExtraGroup = '')
+    $r = [ordered]@{ Ok = $false; Error = ''; Who = @(); Notes = @() }
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { $r.Error = 'Ordner fehlt'; return [pscustomobject]$r }
+    $fs = Get-HMPathFileSystem $Path
+    if ($fs -and $fs -notmatch '^(?i)(NTFS|ReFS)$') { $r.Error = "Dateisystem $fs kennt keine Ordnerrechte"; return [pscustomobject]$r }
+    # Benutzer-Modus: immer das eigene Konto (sonst sperrt man sich selbst aus)
+    if ($UserMode) { try { $UserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { } }
+    $grants = @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'); $who = @('SYSTEM', 'Administratoren')
+    $me = ''; try { $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { }
+    if ("$UserSid" -match '^S-1-(5-21|12-1)-[\d-]+$') {   # Domaene/lokal bzw. Entra ID
+        $grants += "*${UserSid}:(OI)(CI)$(if ($UserMode) { 'M' } elseif ($UserSid -eq $me) { 'F' } else { 'RX' })"
+        $who += $(try { ([System.Security.Principal.SecurityIdentifier]$UserSid).Translate([System.Security.Principal.NTAccount]).Value } catch { $UserSid })
+    } elseif ($UserMode) { $r.Error = 'eigenes Konto nicht ermittelbar'; return [pscustomobject]$r }
+    # Admin-Backup: das ausfuehrende Konto behaelt Vollzugriff - auf einer Freigabe ist es dort evtl. kein Administrator
+    if (-not $UserMode) {
+        if ($me -match '^S-1-(5-21|12-1)-[\d-]+$' -and $me -ne "$UserSid") { $grants += "*${me}:(OI)(CI)F"; $who += $(try { ([System.Security.Principal.SecurityIdentifier]$me).Translate([System.Security.Principal.NTAccount]).Value } catch { $me }) }
+    }
+    if ($ExtraGroup) {
+        $gs = ''
+        try { $gs = if ($ExtraGroup -match '^S-1-[\d-]+$') { ([System.Security.Principal.SecurityIdentifier]$ExtraGroup).Value } else { ([System.Security.Principal.NTAccount]$ExtraGroup).Translate([System.Security.Principal.SecurityIdentifier]).Value } } catch { }
+        if ($gs) { $grants += "*${gs}:(OI)(CI)RX"; $who += "$ExtraGroup (lesen)" }
+        else { $r.Notes += "Gruppe '$ExtraGroup' (Einstellung Backup.ExtraReadGroup) nicht gefunden - nicht berechtigt" }
+    }
+    $o = & icacls.exe "$Path" /inheritance:r /grant:r @grants /C /Q 2>&1
+    if ($LASTEXITCODE -ne 0) { $r.Error = "icacls Exitcode ${LASTEXITCODE}: $((@($o) | Where-Object { "$_".Trim() } | Select-Object -First 2) -join ' ')"; return [pscustomobject]$r }
+    $r.Ok = $true; $r.Who = $who
+    return [pscustomobject]$r
+}
+
 # Freier Platz fuer beliebige Pfade (Laufwerk oder UNC-Freigabe). -1 = unbekannt
 function Get-HMFreeSpace([string]$Path) {
     if (-not ('HMNet.Disk' -as [type])) {
@@ -2615,10 +2656,13 @@ function Start-HMBackup {
             catch { Write-HMLog $Job "Backup-Ordner konnte nicht umbenannt werden ($($_.Exception.Message)) - alter Name bleibt" 'Warning' }
         }
         New-Item -ItemType Directory -Path $Ctx.BackupPath -Force | Out-Null
-        # Admin-Backup eines Benutzers: der Benutzer darf sein eigenes Backup lesen (BACKUPS ist sonst nur fuer den Ersteller lesbar)
-        if (-not $Ctx.UserMode -and "$($Ctx.UserSid)" -match '^S-1-5-21-' -and "$($Ctx.BackupPath)" -notlike '\\*') {
-            try { $null = & icacls.exe "$($Ctx.BackupPath)" /grant "*$($Ctx.UserSid):(OI)(CI)RX" /C /Q 2>&1 } catch { Write-HMLog $Job "Leserecht fuer den Benutzer nicht gesetzt: $($_.Exception.Message)" 'Debug' }
-        }
+        # Backup-Ordner nur fuer SYSTEM, Administratoren und den gesicherten Benutzer (plus optionale Gruppe) - egal wo er liegt
+        # (eigener Speicherort, USB-Platte, Freigabe). Geht das nicht (FAT/exFAT, NAS ohne Rechte): Warnung, kein Abbruch.
+        $xg = if ($Ctx.Settings -and $Ctx.Settings.Backup) { "$($Ctx.Settings.Backup.ExtraReadGroup)".Trim() } else { '' }
+        $acl = Set-HMBackupFolderAcl -Path $Ctx.BackupPath -UserSid "$($Ctx.UserSid)" -UserMode:([bool]$Ctx.UserMode) -ExtraGroup $xg
+        foreach ($n in @($acl.Notes)) { Write-HMLog $Job "Backup-Ordner-Rechte: $n" 'Warning' }
+        if ($acl.Ok) { Write-HMLog $Job "Backup-Ordner-Rechte: nur $($acl.Who -join ', ')" 'Info' }
+        else { Write-HMLog $Job "Backup-Ordner-Rechte NICHT gesetzt ($($acl.Error)) - das Backup (u. a. Browser-Daten) ist fuer alle lesbar, die auf diesen Speicherort zugreifen koennen. Fuer ein geschuetztes Backup ein NTFS-Ziel verwenden." 'Warning' }
         $Job.LogFile = Join-Path $Ctx.BackupPath 'HUMig.log'
         $Ctx.RoboLog = Join-Path $Ctx.BackupPath 'Robocopy.log'
         try {

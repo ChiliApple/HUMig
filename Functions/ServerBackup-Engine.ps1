@@ -414,6 +414,20 @@ function Rename-HMSbDiskVolume([int]$Number, [string]$Letter, [string]$Label, [s
     return [pscustomobject]@{ Letter = $i.Letter; Label = $Label; OldLabel = $old; FreeBytes = $i.FreeBytes; SizeBytes = $i.SizeBytes }
 }
 
+# Lebenszeichen bei langen wbadmin-Laeufen: Abstand in Minuten, belegter Platz auf der Zielplatte, Text der Logzeile
+$script:HMSbAliveMinutes = 30
+function Get-HMSbDriveUsedBytes([string]$Drive) {
+    try { $d = New-Object System.IO.DriveInfo($Drive); if ($d.IsReady) { return [long]($d.TotalSize - $d.TotalFreeSpace) } } catch { }
+    return $null
+}
+function Format-HMSbAliveLine {
+    param([string]$Phase = '', [TimeSpan]$Elapsed, [string]$PctText = '', $UsedStart = $null, $UsedNow = $null)
+    $t = "laeuft noch$(if ($Phase) { " ($Phase)" }) - seit $(Format-HMDuration $Elapsed)"
+    if ($PctText) { $t += ", zuletzt gemeldet $PctText" }
+    if ($null -ne $UsedStart -and $null -ne $UsedNow -and [long]$UsedNow -gt [long]$UsedStart) { $t += (', ca. {0:N1} GB auf die Platte geschrieben' -f (([long]$UsedNow - [long]$UsedStart) / 1GB)) }
+    return $t
+}
+
 # wbadmin ausfuehren (stdout+stderr), Fortschritt in $Job, Zeilen ins Log
 function Invoke-HMSbWbadmin {
     param([string]$Arguments, [string]$Phase = '', [double]$PBase = 0, [double]$PSpan = 100, [string]$LogFile = '', [switch]$Quiet)
@@ -429,7 +443,20 @@ function Invoke-HMSbWbadmin {
     $p = [System.Diagnostics.Process]::Start($psi)
     if ($script:SbJob -and -not $Quiet) { $script:SbJob.Process = $p }
     $lastPct = -1; $prev = ''
-    while ($null -ne ($line = $p.StandardOutput.ReadLine())) {
+    # lange Laeufe (grosse VMs): alle 30 min eine Logzeile 'laeuft noch', auch wenn wbadmin lange nichts ausgibt
+    $tgt = if ($Arguments -match '(?i)-backupTarget:([A-Za-z]:)') { $Matches[1] } else { '' }
+    $used0 = if ($tgt -and -not $Quiet) { Get-HMSbDriveUsedBytes $tgt } else { $null }
+    $t0 = Get-Date; $lastLog = $t0; $lastPctTxt = ''
+    while ($true) {
+        $rl = $p.StandardOutput.ReadLineAsync()
+        while (-not $rl.Wait(5000)) {
+            if (-not $Quiet -and ((Get-Date) - $lastLog).TotalMinutes -ge $script:HMSbAliveMinutes) {
+                $lastLog = Get-Date
+                Write-HMSbLog ('  ' + (Format-HMSbAliveLine -Phase $Phase -Elapsed ((Get-Date) - $t0) -PctText $lastPctTxt -UsedStart $used0 -UsedNow $(if ($tgt) { Get-HMSbDriveUsedBytes $tgt } else { $null })))
+            }
+        }
+        $line = $rl.Result
+        if ($null -eq $line) { break }
         $t = $line.Trim()
         if (-not $t) { continue }
         $lines.Add($t)
@@ -440,7 +467,8 @@ function Invoke-HMSbWbadmin {
                 $script:SbJob.Progress = [Math]::Min(100, [int]($PBase + $PSpan * $pct / 100))
                 $script:SbJob.Status = "$Phase $pct %"
             }
-            if ($pct -ge $lastPct + 10 -or ($pct -eq 100 -and $lastPct -ne 100)) { Write-HMSbLog "  $t"; $lastPct = $pct }
+            $lastPctTxt = "$pct %"
+            if ($pct -ge $lastPct + 10 -or ($pct -eq 100 -and $lastPct -ne 100)) { Write-HMSbLog "  $t"; $lastPct = $pct; $lastLog = Get-Date }
             continue
         }
         if ($t -eq $prev) { continue }
@@ -450,6 +478,7 @@ function Invoke-HMSbWbadmin {
         elseif ($t -match '(?i)warnung|warning|\(Offline\)') { $lvl = 'Warning' }
         elseif ($t -match '(?i)erfolgreich|successfully') { $lvl = 'Success' }
         Write-HMSbLog "  $t" $lvl
+        $lastLog = Get-Date
     }
     $p.WaitForExit()
     $code = $p.ExitCode
@@ -606,7 +635,7 @@ function New-HMSbNotifyMessage {
     $healthShown = $false
     if (& $on $coreCat) {
         $lines.Add("Platte: $Disk")
-        foreach ($n in $other) { $lines.Add("Hinweis: $n") }
+        foreach ($n in $other) { $lines.Add("Hinweis: $($n -replace '^Hinweis: ', '')") }   # Notizen wie "Hinweis: VM offline gesichert" nicht doppelt
         $lv.Add($core)
     }
     $hl = "$($Result.Health)"
@@ -619,7 +648,12 @@ function New-HMSbNotifyMessage {
         $lv.Add($expSt)
     }
     $rem = @(@($Reminders) | Where-Object { "$_".Trim() })
-    if ($rem.Count -and (& $on 'Reminder')) { foreach ($r in $rem) { $lines.Add("Erinnerung: $r") }; $lv.Add('Warning') }
+    # Erinnerungen (Plattenwechsel laut Rotation, Archiv faellig) nur als Zeile - die Karte bleibt gruen;
+    # ein auffaelliger Plattenzustand einer anderen Platte faerbt weiter orange
+    if ($rem.Count -and (& $on 'Reminder')) {
+        foreach ($r in $rem) { $lines.Add("Erinnerung: $r") }
+        $lv.Add($(if (@($rem | Where-Object { $_ -notmatch 'Platte wechseln \(Rotation\)|Archiv-Sicherung faellig' }).Count) { 'Warning' } else { 'OK' }))
+    }
     if ($Result.LowSpace -and (& $on 'Space')) {
         $lines.Add(("Speicherplatz knapp: {0:N0} GB frei von {1:N0} GB - die Windows Server-Sicherung loescht bald automatisch die aeltesten Versionen. Groessere Platte oder weniger sichern." -f ([long]$Result.FreeBytes / 1GB), ([long]$Result.TotalBytes / 1GB)))
         $lv.Add('Warning')
