@@ -1,5 +1,14 @@
 ﻿# Changelog
 
+## v2.1.8 - 2026-10-15
+### Server-Backup
+- **Neustart ausstehend:** vor jeder Sicherung prueft HUMig, ob Windows auf einen Neustart wartet (Windows Update, Windows-Komponenten, geaenderter Computername) - Windows startet den Server sonst ausserhalb der Nutzungszeit evtl. mitten in der Sicherung neu. Manueller Start: Hinweis in der Rueckfrage; Lauf und Bericht: Hinweis; Zeitplan: Teams-Meldung (Kategorie *Server-Backup mit Warnungen*) und die Sicherung startet trotzdem - oder nicht, wenn im Profil (*Bearbeiten*) "bei ausstehendem Neustart nicht sichern" gewaehlt ist
+- **Abgebrochene Laeufe werden gemeldet:** waehrend eines Laufs liegt eine Markierung im Tool-Ordner (je Prozess eine eigene Datei; ob der Lauf noch lebt, entscheidet die Startzeit des Prozesses - Zeitkorrekturen am Server loesen keinen Fehlalarm aus; Oberflaeche und Zeitplan melden denselben Abbruch nur einmal). Endet er ohne Aufraeumen (Neustart durch Windows Update, Absturz, Abmelden), erkennt der naechste Start von HUMig bzw. des Zeitplans den Abbruch: Eintrag *ABGEBROCHEN* mit Ursache aus dem Systemprotokoll (nur wenn der Server seither neu gestartet wurde, z. B. "neu starten am 15.10.2026 01:00 (Windows Update) - ausgeloest von MoUsoCoreWorker.exe"; "Windows Update" nur bei Update-Prozess bzw. Update-Grundcode, nicht bei manuellem Neustart; sonst "HUMig wurde waehrend der Sicherung beendet") im Verlauf (Tool-Ordner und Platte), `Abbruch.txt` im Berichtsordner, Ereignisanzeige und Teams-Meldung (Kategorie *Server-Backup fehlgeschlagen / abgebrochen*). Bisher fehlte so ein Lauf einfach im Verlauf
+- Anleitung: Abschnitt *Neustart durch Windows Update* mit den Einstellungen gegen den automatischen Neustart
+### Backup / Restore
+- Programm-Katalog Visual Studio Code: die Hilfsskripte `askpass` (legt VS Code bei jedem Start neu an, waehrend des Laufs gesperrt) werden nicht mehr gesichert - bisher Fehler, wenn VS Code geoeffnet war
+- **Outlook wie die Browser:** laeuft Outlook, fragt HUMig vor dem Backup des Moduls *Office* nach dem Schliessen (geoeffnete PST-Dateien sind gesperrt). Ohne Abfrage (Zeitplan) wird trotzdem kopiert - gesperrte Outlook-Dateien sind dann nur ein Hinweis, kein Fehler. **Funktionsaenderung:** vor dem Restore des Moduls *Office* wird Outlook sanft geschlossen (bis 60 s) - nie hart beendet, weil das offene PST/OST-Dateien beschaedigen kann. Bleibt Outlook offen, werden nur die PST-Dateien ausgelassen (Warnung), Signaturen und Vorlagen kommen trotzdem zurueck. "Ueberspringen" in der Abfrage laesst das Modul aus
+
 ## v2.1.7 - 2026-10-15
 ### Browser (Edge, Chrome, Brave, Vivaldi)
 - **Lesezeichen zuverlaessig auf einen neuen PC:** bisher wurde das Profil nur kopiert - auf einem anderen PC verwarf der Browser dabei oft Teile (an PC und Konto gebundene Daten). Das Backup sichert weiter alles; beim Restore entscheidet HUMig nach dem Fall:

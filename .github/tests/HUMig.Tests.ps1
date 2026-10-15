@@ -866,11 +866,40 @@ Describe 'Browser vor Backup/Restore schliessen' {
     It 'Edge, Chrome, Firefox fragen nach dem Schliessen; ohne Abfrage wird trotzdem kopiert' {
         $j = Get-Content -LiteralPath (Join-Path $script:Root 'Config\modules.default.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $mods = @($j.Modules)
-        foreach ($x in @(@('Edge', 'msedge'), @('Chrome', 'chrome'), @('Firefox', 'firefox'))) {
+        foreach ($x in @(@('Edge', 'msedge'), @('Chrome', 'chrome'), @('Firefox', 'firefox'), @('Office', 'outlook'))) {
             $m = @($mods | Where-Object { $_.Id -eq $x[0] })[0]
             @($m.CloseProcess) | Should -Contain $x[1]
             $m.CloseDefault | Should -Be 'Copy'
         }
+        @($mods | Where-Object { $_.Id -eq 'Office' })[0].RestoreClose | Should -BeTrue
+        @(@($mods | Where-Object { $_.Id -eq 'Office' })[0].RestoreCloseSkip) | Should -Contain 'PST'
+        $vsc = @((Get-Content -LiteralPath (Join-Path $script:Root 'Config\apps.default.json') -Raw -Encoding UTF8 | ConvertFrom-Json).Apps | Where-Object { $_.Id -eq 'App_VSCode' })[0]
+        @(@($vsc.Items)[0].XD) | Should -Contain 'askpass'
+    }
+    It 'Restore: Outlook (RestoreClose) nur sanft schliessen, nie hart beenden; bleibt es offen, nur PST auslassen' {
+        Mock Get-HMRunningProcs { @([pscustomobject]@{ Name = 'outlook'; Id = 77 }) }
+        Mock Close-HMProcs { @() }
+        $job = @{ Log = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue)); Cancel = $false }
+        $m = [pscustomobject]@{ Id = 'Office'; Name = 'Office'; Group = 'Office'; CloseProcess = @('outlook'); CloseDefault = 'Copy'; RestoreClose = $true; Items = @() }
+        $m | Add-Member -NotePropertyName RestoreCloseSkip -NotePropertyValue @('PST')
+        $r = Enter-HMModule @{ ProcDecisions = @{ Office = 'Copy' }; UserSid = 'S-1-5-21-1' } $job $m @{} 'Restore'
+        $r.ProcAction | Should -Be 'geschlossen'
+        @($r.SkipItems).Count | Should -Be 0
+        # nie hart beenden (Force = false), laengere Wartezeit
+        Should -Invoke Close-HMProcs -Times 1 -ParameterFilter { $Force -eq $false -and $TimeoutSec -eq 60 }
+        # bleibt Outlook offen: nur PST auslassen, Modul nicht ueberspringen
+        Mock Close-HMProcs { @([pscustomobject]@{ Name = 'outlook'; Id = 77 }) }
+        $r2 = Enter-HMModule @{ ProcDecisions = @{}; UserSid = 'S-1-5-21-1' } $job $m @{} 'Restore'
+        $r2.Skip | Should -BeFalse
+        @($r2.SkipItems) | Should -Be @('PST')
+        $r2.Warn[0] | Should -Match 'nicht hart beendet'
+        # Entscheidung Ueberspringen wird respektiert
+        $r3 = Enter-HMModule @{ ProcDecisions = @{ Office = 'Skip' }; UserSid = 'S-1-5-21-1' } $job $m @{} 'Restore'
+        $r3.Skip | Should -BeTrue
+        # Backup ohne Entscheidung: trotzdem kopieren, gesperrte Dateien nur Hinweis
+        $b = Enter-HMModule @{ ProcDecisions = @{}; UserSid = 'S-1-5-21-1' } $job $m @{} 'Backup'
+        $b.LockedHint | Should -BeTrue
+        $b.Skip | Should -BeFalse
     }
     It 'Entscheidung: ohne Abfrage kopieren (CloseDefault), Ueberspringen und ohne CloseDefault auslassen' {
         Mock Get-HMRunningProcs { @([pscustomobject]@{ Name = 'msedge'; Id = 42 }) }
@@ -2613,9 +2642,99 @@ Describe 'Browser: Lesezeichen zusammenfuehren (Chromium)' {
         foreach ($id in @('App_Brave', 'App_Vivaldi')) { Test-HMChromiumItem (@($apps | Where-Object { $_.Id -eq $id })[0].Items[0]) | Should -BeTrue }
         $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
         $eng | Should -Match "Phase -eq 'Restore' -and \(Test-HMBrowserModule \`$Module\)\) \{ \`$dec = 'CloseForce' \}"
+        $eng | Should -Match "RestoreClose -eq \`$true -and \`$dec -ne 'Skip'\) \{ \`$dec = 'CloseSoft' \}"
         $eng | Should -Match 'SameMachineOnly -and -not \(Test-HMBrowserSameMachine'
         $eng | Should -Match 'MachineGuid = \(Get-HMMachineGuid'
         $eng | Should -Match 'SourceComputerName = \(Get-HMTargetComputerName'
         $eng | Should -Match 'wurde waehrend des Restores wieder gestartet'
+    }
+}
+
+Describe 'Server-Backup: Neustart ausstehend und abgebrochene Laeufe' {
+    BeforeAll { . (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1') }
+    It 'Hinweistext nur bei ausstehendem Neustart' {
+        Format-HMSbPendingReboot @() '6-21 Uhr' | Should -BeNullOrEmpty
+        $t = Format-HMSbPendingReboot @('Windows Update') '6-21 Uhr'
+        $t | Should -Match 'Neustart ausstehend \(Windows Update\)'
+        $t | Should -Match '6-21 Uhr'
+    }
+    It 'Ursache aus dem Systemprotokoll: Windows-Update-Neustart, Stromausfall, nichts' {
+        $since = [datetime]'2026-10-14 07:43'
+        $ev = @(
+            [pscustomobject]@{ Id = 1074; TimeCreated = [datetime]'2026-10-15 01:00:02'; Properties = @(
+                [pscustomobject]@{ Value = 'C:\WINDOWS\uus\packages\preview\AMD64\MoUsoCoreWorker.exe (SERVER01)' }, [pscustomobject]@{ Value = 'SERVER01' },
+                [pscustomobject]@{ Value = 'Betriebssystem: Service Pack (geplant)' }, [pscustomobject]@{ Value = '0x80020010' }, [pscustomobject]@{ Value = 'neu starten' }) },
+            [pscustomobject]@{ Id = 1074; TimeCreated = [datetime]'2026-10-13 01:00:00'; Properties = @() })
+        $r = Get-HMSbAbortReason $since $ev
+        $r | Should -Match '^neu starten am 15\.10\.2026 01:00 \(Windows Update\) - ausgeloest von MoUsoCoreWorker\.exe: Betriebssystem: Service Pack'
+        Get-HMSbAbortReason $since @([pscustomobject]@{ Id = 41; TimeCreated = [datetime]'2026-10-14 09:00'; Properties = @() }) | Should -Match 'Stromausfall'
+        Get-HMSbAbortReason $since @() | Should -Match 'HUMig wurde waehrend der Sicherung beendet'
+        # manueller Neustart (explorer, Grund-Code Reconfiguration) ist kein Windows Update; svchost allein auch nicht
+        $man = [pscustomobject]@{ Id = 1074; TimeCreated = [datetime]'2026-10-14 09:00'; Properties = @(
+            [pscustomobject]@{ Value = 'C:\Windows\explorer.exe (SERVER01)' }, [pscustomobject]@{ Value = 'SERVER01' }, [pscustomobject]@{ Value = 'Operating System: Reconfiguration (Planned)' }, [pscustomobject]@{ Value = '0x80020004' }, [pscustomobject]@{ Value = 'restart' }) }
+        Get-HMSbAbortReason $since @($man) | Should -Not -Match 'Windows Update'
+        $svc = [pscustomobject]@{ Id = 1074; TimeCreated = [datetime]'2026-10-14 09:00'; Properties = @(
+            [pscustomobject]@{ Value = 'C:\Windows\system32\svchost.exe (SERVER01)' }, [pscustomobject]@{ Value = 'SERVER01' }, [pscustomobject]@{ Value = 'Other (Planned)' }, [pscustomobject]@{ Value = '0x80000000' }, [pscustomobject]@{ Value = 'restart' }) }
+        Get-HMSbAbortReason $since @($svc) | Should -Not -Match 'Windows Update'
+        # Ereignisse nach dem neuen Systemstart zaehlen nicht
+        Get-HMSbAbortReason $since @($man) -Until ([datetime]'2026-10-14 08:00') | Should -Match 'HUMig wurde'
+    }
+    It 'Laufend-Markierung: eigener Prozess laeuft noch, fremder/anderer Systemstart nicht' {
+        $me = [pscustomobject]@{ Pid = $PID; ProcStart = (Get-Process -Id $PID).StartTime.ToString('o'); Boot = 'B1' }
+        $me.Boot = '2026-10-14T06:00:00.0000000+02:00'
+        Test-HMSbRunAlive $me '2026-10-14T06:00:00.0000000+02:00' | Should -BeTrue
+        Test-HMSbRunAlive $me ([datetime]'2026-10-14T06:00:00+02:00') | Should -BeTrue
+        # Zeitkorrektur: Systemstart verschiebt sich um Sekunden/Minuten - Prozess mit gleicher Startzeit laeuft weiter
+        Test-HMSbRunAlive $me '2026-10-14T06:00:03.0000000+02:00' | Should -BeTrue
+        Test-HMSbRunAlive $me '2026-10-14T06:01:00.0000000+02:00' | Should -BeTrue
+        # ohne Prozess-Startzeit entscheidet der Systemstart mit 10 min Toleranz
+        $np = [pscustomobject]@{ Pid = $PID; ProcStart = ''; Boot = '2026-10-14T06:00:00.0000000+02:00' }
+        Test-HMSbRunAlive $np '2026-10-14T06:05:00.0000000+02:00' | Should -BeTrue
+        Test-HMSbRunAlive $np '2026-10-15T03:45:00.0000000+02:00' | Should -BeFalse
+        Test-HMSbRunAlive ([pscustomobject]@{ Pid = $PID; ProcStart = '2000-01-01T00:00:00.0000000Z'; Boot = '' }) '' | Should -BeFalse
+        Test-HMSbRunAlive ([pscustomobject]@{ Pid = 999999; ProcStart = ''; Boot = '' }) '' | Should -BeFalse
+    }
+    It 'Abgebrochener Lauf: Verlauf (Tool-Ordner und Platte), Abbruch.txt, Markierung entfernt; laufender bleibt' {
+        $cfg = Join-Path $TestDrive 'sbcfg'; [void][System.IO.Directory]::CreateDirectory($cfg)
+        $hist = Join-Path $cfg 'history.json'
+        $disk = Join-Path $TestDrive 'sbdisk'; $rep = Join-Path $disk '2026-10-14_0742_GYM'; [void][System.IO.Directory]::CreateDirectory($rep)
+        $ctx = @{ LocalHistory = $hist; Profile = 'GYM'; DiskLabel = 'HUMIG-GYM-2'; DiskSerial = 'X'; VMs = @('VM1'); Volumes = @(); Version = '2.1.8' }
+        Set-HMSbRunMarker $ctx $rep ([datetime]'2026-10-14 07:42')
+        $mf = Get-HMSbRunMarkerPath $cfg 'GYM'
+        Test-Path -LiteralPath $mf | Should -BeTrue
+        $mf | Should -Match "laufend_GYM_$PID\.json$"
+        # eigener Prozess: laeuft noch -> nichts melden
+        @(Resolve-HMSbAbortedRuns $hist '2.1.8' -NoNotify).Count | Should -Be 0
+        Test-Path -LiteralPath $mf | Should -BeTrue
+        # Markierung eines beendeten Prozesses
+        $j = Get-Content -LiteralPath $mf -Raw | ConvertFrom-Json
+        $j.Pid = 999999; $j.ProcStart = ''
+        Set-Content -LiteralPath $mf -Value ($j | ConvertTo-Json) -Encoding UTF8
+        $r = @(Resolve-HMSbAbortedRuns $hist '2.1.8' -NoNotify)
+        $r.Count | Should -Be 1
+        $r[0].Text | Should -Match "Server-Backup 'GYM' .* ABGEBROCHEN"
+        $r[0].Reason | Should -Match 'kein Neustart seither'
+        Test-Path -LiteralPath $mf | Should -BeFalse
+        Test-Path -LiteralPath "$mf.pruefe" | Should -BeFalse
+        $h = Read-HMSbHistory $hist
+        @($h).Count | Should -Be 1
+        @($h)[0].Status | Should -Be 'Error'
+        @($h)[0].Note | Should -Match '^ABGEBROCHEN: '
+        @($h)[0].Date | Should -Be '2026-10-14 07:42'
+        Test-Path -LiteralPath (Join-Path $disk 'history.json') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $rep 'Abbruch.txt') | Should -BeTrue
+        Clear-HMSbRunMarker $ctx
+    }
+    It 'Engine und Zeitplan: Markierung setzen/entfernen, Neustart-Pruefung, Profil-Option' {
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1')
+        $eng | Should -Match 'Set-HMSbRunMarker \$Ctx \$rep \$t0'
+        $eng | Should -Match 'Clear-HMSbRunMarker \$Ctx'
+        $tsk = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\ServerBackup-Task.ps1')
+        $tsk | Should -Match 'Resolve-HMSbAbortedRuns \$localHist \$version'
+        $tsk | Should -Match 'RebootPendingSkip -eq \$true'
+        $tsk | Should -Match 'Scheduled = \$true'
+        $ui = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+        $ui | Should -Match 'function Invoke-HMSbAbortCheck'
+        $ui | Should -Match 'RebootPendingSkip = \(\$p\.RebootPendingSkip -eq \$true\)'
     }
 }

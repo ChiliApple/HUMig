@@ -774,6 +774,161 @@ function Write-HMSbEvent([string]$Status, [string]$Message) {
         Write-EventLog -LogName Application -Source 'HUMig' -EntryType $type -EventId $id -Message $Message -ErrorAction Stop
     } catch { }
 }
+# ----------------------------------------------------------------------------
+# Neustart ausstehend / abgebrochene Laeufe
+# Ein Neustart durch Windows Update (ausserhalb der Nutzungszeit) beendet eine laufende Sicherung ohne Verlauf und Meldung.
+# Vor dem Lauf: ausstehenden Neustart erkennen. Waehrend des Laufs: Markierung laufend_<Profil>.json neben dem Verlauf im
+# Tool-Ordner; fehlt am Ende das Aufraeumen (Neustart, Absturz, Abmelden), erkennt der naechste Start den Abbruch.
+# ----------------------------------------------------------------------------
+# Gruende fuer einen ausstehenden Neustart (leer = keiner). Registry-Pfade wie von Windows Update/CBS gesetzt.
+function Get-HMSbPendingReboot {
+    $r = New-Object System.Collections.Generic.List[string]
+    if (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') { $r.Add('Windows Update') }
+    if (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') { $r.Add('Windows-Komponenten (Updates/Features)') }
+    try { $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Updates' -Name UpdateExeVolatile -ErrorAction Stop).UpdateExeVolatile; if ([int]$v -ne 0) { $r.Add('Installationsprogramm') } } catch { }
+    try {
+        $a = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' -ErrorAction Stop).ComputerName
+        $n = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName' -ErrorAction Stop).ComputerName
+        if ("$a" -and "$n" -and "$a" -ne "$n") { $r.Add('Computername geaendert') }
+    } catch { }
+    return $r.ToArray()
+}
+# Nutzungszeit von Windows Update als Text ('6-21 Uhr'), '' wenn unbekannt
+function Get-HMSbActiveHours {
+    try {
+        $k = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' -ErrorAction Stop
+        if ($null -ne $k.ActiveHoursStart -and $null -ne $k.ActiveHoursEnd) { return ('{0}-{1} Uhr' -f [int]$k.ActiveHoursStart, [int]$k.ActiveHoursEnd) }
+    } catch { }
+    return ''
+}
+# Hinweistext (rein, testbar)
+function Format-HMSbPendingReboot([string[]]$Reasons, [string]$ActiveHours = '') {
+    $r = @($Reasons | Where-Object { "$_".Trim() })
+    if (-not $r.Count) { return '' }
+    $w = if ($ActiveHours) { "ausserhalb der Nutzungszeit ($ActiveHours)" } else { 'ausserhalb der Nutzungszeit' }
+    return "Neustart ausstehend ($($r -join ', ')) - Windows startet den Server $w evtl. selbst neu, auch mitten in der Sicherung. Vorher neu starten oder den automatischen Neustart abschalten."
+}
+
+$script:SbRunMarkerPrefix = 'laufend_'
+# Name mit Prozess-ID: zwei gleichzeitige Laeufe desselben Profils ueberschreiben/loeschen sich nicht gegenseitig die Markierung
+function Get-HMSbRunMarkerPath([string]$Dir, [string]$ProfileName, [int]$ProcessId = $PID) { return [System.IO.Path]::Combine($Dir, ('{0}{1}_{2}.json' -f $script:SbRunMarkerPrefix, (ConvertTo-HMSbSafeName $ProfileName), $ProcessId)) }
+function Get-HMSbBootTime { try { return ([datetime](Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime).ToString('o') } catch { return '' } }
+function Set-HMSbRunMarker($Ctx, [string]$Report, [datetime]$Started) {
+    if (-not $Ctx.LocalHistory) { return }
+    $dir = Split-Path "$($Ctx.LocalHistory)" -Parent
+    try {
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $ps = ''; try { $ps = (Get-Process -Id $PID -ErrorAction Stop).StartTime.ToString('o') } catch { }
+        $m = [ordered]@{
+            Profile = "$($Ctx.Profile)"; Host = $env:COMPUTERNAME; Disk = "$($Ctx.DiskLabel)"; DiskSerial = "$($Ctx.DiskSerial)"; Report = $Report
+            Started = $Started.ToString('o'); Pid = $PID; ProcStart = $ps; Boot = (Get-HMSbBootTime)
+            VMs = (@($Ctx.VMs) -join ', '); Volumes = (@($Ctx.Volumes) -join ', '); Version = "$($Ctx.Version)"; Kind = $(if ($Ctx.Scheduled) { 'Zeitplan' } else { 'Oberflaeche' })
+        }
+        Set-Content -LiteralPath (Get-HMSbRunMarkerPath $dir "$($Ctx.Profile)") -Value ($m | ConvertTo-Json) -Encoding UTF8
+    } catch { Write-HMSbLog "Laufend-Markierung nicht geschrieben: $($_.Exception.Message)" 'Debug' }
+}
+function Clear-HMSbRunMarker($Ctx) {
+    if (-not $Ctx.LocalHistory) { return }
+    try { Remove-Item -LiteralPath (Get-HMSbRunMarkerPath (Split-Path "$($Ctx.LocalHistory)" -Parent) "$($Ctx.Profile)") -Force -ErrorAction SilentlyContinue } catch { }
+}
+# Zeitpunkt aus der Markierung (Text im Format 'o' oder - PowerShell 7 wandelt beim Einlesen um - schon DateTime); $null = unbekannt
+function ConvertTo-HMSbTime($Value) {
+    if ($null -eq $Value -or "$Value" -eq '') { return $null }
+    if ($Value -is [datetime]) { return $Value.ToUniversalTime() }
+    try { return ([datetime]::Parse("$Value", [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)).ToUniversalTime() } catch { return $null }
+}
+function Test-HMSbSameTime($A, $B) {
+    $x = ConvertTo-HMSbTime $A; $y = ConvertTo-HMSbTime $B
+    if ($null -eq $x -or $null -eq $y) { return $true }   # unbekannt: nicht als Abweichung werten
+    return ([Math]::Abs(($x - $y).TotalSeconds) -lt 2)
+}
+# Systemstart seit der Markierung geaendert? Grosse Toleranz (10 min): LastBootUpTime wird aus Uhrzeit minus Laufzeit
+# berechnet und verschiebt sich bei jeder Zeitkorrektur (NTP, Domaene, Hyper-V-Zeitsynchronisierung)
+function Test-HMSbBootChanged($MarkerBoot, $BootNow) {
+    $x = ConvertTo-HMSbTime $MarkerBoot; $y = ConvertTo-HMSbTime $BootNow
+    if ($null -eq $x -or $null -eq $y) { return $false }
+    return ([Math]::Abs(($x - $y).TotalMinutes) -ge 10)
+}
+# Laeuft der Vorgang der Markierung noch? Massgeblich: Prozess mit dieser ID und derselben Prozess-Startzeit (Kernel-Zeit, stabil).
+# Nur wenn die Prozess-Startzeit unbekannt ist, entscheidet zusaetzlich der Systemstart (mit grosser Toleranz).
+function Test-HMSbRunAlive($Marker, $BootNow = '') {
+    if (-not $Marker) { return $false }
+    $p = $null; try { $p = Get-Process -Id ([int]$Marker.Pid) -ErrorAction Stop } catch { return $false }
+    $ps = $null; try { $ps = $p.StartTime } catch { }
+    if ($null -ne $ps -and "$($Marker.ProcStart)") { return (Test-HMSbSameTime $Marker.ProcStart $ps) }
+    return (-not (Test-HMSbBootChanged $Marker.Boot $BootNow))
+}
+# Ursache eines Abbruchs aus dem Systemprotokoll (rein auswertbar: $Events = Ereignisse mit Id, TimeCreated, Properties)
+function Get-HMSbAbortReason([datetime]$Since, $Events = $null, $Until = $null) {
+    if ($null -eq $Events) {
+        $fh = @{ LogName = 'System'; Id = 1074, 6008, 41; StartTime = $Since }
+        if ($null -ne $Until) { $fh.EndTime = ([datetime]$Until).AddMinutes(5) }
+        try { $Events = @(Get-WinEvent -FilterHashtable $fh -ErrorAction Stop | Sort-Object TimeCreated) } catch { $Events = @() }
+    }
+    foreach ($e in @($Events | Where-Object { $_ -and $_.TimeCreated -ge $Since -and ($null -eq $Until -or $_.TimeCreated -le ([datetime]$Until).AddMinutes(5)) } | Sort-Object TimeCreated)) {
+        $t = ([datetime]$e.TimeCreated).ToString('dd.MM.yyyy HH:mm')
+        $pv = @($e.Properties | ForEach-Object { "$($_.Value)" })
+        switch ([int]$e.Id) {
+            1074 {
+                $proc = if ($pv.Count -gt 0) { Split-Path ($pv[0] -replace '\s*\(.*$', '') -Leaf } else { '' }
+                $why = if ($pv.Count -gt 2) { $pv[2] } else { '' }
+                $kind = if ($pv.Count -gt 4 -and $pv[4]) { $pv[4] } else { 'Neustart/Herunterfahren' }
+                # Windows Update: ausloesender Prozess oder (sprachunabhaengig) Grund-Code Service Pack/Hotfix/Upgrade/Aktualisierung
+                $code = if ($pv.Count -gt 3) { "$($pv[3])".Trim() } else { '' }
+                $wu = if ($proc -match '^(MoUsoCoreWorker|TrustedInstaller|usoclient|wuauclt)\.exe$' -or $code -match '^0x8002(0010|0011|0002|0003)$') { ' (Windows Update)' } else { '' }
+                return "$kind am $t$wu - ausgeloest von $(if ($proc) { $proc } else { 'unbekannt' })$(if ($why) { ": $why" })"
+            }
+            6008 { return "unerwartetes Herunterfahren vor $t (Stromausfall, Absturz oder Ausschalten)" }
+            41 { return "Neustart ohne sauberes Herunterfahren am $t (Stromausfall, Absturz oder Ausschalten)" }
+        }
+    }
+    return 'HUMig wurde waehrend der Sicherung beendet (z. B. Abmelden, Task-Manager) - kein Neustart im Systemprotokoll'
+}
+# Abgebrochene Laeufe finden und festhalten: Verlauf (Tool-Ordner + Platte, falls angesteckt), Abbruch.txt, Ereignisanzeige,
+# Teams (falls Core-Notify geladen). Rueckgabe: Liste der Meldungen. Markierung wird danach geloescht.
+function Resolve-HMSbAbortedRuns([string]$LocalHistory, [string]$Version = '', [switch]$NoNotify) {
+    $out = New-Object System.Collections.Generic.List[object]
+    if (-not $LocalHistory) { return $out.ToArray() }
+    $dir = Split-Path $LocalHistory -Parent
+    if (-not (Test-Path -LiteralPath $dir)) { return $out.ToArray() }
+    $boot = Get-HMSbBootTime
+    foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter "$($script:SbRunMarkerPrefix)*.json" -File -ErrorAction SilentlyContinue)) {
+        $m = $null; try { $m = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+        if (-not $m) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue; continue }
+        if (Test-HMSbRunAlive $m $boot) { continue }
+        # Markierung atomar uebernehmen: prueft gleichzeitig ein zweiter Vorgang (Zeitplan + Oberflaeche), meldet nur einer
+        $claim = "$($f.FullName).pruefe"
+        try { [System.IO.File]::Move($f.FullName, $claim) } catch { continue }
+        $st = [datetime]::Now; $t0 = ConvertTo-HMSbTime $m.Started; if ($null -ne $t0) { $st = $t0.ToLocalTime() }
+        # Ursache aus dem Systemprotokoll nur, wenn seither neu gestartet wurde - sonst war es kein Neustart
+        $why = if (Test-HMSbBootChanged $m.Boot $boot) {
+            $bn = ConvertTo-HMSbTime $boot
+            Get-HMSbAbortReason $st -Until $(if ($null -ne $bn) { $bn.ToLocalTime() } else { $null })
+        } else { 'HUMig wurde waehrend der Sicherung beendet (z. B. Abmelden, Task-Manager) - kein Neustart seither' }
+        $note = "ABGEBROCHEN: $why"
+        $entry = [pscustomobject][ordered]@{
+            Date = $st.ToString('yyyy-MM-dd HH:mm'); Profile = "$($m.Profile)"; Host = "$($m.Host)"; Disk = "$($m.Disk)"; DiskSerial = "$($m.DiskSerial)"
+            VMs = "$($m.VMs)"; Volumes = "$($m.Volumes)"; VolVersionId = ''; Status = 'Error'; Minutes = [math]::Round(((Get-Date) - $st).TotalMinutes, 1); SizeGB = 0; VersionId = ''
+            HostConfig = $false; HostSystem = $false; HostVersionId = ''; Note = $note; Tool = "HUMig $(if ($m.Version) { $m.Version } else { $Version })"
+            Report = $(if ("$($m.Report)") { Split-Path "$($m.Report)" -Leaf } else { '' }); Health = ''; HealthText = ''; Export = ''; ExportStatus = ''; Aborted = $true
+        }
+        try { Add-HMSbHistory $LocalHistory $entry } catch { }
+        $rep = "$($m.Report)"
+        if ($rep -and (Test-Path -LiteralPath $rep)) {
+            try { Add-HMSbHistory (Join-Path (Split-Path $rep -Parent) 'history.json') $entry } catch { }
+            try { Set-Content -LiteralPath (Join-Path $rep 'Abbruch.txt') -Value @("Server-Backup '$($m.Profile)' auf $($m.Host) - gestartet $($st.ToString('dd.MM.yyyy HH:mm')) ($($m.Kind))", "ABGEBROCHEN: $why", '', 'Was bis dahin gesichert war, zeigt "Versionen auf der Platte". Sicherung erneut starten.') -Encoding UTF8 } catch { }
+        }
+        $txt = "Server-Backup '$($m.Profile)' auf $($m.Host) ABGEBROCHEN (gestartet $($st.ToString('dd.MM.yyyy HH:mm')), $($m.Kind)): $why"
+        Write-HMSbEvent 'Error' "$txt`nPlatte: $($m.Disk)`nHUMig $Version"
+        if (-not $NoNotify -and (Get-Command Send-HMNotify -ErrorAction SilentlyContinue)) {
+            try { [void](Send-HMNotify -Title "Server-Backup '$($m.Profile)' auf $($m.Host) ABGEBROCHEN" -Lines @("Gestartet: $($st.ToString('dd.MM.yyyy HH:mm')) ($($m.Kind))", "Ursache: $why", "Platte: $($m.Disk)", 'Sicherung erneut starten.') -Level 'Error' -Category 'SbError' -SbProfile "$($m.Profile)") } catch { }
+        }
+        Remove-Item -LiteralPath $claim -Force -ErrorAction SilentlyContinue
+        $out.Add([pscustomobject]@{ Profile = "$($m.Profile)"; Started = $st; Reason = $why; Text = $txt })
+    }
+    return $out.ToArray()
+}
+
 # VMs mit Dateien auf dem Systemlaufwerk (werden beim Host-System / -allCritical beruehrt)
 # $Vms: Objekte mit Name, Paths (virtuelle Festplatten), VmPath, ConfigPath
 function Get-HMSbSysDriveVms($Vms, [string]$SysDrive = $env:SystemDrive) {
@@ -1623,6 +1778,17 @@ function Start-HMServerBackup {
     }
 
     # Ab hier existiert der Berichtsordner: Abbruch/Fehler wird trotzdem in Verlauf und Bericht festgehalten
+    # Laufend-Markierung: endet der Vorgang ohne Aufraeumen (Neustart, Absturz), meldet der naechste Start den Abbruch
+    Set-HMSbRunMarker $Ctx $rep $t0
+    # Neustart ausstehend? Windows Update startet sonst evtl. mitten in der Sicherung neu (z. B. nachts ausserhalb der Nutzungszeit)
+    try {
+        $pr = Format-HMSbPendingReboot @(Get-HMSbPendingReboot) (Get-HMSbActiveHours)
+        if ($pr) {
+            Write-HMSbLog $pr 'Warning'
+            $notes += "Hinweis: $pr"
+            $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = $pr; Fix = 'Server nach der Sicherung (oder vor der naechsten) neu starten. Dauerhaft: automatischen Neustart von Windows Update abschalten (Anleitung > Server-Backup > Neustart durch Windows Update).' }
+        }
+    } catch { }
     $hostCfgOk = $false; $verId = ''; $volOk = $false; $hostSysOk = $false
     try {
         # --- Host-Konfiguration
@@ -1822,6 +1988,7 @@ function Start-HMServerBackup {
     }
     try { Add-HMSbHistory (Join-Path "$target\$($script:SbDirName)" 'history.json') $entry } catch { Write-HMSbLog "Verlauf auf der Platte nicht gespeichert: $($_.Exception.Message)" 'Warning' }
     if ($Ctx.LocalHistory) { try { Add-HMSbHistory "$($Ctx.LocalHistory)" $entry } catch { Write-HMSbLog "Verlauf im Tool-Ordner nicht gespeichert: $($_.Exception.Message)" 'Warning' } }
+    Clear-HMSbRunMarker $Ctx
     try {
         Write-HMSbReport -Path (Join-Path $rep 'Bericht.html') -Entry $entry -Hints $hints -Folder $rep -Ctx $Ctx
         if ($Ctx.LocalReportDir) {
