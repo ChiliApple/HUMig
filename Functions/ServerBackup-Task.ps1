@@ -58,6 +58,11 @@ function Add-HMSbTaskError([string]$Note, [string]$Disk = '') {
 
 Write-HMSbLog "Geplantes Server-Backup - Profil '$ProfileName' - Host $env:COMPUTERNAME - Konto $env:USERDOMAIN\$env:USERNAME - HUMig $version" 'Header'
 
+# --- frueher abgebrochene Laeufe (Neustart, Absturz) melden und im Verlauf festhalten
+try {
+    foreach ($ab in @(Resolve-HMSbAbortedRuns $localHist $version)) { Write-HMSbLog "Frueherer Lauf: $($ab.Text) - im Verlauf festgehalten und gemeldet" 'Error' }
+} catch { Write-HMSbLog "Pruefung auf abgebrochene Laeufe: $($_.Exception.Message)" 'Warning' }
+
 # --- Profil (auch nach Umbenennung)
 $prof = $null
 try {
@@ -92,7 +97,15 @@ if ($Explicit) {
     $list = @($VMs -split '\|' | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
     $volList = @($Volumes -split '\|' | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
 } elseif ($VMs -and -not $Volumes) { $volList = @() }   # aeltere Zeitplaene (nur VMs angegeben)
+# --- Neustart ausstehend? (Windows Update startet sonst evtl. mitten in der Sicherung neu)
+$pend = Format-HMSbPendingReboot @(Get-HMSbPendingReboot) (Get-HMSbActiveHours)
+if ($pend) {
+    if ($prof.RebootPendingSkip -eq $true) { Add-HMSbTaskError "Nicht gestartet: $pend (Profil-Einstellung: bei ausstehendem Neustart nicht sichern)" "$($d.Label)"; exit 2 }
+    Write-HMSbLog "$pend - Sicherung wird trotzdem gestartet" 'Warning'
+    try { $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME - Neustart ausstehend" -Lines @($pend, 'Die Sicherung wird trotzdem gestartet. Bricht sie durch den Neustart ab, meldet HUMig das beim naechsten Start.') -Level 'Warning' -Category 'SbWarning' -SbProfile $ProfileName; if ($n) { Write-HMSbLog $n 'Info' } } catch { }
+}
 $ctx = @{
+    Scheduled = $true
     Profile = $ProfileName; DiskPrefix = $prefix; Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
     VMs = @($list); Volumes = @($volList); HostConfig = [bool]$HostConfig; HostSystem = [bool]$HostSystem; Verify = -not $NoVerify
     LocalHistory = $localHist; LocalHealth = $localHealth; LocalReportDir = $repDir; Version = $version; ProfileData = $prof

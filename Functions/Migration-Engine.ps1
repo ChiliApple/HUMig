@@ -1123,15 +1123,16 @@ function Enter-HMModule([hashtable]$Ctx, $Job, $Module, [hashtable]$TEnv, [strin
             # ohne Abfrage (geplantes Backup, Mehrfachaktion): Module mit CloseDefault = Copy (Browser) trotzdem kopieren statt auslassen -
             # Browser laufen oft dauerhaft im Hintergrund; gesperrte Dateien (z.B. Cookies) fehlen dann im Backup
             elseif ("$($Module.CloseDefault)" -eq 'Copy') { $dec = 'Copy' }
-            # Restore eines Browsers: immer schliessen (notfalls beenden) - ein laufender Browser ueberschreibt die zurueckgespielten Dateien
-            if ($Phase -eq 'Restore' -and (Test-HMBrowserModule $Module)) { $dec = 'CloseForce' }
+            # Restore eines Browsers (bzw. Modul mit RestoreClose, z.B. Outlook): immer schliessen (notfalls beenden) -
+            # ein laufendes Programm ueberschreibt die zurueckgespielten Dateien bzw. haelt sie gesperrt
+            if ($Phase -eq 'Restore' -and ((Test-HMBrowserModule $Module) -or $Module.RestoreClose -eq $true)) { $dec = 'CloseForce' }
             switch ($dec) {
                 'Copy' {
                     $st.ProcAction = 'trotzdem kopiert'
                     if ($Phase -eq 'Backup' -and "$($Module.CloseDefault)" -eq 'Copy') {
                         # Browser: laufen oft dauerhaft - vom Programm gesperrte Dateien (Cookies, Sitzung) sind nur ein Hinweis, kein Fehler
                         $st.LockedHint = $true
-                        $st.Info += "$pn lief - trotzdem kopiert; vom Programm gesperrte Dateien (z.B. Cookies, Sitzung) fehlen evtl. - fuer eine vollstaendige Sicherung vorher schliessen"
+                        $st.Info += "$pn lief - trotzdem kopiert; vom Programm gesperrte Dateien (z.B. Cookies, Sitzung, geoeffnete PST-Dateien) fehlen evtl. - fuer eine vollstaendige Sicherung vorher schliessen"
                     } else { $st.Warn += "$pn lief - trotzdem kopiert (Daten evtl. nicht aktuell/inkonsistent)" }
                 }
                 { $_ -in @('Close', 'CloseForce') } {
@@ -2019,7 +2020,7 @@ function Backup-HMFolderItem {
         if ($Ctx.LockedHint -and $onlyLocks -and $st -ne 'Cancel' -and [int]$rc.ExitCode -lt 16) {
             # Browser lief (Modul mit CloseDefault Copy): gesperrte Dateien nur als Hinweis
             $lockHint = $true
-            $msg += ", Hinweis: $($rc.FilesFailed) Datei(en) vom laufenden Programm gesperrt und nicht gesichert (z.B. Cookies, Sitzung - fuer eine vollstaendige Sicherung das Programm vorher schliessen)$fl"
+            $msg += ", Hinweis: $($rc.FilesFailed) Datei(en) vom laufenden Programm gesperrt und nicht gesichert (z.B. Cookies, Sitzung, geoeffnete PST-Datei - fuer eine vollstaendige Sicherung das Programm vorher schliessen)$fl"
             $st = if (([int]$rc.ExitCode -band 4) -ne 0) { 'Warning' } else { 'OK' }
         } else {
             $msg += ", $($rc.FilesFailed) FEHLGESCHLAGEN (gesperrt/keine Rechte - siehe Robocopy-Log)$fl"

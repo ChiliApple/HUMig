@@ -55,6 +55,7 @@ function ConvertTo-HMSbProfile($p) {
         ExportFolder = "$($p.ExportFolder)".Trim()
         ExportKeep = $(if ($ek -ge 1 -and $ek -le 10) { $ek } else { 1 })
         ExportAfter = ($p.ExportAfter -eq $true)
+        RebootPendingSkip = ($p.RebootPendingSkip -eq $true)
     }
 }
 function Get-HMSbConfig {
@@ -215,7 +216,11 @@ function Edit-HMSbProfile {
         if ($null -eq $i) { return }
         if (-not [int]::TryParse("$i".Trim(), [ref]$ai) -or $ai -lt 1 -or $ai -gt 365) { Out-Console "Ungueltige Tage '$i' (1-365)" 'Error'; return }
     }
-    foreach ($x in $cfg.Profiles) { if ($x.Name -eq $p.Name) { $x.Name = $n; $x.DiskPrefix = $pre; $x.Disks = $cnt; $x.WarnDays = $wd; $x.ArchiveDisks = $ad; $x.ArchiveDays = $ai } }
+    $rbq = "Geplante Sicherung, wenn am Server ein Neustart aussteht (z. B. nach Windows Update)?`n`nJa = NICHT sichern, nur melden (Teams/Verlauf) - sinnvoll, wenn Windows den Server sonst mitten in der Sicherung neu startet`nNein = trotzdem sichern und warnen (Standard)`n`nAktuell: $(if ($p.RebootPendingSkip) { 'nicht sichern' } else { 'trotzdem sichern' })"
+    $rba = "$([System.Windows.MessageBox]::Show($script:Window, $rbq, 'Profil bearbeiten', 'YesNoCancel', 'Question', $(if ($p.RebootPendingSkip) { 'Yes' } else { 'No' })))"
+    if ($rba -eq 'Cancel') { return }
+    $rbs = ($rba -eq 'Yes')
+    foreach ($x in $cfg.Profiles) { if ($x.Name -eq $p.Name) { $x.Name = $n; $x.DiskPrefix = $pre; $x.Disks = $cnt; $x.WarnDays = $wd; $x.ArchiveDisks = $ad; $x.ArchiveDays = $ai; $x | Add-Member -NotePropertyName RebootPendingSkip -NotePropertyValue $rbs -Force } }
     if ($n -ne $p.Name) { $cfg.Renames = @(@($cfg.Renames) | Where-Object { $_.Old -ne $n }) + @([pscustomobject]@{ Old = $p.Name; New = $n }) }
     if ($cfg.LastProfile -eq $p.Name) { $cfg.LastProfile = $n }
     Save-HMSbConfig $cfg
@@ -813,6 +818,8 @@ function Start-HMSbBackup {
     elseif ($after -eq 'Offline') { $msg += "`n`nNach der Sicherung wird die Platte automatisch offline geschaltet." }
     $exp = if ($p) { Get-HMSbExportOptions $p } else { $null }
     if ($exp) { $msg += "`n`nNach der Sicherung: VM-Export $(@($exp.VMs) -join ', ') -> $(Get-HMSbExportBase $exp.Folder $d.Letter) (behalten je VM: $($exp.Keep))" }
+    $pend = ''; try { $pend = Format-HMSbPendingReboot @(Get-HMSbPendingReboot) (Get-HMSbActiveHours) } catch { }
+    if ($pend) { $msg += "`n`nACHTUNG - $pend" }
     if (-not $p) { $msg += "`n`nHinweis: kein Profil gewaehlt - Verlauf unter '(ohne Profil)'." }
     elseif (-not (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { $msg += "`n`nACHTUNG: Die Platte '$($d.Label)' gehoert laut Bezeichnung NICHT zum Profil ($($p.DiskPrefix)-...)." }
     if ($p) {
@@ -837,6 +844,7 @@ function Start-HMSbBackup {
         ProfileData = $(if ($p) { $p } else { $null }); After = $after; Export = $exp
     }
     $script:SbAfterRun = $after
+    $script:SbRunProfile = $pName
     # Teams-Meldung auch fuer manuell gestartete Laeufe (auch bei Abbruch durch einen Fehler; nicht bei "Abbrechen")
     $cmd = '$e = ''''; try { Start-HMServerBackup -Ctx $Ctx -Job $Job } catch { $e = "$($_.Exception.Message)"; throw } finally { Send-HMSbRunNotify $Ctx $Job $e }'
     Start-EngineJob -Command $cmd -Ctx $ctx -Title 'Server-Backup' -ScriptFiles @($script:SbEngine, (Join-Path $script:AppRoot 'Functions\Core-Notify.ps1')) -OnFinished {
@@ -1611,4 +1619,17 @@ function Initialize-HMServerBackupTab {
         if ($e.OriginalSource -ne $ui.tabMain) { return }
         if ($ui.tabMain.SelectedItem -eq $ui.tabServerBackup -and -not $script:SbInit) { $script:SbInit = $true; Update-HMSbAll }
     })
+    # Beim Start: frueher abgebrochene Server-Backups (Neustart durch Windows Update, Absturz) melden - im Hintergrund
+    try { [void]$script:Window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::ApplicationIdle, [action]{ try { Invoke-HMSbAbortCheck } catch { } }) } catch { }
+}
+# Abgebrochene Laeufe (Markierung laufend_*.json ohne laufenden Vorgang): Verlauf, Abbruch.txt, Ereignisanzeige, Teams
+function Invoke-HMSbAbortCheck {
+    $dir = Split-Path $script:SbHistFile -Parent
+    if (-not @(Get-ChildItem -LiteralPath $dir -Filter "$($script:SbRunMarkerPrefix)*.json" -File -ErrorAction SilentlyContinue).Count) { return }
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $nf, $hist, $ver) . $eng; . $nf; Resolve-HMSbAbortedRuns $hist $ver } -ArgumentList @($script:SbEngine, (Join-Path $script:AppRoot 'Functions\Core-Notify.ps1'), $script:SbHistFile, $script:Version) -TimeoutSec 120 -OnComplete {
+        param($r)
+        $l = @($r | Where-Object { $_ -and $_.Text })
+        foreach ($x in $l) { Out-Console "$($x.Text) - im Verlauf festgehalten und (falls eingerichtet) per Teams gemeldet" 'Error' }
+        if ($l.Count) { try { if ($script:SbInit) { Update-HMSbHistory } } catch { } }
+    }
 }
