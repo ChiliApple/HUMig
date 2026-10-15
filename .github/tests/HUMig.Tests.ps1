@@ -3098,6 +3098,13 @@ Describe '2.1.11: Teams-Karte, Lebenszeichen, Rechte der Backup-Ordner' {
         $m2 = New-HMSbNotifyMessage -Result (New-T21Res) -ProfileName 'P' -Disk 'D1' -Reminders $rem -Cats $c
         if ($c['Reminder']) { $m2.Level | Should -Be 'OK'; @($m2.Lines).Count | Should -BeGreaterThan 0 }
     }
+    It 'Muster der gruenen Erinnerungen passen zu den Texten der Statusseite (B39)' {
+        $st = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\UI-Status.ps1')
+        $st | Should -Match 'Platte wechseln \(Rotation\)'
+        $st | Should -Match 'Archiv-Sicherung faellig'
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1')
+        $eng | Should -Match ([regex]::Escape("'Platte wechseln \(Rotation\)|Archiv-Sicherung faellig'"))
+    }
     It 'auffaelliger Plattenzustand einer anderen Platte faerbt weiter orange' {
         $m = New-HMSbNotifyMessage -Result (New-T21Res) -ProfileName 'P' -Disk 'D1' -Reminders @("Server-Backup 'P': Platte P-2 - SMART meldet Fehler") -Cats $script:On
         $m.Level | Should -Be 'Warning'
