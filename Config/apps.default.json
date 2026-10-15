@@ -161,6 +161,7 @@
       "Id": "App_AcrobatReader",
       "Name": "Adobe Acrobat Reader",
       "Detect": "^Adobe Acrobat",
+      "DetectFamily": true,
       "Items": [
         {
           "Type": "Reg",

@@ -2953,3 +2953,112 @@ Describe 'Restore: Ziel-Konto aus dem Backup vorschlagen, lokales Konto anlegen'
         $main | Should -Match 'Invoke-HMRestoreAccountCheck \$b \$p \$mods \$comp'
     }
 }
+
+Describe '2.1.10: Praxistest-Befunde und Verknuepfungen beim Restore' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        . (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1')
+        . (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1')
+        . (Join-Path $script:Root 'Functions\UI-Apps.ps1')
+        $script:IsWin = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows
+    }
+    It 'USMT Code 3 wird erklaert' {
+        Get-HMUsmtCodeText 3 '' | Should -Match 'mindestens ein Fehler wurde uebersprungen'
+    }
+    It 'WLAN: ohne WLAN-Adapter nur Hinweis statt Fehler je Profil' {
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        $eng | Should -Match 'NdisPhysicalMedium -eq 9'
+        $eng | Should -Match "Name WlanSvc"
+        $eng | Should -Match "\(& \`$res 'Skip' `"kein WLAN-Adapter"
+    }
+    It 'WinGet: bei Neuinstallation zaehlt "kein passendes Update" als bereits installiert, beim Update nicht' {
+        $c = Format-HMAuCliResult -1978335189 ''
+        (Convert-HMAuInstallResult $c $true).Ok | Should -BeTrue
+        (Convert-HMAuInstallResult $c $true).Text | Should -Be 'bereits installiert'
+        (Convert-HMAuInstallResult $c $false).Ok | Should -BeFalse
+        (Convert-HMAuInstallResult @{ Ok = $false; Text = 'Download fehlgeschlagen' } $true).Ok | Should -BeFalse
+        (Convert-HMAuInstallResult @{ Ok = $false; Text = (Format-HMAuResult 'NoApplicableUpgrade' 0 0 $false) } $true).Ok | Should -BeTrue
+    }
+    It 'Fehlende Programme: andere Schreibweise desselben Programms (Katalog-Erkennung) gilt als installiert' {
+        $cat = @([pscustomobject]@{ Id = 'App_7Zip'; Name = '7-Zip'; Detect = '^7-Zip'; WingetId = '7zip.7zip' })
+        $p = Get-HMMissingAppPlan -Src @([pscustomobject]@{ Name = '7-Zip 26.04 (x64)'; Version = '26.04' }) -Have @('7-Zip 26.04 (x64 edition)') -Packages @() -Catalog $cat -OnlyApps @('App_7Zip') -Restrict
+        @($p.Rows).Count | Should -Be 0
+        $q = Get-HMMissingAppPlan -Src @([pscustomobject]@{ Name = '7-Zip 26.04 (x64)'; Version = '26.04' }) -Have @('Notepad++') -Packages @() -Catalog $cat -OnlyApps @('App_7Zip') -Restrict
+        @($q.Rows).Count | Should -Be 1
+    }
+    It 'B34: Familien-Muster im Katalog verdeckt kein fehlendes Programm' {
+        $cat = @([pscustomobject]@{ Id = 'App_Autodesk'; Name = 'Autodesk'; Detect = '^Autodesk (AutoCAD|Inventor|Revit|Fusion|3ds Max|Maya)' },
+            [pscustomobject]@{ Id = 'App_Python'; Name = 'Python'; Detect = '^Python 3\.\d+\.\d+ \(' },
+            [pscustomobject]@{ Id = 'App_Acro'; Name = 'Acrobat'; Detect = '^Adobe Acrobat'; DetectFamily = $true })
+        $ids = @('App_Autodesk', 'App_Python', 'App_Acro')
+        @((Get-HMMissingAppPlan -Src @([pscustomobject]@{ Name = 'Autodesk Revit 2025' }) -Have @('Autodesk AutoCAD 2025') -Catalog $cat -OnlyApps $ids -Restrict).Rows).Count | Should -Be 1
+        @((Get-HMMissingAppPlan -Src @([pscustomobject]@{ Name = 'Autodesk Revit 2025' }) -Have @('Autodesk Revit 2024') -Catalog $cat -OnlyApps $ids -Restrict).Rows).Count | Should -Be 0
+        @((Get-HMMissingAppPlan -Src @([pscustomobject]@{ Name = 'Python 3.12.1 (64-bit)' }) -Have @('Python 3.8.0 (64-bit)') -Catalog $cat -OnlyApps $ids -Restrict).Rows).Count | Should -Be 0   # gleiche Basis "Python" -> wie bisher andere Version
+        @((Get-HMMissingAppPlan -Src @([pscustomobject]@{ Name = 'Adobe Acrobat DC (64-bit)' }) -Have @('Adobe Acrobat Reader DC') -Catalog $cat -OnlyApps $ids -Restrict).Rows).Count | Should -Be 1
+    }
+    It 'B21: liegengebliebene Uebernahme (.pruefe) wird nach 10 min wieder ausgewertet' {
+        $cfg = Join-Path $TestDrive 'sb21'; [void][System.IO.Directory]::CreateDirectory($cfg)
+        $hist = Join-Path $cfg 'history.json'
+        $ctx = @{ LocalHistory = $hist; Profile = 'SCHULE'; DiskLabel = 'HUMIG-SCHULE-1'; DiskSerial = 'X'; VMs = @('VM1'); Volumes = @(); Version = '2.1.10' }
+        Set-HMSbRunMarker $ctx '' ([datetime]'2026-10-14 07:42')
+        $mf = Get-HMSbRunMarkerPath $cfg 'SCHULE'
+        $j = Get-Content -LiteralPath $mf -Raw | ConvertFrom-Json; $j.Pid = 999999; $j.ProcStart = ''
+        Set-Content -LiteralPath "$mf.pruefe" -Value ($j | ConvertTo-Json) -Encoding UTF8
+        Remove-Item -LiteralPath $mf -Force
+        # frisch uebernommen (anderer Pruefer arbeitet noch): nicht anfassen
+        @(Resolve-HMSbAbortedRuns $hist '2.1.10' -NoNotify).Count | Should -Be 0
+        Test-Path -LiteralPath "$mf.pruefe" | Should -BeTrue
+        # aelter als 10 min: zurueckholen und melden
+        [System.IO.File]::SetLastWriteTime("$mf.pruefe", (Get-Date).AddMinutes(-11))
+        $r = @(Resolve-HMSbAbortedRuns $hist '2.1.10' -NoNotify)
+        $r.Count | Should -Be 1
+        Test-Path -LiteralPath "$mf.pruefe" | Should -BeFalse
+        Test-Path -LiteralPath $mf | Should -BeFalse
+    }
+    It 'B11: Browser-Restore prueft nach dem Kopieren noch einmal auf Verknuepfungen' {
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        ([regex]::Matches($eng, 'nach dem Kopieren Verknuepfung gefunden')).Count | Should -Be 2
+    }
+    It 'Write-HMFileAtomic: Ersatzweg ohne File.Replace (NAS) laesst nie eine fehlende Datei zurueck' {
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        $eng | Should -Match 'catch \[System\.PlatformNotSupportedException\], \[System\.IO\.IOException\]'
+        $eng | Should -Match 'try \{ \[System\.IO\.File\]::Move\(\$tmp, \$Path\) \} catch \{ \[System\.IO\.File\]::Move\(\$old, \$Path\); throw \}'
+    }
+    It 'Verknuepfung im Profil nach ausserhalb: wird erkannt, innerhalb des Profils nicht (Windows, Junction)' -Skip:(-not (($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows)) {
+        Initialize-HMJson
+        $base = [HMJ.PathCheck]::LongPath($TestDrive)   # CI-TEMP mit Kurznamen (RUNNER~1) -> langer Pfad wie im echten Profil
+        $p = Join-Path $base 'Users\anna'; $o = Join-Path $base 'Fremd'
+        foreach ($d in @("$p\AppData\Roaming\App", $o)) { [void][System.IO.Directory]::CreateDirectory($d) }
+        New-Item -ItemType Junction -Path "$p\AppData\Roaming\Evil" -Target $o | Out-Null
+        New-Item -ItemType Junction -Path "$p\Anwendungsdaten" -Target "$p\AppData\Roaming" | Out-Null
+        # ohne Backup-Liste: jede Verknuepfung zaehlt (auch innerhalb des Profils, B32)
+        $l = @(Find-HMUnsafeLinks @{ IsRemote = $false } $p $p $null)
+        $l.Count | Should -Be 2
+        @($l | Where-Object { $_.Path -eq "$p\AppData\Roaming\Evil" }).Count | Should -Be 1
+        # Windows-eigene Verknuepfung ("Anwendungsdaten") ist nie im Backup -> kein Fund
+        @(Find-HMUnsafeLinks @{ IsRemote = $false } $p $p @('AppData', 'AppData\Roaming', 'AppData\Roaming\App')).Count | Should -Be 0
+        # B32 Kette: plugins -> Ordner im Profil -> der zeigt nach aussen
+        New-Item -ItemType Junction -Path "$p\x" -Target $o | Out-Null
+        New-Item -ItemType Junction -Path "$p\AppData\Roaming\App\plugins" -Target "$p\x" | Out-Null
+        $k = @(Find-HMUnsafeLinks @{ IsRemote = $false } "$p\AppData\Roaming\App" $p @('plugins'))
+        $k.Count | Should -Be 1
+        $k[0].Path | Should -Be "$p\AppData\Roaming\App\plugins"
+        $k[0].Target | Should -Be "$p\x"
+        # nur Ordner, die es im Backup gibt: "Evil" nicht im Backup -> Robocopy schreibt dort nicht hinein
+        @(Find-HMUnsafeLinks @{ IsRemote = $false } $p $p @('AppData', 'AppData\Roaming', 'AppData\Roaming\App')).Count | Should -Be 0
+        @(Find-HMUnsafeLinks @{ IsRemote = $false } $p $p @('AppData', 'AppData\Roaming', 'AppData\Roaming\Evil')).Count | Should -Be 1
+        # Zielordner selbst bzw. Ordner darueber ist die Verknuepfung
+        $t = @(Find-HMUnsafeLinks @{ IsRemote = $false } "$p\AppData\Roaming\Evil\Sub" $p $null)
+        $t.Count | Should -Be 1
+        $t[0].Path | Should -Be "$p\AppData\Roaming\Evil"
+        # Restore eines Ordners unter der Verknuepfung: Fehler, nichts in den fremden Ordner geschrieben
+        $src = Join-Path $TestDrive 'bk\Sub'; [void][System.IO.Directory]::CreateDirectory($src); Set-Content -LiteralPath "$src\a.txt" -Value 'x'
+        $ctx = @{ IsRemote = $false; ProfilePath = $p; UserMode = $false; Options = @{}; Threads = 2; RoboLog = (Join-Path $TestDrive 'r.log') }
+        $job = @{ Log = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue)); Cancel = $false; Process = $null; Progress = 0 }
+        $it = [pscustomobject]@{ Name = 'SUB'; Type = 'Folder'; Path = '{PROFILE}\AppData\Roaming\Evil\Sub' }
+        $r = Restore-HMFolderItem -Ctx $ctx -Job $job -Module ([pscustomobject]@{ Id = 'X' }) -Item $it -TEnv @{ PROFILE = $p } -SourceOverride $src -DestOverride "$p\AppData\Roaming\Evil\Sub"
+        $r.Status | Should -Be 'Error'
+        $r.Msg | Should -Match 'Verknuepfung im Zielpfad'
+        Test-Path -LiteralPath "$o\Sub\a.txt" | Should -BeFalse
+    }
+}
