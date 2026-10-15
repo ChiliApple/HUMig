@@ -87,6 +87,14 @@ function Format-HMAuCliResult([int64]$Code, [string]$Out) {
     }
     return @{ Ok = $false; Reboot = $false; Text = "$t ($hex)$(if ("$Out".Trim() -and $t -eq 'Fehler') { ": $Out" })" }
 }
+# Neuinstallation: "kein passendes Update" bzw. "schon installiert" heisst, das Programm ist schon da (z. B. andere Variante,
+# zweiter Lauf nach Abbruch) - kein Fehler. Gilt nur fuer Install, nicht fuer Update.
+function Convert-HMAuInstallResult($Result, [bool]$Install) {
+    if ($Install -and $Result -and -not $Result.Ok -and "$($Result.Text)" -match '0x8A15002B|0x8A150061|kein passendes Update|schon installiert') {
+        return @{ Ok = $true; Reboot = [bool]$Result.Reboot; Text = 'bereits installiert' }
+    }
+    return $Result
+}
 # Windows-Version fuer WinGet: Win10 1809+ / Win11 (Client), Windows Server 2025 (mitgeliefert) und 2022 (nicht mitgeliefert,
 # 'WinGet einrichten' installiert es mit Repair-WinGetPackageManager -AllUsers - von Microsoft nur eingeschraenkt unterstuetzt).
 # Windows Server 2019 (Build 17763, gleiche Basis wie Windows 10 1809): von Microsoft NICHT unterstuetzt - experimentell zugelassen
@@ -662,7 +670,7 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
                 Exclude = @(@($Ctx.ByPc[$k].Exclude) | Where-Object { $_ } | ForEach-Object { @{ Pattern = "$($_.Pattern)"; Reason = "$($_.Reason)" } }) }
         }
     }
-    $st = @{ Job = $Job; Names = $names; Done = 0; Total = [Math]::Max(1, $names.Count); Logged = @{}; Multi = ($pcs.Count -gt 1); Verb = $verb }
+    $st = @{ Job = $Job; Names = $names; Done = 0; Total = [Math]::Max(1, $names.Count); Logged = @{}; Multi = ($pcs.Count -gt 1); Verb = $verb; Install = ($op -eq 'Install') }
     $on = {
         param($pc, $ln)
         $pre = if ($st.Multi) { "[$pc] " } else { '' }
@@ -691,6 +699,7 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
                 }
                 if ($p[2] -eq 'Cli') { $c = Format-HMAuCliResult ([int64]$p[3]) '' }
                 elseif ($p[2] -ne 'Exception') { $t = Format-HMAuResult $p[2] $p[4] $p[5] ($p[6] -eq 'True'); $c = @{ Ok = ($p[2] -eq 'Ok'); Text = $t } }
+                $c = Convert-HMAuInstallResult $c $st.Install
             }
             if ($c) {
                 $txt = if ($c.Ok -and $c.Text -eq 'aktualisiert') { $st.Verb } else { $c.Text }
@@ -714,13 +723,15 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
             } elseif ("$($x.Status)" -eq 'Excluded') { $e.Status = 'Skipped'; $e.Text = $(if ("$($x.Text)") { "$($x.Text)" } else { 'Ausnahme - nicht aktualisiert' }) }
             elseif ("$($x.Status)" -eq 'Exception') { $e.Status = 'Error'; $e.Text = "$($x.Text)" }
             elseif ("$($x.Status)" -eq 'Cli') {
-                $c = Format-HMAuCliResult ([int64]$x.Code) "$($x.Text)"
+                $c = Convert-HMAuInstallResult (Format-HMAuCliResult ([int64]$x.Code) "$($x.Text)") ($op -eq 'Install')
                 $e.Status = $(if ($c.Ok) { 'OK' } else { 'Error' }); $e.Reboot = [bool]$c.Reboot
                 $e.Text = $(if ($c.Ok -and $c.Text -eq 'aktualisiert') { $verb } else { $c.Text })
             } else {
                 $e.Status = $(if ("$($x.Status)" -eq 'Ok') { 'OK' } else { 'Error' })
                 $e.Reboot = [bool]$x.Reboot
                 $e.Text = Format-HMAuResult "$($x.Status)" $x.InstallerErrorCode $x.ExtendedErrorCode ([bool]$x.Reboot)
+                $c = Convert-HMAuInstallResult @{ Ok = ($e.Status -eq 'OK'); Reboot = $e.Reboot; Text = $e.Text } ($op -eq 'Install')
+                if ($c.Ok -and $e.Status -ne 'OK') { $e.Status = 'OK'; $e.Text = $c.Text }
             }
             if (-not $st.Logged.ContainsKey("$k|$($it.Id)") -or $e.Status -ne 'OK') {
                 if (-not $st.Logged.ContainsKey("$k|$($it.Id)")) { Write-HMLog $Job "  $(if ($st.Multi) { "[$k] " })$($it.Name): $($e.Text)" $(if ($e.Status -eq 'OK') { 'Success' } elseif ($e.Status -eq 'Skipped') { 'Warning' } else { 'Error' }) }

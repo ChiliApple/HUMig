@@ -1,5 +1,16 @@
 ﻿# Changelog
 
+## v2.1.10 - 2026-10-15
+### Restore
+- **Verknuepfungen im Zielprofil:** vor dem Zurueckkopieren in ein Benutzerprofil (als Administrator) prueft HUMig Zielordner, Ordner darueber und - nur Ordner, die es im Backup gibt - darunter auf Junctions/symbolische Links - jede Verknuepfung zaehlt, auch mit Ziel im Profil (sonst per Kette umgehbar). Zielordner selbst betroffen: Modul nicht zurueckgespielt (Fehler); darunter: nur dieser Ordner ausgelassen (Warnung). Windows-eigene Verknuepfungen stoeren nicht (nie im Backup). Bei einer gewollten Ordner-Umleitung per Verknuepfung sagt die Meldung, wohin von Hand zu kopieren ist. Gilt lokal und per Fernzugriff, nicht im Benutzer-Modus
+- Restore (Ordner und Browser): nach dem Kopieren erneute Pruefung auf Verknuepfungen (Warnung, falls waehrend des Restores eine entstanden ist)
+- Lesezeichen schreiben: kann eine Freigabe `File.Replace` nicht (manche NAS), alte Datei beiseite - neue an ihren Platz - alte loeschen; scheitert es, kommt die alte zurueck
+- **WLAN-Profile** auf einem PC ohne WLAN-Adapter: nur ein Hinweis statt "fehlgeschlagen" je Profil
+- USMT LoadState **Code 3** wird erklaert (Teil uebersprungen, Rest uebernommen)
+- **Fehlende Programme:** ein Programm in anderer Schreibweise/Variante (z. B. "7-Zip (x64)" vs. "7-Zip (x64 edition)") gilt ueber die Katalog-Erkennung als installiert - nur bei gleichem erkannten Produkt (Revit fehlt weiter, wenn nur AutoCAD da ist); neues Katalog-Feld `DetectFamily` (z. B. Acrobat Reader/Pro) schaltet das ab. Programme mit Katalog-Eintrag werden nur noch ueber den Katalog verglichen (die Namens-Regel "gleicher Name ohne Version" gilt nur ohne Eintrag - "Python Launcher" verdeckt Python 3.12 nicht mehr); Python-Erkennung auf Hauptversion (3.12) beschraenkt; WinGet "kein passendes Update" bzw. "schon installiert" beim Installieren = *bereits installiert* statt Fehler
+### Server-Backup
+- Abbruch-Erkennung: eine unterbrochene Pruefung (`laufend_*.json.pruefe`) wird nach 10 min wieder ausgewertet, statt liegen zu bleiben
+
 ## v2.1.9 - 2026-10-15
 ### Server-Backup
 - **Im Hintergrund sichern (Abmelden moeglich):** "Server-Backup starten" fragt, wo die Sicherung laufen soll. *Ja* = HUMig legt eine einmalige Aufgabe `\HUMig\Server-Backup - <Profil> - sofort <Datum Uhrzeit>` als SYSTEM an und startet sie sofort - ohne Zeitpunkt (startet nie von selbst noch einmal), ohne Nachhol-Start, Zeitlimit 72 h. Gesichert wird die Auswahl der Oberflaeche auf genau die gewaehlte Platte (neu: `-DiskLabel`, nie eine andere Platte des Profils). Verlauf, Teams, Abbruch-Erkennung wie beim Zeitplan. HUMig prueft bis 60 s, ob die Sicherung anlaeuft, und zeigt sonst den Grund aus dem Protokoll; beim naechsten Oeffnen steht in der Ausgabe, dass sie im Hintergrund laeuft. Erledigte Hintergrund-Aufgaben werden automatisch entfernt. *Nein* = wie bisher in HUMig

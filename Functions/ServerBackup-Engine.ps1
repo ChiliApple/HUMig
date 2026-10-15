@@ -953,13 +953,21 @@ function Resolve-HMSbAbortedRuns([string]$LocalHistory, [string]$Version = '', [
     $dir = Split-Path $LocalHistory -Parent
     if (-not (Test-Path -LiteralPath $dir)) { return $out.ToArray() }
     $boot = Get-HMSbBootTime
+    # liegengebliebene Uebernahmen (Pruefung wurde nach dem Umbenennen unterbrochen) nach 10 min wieder freigeben
+    foreach ($o in @(Get-ChildItem -LiteralPath $dir -Filter "$($script:SbRunMarkerPrefix)*.json.pruefe" -File -ErrorAction SilentlyContinue)) {
+        if ($o.Name -notmatch '\.json\.pruefe$' -or $o.LastWriteTime -gt (Get-Date).AddMinutes(-10)) { continue }
+        $back = $o.FullName -replace '\.pruefe$', ''
+        try { if (-not [System.IO.File]::Exists($back)) { [System.IO.File]::Move($o.FullName, $back) } } catch { }
+    }
     foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter "$($script:SbRunMarkerPrefix)*.json" -File -ErrorAction SilentlyContinue)) {
+        if ($f.Name -notmatch '\.json$') { continue }
         $m = $null; try { $m = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
         if (-not $m) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue; continue }
         if (Test-HMSbRunAlive $m $boot) { continue }
         # Markierung atomar uebernehmen: prueft gleichzeitig ein zweiter Vorgang (Zeitplan + Oberflaeche), meldet nur einer
         $claim = "$($f.FullName).pruefe"
         try { [System.IO.File]::Move($f.FullName, $claim) } catch { continue }
+        try { [System.IO.File]::SetLastWriteTime($claim, [datetime]::Now) } catch { }   # Zeitpunkt der Uebernahme (Move behaelt die alte Zeit)
         $st = [datetime]::Now; $t0 = ConvertTo-HMSbTime $m.Started; if ($null -ne $t0) { $st = $t0.ToLocalTime() }
         # Ursache aus dem Systemprotokoll nur, wenn seither neu gestartet wurde - sonst war es kein Neustart
         $why = if (Test-HMSbBootChanged $m.Boot $boot) {
