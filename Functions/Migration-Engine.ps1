@@ -1618,7 +1618,9 @@ function Test-HMNetworkPath([string]$Path) {
     try { return ("$((New-Object System.IO.DriveInfo($Path.Substring(0, 2))).DriveType)" -eq 'Network') } catch { return $false }
 }
 
-# Hat ein Ordner schon genau diese Rechte (Vererbung aus, nur diese Konten, je Konto mindestens das Recht, an Unterordner/Dateien vererbt)?
+# Hat ein Ordner schon diese Rechte (Vererbung aus, je Soll-Konto genau dieses Recht, an Unterordner/Dateien vererbt)?
+# Weitere Konten werden geduldet (z. B. das ACE, das der Explorer fuer einen Admin ohne Erhoehung eintraegt) - sonst wuerde
+# jeder solche Eintrag beim naechsten Lauf ein Neusetzen ueber den ganzen Ordnerbaum ausloesen.
 # $Expected: Hashtable SID -> 'F' | 'M' | 'RX'
 function Test-HMFolderAclMatch([string]$Path, [hashtable]$Expected) {
     try { $a = Get-Acl -LiteralPath $Path -ErrorAction Stop } catch { return $false }
@@ -1627,11 +1629,11 @@ function Test-HMFolderAclMatch([string]$Path, [hashtable]$Expected) {
     $inh = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
     $have = @{}
     foreach ($r in @($a.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) {
-        if ("$($r.AccessControlType)" -ne 'Allow' -or $r.PropagationFlags -ne 'None' -or $r.InheritanceFlags -ne $inh) { return $false }
         $sid = "$($r.IdentityReference.Value)"
+        if (-not $Expected.ContainsKey($sid)) { if ("$($r.AccessControlType)" -ne 'Allow') { return $false }; continue }   # fremdes Verweigern nie dulden
+        if ("$($r.AccessControlType)" -ne 'Allow' -or $r.PropagationFlags -ne 'None' -or $r.InheritanceFlags -ne $inh) { return $false }
         $have[$sid] = $(if ($have.ContainsKey($sid)) { $have[$sid] -bor $r.FileSystemRights } else { $r.FileSystemRights })
     }
-    if ($have.Count -ne $Expected.Count) { return $false }
     foreach ($k in $Expected.Keys) {
         if (-not $have.ContainsKey($k)) { return $false }
         $want = [int]$map["$($Expected[$k])"]
@@ -1680,7 +1682,8 @@ function Set-HMBackupFolderAcl {
     $grants = @(foreach ($k in $exp.Keys) { "*${k}:(OI)(CI)$($exp[$k])" })
     $o = & icacls.exe "$Path" /inheritance:r /grant:r @grants /C /Q 2>&1
     if ($LASTEXITCODE -ne 0) { $r.Error = "icacls Exitcode ${LASTEXITCODE}: $((@($o) | Where-Object { "$_".Trim() } | Select-Object -First 2) -join ' ')"; return [pscustomobject]$r }
-    # /grant:r ersetzt nur die genannten Konten - fruehere Eintraege (z. B. eine nicht mehr eingestellte Gruppe) entfernen
+    # /grant:r ersetzt nur die genannten Konten - beim ohnehin noetigen Neusetzen auch fruehere Eintraege (z. B. eine nicht mehr
+    # eingestellte Gruppe) entfernen
     $extra = @()
     try { $extra = @(@((Get-Acl -LiteralPath $Path -ErrorAction Stop).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])) | ForEach-Object { "$($_.IdentityReference.Value)" } | Where-Object { -not $exp.Contains($_) } | Select-Object -Unique) } catch { }
     if ($extra.Count) {

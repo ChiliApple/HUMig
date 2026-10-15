@@ -3158,8 +3158,14 @@ Describe '2.1.11: Teams-Karte, Lebenszeichen, Rechte der Backup-Ordner' {
         $r3 = Set-HMBackupFolderAcl -Path $d -UserSid $me
         $r3.Ok | Should -BeTrue
         $r3.Unchanged | Should -BeTrue
+        # weiteres Konto (z. B. Explorer-ACE eines Admins ohne Erhoehung) wird geduldet - kein Neusetzen ueber den Baum
         $null = & icacls.exe "$d" /grant '*S-1-5-32-545:(OI)(CI)RX' 2>&1
+        (Set-HMBackupFolderAcl -Path $d -UserSid $me).Unchanged | Should -BeTrue
+        # fremdes Verweigern dagegen nicht; beim Neusetzen werden auch die weiteren Konten entfernt
+        $null = & icacls.exe "$d" /deny '*S-1-5-32-545:(OI)(CI)W' 2>&1
         (Set-HMBackupFolderAcl -Path $d -UserSid $me).Unchanged | Should -BeFalse
+        $left = @((Get-Acl -LiteralPath $d).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value })
+        $left | Should -Not -Contain 'S-1-5-32-545'
         (Set-HMBackupFolderAcl -Path $d -UserSid $me).Unchanged | Should -BeTrue
         $null = & icacls.exe "$d" /inheritance:e 2>&1
         (Set-HMBackupFolderAcl -Path $d -UserSid $me).Unchanged | Should -BeFalse
