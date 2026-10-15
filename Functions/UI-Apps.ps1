@@ -331,6 +331,9 @@ function Get-HMMissingAppPlan {
     $pkgs = @{}; $wgs = @{}; $noPkg = 0; $other = 0
     foreach ($s in @($Src | Where-Object { $_ -and "$($_.Name)" } | Sort-Object Name -Unique)) {
         if ($Have -contains $s.Name) { continue }
+        # gleiches Programm laut Katalog-Erkennung schon installiert (andere Variante/Schreibweise, z. B. "7-Zip 26.04 (x64)" vs. "... (x64 edition)")
+        $app0 = @($Catalog | Where-Object { "$($_.Detect)" -and $s.Name -match "$($_.Detect)" })[0]
+        if ($app0 -and @($Have | Where-Object { "$_" -match "$($app0.Detect)" }).Count) { continue }
         # schon installiert in anderer Version? (gleicher Name ohne Versionsnummer)
         $base = ("$($s.Name)" -replace '[\s\-_(]*(x64|x86|64-bit|32-bit)?[\s\-_(]*v?\d+([\.\d]+)*.*$', '').Trim()
         if ($base.Length -ge 4 -and @($Have | Where-Object { "$_".StartsWith($base, [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
