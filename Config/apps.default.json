@@ -2873,6 +2873,7 @@
           "Type": "Folder",
           "Name": "DATA",
           "Path": "{LOCALAPPDATA}\\BraveSoftware\\Brave-Browser\\User Data",
+          "Chromium": "",
           "XD": [
             "*Cache*",
             "Crashpad",
@@ -2903,6 +2904,7 @@
           "Type": "Folder",
           "Name": "DATA",
           "Path": "{LOCALAPPDATA}\\Vivaldi\\User Data",
+          "Chromium": "",
           "XD": [
             "*Cache*",
             "Crashpad",
