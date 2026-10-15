@@ -763,6 +763,25 @@ Describe 'Restore: fehlende Programme zuerst, Programm-Module ohne Programm ausl
         $p.NoPkg | Should -Be 1
         $p.Installable | Should -Be 2
     }
+    It 'Restore: nur Programme der angehakten Module anbieten, andere nur zaehlen' {
+        $src = @([pscustomobject]@{ Name = 'KeePass Password Safe 2.57'; Version = '2.57' }, [pscustomobject]@{ Name = 'VLC media player'; Version = '3.0' }, [pscustomobject]@{ Name = 'Unbekannt Tool'; Version = '1' })
+        $p = Get-HMMissingAppPlan -Src $src -Have @() -Packages @() -Catalog $script:Cat -OnlyApps @('App_Vlc') -Restrict
+        @($p.Rows).Count | Should -Be 1
+        $p.Rows[0][1] | Should -Be 'VLC media player'
+        $p.Other | Should -Be 2
+        $p.Installable | Should -Be 1
+        $n = Get-HMMissingAppPlan -Src $src -Have @() -Packages @() -Catalog $script:Cat -OnlyApps @() -Restrict
+        @($n.Rows).Count | Should -Be 0
+        $n.Other | Should -Be 3
+        $mods = @([pscustomobject]@{ Id = 'App_Vlc'; Catalog = $true; AppId = 'App_Vlc' }, [pscustomobject]@{ Id = 'Chrome' }, [pscustomobject]@{ Id = 'Office' }, [pscustomobject]@{ Id = 'Desktop' })
+        $a = @(Get-HMRestoreModuleApps $mods)
+        $a | Should -Contain 'App_Vlc'
+        $a | Should -Contain 'App_Chrome'
+        $a | Should -Contain 'App_Office'
+        $a.Count | Should -Be 3
+        $ui = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\UI-Apps.ps1')
+        $ui | Should -Match '-OnlyApps \$only -Restrict'
+    }
     It 'Luecke: Programm-Module, deren Programm am Ziel fehlt; ohne Erkennung nie auslassen' {
         $mods = @([pscustomobject]@{ Id = 'App_KeePass'; Catalog = $true; AppId = 'App_KeePass' }, [pscustomobject]@{ Id = 'App_Vlc'; Catalog = $true; AppId = 'App_Vlc' }, [pscustomobject]@{ Id = 'App_Ohne'; Catalog = $true; AppId = 'App_Ohne' }, [pscustomobject]@{ Id = 'Desktop'; Scope = 'User' })
         $g = @(Get-HMRestoreAppGap -Modules $mods -Software @([pscustomobject]@{ Name = 'VLC media player'; Version = '3.0' }) -Catalog $script:Cat)
@@ -900,6 +919,53 @@ Describe 'Browser vor Backup/Restore schliessen' {
         $b = Enter-HMModule @{ ProcDecisions = @{}; UserSid = 'S-1-5-21-1' } $job $m @{} 'Backup'
         $b.LockedHint | Should -BeTrue
         $b.Skip | Should -BeFalse
+    }
+    It 'Restore ohne Profil am Ziel: Umgebung ohne Profilpfade statt Abbruch; USMT-Code 14 erklaert' {
+        $e = Get-HMTargetEnv @{ IsRemote = $false } '' ''
+        $e.PROFILE | Should -BeNullOrEmpty
+        $e.APPDATA | Should -BeNullOrEmpty
+        $e.LOCALAPPDATA | Should -BeNullOrEmpty
+        $e2 = Get-HMTargetEnv @{ IsRemote = $false } '' (Join-Path $TestDrive 'Users\x')
+        $e2.APPDATA | Should -Match 'AppData.Roaming$'
+        Get-HMUsmtCodeText 14 '' | Should -Match 'lokales Konto fehlt'
+    }
+    It 'Geplantes Backup: Outlook/Browser schliessen (CloseForce, Outlook 60 s) oder nur Hinweis zum Nachsichern' {
+        Mock Get-HMRunningProcs { @([pscustomobject]@{ Name = 'outlook'; Id = 77 }) }
+        Mock Close-HMProcs { @() }
+        $job = @{ Log = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue)); Cancel = $false }
+        $m = [pscustomobject]@{ Id = 'Office'; Name = 'Office'; Group = 'Office'; CloseProcess = @('outlook'); CloseDefault = 'Copy'; RestoreClose = $true; Items = @() }
+        $r = Enter-HMModule @{ ProcDecisions = @{ Office = 'CloseForce' }; UserSid = 'S-1-5-21-1' } $job $m @{} 'Backup'
+        $r.ProcAction | Should -Be 'geschlossen (notfalls beendet)'
+        Should -Invoke Close-HMProcs -Times 1 -ParameterFilter { $Force -eq $true -and $TimeoutSec -eq 60 }
+        $e = [pscustomobject]@{ Id = 'Edge'; Name = 'Edge-Profil'; CloseProcess = @('msedge'); CloseDefault = 'Copy' }
+        [void](Enter-HMModule @{ ProcDecisions = @{ Edge = 'CloseForce' }; UserSid = 'S-1-5-21-1' } $job $e @{} 'Backup')
+        Should -Invoke Close-HMProcs -Times 1 -ParameterFilter { $Force -eq $true -and $TimeoutSec -eq 20 }
+        # ohne Haken: trotzdem kopiert, Hinweis zum Nachsichern
+        $h = Enter-HMModule @{ ProcDecisions = @{}; UserSid = 'S-1-5-21-1'; ScheduledOpenHint = $true } $job $m @{} 'Backup'
+        $h.ProcAction | Should -Be 'trotzdem kopiert'
+        (@($h.Info) -join ' ') | Should -Match 'bald von Hand nachsichern'
+        # B27: Outlook im geplanten Backup nur sanft, nie beenden; bleibt es offen, trotzdem kopiert + Hinweis
+        Mock Close-HMProcs { @([pscustomobject]@{ Name = 'outlook'; Id = 77 }) }
+        $s1 = Enter-HMModule @{ ProcDecisions = @{ Office = 'CloseSoftCopy' }; UserSid = 'S-1-5-21-1' } $job $m @{} 'Backup'
+        $s1.Skip | Should -BeFalse
+        $s1.ProcAction | Should -Be 'nicht geschlossen - trotzdem kopiert'
+        (@($s1.Info) -join ' ') | Should -Match 'nicht beendet'
+        Should -Invoke Close-HMProcs -Times 1 -Exactly -ParameterFilter { $Force -eq $false -and $TimeoutSec -eq 60 }
+        Mock Close-HMProcs { @() }
+        $h2 = Enter-HMModule @{ ProcDecisions = @{}; UserSid = 'S-1-5-21-1' } $job $m @{} 'Backup'
+        (@($h2.Info) -join ' ') | Should -Not -Match 'bald von Hand nachsichern'
+        $tsk = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Backup-Task.ps1')
+        $tsk | Should -Match '\$closeApps = \(\$script:Def\.CloseApps -eq \$true\)'
+        $tsk | Should -Match "'CloseSoftCopy' \} else \{ 'CloseForce' \}"
+        $tsk | Should -Match 'ProcDecisions = \$procDec; ScheduledOpenHint = \(-not \$closeApps\)'
+        $tsk | Should -Match 'diese Module bald von Hand nachsichern'
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        $eng | Should -Match "-like '\*\.pst' \}\)\.Count\) \{ \`$st = 'Warning'"
+        $bs = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\UI-BackupSchedule.ps1')
+        $bs | Should -Match 'x:Name="chkClose"'
+        $bs | Should -Match 'CloseApps = \[bool\]\$r\.CloseApps'
+        $bs | Should -Match 'Outlook/Browser schliessen an/aus'
+        $bs | Should -Match 'rbLogon\.IsChecked -and \$chkClose\.IsChecked'
     }
     It 'Entscheidung: ohne Abfrage kopieren (CloseDefault), Ueberspringen und ohne CloseDefault auslassen' {
         Mock Get-HMRunningProcs { @([pscustomobject]@{ Name = 'msedge'; Id = 42 }) }
@@ -2736,5 +2802,154 @@ Describe 'Server-Backup: Neustart ausstehend und abgebrochene Laeufe' {
         $ui = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
         $ui | Should -Match 'function Invoke-HMSbAbortCheck'
         $ui | Should -Match 'RebootPendingSkip = \(\$p\.RebootPendingSkip -eq \$true\)'
+    }
+}
+
+Describe 'Server-Backup im Hintergrund (einmalige SYSTEM-Aufgabe)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1')
+        $rmt = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\UI-Remote.ps1')
+        # Muster der Handy-Fernbedienung (UI-Remote) fuer Server-Backup-Aufgaben, mit Testpfad
+        $null = $rmt -match "\(\`$hd \+ \[regex\]::Escape\(`"\`$AppRoot\\Functions\\ServerBackup-Task\.ps1`"\) \+ '([^']+)'\)"
+        $script:RxTail = $Matches[1]
+        $script:RxHd = '(?i)^-NoProfile -ExecutionPolicy Bypass (-WindowStyle Hidden )?-File "'
+    }
+    It 'Argumente passen genau zur Pruefung der Handy-Fernbedienung (mit und ohne Platte)' {
+        $script:RxTail | Should -Match 'DiskLabel'
+        $tf = 'C:\Program Files\HUMig\Functions\ServerBackup-Task.ps1'
+        $rx = $script:RxHd + [regex]::Escape($tf) + $script:RxTail
+        $a1 = Get-HMSbTaskArgument $tf 'GYM' @('DC1', 'FS1') @('D:') $true $false $true
+        $a1 | Should -Be "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$tf`" -ProfileName `"GYM`" -VMs `"DC1|FS1`" -Volumes `"D:`" -HostConfig -Explicit"
+        $a1 -match $rx | Should -BeTrue
+        $a2 = Get-HMSbTaskArgument $tf 'GYM (Haus 2)' @('DC1') @() $false $true $false 'HUMIG-GYM-2'
+        $a2 | Should -Match ' -HostSystem -NoVerify -Explicit -DiskLabel "HUMIG-GYM-2"$'
+        $a2 -match $rx | Should -BeTrue
+        ($a2 -replace 'HUMIG-GYM-2', 'X Y') -match $rx | Should -BeFalse
+        ($a2 + ' -Command x') -match $rx | Should -BeFalse
+    }
+    It 'Profilnamen und Aufgabennamen: Sonderzeichen werden abgefangen' {
+        Test-HMSbProfileName 'Schule Nord (Haus 2)' | Should -BeTrue
+        Test-HMSbProfileName 'Schulzentrum_Ost-1.a' | Should -BeTrue
+        Test-HMSbProfileName 'GYM "x"' | Should -BeFalse
+        Test-HMSbProfileName '[Host]' | Should -BeFalse
+        Test-HMSbProfileName ('A' * 41) | Should -BeFalse
+        Test-HMSbTaskSafeName 'Gym & Co' | Should -BeTrue
+        foreach ($n in @('a"b', 'a|b', 'a*b', 'a?b', '[a]', '')) { Test-HMSbTaskSafeName $n | Should -BeFalse }
+        ConvertTo-HMSbTaskPart 'A[1]:B' | Should -Be 'A_1__B'
+        Test-HMSbDiskLabel 'HUMIG-GYM-A1' | Should -BeTrue
+        Test-HMSbDiskLabel 'HUMIG GYM' | Should -BeFalse
+    }
+    It 'Hintergrund-Aufgabe am Namen erkennen' {
+        "$(Get-HMSbOnceTaskTime 'Server-Backup - GYM - sofort 15.10.2026 09-05')" | Should -Be "$([datetime]'2026-10-15 09:05')"
+        Get-HMSbOnceTaskTime 'Server-Backup - GYM - sofort 15.10.2026 09-05 (2)' | Should -Not -BeNullOrEmpty
+        Get-HMSbOnceTaskTime 'Server-Backup - GYM - taeglich 09-05' | Should -BeNullOrEmpty
+        Get-HMSbOnceTaskTime 'Server-Backup - GYM - einmalig 15.10.2026 09-05' | Should -BeNullOrEmpty
+    }
+    It 'Aufraeumen: nur erledigte Hintergrund-Aufgaben ohne Ausloeser, nie laufende oder geplante' {
+        if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { function Get-ScheduledTask { param($TaskPath, $TaskName) }; function Unregister-ScheduledTask { param($TaskPath, $TaskName, [switch]$Confirm) } }
+        $old = (Get-Date).AddHours(-2).ToString('dd.MM.yyyy HH-mm'); $new = (Get-Date).ToString('dd.MM.yyyy HH-mm')
+        Mock Get-ScheduledTask { @(
+                [pscustomobject]@{ TaskPath = '\HUMig\'; TaskName = "Server-Backup - GYM - sofort $old"; State = 'Ready'; Triggers = @() },
+                [pscustomobject]@{ TaskPath = '\HUMig\'; TaskName = "Server-Backup - GYM - sofort $old (2)"; State = 'Running'; Triggers = @() },
+                [pscustomobject]@{ TaskPath = '\HUMig\'; TaskName = "Server-Backup - GYM - sofort $new"; State = 'Ready'; Triggers = @() },
+                [pscustomobject]@{ TaskPath = '\HUMig\'; TaskName = "Server-Backup - SCHULE2 - sofort $old"; State = 'Ready'; Triggers = @([pscustomobject]@{ StartBoundary = 'x' }) },
+                [pscustomobject]@{ TaskPath = '\HUMig\'; TaskName = 'Server-Backup - GYM - taeglich 22-00'; State = 'Ready'; Triggers = @([pscustomobject]@{ StartBoundary = 'x' }) }) }
+        Mock Unregister-ScheduledTask { }
+        $r = @(Remove-HMSbStaleOnceTasks)
+        $r | Should -Be @("Server-Backup - GYM - sofort $old")
+        Should -Invoke Unregister-ScheduledTask -Times 1 -Exactly
+        @(Remove-HMSbStaleOnceTasks -Except "Server-Backup - GYM - sofort $old").Count | Should -Be 0
+    }
+    It 'Laufende Markierungen anderer Prozesse finden (Profil-Filter)' {
+        $dir = Join-Path $TestDrive 'sbalive'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $ps = (Get-Process -Id $PID).StartTime.ToString('o')
+        $m = [ordered]@{ Profile = 'GYM'; Pid = $PID; ProcStart = $ps; Boot = ''; Started = (Get-Date).ToString('o'); Kind = 'Zeitplan'; Disk = 'HUMIG-GYM-1' }
+        Set-Content -LiteralPath (Get-HMSbRunMarkerPath $dir 'GYM') -Value ($m | ConvertTo-Json) -Encoding UTF8
+        $m.Profile = 'GYM X'; $m.Pid = 999999
+        Set-Content -LiteralPath (Get-HMSbRunMarkerPath $dir 'GYM X' 999999) -Value ($m | ConvertTo-Json) -Encoding UTF8
+        @(Get-HMSbAliveRuns $dir 'GYM').Count | Should -Be 1
+        @(Get-HMSbAliveRuns $dir 'GYM X').Count | Should -Be 0
+        @(Get-HMSbAliveRuns $dir).Count | Should -Be 1
+        @(Get-HMSbAliveRuns (Join-Path $TestDrive 'fehlt')).Count | Should -Be 0
+    }
+    It 'Sperrgruende fuer den Hintergrund: Profil, Platte, Name, Freigabe, Neustart-Sperre' {
+        $p = [pscustomobject]@{ Name = 'GYM'; DiskPrefix = 'HUMIG-GYM'; RebootPendingSkip = $false }
+        $d = [pscustomobject]@{ Letter = 'E'; Label = 'HUMIG-GYM-1' }
+        $keep = $script:AppRoot
+        try {
+            $script:AppRoot = 'C:\Program Files\HUMig'
+            Get-HMSbBackgroundBlock $null $d $null '' | Should -Match 'kein Profil'
+            Get-HMSbBackgroundBlock $p ([pscustomobject]@{ Letter = 'F'; Label = 'USB-STICK' }) $null '' | Should -Match 'gehoert nicht zum Profil'
+            Get-HMSbBackgroundBlock ([pscustomobject]@{ Name = 'G[1]'; DiskPrefix = 'HUMIG-GYM' }) $d $null '' | Should -Match 'Profilname'
+            Get-HMSbBackgroundBlock $p $d $null 'Neustart ausstehend' | Should -BeNullOrEmpty
+            Get-HMSbBackgroundBlock $p $d $null '' @('VM "1"') | Should -Match 'Anfuehrungszeichen'
+            $p.RebootPendingSkip = $true
+            Get-HMSbBackgroundBlock $p $d $null 'Neustart ausstehend' | Should -Match 'NICHT gesichert'
+            $p.RebootPendingSkip = $false
+            $script:AppRoot = '\\nas\tools\HUMig'
+            Get-HMSbBackgroundBlock $p $d $null '' | Should -Match 'Netzwerkfreigabe'
+        } finally { $script:AppRoot = $keep }
+    }
+    It 'Aufgabe: ohne Ausloeser, ohne Nachhol-Start, 72 h; Zeitplan-Skript nimmt nur die gewaehlte Platte' {
+        $ui = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+        $fn = [regex]::Match($ui, '(?s)function Start-HMSbBackgroundRun.*?\n}\r?\n').Value
+        $fn | Should -Match 'Register-ScheduledTask -TaskName \$name -TaskPath \$script:SbTaskPath -Action \$a -Principal \$pr -Settings \$s'
+        $fn | Should -Not -Match '-Trigger'
+        $fn | Should -Not -Match '-StartWhenAvailable'
+        $fn | Should -Match 'New-TimeSpan -Hours 72'
+        $fn | Should -Match 'Confirm-HMAppFolderSafe'
+        $fn | Should -Match 'Start-ScheduledTask'
+        $ui | Should -Match 'Watch-HMSbBackgroundRun \$p\.Name \$name \$now'
+        $tsk = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\ServerBackup-Task.ps1')
+        $tsk | Should -Match '\[string\]\$DiskLabel = '''''
+        $tsk | Should -Match '"\$\(\$_\.Label\)" -ieq \$DiskLabel'
+        $tsk | Should -Match 'Remove-HMSbStaleOnceTasks'
+        $tsk | Should -Match 'Uebersprungen: Profil laeuft bereits'
+        $blk = [regex]::Match($tsk, '(?s)if \(\$live\.Count\) \{.*?exit 1').Value
+        $blk | Should -Not -BeNullOrEmpty
+        $blk | Should -Not -Match 'Add-HMSbTaskError|Add-HMSbHistory'
+        $rmt = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\UI-Remote.ps1')
+        $rmt | Should -Match 'vom Handy nicht startbar'
+        $main = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'HUMig.ps1')
+        $main | Should -Match "(?s)if \(\`$root -like '\\\\\*'\) \{.*?return \`$false"
+    }
+}
+
+Describe 'Restore: Ziel-Konto aus dem Backup vorschlagen, lokales Konto anlegen' {
+    BeforeAll { . (Join-Path $script:Root 'Functions\UI-Quality.ps1') }
+    It 'Konto-Art und Vorschlag: lokal, Domaene, Entra, vorhandenes Profil' {
+        $pr = @([pscustomobject]@{ Account = 'SCHULE\admin'; Folder = 'admin' })
+        $l = Get-HMRestoreAccountPlan 'PC01\Anna' 'Anna' 'PC01' 'SCHULE\admin' 'PC99' $pr
+        $l.Kind | Should -Be 'Local'
+        $l.Suggest | Should -Be 'PC99\Anna'
+        $l.Differs | Should -BeTrue
+        $l.Hit | Should -BeNullOrEmpty
+        $d = Get-HMRestoreAccountPlan 'SCHULE\anna' 'anna' 'PC01.schule.local' 'anna' 'PC99' $pr
+        $d.Kind | Should -Be 'Domain'
+        $d.Suggest | Should -Be 'SCHULE\anna'
+        $d.Differs | Should -BeFalse
+        (Get-HMRestoreAccountPlan 'AzureAD\AnnaB' 'AnnaB' 'PC01' 'x' 'PC99').Kind | Should -Be 'Entra'
+        $h = Get-HMRestoreAccountPlan 'PC01\admin' 'admin' 'PC01' 'PC99\x' 'PC99' $pr
+        $h.Hit.Account | Should -Be 'SCHULE\admin'
+        $h.Suggest | Should -Be 'SCHULE\admin'
+        (Get-HMRestoreAccountPlan '' '' 'PC01' 'x' 'PC99').Kind | Should -Be ''
+    }
+    It 'Lokales Ziel-Konto erkennen' {
+        Test-HMLocalTargetAccount 'Anna' 'PC99' | Should -BeTrue
+        Test-HMLocalTargetAccount 'pc99\Anna' 'PC99.schule.local' | Should -BeTrue
+        Test-HMLocalTargetAccount 'SCHULE\Anna' 'PC99' | Should -BeFalse
+    }
+    It 'Konto anlegen nur mit Kennwort aus dem Dialog, nie auf der Befehlszeile; USMT ohne /lac' {
+        $q = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\UI-Quality.ps1')
+        $q | Should -Match 'New-LocalUser -Name \$n -Password \$pw'
+        $q | Should -Match 'SecurePassword'
+        $q | Should -Not -Match 'PtrToStringBSTR'
+        $q | Should -Not -Match '/lac'
+        $q | Should -Not -Match 'net(\.exe)? user'
+        $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        $eng | Should -Not -Match "'/lac"
+        $main = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'HUMig.ps1')
+        $main | Should -Match 'Invoke-HMRestoreAccountCheck \$b \$p \$mods \$comp'
     }
 }

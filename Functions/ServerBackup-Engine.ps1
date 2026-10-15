@@ -831,6 +831,67 @@ function Clear-HMSbRunMarker($Ctx) {
     if (-not $Ctx.LocalHistory) { return }
     try { Remove-Item -LiteralPath (Get-HMSbRunMarkerPath (Split-Path "$($Ctx.LocalHistory)" -Parent) "$($Ctx.Profile)") -Force -ErrorAction SilentlyContinue } catch { }
 }
+# Laufende Server-Backups (lebende Markierungen, auch aus anderen Prozessen, z.B. ein SYSTEM-Lauf im Hintergrund)
+function Get-HMSbAliveRuns([string]$Dir, [string]$ProfileName = '') {
+    $out = @()
+    if (-not $Dir -or -not (Test-Path -LiteralPath $Dir)) { return $out }
+    $boot = Get-HMSbBootTime
+    $flt = if ($ProfileName) { "$($script:SbRunMarkerPrefix)$(ConvertTo-HMSbSafeName $ProfileName)_*.json" } else { "$($script:SbRunMarkerPrefix)*.json" }
+    foreach ($f in @(Get-ChildItem -LiteralPath $Dir -Filter $flt -File -ErrorAction SilentlyContinue)) {
+        if ($f.Name -notmatch '\.json$') { continue }   # Filter *.json trifft unter Windows auch *.json.pruefe nicht, sicherheitshalber
+        $m = $null; try { $m = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8 | ConvertFrom-Json } catch { continue }
+        if (-not $m) { continue }
+        if ($ProfileName -and "$($m.Profile)" -ne $ProfileName) { continue }
+        if (Test-HMSbRunAlive $m $boot) { $out += $m }
+    }
+    return $out
+}
+
+# ----------------------------------------------------------------------------
+# Server-Backup im Hintergrund: einmalige Aufgabe als SYSTEM ohne Ausloeser (Start nur per Start-ScheduledTask)
+# ----------------------------------------------------------------------------
+$script:SbOnceWord = 'sofort'
+# Profilnamen: beim Anlegen/Umbenennen nur Buchstaben, Ziffern, Leerzeichen und - _ . ( )
+function Test-HMSbProfileName([string]$Name) { return ("$Name" -match '^[\w\- .()]{1,40}$') }
+# Zeichen, die das Argument der Aufgabe ("...") oder die Pruefung der Aufgabe (Handy-Fernbedienung) brechen
+function Test-HMSbTaskSafeName([string]$Name) { return ("$Name".Trim() -and "$Name" -notmatch '["|*?\[\]\x00-\x1F]') }
+function ConvertTo-HMSbTaskPart([string]$Name) { return ("$Name" -replace '[\\/:*?"<>|\[\]]', '_') }
+function Test-HMSbDiskLabel([string]$Label) { return ("$Label" -match '^[A-Za-z0-9_\-]{1,32}$') }
+# Argumente fuer Functions\ServerBackup-Task.ps1 (genau das Format, das UI-Remote prueft)
+function Get-HMSbTaskArgument([string]$TaskFile, [string]$ProfileName, [string[]]$VMs, [string[]]$Volumes, [bool]$HostConfig, [bool]$HostSystem, [bool]$Verify, [string]$DiskLabel = '') {
+    $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TaskFile`" -ProfileName `"$ProfileName`""
+    $v = @($VMs | Where-Object { "$_".Trim() }); $l = @($Volumes | Where-Object { "$_".Trim() })
+    if ($v.Count) { $arg += " -VMs `"$($v -join '|')`"" }
+    if ($l.Count) { $arg += " -Volumes `"$($l -join '|')`"" }
+    if ($HostConfig) { $arg += ' -HostConfig' }
+    if ($HostSystem) { $arg += ' -HostSystem' }
+    if (-not $Verify) { $arg += ' -NoVerify' }
+    $arg += ' -Explicit'
+    if ($DiskLabel) { $arg += " -DiskLabel `"$DiskLabel`"" }
+    return $arg
+}
+# Zeitpunkt aus dem Aufgabennamen "Server-Backup - <Profil> - sofort dd.MM.yyyy HH-mm[ (n)]"; $null = keine Hintergrund-Aufgabe
+function Get-HMSbOnceTaskTime([string]$TaskName) {
+    if ("$TaskName" -notmatch "^Server-Backup - .+ - $($script:SbOnceWord) (\d{2}\.\d{2}\.\d{4} \d{2}-\d{2})( \(\d+\))?$") { return $null }
+    $t = [datetime]::MinValue
+    if ([datetime]::TryParseExact($Matches[1], 'dd.MM.yyyy HH-mm', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$t)) { return $t }
+    return $null
+}
+# Erledigte Hintergrund-Aufgaben entfernen: nicht laufend und aelter als 10 min (Ergebnis steht im Verlauf). $Except = eigener Name
+function Remove-HMSbStaleOnceTasks([string]$Except = '', [int]$Minutes = 10) {
+    $out = @()
+    $tasks = @(); try { $tasks = @(Get-ScheduledTask -TaskPath '\HUMig\' -ErrorAction Stop | Where-Object { $_.TaskName -like 'Server-Backup*' }) } catch { return $out }
+    foreach ($t in $tasks) {
+        if ($Except -and "$($t.TaskName)" -eq $Except) { continue }
+        $at = Get-HMSbOnceTaskTime "$($t.TaskName)"
+        if ($null -eq $at) { continue }
+        if (@($t.Triggers | Where-Object { $_ }).Count) { continue }   # hat einen Ausloeser: keine Hintergrund-Aufgabe von HUMig
+        if ("$($t.State)" -in @('Running', 'Queued')) { continue }
+        if (((Get-Date) - $at).TotalMinutes -lt $Minutes) { continue }
+        try { Unregister-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -Confirm:$false -ErrorAction Stop; $out += "$($t.TaskName)" } catch { }
+    }
+    return $out
+}
 # Zeitpunkt aus der Markierung (Text im Format 'o' oder - PowerShell 7 wandelt beim Einlesen um - schon DateTime); $null = unbekannt
 function ConvertTo-HMSbTime($Value) {
     if ($null -eq $Value -or "$Value" -eq '') { return $null }

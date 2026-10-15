@@ -102,6 +102,9 @@ function Show-HMBsDialog([string]$Info, [string]$DefaultName, [string]$EjectInfo
     </StackPanel>
     <TextBlock Foreground="#FF6C7086" TextWrapping="Wrap" Margin="22,0,0,4" FontSize="11" Text="Gilt fuer alle Backups dieses Benutzers von diesem PC im Backup-Ordner (auch von Hand erstellte). Geloescht wird nur nach einem erfolgreichen Lauf und endgueltig."/>
     <CheckBox x:Name="chkNotify" IsChecked="True" Content="Nach jedem Lauf Meldung anzeigen (aus = nur bei Warnung/Fehler/uebersprungen)" Foreground="#FFCDD6F4" Margin="0,2,0,10"/>
+    <TextBlock Text="GEOEFFNETE PROGRAMME" Foreground="#FF89B4FA" FontWeight="SemiBold" Margin="0,0,0,2"/>
+    <CheckBox x:Name="chkClose" Content="Outlook und Browser vor der Sicherung schliessen (Browser notfalls beenden)" Foreground="#FFCDD6F4" Margin="0,2"/>
+    <TextBlock Foreground="#FF6C7086" TextWrapping="Wrap" Margin="22,0,0,10" FontSize="11" Text="An: Browser bekommen bis 20 s und werden danach beendet. Outlook wird nur sanft geschlossen (bis 60 s) und nie beendet - bleibt es offen, wird trotzdem gesichert und gemeldet. Fuer Zeiten, in denen niemand arbeitet. Aus: offene Programme werden trotzdem gesichert, gesperrte Dateien (PST, Cookies) fehlen dann evtl. - Meldung und Bericht nennen die Module, die bald von Hand nachgesichert werden sollten."/>
     <TextBlock Text="NACH DER SICHERUNG" Foreground="#FF89B4FA" FontWeight="SemiBold" Margin="0,0,0,2"/>
     <CheckBox x:Name="chkEject" Content="USB-Laufwerk auswerfen (Schutz vor Verschluesselungstrojanern)" Foreground="#FFCDD6F4" Margin="0,2"/>
     <TextBlock x:Name="ejectNote" Foreground="#FF6C7086" TextWrapping="Wrap" Margin="22,0,0,10" FontSize="11"/>
@@ -120,7 +123,7 @@ function Show-HMBsDialog([string]$Info, [string]$DefaultName, [string]$EjectInfo
     $txtName = $w.FindName('txtName'); $txtName.Text = $DefaultName
     $txtTime = $w.FindName('txtTime'); $txtDelay = $w.FindName('txtDelay'); $txtKeep = $w.FindName('txtKeep')
     $rbUpdate = $w.FindName('rbUpdate'); $rbDaily = $w.FindName('rbDaily'); $rbWeekly = $w.FindName('rbWeekly'); $rbLogon = $w.FindName('rbLogon')
-    $chkRet = $w.FindName('chkRet'); $chkNotify = $w.FindName('chkNotify'); $chkEject = $w.FindName('chkEject')
+    $chkRet = $w.FindName('chkRet'); $chkNotify = $w.FindName('chkNotify'); $chkEject = $w.FindName('chkEject'); $chkClose = $w.FindName('chkClose')
     if ($EjectInfo) { $chkEject.IsEnabled = $false; $w.FindName('ejectNote').Text = $EjectInfo }
     else { $w.FindName('ejectNote').Text = 'Nach jedem Lauf (auch nach Fehlern) wird das Laufwerk ausgeworfen - ein Schaedling auf dem PC kommt dann nicht mehr an die Backups. Vor dem naechsten Lauf das Laufwerk wieder anstecken (sonst wird der Lauf uebersprungen und gemeldet).' }
     $days = @(@('Monday', 'Mo'), @('Tuesday', 'Di'), @('Wednesday', 'Mi'), @('Thursday', 'Do'), @('Friday', 'Fr'), @('Saturday', 'Sa'), @('Sunday', 'So'))
@@ -147,8 +150,11 @@ function Show-HMBsDialog([string]$Info, [string]$DefaultName, [string]$EjectInfo
         if ($chkRet.IsChecked -and (-not [int]::TryParse("$($txtKeep.Text)".Trim(), [ref]$keep) -or $keep -lt 1 -or $keep -gt 999)) {
             [void][System.Windows.MessageBox]::Show($w, 'Anzahl der Backups, die bleiben sollen: 1-999.', 'Zeitplan', 'OK', 'Warning'); return
         }
+        if ($rbLogon.IsChecked -and $chkClose.IsChecked) {
+            if ("$([System.Windows.MessageBox]::Show($w, "Bei Anmeldung laeuft das Backup kurz nach dem Anmelden - dann werden Outlook und Browser mitten in der Arbeit geschlossen (Browser notfalls beendet).`n`nTrotzdem so planen?", 'Zeitplan', 'YesNo', 'Warning', 'No'))" -ne 'Yes') { return }
+        }
         $res.V = @{ Name = $name; Kind = $(if ($rbUpdate.IsChecked) { 'Update' } else { 'New' }); Mode = $mode; Time = $(if ($mode -ne 'Logon') { $t.ToString('HH:mm') } else { '' })
-            Days = $sel; Delay = $delay; RetEnabled = [bool]$chkRet.IsChecked; Keep = $(if ($chkRet.IsChecked) { $keep } else { 3 }); NotifyAlways = [bool]$chkNotify.IsChecked; EjectAfter = ([bool]$chkEject.IsChecked -and [bool]$chkEject.IsEnabled) }
+            Days = $sel; Delay = $delay; RetEnabled = [bool]$chkRet.IsChecked; Keep = $(if ($chkRet.IsChecked) { $keep } else { 3 }); NotifyAlways = [bool]$chkNotify.IsChecked; EjectAfter = ([bool]$chkEject.IsChecked -and [bool]$chkEject.IsEnabled); CloseApps = [bool]$chkClose.IsChecked }
         $w.DialogResult = $true
     }.GetNewClosure())
     $w.Owner = $script:Window; Set-HMWindowScale $w
@@ -226,6 +232,7 @@ function New-HMBackupSchedule {
         Retention = [ordered]@{ Enabled = [bool]$r.RetEnabled; Keep = [int]$r.Keep }
         NotifyAlways = [bool]$r.NotifyAlways
         EjectAfter = [bool]$r.EjectAfter
+        CloseApps = [bool]$r.CloseApps
         TaskName = $taskName; TaskPath = ''
         LastRun = ''; LastStatus = ''; LastMessage = ''; LastBackup = ''; LastLog = ''
     }
@@ -275,7 +282,7 @@ function New-HMBackupSchedule {
             if (-not $ex) { New-EventLog -LogName Application -Source 'HUMig' -ErrorAction Stop }
         } catch { Out-Console "Ereignisquelle HUMig nicht angelegt (Ereignisse des Zeitplans fehlen im Anwendungsprotokoll): $($_.Exception.Message)" 'Warning' }
     }
-    Out-Console "Geplant: '$($r.Name)' - $(Format-HMBsWhen ([pscustomobject]@{ Trigger = [pscustomobject]$def.Trigger })), $(if ($r.Kind -eq 'Update') { 'fortlaufend' } else { 'neues Backup' }) -> $($tg.Display)$(if ($r.RetEnabled) { ", neueste $($r.Keep) bleiben" })$(if ($r.EjectAfter) { ', danach auswerfen' })" 'Success'
+    Out-Console "Geplant: '$($r.Name)' - $(Format-HMBsWhen ([pscustomobject]@{ Trigger = [pscustomobject]$def.Trigger })), $(if ($r.Kind -eq 'Update') { 'fortlaufend' } else { 'neues Backup' }) -> $($tg.Display)$(if ($r.RetEnabled) { ", neueste $($r.Keep) bleiben" })$(if ($r.EjectAfter) { ', danach auswerfen' })$(if ($r.CloseApps) { ', Outlook/Browser werden geschlossen' })" 'Success'
     Out-Console "   Aufgabenplanung: $used$taskName   (Konto $($me.Name)$(if ($elev) { ', mit Administratorrechten' } else { ', Benutzer-Modus' }))   Verwalten: Rechtsklick auf 'Zeitplan ...'" 'Info'
     Update-HMBsLabel
 }
@@ -317,6 +324,7 @@ function Get-HMBsRows {
             Name = "$($d.Name)"; Art = $(if ($d.Kind -eq 'Update') { 'fortlaufend' } else { 'neu' }); Wann = (Format-HMBsWhen $d); Was = ($what -join ' | '); Ziel = $tgt
             Aufbewahrung = $(if ($d.Retention -and $d.Retention.Enabled) { "neueste $($d.Retention.Keep)" } else { 'aus' })
             Danach = $(if ($d.EjectAfter) { 'auswerfen' } else { '' })
+            Programme = $(if ($d.CloseApps -eq $true) { 'schliessen' } else { 'nur Hinweis' })
             Zustand = $state; Next = $next; Last = "$($d.LastRun)"; Result = $res; Msg = "$($d.LastMessage)"; Def = $d; Task = $t
         }
     }
@@ -336,9 +344,9 @@ function Show-HMBackupSchedules {
     $rows = @($rows)
     if (-not $rows.Count) { Out-Console "Keine geplanten Backups fuer $([Security.Principal.WindowsIdentity]::GetCurrent().Name). Anlegen: Links-Klick auf 'Zeitplan ...'." 'Info'; return }
     $list = New-Object System.Collections.Generic.List[object]
-    foreach ($r in $rows) { $list.Add(@($r.Name, $r.Art, $r.Wann, $r.Was, $r.Ziel, $r.Aufbewahrung, $r.Danach, $r.Zustand, $r.Next, $r.Last, $r.Result, $r.Msg, "$($r.Def.Id)")) }
+    foreach ($r in $rows) { $list.Add(@($r.Name, $r.Art, $r.Wann, $r.Was, $r.Ziel, $r.Aufbewahrung, $r.Danach, $r.Programme, $r.Zustand, $r.Next, $r.Last, $r.Result, $r.Msg, "$($r.Def.Id)")) }
     Show-DataGridWindow -Title "Geplante Backups - $([Security.Principal.WindowsIdentity]::GetCurrent().Name)" -Width 1500 -Height 420 `
-        -Columns @('Name', 'Art', 'Wann', 'Was', 'Ziel', 'Aufbewahrung', 'Danach', 'Zustand', 'Naechster_Lauf', 'Letzter_Lauf', 'Ergebnis', 'Meldung', 'Id') -Rows $list.ToArray() `
+        -Columns @('Name', 'Art', 'Wann', 'Was', 'Ziel', 'Aufbewahrung', 'Danach', 'Offene_Programme', 'Zustand', 'Naechster_Lauf', 'Letzter_Lauf', 'Ergebnis', 'Meldung', 'Id') -Rows $list.ToArray() `
         -CountText 'Protokolle: %LOCALAPPDATA%\HUMig\Zeitplaene\Logs - Bericht des Backups: Bericht_Backup.html im Backup-Ordner' `
         -Actions @(
             @{ Text = 'Jetzt starten'; Color = '#FFA6E3A1'; Handler = { param($sel, $w, $c)
@@ -347,6 +355,19 @@ function Show-HMBackupSchedules {
                         $t = if ($d) { Get-HMBsTask $d } else { $null }
                         if (-not $t) { Out-Console "$($x.Name): Aufgabe fehlt - Zeitplan loeschen und neu anlegen" 'Error'; continue }
                         try { Start-ScheduledTask -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction Stop; Out-Console "Gestartet: $($x.Name) (laeuft im Hintergrund, Meldung am Ende)" 'Success' } catch { Out-Console "$($x.Name): $($_.Exception.Message)" 'Error' }
+                    }
+                    $w.Close(); Update-HMBsLabel } },
+            @{ Text = 'Outlook/Browser schliessen an/aus'; Color = '#FFF9E2AF'; Handler = { param($sel, $w, $c)
+                    foreach ($x in $sel) {
+                        $f = Join-Path $script:BsDir "$($x.Id).json"
+                        if ("$($x.Id)" -notmatch '^[A-Za-z0-9]{8,40}$' -or -not (Test-Path -LiteralPath $f)) { continue }
+                        try {
+                            $d = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+                            $on = -not ($d.CloseApps -eq $true)
+                            $d | Add-Member -NotePropertyName CloseApps -NotePropertyValue $on -Force
+                            $d | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $f -Encoding UTF8 -Force
+                            Out-Console "Zeitplan '$($x.Name)': Outlook/Browser $(if ($on) { 'werden vor der Sicherung geschlossen (notfalls beendet)' } else { 'werden nicht geschlossen - nur Hinweis, welche Module von Hand nachgesichert werden sollten' })" 'Success'
+                        } catch { Out-Console "$($x.Name): Zeitplan-Datei nicht geaendert: $($_.Exception.Message)" 'Error' }
                     }
                     $w.Close(); Update-HMBsLabel } },
             @{ Text = 'Protokoll'; Color = '#FF89B4FA'; Handler = { param($sel, $w, $c)
