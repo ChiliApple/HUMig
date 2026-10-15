@@ -1611,37 +1611,76 @@ function Get-HMPathFileSystem([string]$Path) {
     return ''
 }
 
+# Liegt ein Pfad auf einer Netzwerkfreigabe (UNC oder verbundenes Netzlaufwerk)?
+function Test-HMNetworkPath([string]$Path) {
+    if ("$Path" -match '^(\\\\|//)') { return $true }
+    if ("$Path" -notmatch '^[A-Za-z]:') { return $false }
+    try { return ("$((New-Object System.IO.DriveInfo($Path.Substring(0, 2))).DriveType)" -eq 'Network') } catch { return $false }
+}
+
+# Hat ein Ordner schon genau diese Rechte (Vererbung aus, nur diese Konten, je Konto mindestens das Recht, an Unterordner/Dateien vererbt)?
+# $Expected: Hashtable SID -> 'F' | 'M' | 'RX'
+function Test-HMFolderAclMatch([string]$Path, [hashtable]$Expected) {
+    try { $a = Get-Acl -LiteralPath $Path -ErrorAction Stop } catch { return $false }
+    if (-not $a.AreAccessRulesProtected) { return $false }
+    $map = @{ F = [System.Security.AccessControl.FileSystemRights]::FullControl; M = [System.Security.AccessControl.FileSystemRights]::Modify; RX = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute }
+    $inh = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $have = @{}
+    foreach ($r in @($a.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) {
+        if ("$($r.AccessControlType)" -ne 'Allow' -or $r.PropagationFlags -ne 'None' -or $r.InheritanceFlags -ne $inh) { return $false }
+        $sid = "$($r.IdentityReference.Value)"
+        $have[$sid] = $(if ($have.ContainsKey($sid)) { $have[$sid] -bor $r.FileSystemRights } else { $r.FileSystemRights })
+    }
+    if ($have.Count -ne $Expected.Count) { return $false }
+    foreach ($k in $Expected.Keys) {
+        if (-not $have.ContainsKey($k)) { return $false }
+        $want = [int]$map["$($Expected[$k])"]
+        if (([int]$have[$k] -band $want) -ne $want) { return $false }
+        # mehr als verlangt (z. B. Aendern statt Lesen) zaehlt als abweichend
+        if ("$($Expected[$k])" -ne 'F' -and ([int]$have[$k] -band [int]$map['F']) -eq [int]$map['F']) { return $false }
+        if ("$($Expected[$k])" -eq 'RX' -and ([int]$have[$k] -band [int][System.Security.AccessControl.FileSystemRights]::Write) -ne 0) { return $false }
+    }
+    return $true
+}
+
 # Rechte eines Backup-Ordners: Vererbung aus, nur SYSTEM + Administratoren + ausfuehrendes Konto (Vollzugriff) und der gesicherte Benutzer
 # (Benutzer-Modus: aendern, damit er sein Backup fortsetzen kann; Admin-Backup: lesen), optional eine Gruppe mit Leserecht
 # (settings.json > Backup.ExtraReadGroup, Name oder SID, z. B. eine Techniker-Gruppe). Dateien darunter erben das.
-# Rueckgabe: Ok, Error (Grund, wenn nicht gesetzt), Who (berechtigte Konten), Notes (Hinweise)
+# Netzwerkfreigaben bleiben unveraendert: dort waeren SYSTEM/Administratoren die Konten des Dateiservers - ein Lauf als
+# SYSTEM wuerde sich aussperren. Stimmen die Rechte schon (fortlaufendes Backup), wird nichts geschrieben (Windows wuerde
+# sonst bei jedem Lauf den ganzen Ordnerbaum neu durchlaufen).
+# Rueckgabe: Ok, Unchanged, Skipped (Netzwerk), Error (Grund, wenn nicht gesetzt), Who (berechtigte Konten), Notes (Hinweise)
 function Set-HMBackupFolderAcl {
     param([string]$Path, [string]$UserSid = '', [switch]$UserMode, [string]$ExtraGroup = '')
-    $r = [ordered]@{ Ok = $false; Error = ''; Who = @(); Notes = @() }
+    $r = [ordered]@{ Ok = $false; Unchanged = $false; Skipped = $false; Error = ''; Who = @(); Notes = @() }
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { $r.Error = 'Ordner fehlt'; return [pscustomobject]$r }
+    if (Test-HMNetworkPath $Path) { $r.Skipped = $true; $r.Error = 'Netzwerkfreigabe - Rechte bleiben wie am Dateiserver eingestellt'; return [pscustomobject]$r }
     $fs = Get-HMPathFileSystem $Path
     if ($fs -and $fs -notmatch '^(?i)(NTFS|ReFS)$') { $r.Error = "Dateisystem $fs kennt keine Ordnerrechte"; return [pscustomobject]$r }
     # Benutzer-Modus: immer das eigene Konto (sonst sperrt man sich selbst aus)
     if ($UserMode) { try { $UserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { } }
-    $grants = @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'); $who = @('SYSTEM', 'Administratoren')
+    $exp = [ordered]@{ 'S-1-5-18' = 'F'; 'S-1-5-32-544' = 'F' }; $who = @('SYSTEM', 'Administratoren')
     $me = ''; try { $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { }
+    $name = { param($s) try { ([System.Security.Principal.SecurityIdentifier]$s).Translate([System.Security.Principal.NTAccount]).Value } catch { $s } }
     if ("$UserSid" -match '^S-1-(5-21|12-1)-[\d-]+$') {   # Domaene/lokal bzw. Entra ID
-        $grants += "*${UserSid}:(OI)(CI)$(if ($UserMode) { 'M' } elseif ($UserSid -eq $me) { 'F' } else { 'RX' })"
-        $who += $(try { ([System.Security.Principal.SecurityIdentifier]$UserSid).Translate([System.Security.Principal.NTAccount]).Value } catch { $UserSid })
+        $exp[$UserSid] = $(if ($UserMode) { 'M' } elseif ($UserSid -eq $me) { 'F' } else { 'RX' })
+        $who += (& $name $UserSid)
     } elseif ($UserMode) { $r.Error = 'eigenes Konto nicht ermittelbar'; return [pscustomobject]$r }
-    # Admin-Backup: das ausfuehrende Konto behaelt Vollzugriff - auf einer Freigabe ist es dort evtl. kein Administrator
-    if (-not $UserMode) {
-        if ($me -match '^S-1-(5-21|12-1)-[\d-]+$' -and $me -ne "$UserSid") { $grants += "*${me}:(OI)(CI)F"; $who += $(try { ([System.Security.Principal.SecurityIdentifier]$me).Translate([System.Security.Principal.NTAccount]).Value } catch { $me }) }
-    }
+    # Admin-Backup: das ausfuehrende Konto behaelt Vollzugriff
+    if (-not $UserMode -and $me -match '^S-1-(5-21|12-1)-[\d-]+$' -and -not $exp.Contains($me)) { $exp[$me] = 'F'; $who += (& $name $me) }
     if ($ExtraGroup) {
         $gs = ''
         try { $gs = if ($ExtraGroup -match '^S-1-[\d-]+$') { ([System.Security.Principal.SecurityIdentifier]$ExtraGroup).Value } else { ([System.Security.Principal.NTAccount]$ExtraGroup).Translate([System.Security.Principal.SecurityIdentifier]).Value } } catch { }
-        if ($gs) { $grants += "*${gs}:(OI)(CI)RX"; $who += "$ExtraGroup (lesen)" }
-        else { $r.Notes += "Gruppe '$ExtraGroup' (Einstellung Backup.ExtraReadGroup) nicht gefunden - nicht berechtigt" }
+        if ($gs -and -not $exp.Contains($gs)) { $exp[$gs] = 'RX'; $who += "$ExtraGroup (lesen)" }
+        elseif (-not $gs) { $r.Notes += "Gruppe '$ExtraGroup' (Einstellung Backup.ExtraReadGroup) nicht gefunden - nicht berechtigt" }
     }
+    $r.Who = $who
+    $h = @{}; foreach ($k in $exp.Keys) { $h[$k] = $exp[$k] }
+    if (Test-HMFolderAclMatch $Path $h) { $r.Ok = $true; $r.Unchanged = $true; return [pscustomobject]$r }
+    $grants = @(foreach ($k in $exp.Keys) { "*${k}:(OI)(CI)$($exp[$k])" })
     $o = & icacls.exe "$Path" /inheritance:r /grant:r @grants /C /Q 2>&1
     if ($LASTEXITCODE -ne 0) { $r.Error = "icacls Exitcode ${LASTEXITCODE}: $((@($o) | Where-Object { "$_".Trim() } | Select-Object -First 2) -join ' ')"; return [pscustomobject]$r }
-    $r.Ok = $true; $r.Who = $who
+    $r.Ok = $true
     return [pscustomobject]$r
 }
 
@@ -2657,11 +2696,12 @@ function Start-HMBackup {
         }
         New-Item -ItemType Directory -Path $Ctx.BackupPath -Force | Out-Null
         # Backup-Ordner nur fuer SYSTEM, Administratoren und den gesicherten Benutzer (plus optionale Gruppe) - egal wo er liegt
-        # (eigener Speicherort, USB-Platte, Freigabe). Geht das nicht (FAT/exFAT, NAS ohne Rechte): Warnung, kein Abbruch.
+        # (eigener Speicherort, USB-Platte; Netzwerkfreigaben nicht). Geht das nicht (FAT/exFAT): Warnung, kein Abbruch.
         $xg = if ($Ctx.Settings -and $Ctx.Settings.Backup) { "$($Ctx.Settings.Backup.ExtraReadGroup)".Trim() } else { '' }
         $acl = Set-HMBackupFolderAcl -Path $Ctx.BackupPath -UserSid "$($Ctx.UserSid)" -UserMode:([bool]$Ctx.UserMode) -ExtraGroup $xg
         foreach ($n in @($acl.Notes)) { Write-HMLog $Job "Backup-Ordner-Rechte: $n" 'Warning' }
-        if ($acl.Ok) { Write-HMLog $Job "Backup-Ordner-Rechte: nur $($acl.Who -join ', ')" 'Info' }
+        if ($acl.Ok) { Write-HMLog $Job "Backup-Ordner-Rechte$(if ($acl.Unchanged) { ' (schon gesetzt)' }): nur $($acl.Who -join ', ')" 'Info' }
+        elseif ($acl.Skipped) { Write-HMLog $Job "Backup-Ordner-Rechte: $($acl.Error) - wer das Backup lesen darf, regeln die Rechte der Freigabe am Server" 'Info' }
         else { Write-HMLog $Job "Backup-Ordner-Rechte NICHT gesetzt ($($acl.Error)) - das Backup (u. a. Browser-Daten) ist fuer alle lesbar, die auf diesen Speicherort zugreifen koennen. Fuer ein geschuetztes Backup ein NTFS-Ziel verwenden." 'Warning' }
         $Job.LogFile = Join-Path $Ctx.BackupPath 'HUMig.log'
         $Ctx.RoboLog = Join-Path $Ctx.BackupPath 'Robocopy.log'

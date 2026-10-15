@@ -3119,6 +3119,10 @@ Describe '2.1.11: Teams-Karte, Lebenszeichen, Rechte der Backup-Ordner' {
         $r.Ok | Should -BeFalse
         $r.Error | Should -Be 'Ordner fehlt'
         Get-HMPathFileSystem '\\srv\share\x' | Should -Be ''
+        Test-HMNetworkPath '\\srv\share\BACKUPS' | Should -BeTrue
+        Test-HMNetworkPath '//srv/share' | Should -BeTrue
+        Test-HMNetworkPath 'relativ\x' | Should -BeFalse
+        (Set-HMBackupFolderAcl -Path '\\srv\share\BACKUPS\x' -UserSid 'S-1-5-21-1-2-3-1001').Ok | Should -BeFalse
         Get-HMPathFileSystem '' | Should -Be ''
         $eng = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
         $eng | Should -Match "/inheritance:r /grant:r @grants"
@@ -3142,5 +3146,17 @@ Describe '2.1.11: Teams-Karte, Lebenszeichen, Rechte der Backup-Ordner' {
         $r2 = Set-HMBackupFolderAcl -Path $d -UserSid $me -ExtraGroup 'GibtEsNicht\KeineGruppe4711'
         $r2.Ok | Should -BeTrue
         @($r2.Notes).Count | Should -Be 1
+        $r2.Unchanged | Should -BeFalse
+        # fortlaufendes Backup: gleiche Rechte -> nichts schreiben; Abweichung -> neu setzen
+        $r3 = Set-HMBackupFolderAcl -Path $d -UserSid $me
+        $r3.Ok | Should -BeTrue
+        $r3.Unchanged | Should -BeTrue
+        $null = & icacls.exe "$d" /grant '*S-1-5-32-545:(OI)(CI)RX' 2>&1
+        (Set-HMBackupFolderAcl -Path $d -UserSid $me).Unchanged | Should -BeFalse
+        (Set-HMBackupFolderAcl -Path $d -UserSid $me).Unchanged | Should -BeTrue
+        $null = & icacls.exe "$d" /inheritance:e 2>&1
+        (Set-HMBackupFolderAcl -Path $d -UserSid $me).Unchanged | Should -BeFalse
+        Test-HMFolderAclMatch $d @{ 'S-1-5-18' = 'F'; 'S-1-5-32-544' = 'F'; $me = 'F' } | Should -BeTrue
+        Test-HMFolderAclMatch $d @{ 'S-1-5-18' = 'F'; 'S-1-5-32-544' = 'F'; $me = 'RX' } | Should -BeFalse
     }
 }
