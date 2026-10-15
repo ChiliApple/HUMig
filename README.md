@@ -102,7 +102,7 @@ Für einen kompletten PC-Umzug führt der **Umzugs-Assistent** (*Umzug …* im R
 | Gruppe | Module |
 |---|---|
 | Profil & Daten | Benutzerprofil, Daten auf C:\\, Zusätzliche Ordner |
-| Browser | Edge, Chrome, Firefox |
+| Browser | Edge, Chrome, Firefox – Lesezeichen am neuen PC zusammengefuehrt, am gleichen PC alles 1:1 |
 | Office | Signaturen, Vorlagen, PST, OneNote · Office-Einstellungen (Registry) |
 | Windows | Taskleiste/Hintergrund, Desktop-Symbole, Startmenü-Pins, Schnellzugriff, Schriftarten |
 | Netzwerk & Drucker | WLAN, Ordnerfreigaben, Netzlaufwerke, Drucker (auch mit Treibern), ODBC, VPN |
