@@ -2718,6 +2718,9 @@ $script:Window.Add_Closing({
             if ($own) { try { $sp = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\wbadmin.exe') -ArgumentList 'stop job -quiet' -WindowStyle Hidden -PassThru -ErrorAction Stop; [void]$sp.WaitForExit(60000) } catch { } }
             if ($cj) { Stop-HMJobProcess $cj }
             Wait-HMJobEnd $cj 30
+        } elseif ($a -eq 'No') {
+            # Sicherung laeuft bewusst ohne HUMig weiter - beim naechsten Start nicht als Abbruch melden
+            try { Clear-HMSbRunMarker @{ LocalHistory = $script:SbHistFile; Profile = "$($script:SbRunProfile)" } } catch { }
         }
     } elseif ($script:JobRunning) {
         if (-not (Confirm-Action 'Ein Backup/Restore laeuft noch. Wirklich beenden (Vorgang wird abgebrochen)?')) { $e.Cancel = $true; return }
