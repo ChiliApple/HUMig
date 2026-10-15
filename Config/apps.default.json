@@ -161,6 +161,7 @@
       "Id": "App_AcrobatReader",
       "Name": "Adobe Acrobat Reader",
       "Detect": "^Adobe Acrobat",
+      "DetectFamily": true,
       "Items": [
         {
           "Type": "Reg",
@@ -3199,7 +3200,7 @@
     {
       "Id": "App_Python",
       "Name": "Python",
-      "Detect": "^Python 3\\.\\d+\\.\\d+ \\(",
+      "Detect": "^Python 3\\.\\d+(?=\\.\\d+ \\()",
       "Items": [
         {
           "Type": "Folder",

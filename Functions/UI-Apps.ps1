@@ -331,9 +331,22 @@ function Get-HMMissingAppPlan {
     $pkgs = @{}; $wgs = @{}; $noPkg = 0; $other = 0
     foreach ($s in @($Src | Where-Object { $_ -and "$($_.Name)" } | Sort-Object Name -Unique)) {
         if ($Have -contains $s.Name) { continue }
-        # schon installiert in anderer Version? (gleicher Name ohne Versionsnummer)
-        $base = ("$($s.Name)" -replace '[\s\-_(]*(x64|x86|64-bit|32-bit)?[\s\-_(]*v?\d+([\.\d]+)*.*$', '').Trim()
-        if ($base.Length -ge 4 -and @($Have | Where-Object { "$_".StartsWith($base, [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
+        # gleiches Programm laut Katalog-Erkennung schon installiert (andere Variante/Schreibweise, z. B. "7-Zip 26.04 (x64)" vs. "... (x64 edition)").
+        # Nur wenn der erkannte Teil gleich ist - sonst verdeckt ein Familien-Muster ein fehlendes Programm (B34: Revit vs. AutoCAD,
+        # Python 3.12 vs. 3.8). Eintraege mit DetectFamily (ein Muster fuer verschiedene Produkte, z. B. Acrobat Pro/Reader) nie.
+        # Mit Katalog-Eintrag entscheidet NUR der Katalog (B35) - die Namens-Regel darunter liesse sonst z. B. "Python Launcher" Python 3.12
+        # bzw. den Reader Acrobat Pro verdecken.
+        $app0 = @($Catalog | Where-Object { "$($_.Detect)" -and $s.Name -match "$($_.Detect)" })[0]
+        if ($app0) {
+            if (-not $app0.DetectFamily -and $s.Name -match "$($app0.Detect)") {
+                $key = "$($Matches[0])".Trim()
+                if ($key -and @($Have | Where-Object { "$_" -match "$($app0.Detect)" -and "$($Matches[0])".Trim() -ieq $key }).Count) { continue }
+            }
+        } else {
+            # ohne Katalog-Eintrag: schon installiert in anderer Version? (gleicher Name ohne Versionsnummer)
+            $base = ("$($s.Name)" -replace '[\s\-_(]*(x64|x86|64-bit|32-bit)?[\s\-_(]*v?\d+([\.\d]+)*.*$', '').Trim()
+            if ($base.Length -ge 4 -and @($Have | Where-Object { "$_".StartsWith($base, [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
+        }
         $pkg = $null; $how = ''
         $app = @($Catalog | Where-Object { "$($_.Detect)" -and $s.Name -match "$($_.Detect)" })[0]
         if ($Restrict -and (-not $app -or @($OnlyApps) -notcontains "$($app.Id)")) { $other++; continue }

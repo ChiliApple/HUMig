@@ -2441,6 +2441,7 @@ function Get-HMUsmtCodeText([int]$Code, [string]$Version) {
         -1073741511 { return " = Einsprungpunkt nicht gefunden: diese USMT-Version passt nicht zum Windows des PCs$(if ($Version) { " (USMT $Version)" }). USMT aus dem ADK 10.1.26100.x verwenden (Werkzeuge > USMT einrichten)" }
         -1073741515 { return ' = DLL fehlt: USMT-Ordner unvollstaendig - neu einrichten (Werkzeuge > USMT einrichten)' }
         -1073741701 { return ' = falsche Architektur (amd64/arm64/x86 passt nicht zum PC)' }
+        3 { return ' = mindestens ein Fehler wurde uebersprungen (USMT-Option /c) - der Rest wurde uebernommen. Was fehlt, steht im LoadState-Protokoll (Zeilen mit Error bzw. Warning)' }
         14 { return ' = lokales Konto fehlt am Ziel-PC (USMT legt lokale Konten nur mit /lac an - HUMig verwendet das nicht): Restore erneut starten, HUMig bietet an, das Konto mit Kennwort anzulegen' }
         default { return '' }
     }
@@ -3524,7 +3525,18 @@ function Write-HMFileAtomic([string]$Path, [string]$Text, [string]$BackupName, [
             }
         }
         & $chk
-        if ([System.IO.File]::Exists($Path)) { [System.IO.File]::Replace($tmp, $Path, [NullString]::Value) } else { [System.IO.File]::Move($tmp, $Path) }
+        if ([System.IO.File]::Exists($Path)) {
+            try { [System.IO.File]::Replace($tmp, $Path, [NullString]::Value) }
+            catch [System.PlatformNotSupportedException], [System.IO.IOException] {
+                # manche NAS-/Samba-Freigaben koennen Replace nicht: alte Datei beiseite, neue an ihren Platz, alte loeschen
+                # (scheitert der zweite Schritt, kommt die alte Datei zurueck - nie ohne Datei)
+                & $chk
+                $old = "$Path.humig-$([guid]::NewGuid().ToString('N')).alt"
+                [System.IO.File]::Move($Path, $old)
+                try { [System.IO.File]::Move($tmp, $Path) } catch { [System.IO.File]::Move($old, $Path); throw }
+                try { [System.IO.File]::Delete($old) } catch { }
+            }
+        } else { [System.IO.File]::Move($tmp, $Path) }
     } catch {
         try { if ([System.IO.File]::Exists($tmp)) { [System.IO.File]::Delete($tmp) } } catch { }
         throw
@@ -3583,6 +3595,9 @@ function Restore-HMChromiumItem {
         $st = switch ($rc.Level) { 'OK' { 'OK' } 'Warning' { 'Warning' } 'Cancel' { 'Cancel' } default { 'Error' } }
         $m = "$case`n" + ("vollstaendig zurueckgespielt wie gesichert ({0} Dateien, {1}) - auch Kennwoerter, Anmeldungen und Einstellungen" -f $rc.FilesTotal, (Format-HMSize $rc.BytesTotal))
         if ($rc.FilesFailed -gt 0) { $m += ", $($rc.FilesFailed) FEHLGESCHLAGEN (Browser geoeffnet?)"; if ($st -ne 'Cancel') { $st = 'Error' } }
+        # waehrend der Kopie entstandene Verknuepfung (Zeitfenster zwischen Pruefung und Kopie): melden
+        $post = Find-HMReparseUnder $dst
+        if ($post) { $m += " | ACHTUNG: nach dem Kopieren Verknuepfung gefunden: $post - pruefen (wurde waehrend des Restores angelegt?)"; if ($st -eq 'OK') { $st = 'Warning' } }
         return (& $after $m $st)
     }
     if (-not [System.IO.Directory]::Exists($udSrc)) { return (& $mk 'Skip' 'keine Browser-Profile im Backup') }
@@ -3627,6 +3642,8 @@ function Restore-HMChromiumItem {
                     $xd = @(foreach ($d in @('Sync Data', 'Network', 'Extension State', 'Extensions', 'Local Extension Settings', 'Sync Extension Settings', 'Sync App Settings')) { Join-Path $sDir $d })
                     $rc = Invoke-HMRobocopy -Job $Job -Source $sDir -Dest $dDir -XD $xd -XF $xf -Threads $Ctx.Threads -LogFile $Ctx.RoboLog
                     if ($null -ne $Ctx.RestoredUserDirs) { [void]$Ctx.RestoredUserDirs.Add("$dDirLocal") }
+                    $post = Find-HMReparseUnder $dDir
+                    if ($post) { $lines.Add("ACHTUNG: nach dem Kopieren Verknuepfung gefunden: $post - pruefen (wurde waehrend des Restores angelegt?)"); if ($st -eq 'OK') { $st = 'Warning' } }
                     $bp = Join-Path $dDir 'Bookmarks'
                     $bm = if (Test-HMReparse $bp) { $null } else { Read-HMJsonFileSafe $bp }
                     $txt = ''
@@ -3785,6 +3802,66 @@ function Get-HMUntrustedBackupItems($BackupPath, $Modules) {
     return $out.ToArray()
 }
 
+# Verknuepfungen (Junction/symbolischer Link) im Zielpfad eines Restores ins Benutzerprofil: Robocopy (als Administrator) wuerde
+# dort hindurch schreiben. JEDE Verknuepfung zaehlt, auch mit Ziel innerhalb des Profils - sonst liesse sich die Pruefung mit einer
+# zweiten Verknuepfung (Kette) umgehen (B32). Windows-eigene Verknuepfungen ("Anwendungsdaten", "Eigene Bilder" ...) stoeren nicht:
+# Backups enthalten sie nie (Robocopy /XJ), und geprueft werden nur Ordner, die es im Backup gibt. Laeuft am Ziel-PC (lokal oder per
+# Fernzugriff), folgt keiner Verknuepfung. Rueckgabe: Liste @{ Path; Target; Dir } (Pfade wie am Ziel-PC); Target '?' = nicht lesbar
+$script:HMUnsafeLinkScript = {
+    param([string]$Dst, [string]$Root, [int]$Max = 50, [string[]]$RelDirs = $null)
+    $r = "$Root".TrimEnd('\')
+    # nur Ordner, die es auch im Backup gibt (nur dort schreibt Robocopy hinein); $null = alle
+    $set = $null
+    if ($null -ne $RelDirs) { $set = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase); foreach ($x in $RelDirs) { [void]$set.Add("$x") } }
+    $d0 = "$Dst".TrimEnd('\')
+    $out = New-Object System.Collections.Generic.List[object]
+    $inRoot = { param($t) $t = "$t".TrimEnd('\'); ($t -ieq $r -or $t.StartsWith($r + '\', [StringComparison]::OrdinalIgnoreCase)) }
+    # Ziel nur fuer die Meldung (gewertet wird jede Verknuepfung); immer normalisiert (B33: absolutes Ziel mit '..')
+    $target = {
+        param([string]$p)
+        try {
+            $i = Get-Item -LiteralPath $p -Force -ErrorAction Stop
+            if ("$($i.LinkType)" -notin @('Junction', 'SymbolicLink')) { return $null }   # andere Reparse-Punkte (OneDrive-Platzhalter, Dedup) sind keine Verknuepfung
+            $t = "$(@($i.Target)[0])" -replace '^\\\\\?\\', '' -replace '^\\\?\?\\', ''
+            if (-not $t) { return '?' }
+            if (-not [System.IO.Path]::IsPathRooted($t)) { $t = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($p), $t) }
+            return [System.IO.Path]::GetFullPath($t)
+        } catch { return '?' }
+    }
+    $isRp = { param($a) (([int]$a) -band [int][System.IO.FileAttributes]::ReparsePoint) -ne 0 }
+    # 1. Zielordner selbst und Ordner darueber bis zum Profil
+    $cur = "$Dst".TrimEnd('\')
+    while ($cur -and $cur.Length -gt $r.Length -and (& $inRoot $cur)) {
+        if ([System.IO.Directory]::Exists($cur) -or [System.IO.File]::Exists($cur)) {
+            $a = [System.IO.File]::GetAttributes($cur)
+            if (& $isRp $a) { $t = & $target $cur; if ($null -ne $t) { $out.Add([pscustomobject]@{ Path = $cur; Target = $t; Dir = $true }) } }
+        }
+        $cur = [System.IO.Path]::GetDirectoryName($cur)
+    }
+    if ($out.Count -or -not [System.IO.Directory]::Exists($Dst)) { return $out.ToArray() }
+    # 2. unterhalb des Zielordners (ohne Verknuepfungen zu folgen)
+    $stack = New-Object System.Collections.Generic.Stack[string]
+    $stack.Push($d0)
+    while ($stack.Count -and $out.Count -lt $Max) {
+        $d = $stack.Pop()
+        $items = @(); try { $items = @((New-Object System.IO.DirectoryInfo($d)).GetFileSystemInfos()) } catch { continue }
+        foreach ($i in $items) {
+            $dir = (([int]$i.Attributes) -band [int][System.IO.FileAttributes]::Directory) -ne 0
+            if ($dir -and $null -ne $set -and -not $set.Contains($i.FullName.Substring($d0.Length).TrimStart('\'))) { continue }
+            if (& $isRp $i.Attributes) {
+                $t = & $target $i.FullName
+                if ($null -eq $t) { if ($dir) { $stack.Push($i.FullName) }; continue }
+                $out.Add([pscustomobject]@{ Path = $i.FullName; Target = $t; Dir = $dir })
+                continue
+            }
+            if ($dir) { $stack.Push($i.FullName) }
+        }
+    }
+    return $out.ToArray()
+}
+function Find-HMUnsafeLinks([hashtable]$Ctx, [string]$DstLocal, [string]$RootLocal, [string[]]$RelDirs = $null) {
+    try { return @(Invoke-HMTarget $Ctx $script:HMUnsafeLinkScript @($DstLocal, $RootLocal, 50, $RelDirs)) } catch { return @([pscustomobject]@{ Path = $DstLocal; Target = '?'; Dir = $true; Error = "$($_.Exception.Message)" }) }
+}
 function Restore-HMFolderItem {
     param([hashtable]$Ctx, $Job, $Module, $Item, [hashtable]$TEnv, [string]$SourceOverride, [string]$DestOverride)
     $src = if ($SourceOverride) { $SourceOverride } else { Get-HMRestoreSource $Ctx $Module $Item }
@@ -3812,13 +3889,41 @@ function Restore-HMFolderItem {
         $syncs = @($mf.SyncRoots | Where-Object { $_ -and $_.Rel -and $_.Item -eq "$($Module.Id)/$($Item.Name)" })
         foreach ($s in $syncs) { $xd += (Join-Path $src $s.Rel) }
     }
-    $rc = Invoke-HMRobocopy -Job $Job -Source $src -Dest $dst -Files $files -XD $xd -NoRecurse:$noRec -ExcludeOlder:([bool]$Ctx.Options.KeepNewer) -Threads $Ctx.Threads -LogFile $Ctx.RoboLog
+    # Ziel im Benutzerprofil (Restore als Administrator): nie durch eine Verknuepfung hindurch schreiben
+    $xf = @(); $linkNote = ''; $links = $null; $rel = $null
+    $pRoot = "$($Ctx.ProfilePath)".TrimEnd('\')
+    $dl = "$dstLocal".TrimEnd('\')
+    if (-not $Ctx.UserMode -and $pRoot -and ($dl -ieq $pRoot -or $dl.StartsWith($pRoot + '\', [StringComparison]::OrdinalIgnoreCase))) {
+        # Ordner des Backups (relativ) - nur dort schreibt Robocopy hinein; bei Lesefehler alle pruefen
+        $rel = @()
+        if (-not $noRec) {
+            try { $s0 = $src.TrimEnd('\'); $rel = @([System.IO.Directory]::EnumerateDirectories($s0, '*', [System.IO.SearchOption]::AllDirectories) | ForEach-Object { $_.Substring($s0.Length).TrimStart('\') }) } catch { $rel = $null }
+        }
+        $links = @(Find-HMUnsafeLinks $Ctx $dstLocal $pRoot $rel | Where-Object { $_ })
+        $top = @($links | Where-Object { -not "$($_.Path)".StartsWith($dl + '\', [StringComparison]::OrdinalIgnoreCase) })
+        if ($top.Count) {
+            return [pscustomobject]@{ Name = $Item.Name; Status = 'Error'; Msg = "Verknuepfung im Zielpfad: $($top[0].Path) -> $($top[0].Target)$(if ($top[0].Error) { " (Pruefung nicht moeglich: $($top[0].Error))" }) - aus Sicherheitsgruenden nicht zurueckgespielt. Verknuepfung pruefen/entfernen und Restore fuer dieses Modul wiederholen. Ist es eine gewollte Ordner-Umleitung (z. B. Dokumente auf ein anderes Laufwerk): die Daten von Hand aus dem Backup ($src) nach $($top[0].Target) kopieren" }
+        }
+        foreach ($l in $links) {
+            $lr = "$($l.Path)".Substring($dl.Length).TrimStart('\')
+            if ($l.Dir) { $xd += (Join-Path $src $lr) } else { $xf += (Join-Path $src $lr) }
+        }
+        if ($links.Count) { $linkNote = " | ACHTUNG: $($links.Count) Verknuepfung(en) im Ziel ausgelassen (z.B. $($links[0].Path) -> $($links[0].Target)) - pruefen" }
+    }
+    $rc = Invoke-HMRobocopy -Job $Job -Source $src -Dest $dst -Files $files -XD $xd -XF $xf -NoRecurse:$noRec -ExcludeOlder:([bool]$Ctx.Options.KeepNewer) -Threads $Ctx.Threads -LogFile $Ctx.RoboLog
+    # Nachpruefung: waehrend des Kopierens im Ziel angelegte Verknuepfung? (Robocopy /XJ wirkt nur auf die Quelle)
+    if ($null -ne $links) {
+        $known = @($links | ForEach-Object { "$($_.Path)" })
+        $new = @(Find-HMUnsafeLinks $Ctx $dstLocal $pRoot $rel | Where-Object { $_ -and $known -notcontains "$($_.Path)" })
+        if ($new.Count) { $linkNote += " | ACHTUNG: nach dem Kopieren Verknuepfung im Ziel gefunden: $($new[0].Path) -> $($new[0].Target) (waehrend des Restores angelegt?) - pruefen" }
+    }
     # wiederhergestellte Ordner im Profil des Zielbenutzers merken -> danach Besitzer auf den Benutzer setzen (Repair-HMRestoredOwner)
     if ($null -ne $Ctx.RestoredUserDirs -and $Ctx.ProfilePath -and "$dstLocal".StartsWith("$($Ctx.ProfilePath)".TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { [void]$Ctx.RestoredUserDirs.Add("$dstLocal") }
     $st = switch ($rc.Level) { 'OK' { 'OK' } 'Warning' { 'Warning' } 'Cancel' { 'Cancel' } default { 'Error' } }
     $msg = "{0} Dateien, {1} -> {2}" -f $rc.FilesTotal, (Format-HMSize $rc.BytesTotal), $dstLocal
     if ($Ctx.Options.KeepNewer -and $rc.FilesCopied -lt $rc.FilesTotal) { $msg += " ($($rc.FilesCopied) kopiert, neuere/gleiche am Ziel behalten)" }
     if ($rc.FilesFailed -gt 0) { $msg += ", $($rc.FilesFailed) FEHLGESCHLAGEN (Datei geoeffnet? siehe Robocopy-Log)"; if ($st -ne 'Cancel') { $st = 'Error' } }
+    if ($linkNote) { $msg += $linkNote; if ($st -eq 'OK') { $st = 'Warning' } }
     foreach ($s in $syncs) {
         if (Test-HMCancel $Job) { break }
         $sp = Join-Path $src $s.Rel
@@ -4013,6 +4118,13 @@ function Restore-HMBuiltin {
             foreach ($f in $files) { Copy-Item -LiteralPath $f.FullName -Destination $tmpR -Force }
             $r = Invoke-HMTarget $Ctx {
                 param($t)
+                # ohne WLAN-Adapter (bzw. ohne WLAN-Dienst) lehnt Windows jedes Profil ab -> nur Hinweis
+                $wl = $true
+                try {
+                    if (-not (Get-Service -Name WlanSvc -ErrorAction SilentlyContinue)) { $wl = $false }
+                    elseif (Get-Command Get-NetAdapter -ErrorAction SilentlyContinue) { $wl = [bool]@(Get-NetAdapter -ErrorAction Stop | Where-Object { [int]$_.NdisPhysicalMedium -eq 9 }).Count }
+                } catch { $wl = $true }
+                if (-not $wl) { Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue; return 'NOWLAN|' }
                 $ok = 0; $bad = @()
                 foreach ($f in @(Get-ChildItem -LiteralPath $t -Filter *.xml)) {
                     $null = & netsh.exe wlan add profile "filename=$($f.FullName)" user=all 2>&1
@@ -4022,6 +4134,7 @@ function Restore-HMBuiltin {
                 "$ok|$($bad -join ', ')"
             } @($tmpL)
             $p = "$r".Split('|')
+            if ($p[0] -eq 'NOWLAN') { return (& $res 'Skip' "kein WLAN-Adapter an $($Ctx.Computer) - $($files.Count) WLAN-Profil(e) nicht importiert (liegen im Backup; nach Einbau eines WLAN-Adapters Restore nur mit 'WLAN-Profile' wiederholen)") }
             if ($p[1]) { return (& $res 'Warning' "$($p[0]) Profile importiert, fehlgeschlagen: $($p[1])") }
             return (& $res 'OK' "$($p[0]) Profile importiert")
         }
