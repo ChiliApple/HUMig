@@ -16,16 +16,16 @@
       "Items": [ { "Type": "Builtin", "Handler": "ExtraFolders" } ] },
 
     { "Id": "Edge", "Name": "Edge-Profil", "Group": "Browser", "Default": true, "Scope": "User", "Remote": true, "CloseProcess": [ "msedge" ], "CloseDefault": "Copy",
-      "Hint": "Favoriten, Einstellungen, Erweiterungen. Gespeicherte Kennwoerter/Cookies werden durch Windows-Verschluesselung meist NICHT uebertragen -> Edge-Sync mit dem Microsoft-Konto verwenden.",
+      "Hint": "Backup: komplettes Profil, zusaetzlich Favoriten als HTML und Liste der Erweiterungen. Restore am gleichen PC mit gleichem Konto: alles 1:1. Auf einem anderen PC/nach Neuinstallation: Favoriten werden zusammengefuehrt (Ordner 'Uebernommen von ...'); Kennwoerter/Cookies sind an Windows-Konto und PC gebunden -> Edge-Sync oder Kennwort-Export verwenden.",
       "Items": [
-        { "Type": "Folder", "Name": "EDGE", "Path": "{LOCALAPPDATA}\\Microsoft\\Edge", "XD": [ "*Cache*", "Crashpad", "GrShaderCache", "ShaderCache" ], "Legacy": "EDGE" },
-        { "Type": "Reg", "Name": "EdgePreferenceMACs", "Key": "HKCU\\Software\\Microsoft\\Edge\\PreferenceMACs", "Legacy": "REGBACKUP\\EdgeProfile.reg" }
+        { "Type": "Folder", "Name": "EDGE", "Path": "{LOCALAPPDATA}\\Microsoft\\Edge", "XD": [ "*Cache*", "Crashpad", "GrShaderCache", "ShaderCache" ], "Chromium": "User Data", "Legacy": "EDGE" },
+        { "Type": "Reg", "Name": "EdgePreferenceMACs", "Key": "HKCU\\Software\\Microsoft\\Edge\\PreferenceMACs", "SameMachineOnly": true, "Legacy": "REGBACKUP\\EdgeProfile.reg" }
       ] },
     { "Id": "Chrome", "Name": "Chrome-Profil", "Group": "Browser", "Default": true, "Scope": "User", "Remote": true, "CloseProcess": [ "chrome" ], "CloseDefault": "Copy",
-      "Hint": "Lesezeichen, Einstellungen, Erweiterungen. Kennwoerter/Cookies meist NICHT uebertragbar -> Chrome-Sync verwenden.",
+      "Hint": "Backup: komplettes Profil, zusaetzlich Lesezeichen als HTML und Liste der Erweiterungen. Restore am gleichen PC mit gleichem Konto: alles 1:1. Auf einem anderen PC/nach Neuinstallation: Lesezeichen werden zusammengefuehrt (Ordner 'Uebernommen von ...'); Kennwoerter/Cookies sind an Windows-Konto und PC gebunden -> Chrome-Sync oder Kennwort-Export verwenden.",
       "Items": [
-        { "Type": "Folder", "Name": "CHROME", "Path": "{LOCALAPPDATA}\\Google\\Chrome", "XD": [ "*Cache*", "Crashpad", "GrShaderCache", "ShaderCache" ], "Legacy": "CHROME" },
-        { "Type": "Reg", "Name": "ChromePreferenceMACs", "Key": "HKCU\\Software\\Google\\Chrome\\PreferenceMACs", "Legacy": "REGBACKUP\\ChromeProfile.reg" }
+        { "Type": "Folder", "Name": "CHROME", "Path": "{LOCALAPPDATA}\\Google\\Chrome", "XD": [ "*Cache*", "Crashpad", "GrShaderCache", "ShaderCache" ], "Chromium": "User Data", "Legacy": "CHROME" },
+        { "Type": "Reg", "Name": "ChromePreferenceMACs", "Key": "HKCU\\Software\\Google\\Chrome\\PreferenceMACs", "SameMachineOnly": true, "Legacy": "REGBACKUP\\ChromeProfile.reg" }
       ] },
     { "Id": "Firefox", "Name": "Firefox-Profil", "Group": "Browser", "Default": true, "Scope": "User", "Remote": true, "CloseProcess": [ "firefox" ], "CloseDefault": "Copy",
       "Hint": "Komplettes Firefox-Profil (Lesezeichen, Kennwoerter mit Hauptpasswort, Erweiterungen).",
