@@ -9,6 +9,7 @@
 .NOTES
     Zielmaschine: Hyper-V-Host mit HUMig (Aufruf durch die Aufgabenplanung, als SYSTEM).
     Exitcode: 0 = OK, 1 = Warnung, 2 = Fehler / keine Platte.
+    Auch fuer "Server-Backup im Hintergrund" (einmalige Aufgabe ohne Ausloeser, aus der Oberflaeche gestartet, mit -DiskLabel).
 #>
 param(
     [Parameter(Mandatory)][string]$ProfileName,
@@ -17,7 +18,8 @@ param(
     [switch]$HostConfig,
     [switch]$HostSystem,
     [switch]$NoVerify,
-    [switch]$Explicit               # VMs/Laufwerke genau wie angegeben (leer = keine), sonst leer = aus dem Profil
+    [switch]$Explicit,              # VMs/Laufwerke genau wie angegeben (leer = keine), sonst leer = aus dem Profil
+    [string]$DiskLabel = ''         # nur diese Platte verwenden (Start im Hintergrund aus der Oberflaeche: dort gewaehlte Platte)
 )
 $ErrorActionPreference = 'Stop'
 $root   = Split-Path $PSScriptRoot -Parent
@@ -62,6 +64,8 @@ Write-HMSbLog "Geplantes Server-Backup - Profil '$ProfileName' - Host $env:COMPU
 try {
     foreach ($ab in @(Resolve-HMSbAbortedRuns $localHist $version)) { Write-HMSbLog "Frueherer Lauf: $($ab.Text) - im Verlauf festgehalten und gemeldet" 'Error' }
 } catch { Write-HMSbLog "Pruefung auf abgebrochene Laeufe: $($_.Exception.Message)" 'Warning' }
+# --- erledigte Hintergrund-Aufgaben (Server-Backup im Hintergrund) aufraeumen
+try { foreach ($x in @(Remove-HMSbStaleOnceTasks)) { Write-HMSbLog "Erledigte Hintergrund-Aufgabe entfernt: $x" 'Info' } } catch { }
 
 # --- Profil (auch nach Umbenennung)
 $prof = $null
@@ -77,6 +81,11 @@ try {
     if ($prof) { $ProfileName = $name }
 } catch { }
 if (-not $prof) { Add-HMSbTaskError "Profil '$ProfileName' nicht gefunden (Config\serverbackup.json)"; exit 2 }
+# laeuft dieses Profil schon (Oberflaeche, Hintergrund, anderer Zeitplan)? Dann nicht doppelt
+try {
+    $live = @(Get-HMSbAliveRuns (Split-Path $localHist -Parent) $ProfileName)
+    if ($live.Count) { Add-HMSbTaskError "Profil laeuft bereits (seit $($live[0].Started), $($live[0].Kind), Platte $($live[0].Disk)) - nicht doppelt gestartet"; exit 2 }
+} catch { Write-HMSbLog "Pruefung auf laufende Sicherung: $($_.Exception.Message)" 'Warning' }
 $prefix = "$($prof.DiskPrefix)".Trim()
 if (-not $prefix) { $prefix = 'HUMIG-' + (ConvertTo-HMSbSafeName $ProfileName).ToUpper() }
 
@@ -84,6 +93,12 @@ if (-not $prefix) { $prefix = 'HUMIG-' + (ConvertTo-HMSbSafeName $ProfileName).T
 $dl = Get-HMSbDriveList
 foreach ($m in @($dl.Messages)) { if ($m) { Write-HMSbLog $m 'Warning' } }
 $drives = @(@($dl.Drives) | Where-Object { $_ -and (Test-HMSbLabelMatch "$($_.Label)" $prefix) })
+if ($DiskLabel) {
+    # bestimmte Platte (in der Oberflaeche gewaehlt): nur diese - nie eine andere Platte des Profils
+    if (-not (Test-HMSbDiskLabel $DiskLabel)) { Add-HMSbTaskError "Ungueltige Platten-Bezeichnung '$DiskLabel'"; exit 2 }
+    $drives = @($drives | Where-Object { "$($_.Label)" -ieq $DiskLabel })
+    if (-not $drives.Count) { Add-HMSbTaskError "Platte $DiskLabel ist nicht (mehr) angesteckt oder gehoert nicht zum Profil ($prefix-...)"; exit 2 }
+}
 if (-not $drives.Count) { Add-HMSbTaskError "Keine Platte des Profils angesteckt ($prefix-...)"; exit 2 }
 # Rotations-Platten vor Archiv-Platten (<Prefix>-A<n>)
 $drives = @(@($drives | Where-Object { -not (Test-HMSbArchiveLabel "$($_.Label)" $prefix) }) + @($drives | Where-Object { Test-HMSbArchiveLabel "$($_.Label)" $prefix }))

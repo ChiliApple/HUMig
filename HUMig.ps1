@@ -530,7 +530,11 @@ function Protect-HMAppAll([string]$Root, $Parents = @(), [switch]$Folder) {
 function Confirm-HMAppFolderSafe([string]$What) {
     if (-not $isAdmin -or $script:UserMode) { return $true }
     $root = $script:AppRoot
-    if ($root -like '\\*') { return $true }
+    # HUMig auf einer Netzwerkfreigabe: deren Rechte prueft HUMig nicht - mit hoeheren Rechten (SYSTEM/Administrator) nicht von dort starten
+    if ($root -like '\\*') {
+        [void][System.Windows.MessageBox]::Show($script:Window, "$What wuerde mit hoeheren Rechten direkt von der Netzwerkfreigabe $root laufen.`n`nDie Rechte auf der Freigabe prueft HUMig nicht - wer dort schreiben darf, koennte eigenen Code mit diesen Rechten ausfuehren lassen.`n`nBitte HUMig lokal installieren (z.B. C:\Program Files\HUMig) und von dort planen.", 'HUMig - Netzwerkfreigabe', 'OK', 'Warning')
+        return $false
+    }
     $w = ''; try { $w = Get-HMAppAclFindings $root } catch { return $true }
     $pf = @(); try { $pf = @(Get-HMAppParentFindings $root) } catch { $pf = @() }
     $fix = @($pf | Where-Object { -not $_.Profile })
@@ -1865,6 +1869,10 @@ $ui.btnRestore.Add_Click({
     $mods = @(Get-CheckedModules $script:RestoreChecks)
     if (-not $mods.Count) { Out-Console 'Keine Module gewaehlt.' 'Warning'; return }
     $comp = Get-TargetComputer
+    # Konto des Backups als Ziel vorschlagen, fehlendes lokales Konto anlegen (kann die Auswahl oben aendern)
+    if (-not (Invoke-HMRestoreAccountCheck $b $p $mods $comp)) { Out-Console 'Restore abgebrochen.' 'Warning'; return }
+    $p = Get-SelectedProfile
+    if (-not $p) { Out-Console 'Bitte Zielbenutzer waehlen (oder DOMAENE\Benutzer eintragen).' 'Warning'; return }
     if ($p.NoProfile -and -not @($mods | Where-Object { $_.Id -eq 'Usmt' }).Count -and @($mods | Where-Object { $_.Scope -eq 'User' }).Count) {
         Out-Console "$($p.Account) hat an $comp noch kein Profil: Benutzer einmal anmelden lassen oder 'Windows-Einstellungen (USMT)' mitwaehlen." 'Warning'
         if (-not (Confirm-Action "Ohne Profil werden nur die Computer-Module wiederhergestellt. Fortfahren?")) { return }

@@ -143,6 +143,7 @@ function New-HMSbProfile {
     $n = Show-TextInputDialog -Title 'Neues Sicherungs-Profil' -Label 'Name des Profils (z.B. Schule oder Standort):'
     if (-not "$n".Trim()) { return }
     $n = "$n".Trim()
+    if (-not (Test-HMSbProfileName $n)) { Out-Console "Ungueltiger Profilname '$n' - erlaubt: Buchstaben, Ziffern, Leerzeichen und - _ . ( ) (max. 40 Zeichen)" 'Error'; return }
     $cfg = Get-HMSbConfig
     if (@($cfg.Profiles | Where-Object { $_.Name -eq $n }).Count) { Out-Console "Profil '$n' gibt es bereits" 'Warning'; return }
     $pre = Read-HMSbPrefix ('HUMIG-' + (ConvertTo-HMSbSafeName $n).ToUpper())
@@ -197,6 +198,7 @@ function Edit-HMSbProfile {
     if ($null -eq $n) { return }
     $n = "$n".Trim()
     if (-not $n) { Out-Console 'Name darf nicht leer sein' 'Error'; return }
+    if ($n -ne $p.Name -and -not (Test-HMSbProfileName $n)) { Out-Console "Ungueltiger Profilname '$n' - erlaubt: Buchstaben, Ziffern, Leerzeichen und - _ . ( ) (max. 40 Zeichen)" 'Error'; return }
     if ($n -ne $p.Name -and @($cfg.Profiles | Where-Object { $_.Name -eq $n }).Count) { Out-Console "Profil '$n' gibt es bereits" 'Error'; return }
     $pre = Read-HMSbPrefix $p.DiskPrefix
     if (-not $pre) { return }
@@ -828,7 +830,35 @@ function Start-HMSbBackup {
     }
     $off = @($vms | ForEach-Object { $n = $_; @($script:SbVms | Where-Object { $_.Name -eq $n -and $_.OfflineHint })[0] } | Where-Object { $_ })
     if ($off.Count) { $msg += "`n`nACHTUNG - nur OFFLINE sicherbar (VM wird zu Beginn kurz angehalten):`n" + (@($off | ForEach-Object { "  $($_.Name): $($_.OfflineHint)" }) -join "`n") + "`nTipp: solche VMs ausserhalb der Unterrichtszeit sichern (Zeitplan)." }
-    if (-not (Confirm-Action $msg 'Server-Backup')) { return }
+    # laeuft dieses Profil schon (auch im Hintergrund als SYSTEM)? Dann nicht ein zweites Mal starten
+    if ($p) {
+        $alive = @(); try { $alive = @(Get-HMSbAliveRuns (Split-Path $script:SbHistFile -Parent) $p.Name) } catch { }
+        $tRun = @(); try { $pre = 'Server-Backup - {0} - ' -f (ConvertTo-HMSbTaskPart $p.Name); $tRun = @(Get-ScheduledTask -TaskPath $script:SbTaskPath -ErrorAction Stop | Where-Object { "$($_.TaskName)".StartsWith($pre, [StringComparison]::OrdinalIgnoreCase) -and "$($_.State)" -in @('Running', 'Queued') }) } catch { }
+        if ($alive.Count -or $tRun.Count) {
+            $wer = if ($alive.Count) { "seit $(try { ([datetime]$alive[0].Started).ToString('HH:mm') } catch { '?' }) ($(if ("$($alive[0].Kind)" -eq 'Zeitplan') { 'Zeitplan/Hintergrund, als SYSTEM' } else { 'in HUMig' }), Platte $($alive[0].Disk))" } else { "(Aufgabe $($tRun[0].TaskName))" }
+            Out-Console "Server-Backup '$($p.Name)' laeuft bereits $wer - nicht ein zweites Mal gestartet. Fortschritt: Logs\ServerBackup\Aufgabe_*.log bzw. Verlauf." 'Warning'
+            return
+        }
+    }
+    # im Hintergrund als SYSTEM moeglich? (Abmelden waehrend der Sicherung)
+    $bgWhy = Get-HMSbBackgroundBlock $p $d $exp $pend (@($vms) + @($vols))
+    $bgNote = @(Get-HMSbBackgroundNotes $exp $d)
+    $bg = $false
+    if (-not $bgWhy) {
+        $m2 = $msg + "`n`nWo soll die Sicherung laufen?`nJa = im Hintergrund als SYSTEM - du kannst dich danach abmelden (Fortschritt: Verlauf, Teams, Logs\ServerBackup\Aufgabe_*.log)`nNein = hier in HUMig (Fenster offen und angemeldet lassen)`nAbbrechen = nicht starten"
+        if ($bgNote.Count) { $m2 += "`n`n" + ($bgNote -join "`n") }
+        $a = "$([System.Windows.MessageBox]::Show($script:Window, $m2, 'Server-Backup', 'YesNoCancel', 'Question', 'No'))"
+        if ($a -eq 'Cancel') { return }
+        $bg = ($a -eq 'Yes')
+    } else {
+        if ($p) { $msg += "`n`nIm Hintergrund (mit Abmelden) nicht moeglich: $bgWhy" }
+        if (-not (Confirm-Action $msg 'Server-Backup')) { return }
+    }
+    if ($bg) {
+        if ($p) { Save-HMSbLastProfile $p.Name }
+        Start-HMSbBackgroundRun $p $d $vms $vols $hc $hs ([bool]$ui.chkSbVerify.IsChecked)
+        return
+    }
     # Vorab-Pruefung: laeuft schon eine Sicherung/Wiederherstellung am Host?
     $busy = @(Get-HMSbBusy)
     if ($busy.Count) {
@@ -853,6 +883,122 @@ function Start-HMSbBackup {
         if ($j.Result -and $j.Result.Report) { Out-Console "Berichtsordner: $($j.Result.Report)" 'Info' }
         if ($script:SbAfterRun) { Update-HMSbDrives }
         if ($script:SbArchiveRun) { Out-Console "Archiv-Platte $($script:SbArchiveRun): $(if ($script:SbAfterRun -eq 'Eject') { 'abziehen' } else { 'jetzt ""Auswerfen"", abziehen' }) und getrennt vom Server lagern (nicht angesteckt lassen)." 'Warning' }
+    }
+}
+
+# ----------------------------------------------------------------------------
+# Server-Backup im Hintergrund: einmalige Aufgabe als SYSTEM (wie ein Zeitplan, ohne Ausloeser) - Abmelden moeglich
+# ----------------------------------------------------------------------------
+# Grund, warum es im Hintergrund NICHT geht ('' = geht)
+function Get-HMSbBackgroundBlock($p, $d, $exp, [string]$pend, [string[]]$Names = @()) {
+    if (-not $p) { return 'kein Profil gewaehlt (die Aufgabe liest das gespeicherte Profil)' }
+    if (-not $d) { return 'keine Platte gewaehlt' }
+    if (-not (Test-HMSbLabelMatch "$($d.Label)" $p.DiskPrefix)) { return "die Platte '$($d.Label)' gehoert nicht zum Profil ($($p.DiskPrefix)-...)" }
+    if (-not (Test-HMSbDiskLabel "$($d.Label)")) { return "Platten-Bezeichnung '$($d.Label)' mit Sonderzeichen" }
+    if (-not (Test-HMSbTaskSafeName $p.Name)) { return "Profilname '$($p.Name)' enthaelt Anfuehrungszeichen, |, *, ?, [ oder ] - Profil umbenennen (Bearbeiten ...)" }
+    foreach ($x in @($Names)) { if ("$x" -match '["|]') { return "Name '$x' enthaelt Anfuehrungszeichen oder |" } }
+    if ("$($script:AppRoot)" -like '\\*') { return "HUMig laeuft von einer Netzwerkfreigabe ($($script:AppRoot)) - fuer Laeufe als SYSTEM HUMig lokal installieren (C:\Program Files\HUMig)" }
+    if ($pend -and $p.RebootPendingSkip -eq $true) { return "Neustart ausstehend und im Profil eingestellt: 'bei ausstehendem Neustart nicht sichern' - im Hintergrund wuerde NICHT gesichert" }
+    if ($exp) {
+        $eb = "$(Get-HMSbExportBase $exp.Folder $d.Letter)"
+        if ($eb -match '^([A-Za-z]):' -and $Matches[1] -ine "$($d.Letter)") {
+            $L = $Matches[1].ToUpper()
+            $net = $false; try { $net = ([int](Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${L}:'" -ErrorAction Stop).DriveType -eq 4) } catch { }
+            $sub = $false; try { $sub = [bool](@(cmd.exe /c subst 2>$null) | Where-Object { "$_" -like "${L}:\*" }) } catch { }
+            if ($net -or $sub) { return "VM-Export-Ziel ${L}: ist ein $(if ($net) { 'Netzlaufwerk' } else { 'subst-Laufwerk' }) - das sieht SYSTEM nicht (im Profil einen UNC-Pfad \\server\freigabe eintragen)" }
+        }
+    }
+    return ''
+}
+# Hinweise fuer die Rueckfrage (Zugriff als Computerkonto)
+function Get-HMSbBackgroundNotes($exp, $d) {
+    $out = @()
+    if ($exp) {
+        $eb = "$(Get-HMSbExportBase $exp.Folder $d.Letter)"
+        if ($eb -like '\\*') {
+            $out += "Hinweis: VM-Export nach $eb - im Hintergrund greift das Computerkonto $env:COMPUTERNAME`$ zu (Freigabe- und NTFS-Rechte fuer dieses Konto noetig)."
+            $dom = $true; try { $dom = [bool](Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).PartOfDomain } catch { }
+            if (-not $dom) { $out += "ACHTUNG: Der Server ist in keiner Domaene - das Computerkonto hat auf Freigaben anderer Rechner meist keinen Zugriff. Dann besser 'Nein' (in HUMig)." }
+        }
+    }
+    return $out
+}
+function Start-HMSbBackgroundRun($p, $d, [string[]]$vms, [string[]]$vols, [bool]$hc, [bool]$hs, [bool]$vf) {
+    # laeuft als SYSTEM aus dem HUMig-Ordner: Ordner und Ordner darueber duerfen Nicht-Administratoren nicht aendern/ersetzen
+    if ((Get-Command Confirm-HMAppFolderSafe -ErrorAction SilentlyContinue) -and -not (Confirm-HMAppFolderSafe 'Das Server-Backup im Hintergrund (als SYSTEM)')) { return }
+    try { foreach ($x in @(Remove-HMSbStaleOnceTasks)) { Out-Console "Erledigte Hintergrund-Aufgabe entfernt: $x" 'Info' } } catch { }
+    $now = Get-Date
+    $base = 'Server-Backup - {0} - {1} {2}' -f (ConvertTo-HMSbTaskPart $p.Name), $script:SbOnceWord, $now.ToString('dd.MM.yyyy HH-mm')
+    $name = $base; $i = 2
+    while (Get-ScheduledTask -TaskPath $script:SbTaskPath -TaskName $name -ErrorAction SilentlyContinue) { $name = "$base ($i)"; $i++ }
+    $arg = Get-HMSbTaskArgument (Join-Path $script:AppRoot 'Functions\ServerBackup-Task.ps1') $p.Name $vms $vols $hc $hs $vf "$($d.Label)"
+    try {
+        $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument $arg -WorkingDirectory $script:AppRoot
+        # ohne Ausloeser (startet nie von selbst, kein zweiter Lauf), kein StartWhenAvailable, langes Zeitlimit (Sicherung + Export + Pruefen)
+        $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 72) -MultipleInstances IgnoreNew
+        $pr = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $desc = "HUMig Server-Backup im Hintergrund (einmalig, ohne Ausloeser), Profil $($p.Name), Platte $($d.Label), gestartet von $env:USERDOMAIN\$env:USERNAME. Wird nach dem Lauf von HUMig entfernt."
+        Register-ScheduledTask -TaskName $name -TaskPath $script:SbTaskPath -Action $a -Principal $pr -Settings $s -Description $desc -ErrorAction Stop | Out-Null
+    } catch { Out-Console "Server-Backup im Hintergrund: Aufgabe nicht angelegt ($($_.Exception.Message)) - bitte erneut starten und 'Nein' (in HUMig) waehlen." 'Error'; return }
+    try { Start-ScheduledTask -TaskPath $script:SbTaskPath -TaskName $name -ErrorAction Stop }
+    catch {
+        Out-Console "Server-Backup im Hintergrund: Start nicht moeglich ($($_.Exception.Message)) - bitte erneut starten und 'Nein' (in HUMig) waehlen." 'Error'
+        try { Unregister-ScheduledTask -TaskPath $script:SbTaskPath -TaskName $name -Confirm:$false -ErrorAction Stop } catch { }
+        return
+    }
+    Out-Console "Server-Backup '$($p.Name)' im Hintergrund gestartet (Aufgabe \HUMig\$name, als SYSTEM, Platte $($d.Label)) - HUMig prueft bis zu 60 s, ob die Sicherung anlaeuft ..." 'Success'
+    Watch-HMSbBackgroundRun $p.Name $name $now
+    Update-HMSbSchedules
+}
+# Rueckmeldung: laeuft die Sicherung wirklich an (Laufend-Markierung) oder endet die Aufgabe vorher (keine Platte, Neustart-Sperre, Fehler)?
+function Watch-HMSbBackgroundRun([string]$ProfileName, [string]$TaskName, [datetime]$Since) {
+    $dir = Split-Path $script:SbHistFile -Parent
+    $flt = "$($script:SbRunMarkerPrefix)$(ConvertTo-HMSbSafeName $ProfileName)_*.json"
+    $logPat = 'Aufgabe_*_{0}.log' -f ($ProfileName -replace '[^\w\-]', '_')
+    Invoke-AsyncCommand -ScriptBlock {
+        param($tp, $tn, $dir, $flt, $prof, $since, $repDir, $logPat)
+        $end = (Get-Date).AddSeconds(60); $st = ''; $res = $null
+        while ((Get-Date) -lt $end) {
+            foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter $flt -File -ErrorAction SilentlyContinue)) {
+                $m = $null; try { $m = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8 | ConvertFrom-Json } catch { continue }
+                if (-not $m -or "$($m.Profile)" -ne $prof -or "$($m.Kind)" -ne 'Zeitplan') { continue }
+                $t0 = $null; try { $t0 = [datetime]$m.Started } catch { }
+                if ($t0 -and $t0 -ge $since.AddMinutes(-1)) { return [pscustomobject]@{ State = 'Running'; Disk = "$($m.Disk)" } }
+            }
+            $t = $null; try { $t = Get-ScheduledTask -TaskPath $tp -TaskName $tn -ErrorAction Stop } catch { }
+            $i = $null; try { $i = Get-ScheduledTaskInfo -TaskPath $tp -TaskName $tn -ErrorAction Stop } catch { }
+            $st = if ($t) { "$($t.State)" } else { 'fehlt' }
+            $res = if ($i) { [int64]$i.LastTaskResult } else { $null }
+            # beendet (nicht laufend, schon gestartet, Ergebnis kein "laeuft"/"noch nie gelaufen") ohne Markierung
+            if ($t -and $st -notin @('Running', 'Queued') -and $i -and $i.LastRunTime -and $i.LastRunTime.Year -gt 2000 -and $res -notin @(267009, 267011)) {
+                $log = @(Get-ChildItem -LiteralPath $repDir -Filter $logPat -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $since.AddMinutes(-1) } | Sort-Object LastWriteTime -Descending)[0]
+                $lines = @(); if ($log) { try { $lines = @(Get-Content -LiteralPath $log.FullName -Tail 8 -Encoding UTF8) } catch { } }
+                return [pscustomobject]@{ State = 'Ended'; Result = $res; Log = $(if ($log) { $log.FullName } else { '' }); Lines = $lines }
+            }
+            Start-Sleep -Seconds 3
+        }
+        return [pscustomobject]@{ State = 'Unknown'; TaskState = $st; Result = $res }
+    } -ArgumentList @($script:SbTaskPath, $TaskName, $dir, $flt, $ProfileName, $Since, $script:SbReportDir, $logPat) -TimeoutSec 90 -State @{ P = $ProfileName; T = $TaskName } -OnComplete {
+        param($r, $s)
+        if (-not $r -or $r -is [string]) { Out-Console "Server-Backup im Hintergrund: Rueckmeldung nicht moeglich ($r) - Stand im Verlauf bzw. in Logs\ServerBackup\Aufgabe_*.log ansehen." 'Warning'; return }
+        switch ("$($r.State)") {
+            'Running' { Out-Console "Server-Backup '$($s.P)' laeuft im Hintergrund (SYSTEM, Platte $($r.Disk)) - du kannst dich jetzt abmelden. Ergebnis: Verlauf, Teams (falls eingerichtet), Logs\ServerBackup\Aufgabe_*.log" 'Success' }
+            'Ended' {
+                $rt = switch ([int64]$r.Result) { 0 { 'OK' } 1 { 'Warnung' } 2 { 'Fehler' } default { '0x{0:X}' -f [int64]$r.Result } }
+                if ([int64]$r.Result -in @(0, 1)) { Out-Console "Server-Backup '$($s.P)' im Hintergrund ist bereits fertig ($rt) - siehe Verlauf." 'Success' }
+                else {
+                    Out-Console "Server-Backup '$($s.P)' im Hintergrund ist sofort beendet ($rt) - die Sicherung lief NICHT:" 'Error'
+                    foreach ($ln in @($r.Lines)) { if ("$ln".Trim()) { Out-Console "   $ln" 'Info' } }
+                    if ($r.Log) { Out-Console "   Protokoll: $($r.Log)" 'Info' }
+                }
+                try { if ($script:SbInit) { Update-HMSbHistory } } catch { }
+            }
+            default {
+                if ("$($r.TaskState)" -in @('Running', 'Queued')) { Out-Console "Server-Backup '$($s.P)': die Aufgabe laeuft, die Sicherung hat aber nach 60 s noch nicht begonnen (wartet z.B. auf einen anderen Sicherungsvorgang). Fortschritt: Logs\ServerBackup\Aufgabe_*.log" 'Warning' }
+                else { Out-Console "Server-Backup '$($s.P)' im Hintergrund: Stand unklar (Aufgabe: $($r.TaskState)) - Aufgabenplanung \HUMig\$($s.T) und Verlauf pruefen." 'Warning' }
+            }
+        }
+        try { Update-HMSbSchedules } catch { }
     }
 }
 
@@ -1451,14 +1597,15 @@ function New-HMSbSchedule {
     $vols = @(Get-HMSbCheckedVols)
     $hc = [bool]$ui.chkSbHostConfig.IsChecked; $hs = [bool]$ui.chkSbHostSystem.IsChecked; $vf = [bool]$ui.chkSbVerify.IsChecked
     if (-not $vms.Count -and -not $vols.Count -and -not $hs -and -not $hc) { Out-Console 'Zeitplan: nichts gewaehlt (VMs, Laufwerke, Host-Konfiguration oder System).' 'Warning'; return }
-    foreach ($x in @($p.Name) + $vms) { if ("$x" -match '["|]') { Out-Console "Zeitplan: Name '$x' enthaelt ein nicht erlaubtes Zeichen (Anfuehrungszeichen oder |)." 'Error'; return } }
+    if (-not (Test-HMSbTaskSafeName $p.Name)) { Out-Console "Zeitplan: Profilname '$($p.Name)' enthaelt ein nicht erlaubtes Zeichen (Anfuehrungszeichen, |, *, ?, [ oder ]) - Profil umbenennen (Bearbeiten ...)." 'Error'; return }
+    foreach ($x in $vms) { if ("$x" -match '["|]') { Out-Console "Zeitplan: Name '$x' enthaelt ein nicht erlaubtes Zeichen (Anfuehrungszeichen oder |)." 'Error'; return } }
     $info = "Profil: $($p.Name)   (Platten $($p.DiskPrefix)-...)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })   Pruefen: $(if ($vf) { 'ja' } else { 'nein' })   Host-System: $(if ($hs) { 'ja' } else { 'nein' })`n`nEs gelten die aktuell angehakten VMs und Optionen.$(if (Get-HMSbExportOptions $p) { "`nNach der Sicherung: VM-Export $(@($p.ExportVMs) -join ', ') (Einstellung im Profil - gilt beim Lauf, Button 'VMs exportieren ...')" })"
     if ($hs) { $sv = Format-HMSbSysDriveVms (Get-HMSbSysDriveVms $script:SbVms); if ($sv) { $info += "`n`n$sv" } }
     $r = Show-HMSbScheduleDialog $info
     if (-not $r) { return }
     # andere Sicherungsaufgaben, die sich ueberschneiden (naechste 14 Tage)
     try {
-        $own = 'Server-Backup - {0} - ' -f ($p.Name -replace '[\\/:*?"<>|]', '_')
+        $own = 'Server-Backup - {0} - ' -f (ConvertTo-HMSbTaskPart $p.Name)
         $avg = 360.0
         try { $ah = Get-HMSbAllHistory; $okr = @(@($ah) | Where-Object { "$($_.Profile)" -eq $p.Name -and "$($_.Status)" -ne 'Error' -and [double]$_.Minutes -gt 0 }); if ($okr.Count) { $avg = [double](@($okr | ForEach-Object { [double]$_.Minutes }) | Measure-Object -Maximum).Maximum } } catch { }
         $cf = Get-HMSbConflicts $r $own $avg
@@ -1472,14 +1619,7 @@ function New-HMSbSchedule {
     } catch { Out-Console "Pruefung auf andere Sicherungsaufgaben nicht moeglich: $($_.Exception.Message)" 'Warning' }
     # laeuft als SYSTEM aus dem HUMig-Ordner: Ordner und Ordner darueber duerfen Nicht-Administratoren nicht aendern/ersetzen
     if ((Get-Command Confirm-HMAppFolderSafe -ErrorAction SilentlyContinue) -and -not (Confirm-HMAppFolderSafe 'Das Server-Backup (als SYSTEM)')) { return }
-    $task = Join-Path $script:AppRoot 'Functions\ServerBackup-Task.ps1'
-    $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$task`" -ProfileName `"$($p.Name)`""
-    if ($vms.Count) { $arg += " -VMs `"$($vms -join '|')`"" }
-    if ($vols.Count) { $arg += " -Volumes `"$($vols -join '|')`"" }
-    if ($hc) { $arg += ' -HostConfig' }
-    if ($hs) { $arg += ' -HostSystem' }
-    if (-not $vf) { $arg += ' -NoVerify' }
-    $arg += ' -Explicit'
+    $arg = Get-HMSbTaskArgument (Join-Path $script:AppRoot 'Functions\ServerBackup-Task.ps1') $p.Name $vms $vols $hc $hs $vf
     $dayNames = @{ Monday = 'Mo'; Tuesday = 'Di'; Wednesday = 'Mi'; Thursday = 'Do'; Friday = 'Fr'; Saturday = 'Sa'; Sunday = 'So' }
     try {
         $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument $arg -WorkingDirectory $script:AppRoot
@@ -1495,7 +1635,7 @@ function New-HMSbSchedule {
             default { $t = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $r.Days -At $r.At; $when = (@($r.Days | ForEach-Object { $dayNames[$_] }) -join ',') + ' ' + $r.At.ToString('HH-mm') }
         }
         $pr = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-        $base = ('Server-Backup - {0} - {1}' -f ($p.Name -replace '[\\/:*?"<>|]', '_'), $when)
+        $base = ('Server-Backup - {0} - {1}' -f (ConvertTo-HMSbTaskPart $p.Name), $when)
         $name = $base; $i = 2
         while (Get-ScheduledTask -TaskPath $script:SbTaskPath -TaskName $name -ErrorAction SilentlyContinue) { $name = "$base ($i)"; $i++ }
         $desc = "HUMig Server-Backup, Profil $($p.Name), VMs: $(if ($vms.Count) { $vms -join ', ' } else { '-' }). Verwalten: HUMig > Server-Backup > Zeitplan (Rechtsklick)."
@@ -1508,7 +1648,7 @@ function Get-HMSbScheduleRows {
     $rows = @()
     foreach ($t in @(Get-ScheduledTask -TaskPath $script:SbTaskPath -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'Server-Backup*' })) {
         $i = $null; try { $i = Get-ScheduledTaskInfo -TaskPath $t.TaskPath -TaskName $t.TaskName -ErrorAction Stop } catch { }
-        $next = if ($i -and $i.NextRunTime) { $i.NextRunTime.ToString('dd.MM.yyyy HH:mm') } else { '' }
+        $next = if ($i -and $i.NextRunTime) { $i.NextRunTime.ToString('dd.MM.yyyy HH:mm') } elseif ($null -ne (Get-HMSbOnceTaskTime "$($t.TaskName)")) { 'im Hintergrund (einmalig)' } else { '' }
         $last = if ($i -and $i.LastRunTime -and $i.LastRunTime.Year -gt 2000) { $i.LastRunTime.ToString('dd.MM.yyyy HH:mm') } else { '' }
         $res = ''
         if ($last) { $res = switch ([int64]$i.LastTaskResult) { 0 { 'OK' } 1 { 'Warnung' } 2 { 'Fehler' } 267009 { 'laeuft' } default { '0x{0:X}' -f [int64]$i.LastTaskResult } } }
@@ -1521,7 +1661,8 @@ function Update-HMSbSchedules {
         $rows = Get-HMSbScheduleRows
         $rows = @($rows)
         $p = Get-HMSbProfile
-        $mine = @($rows | Where-Object { -not $p -or $_.Name -like "Server-Backup - $($p.Name -replace '[\\/:*?"<>|]', '_') - *" })
+        $pre = if ($p) { 'Server-Backup - {0} - ' -f (ConvertTo-HMSbTaskPart $p.Name) } else { '' }
+        $mine = @($rows | Where-Object { -not $p -or "$($_.Name)".StartsWith($pre, [StringComparison]::OrdinalIgnoreCase) })
         if ($mine.Count) {
             $ui.lblSbSchedule.Text = 'Geplant: ' + (@($mine | ForEach-Object { "$(($_.Name -split ' - ', 3)[-1])$(if ($_.Next) { " (naechster Lauf $($_.Next))" })$(if ($_.Result) { " letzter: $($_.Result)" })" }) -join '   |   ')
         } else { $ui.lblSbSchedule.Text = 'Kein Zeitplan fuer dieses Profil (Button Zeitplan ...)' }
@@ -1623,13 +1764,30 @@ function Initialize-HMServerBackupTab {
     try { [void]$script:Window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::ApplicationIdle, [action]{ try { Invoke-HMSbAbortCheck } catch { } }) } catch { }
 }
 # Abgebrochene Laeufe (Markierung laufend_*.json ohne laufenden Vorgang): Verlauf, Abbruch.txt, Ereignisanzeige, Teams
+# Dazu: Laeufe, die gerade im Hintergrund (als SYSTEM) laufen, anzeigen und erledigte Hintergrund-Aufgaben entfernen
 function Invoke-HMSbAbortCheck {
     $dir = Split-Path $script:SbHistFile -Parent
-    if (-not @(Get-ChildItem -LiteralPath $dir -Filter "$($script:SbRunMarkerPrefix)*.json" -File -ErrorAction SilentlyContinue).Count) { return }
-    Invoke-AsyncCommand -ScriptBlock { param($eng, $nf, $hist, $ver) . $eng; . $nf; Resolve-HMSbAbortedRuns $hist $ver } -ArgumentList @($script:SbEngine, (Join-Path $script:AppRoot 'Functions\Core-Notify.ps1'), $script:SbHistFile, $script:Version) -TimeoutSec 120 -OnComplete {
+    $any = [bool]@(Get-ChildItem -LiteralPath $dir -Filter "$($script:SbRunMarkerPrefix)*.json" -File -ErrorAction SilentlyContinue).Count
+    Invoke-AsyncCommand -ScriptBlock {
+        param($eng, $nf, $hist, $ver, $any)
+        . $eng; . $nf
+        $ab = @(); $run = @(); $rm = @()
+        if ($any) {
+            $ab = @(Resolve-HMSbAbortedRuns $hist $ver)
+            $run = @(Get-HMSbAliveRuns (Split-Path $hist -Parent) | Where-Object { [int]$_.Pid -ne $PID })
+        }
+        try { $rm = @(Remove-HMSbStaleOnceTasks) } catch { }
+        [pscustomobject]@{ Aborted = $ab; Running = $run; Removed = $rm }
+    } -ArgumentList @($script:SbEngine, (Join-Path $script:AppRoot 'Functions\Core-Notify.ps1'), $script:SbHistFile, $script:Version, $any) -TimeoutSec 120 -OnComplete {
         param($r)
-        $l = @($r | Where-Object { $_ -and $_.Text })
+        if (-not $r -or $r -is [string]) { return }
+        $l = @(@($r.Aborted) | Where-Object { $_ -and $_.Text })
         foreach ($x in $l) { Out-Console "$($x.Text) - im Verlauf festgehalten und (falls eingerichtet) per Teams gemeldet" 'Error' }
+        foreach ($x in @(@($r.Running) | Where-Object { $_ })) {
+            $t0 = ''; try { $t0 = ([datetime]$x.Started).ToString('dd.MM. HH:mm') } catch { }
+            Out-Console "Server-Backup '$($x.Profile)' laeuft gerade $(if ("$($x.Kind)" -eq 'Zeitplan') { 'im Hintergrund (als SYSTEM)' } else { 'in einer anderen HUMig-Sitzung' }) - seit $t0, Platte $($x.Disk). Fortschritt: Logs\ServerBackup\Aufgabe_*.log" 'Info'
+        }
+        foreach ($x in @(@($r.Removed) | Where-Object { $_ })) { Out-Console "Erledigte Hintergrund-Aufgabe entfernt: $x" 'Info' }
         if ($l.Count) { try { if ($script:SbInit) { Update-HMSbHistory } } catch { } }
     }
 }
