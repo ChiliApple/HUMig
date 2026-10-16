@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## v2.1.14 - 2026-10-16
+### App-Updates
+- **"liess sich nicht beenden" trotz erfolgreichem Beenden behoben** (Praxistest 2.1.13): die Protokollzeilen des Beenden-Schritts zaehlten faelschlich als noch laufende Prozesse - das Update wurde uebersprungen und die Zeilen fehlten im Log
+- **Neustart-Liste repariert (Codepruefung B58):** musste ein Paket ersatzweise im Benutzerkonto installiert werden (z. B. WSL), wurden vorher beendete Programme und gestoppte Dienste nicht mehr neu gestartet - ohne Fehlermeldung
+- **Store-/MSIX-Apps (Codepruefung B57):** die .NET Desktop Runtime wird wieder dem Eintrag "Microsoft Windows Desktop Runtime" zugeordnet und fuer alle Benutzer aktualisiert; scheitert ein Paket im Benutzerkonto mit einem internen WinGet-Fehler (meist Store-Apps), versucht HUMig es einmal fuer alle Benutzer als SYSTEM; die Meldung nennt jetzt den Store-Hintergrund
+- **App Installer wird nie ueber App-Updates aktualisiert** (auch nicht im Zeitplan): sein Update tauscht winget mitten im Lauf aus - er aktualisiert sich selbst ueber den Microsoft Store
+- Ordner namens WindowsApps gelten nie als Programmordner (Ergaenzung zu B54, auch AppData\Local\Microsoft\WindowsApps)
+
 ## v2.1.13 - 2026-10-16
 ### App-Updates
 - **Laufende Programme an anderen PCs:** vor dem Aktualisieren prueft HUMig auch an entfernten PCs, ob ein Programm laeuft, und fragt je Programm: *Beenden, danach neu starten* (hart beendet - aus der Ferne laesst sich kein Fenster schliessen; Dienste werden gestoppt; danach startet HUMig beides wieder, Programme im Konto des Benutzers, falls noch angemeldet), *Nicht aktualisieren* oder *Trotzdem aktualisieren*. Laesst sich ein Programm nicht beenden, wird es nicht aktualisiert. Bisher lief der Installer trotzdem und brach z. B. bei Greenshot ab - teils mit halb entferntem Programm

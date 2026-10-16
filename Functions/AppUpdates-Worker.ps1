@@ -22,7 +22,7 @@ function Get-WScopeMap {
 }
 function ConvertTo-WKey([string]$n) {
     # Vergleichsschluessel: ohne Klammerzusaetze (Sprache, Architektur), Versionsnummern und Sonderzeichen
-    $k = ("$n" -replace '\([^)]*\)', ' ' -replace '\b(x64|x86|64-bit|32-bit|amd64|arm64)\b', ' ' -replace '\b\d+(\.\d+)+\b', ' ').ToLower()
+    $k = ("$n" -replace '(?i)(^|\s)\.NET(\s|$)', ' ' -replace '\([^)]*\)', ' ' -replace '\b(x64|x86|64-bit|32-bit|amd64|arm64)\b', ' ' -replace '\b\d+(\.\d+)+\b', ' ').ToLower()
     return ($k -replace '[^a-z0-9]', '')
 }
 function Get-WScope($Map, [string]$Name) {

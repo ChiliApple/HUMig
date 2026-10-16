@@ -430,6 +430,12 @@ try {
                 $iid = "$($it.Id)"
                 # Paket-ID und Quelle kommen aus der Liste (gelesen im Benutzerkonto) und gehen an winget.exe als SYSTEM:
                 # nur unauffaellige Zeichen zulassen (keine Leerzeichen/Anfuehrungszeichen, die weitere Argumente erzeugen koennten)
+                if ($iid -ieq 'Microsoft.AppInstaller') {
+                    $res += [pscustomobject]@{ Id = $iid; Status = 'Skipped'; Code = 0; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = 'uebersprungen - App Installer tauscht winget waehrend des Laufs aus; er aktualisiert sich ueber den Microsoft Store' }
+                    Out-L "App Installer: wird ueber App-Updates nicht aktualisiert (tauscht winget waehrend des Laufs aus) - aktualisiert sich ueber den Microsoft Store"
+                    Out-L "#DONE|$iid|Skipped|0|0|0|False"
+                    continue
+                }
                 if ($iid -notmatch '^[^\s\-"][^\s"]{0,254}\z' -or "$($it.Source)" -notmatch '^(?=.{1,64}\z)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?\z') {
                     $res += [pscustomobject]@{ Id = $iid; Status = 'Exception'; Code = 0; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = 'ungueltige Paket-ID oder Quelle - nicht ausgefuehrt' }
                     Out-L "ungueltige Paket-ID '$iid' bzw. Quelle '$($it.Source)' - nicht ausgefuehrt"
@@ -481,12 +487,12 @@ try {
             if ($Op -eq 'Update' -and $res.Count) {
                 $nf = @($res | Where-Object { "$($_.Status)" -eq 'Cli' -and "$($_.Code)" -eq '-1978335212' })
                 if ($nf.Count) {
-                    $rs = Get-TUserSid
-                    if ($rs) {
+                    $rsid = Get-TUserSid
+                    if ($rsid) {
                         $ids = @($nf | ForEach-Object { "$($_.Id)" })
                         $res = @($res | Where-Object { $ids -notcontains "$($_.Id)" })
                         $usr = @($usr) + @($mach | Where-Object { $ids -contains "$($_.Id)" })
-                        if (-not $usid -or @(Get-TLoggedOnSids) -notcontains $usid) { $usid = $rs }
+                        if (-not $usid -or @(Get-TLoggedOnSids) -notcontains $usid) { $usid = $rsid }
                         Out-L "$($ids.Count) Programm(e) als SYSTEM nicht gefunden - neuer Versuch im Benutzerkonto $(Get-TAccount $usid) ..."
                     }
                 }
@@ -515,6 +521,18 @@ try {
                         $got += "$($script:TTimedOut)"
                         $todo = @($todo | Where-Object { $got -notcontains "$($_.Id)" })
                     }
+                }
+            }
+            # interner WinGet-Fehler im Benutzerkonto (meist Store-/MSIX-Apps): einmal fuer alle Benutzer als SYSTEM versuchen (B57)
+            if ($Op -eq 'Update') {
+                $ie = @($res | Where-Object { "$($_.Status)" -eq 'InternalError' })
+                if ($ie.Count) {
+                    $ids2 = @($ie | ForEach-Object { "$($_.Id)" })
+                    Out-L "$($ids2.Count) Programm(e) im Benutzerkonto gescheitert (interner WinGet-Fehler, meist Store-Apps) - neuer Versuch fuer alle Benutzer (als SYSTEM) ..."
+                    $res = @($res | Where-Object { $ids2 -notcontains "$($_.Id)" })
+                    $retry = @($all | Where-Object { $ids2 -contains "$($_.Id)" })
+                    Invoke-TTask 'SYSTEM' @{ Mode = 'Update'; Cli = $true; Items = @($retry | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) } $false 10800
+                    if ($script:TRes) { $res += @($script:TRes.Results) }
                 }
             }
             if ($rs.Services.Count -or $rs.Apps.Count) { Restart-TStopped $rs }
