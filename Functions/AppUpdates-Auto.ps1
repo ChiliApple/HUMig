@@ -128,6 +128,7 @@ try {
             foreach ($p in @(Get-WinGetPackage -Source "$src" -ErrorAction Stop | Where-Object { $_.IsUpdateAvailable })) {
                 if ($seen.ContainsKey("$($p.Id)")) { continue }
                 $seen["$($p.Id)"] = $true
+                if ("$($p.Id)" -ieq 'Microsoft.AppInstaller') { Write-ALog 'App Installer: wird im Zeitplan nicht aktualisiert (tauscht winget waehrend des Laufs aus) - aktualisiert sich ueber den Microsoft Store'; continue }
                 $found++
                 $ex = @($cfg.Exclude | Where-Object { $_ -and "$($_.Pattern)".Trim() -and $(try { "$($p.Id)" -like "$($_.Pattern)".Trim() -or "$($p.Name)" -like "$($_.Pattern)".Trim() } catch { "$($p.Id)" -eq "$($_.Pattern)".Trim() -or "$($p.Name)" -eq "$($_.Pattern)".Trim() }) })[0]
                 if ($ex) { $excl++; Write-ALog "Ausnahme: $($p.Name) ($($ex.Pattern))"; continue }

@@ -3383,3 +3383,35 @@ Describe '2.1.13: laufende Programme bei App-Updates, WinGet-Codes, Fernsitzung'
         Get-ARunningText 'Programm das es sicher nicht gibt 4711' | Should -Be ''
     }
 }
+Describe '2.1.14: Hotfix Beenden/Neustart, Store-Apps (B57), Neustart-Liste (B58)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1')
+        $script:FnFrom14 = {
+            param([string]$File, [string[]]$Names)
+            $tk = $null; $er = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root $File), [ref]$tk, [ref]$er)
+            foreach ($n in $Names) {
+                $f = $ast.Find({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true)
+                if ($f) { $f.Extent.Text }
+            }
+        }
+    }
+    It '.NET-Runtime wird dem Registry-Eintrag "Microsoft Windows Desktop Runtime" zugeordnet (B57)' {
+        . ([scriptblock]::Create((@(& $script:FnFrom14 'Functions\AppUpdates-Worker.ps1' @('ConvertTo-WKey', 'Get-WScope')) -join "`n")))
+        $map = @{ Machine = @('Microsoft Windows Desktop Runtime - 8.0.16 (x64)'); User = @() }
+        Get-WScope $map 'Microsoft .NET Windows Desktop Runtime 8.0' | Should -Be 'Machine'
+        Get-WScope $map 'Windows Terminal' | Should -Be 'User'
+        (ConvertTo-WKey 'ASP.NET Core Runtime') | Should -Match 'asp'
+    }
+    It 'B58: Neustart-Liste wird nicht mehr ueberschrieben; App Installer wird ausgelassen; SYSTEM-Wiederholung vorhanden' {
+        $tx = Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw
+        $tx | Should -Not -Match '\$rs = Get-TUserSid'
+        $tx | Should -Match '\$rsid = Get-TUserSid'
+        $tx | Should -Match "-ieq 'Microsoft.AppInstaller'"
+        $tx | Should -Match ([regex]::Escape("-eq 'InternalError' }"))
+        (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Auto.ps1') -Raw) | Should -Match "Microsoft.AppInstaller"
+    }
+    It 'interner WinGet-Fehler nennt Store-Apps und den SYSTEM-Versuch' {
+        Format-HMAuResult 'InternalError' 0 0 $false | Should -Match 'Store-App.*SYSTEM'
+    }
+}

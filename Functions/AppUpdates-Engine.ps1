@@ -41,7 +41,7 @@ function Format-HMAuResult([string]$Status, $InstallerCode, $ExtendedCode, [bool
         'CatalogError' { 'Quelle nicht erreichbar' }
         'PackageAgreementsNotAccepted' { 'Lizenzvereinbarung nicht angenommen' }
         'InvalidOptions' { 'ungueltige Optionen' }
-        'InternalError' { 'interner WinGet-Fehler' }
+        'InternalError' { 'interner WinGet-Fehler - bei einer Store-App (MSIX) ueber den Microsoft Store aktualisieren; HUMig versucht es am Ziel-PC einmal als SYSTEM erneut' }
         default { "$Status" }
     }
     $code = 0; try { $code = [int64]$InstallerCode } catch { }
@@ -741,8 +741,8 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
             $c = $null
             if ($p.Count -ge 7) {
                 if ($p[2] -in @('Excluded', 'Skipped')) {
-                    # Ausnahme am Ziel-PC (vor dem Update erneut geprueft) bzw. laufendes Programm liess sich nicht beenden: wie uebersprungen anzeigen
-                    Write-HMLog $st.Job "  $pre$($x.Name): $(if ($p[2] -eq 'Skipped') { 'liess sich nicht beenden - nicht aktualisiert' } else { 'Ausnahme - nicht aktualisiert' })" 'Warning'
+                    # Ausnahme bzw. uebersprungen (Grund stand gerade als Zeile vom Ziel-PC, z. B. "liess sich nicht beenden" oder App Installer)
+                    if ($p[2] -eq 'Excluded') { Write-HMLog $st.Job "  $pre$($x.Name): Ausnahme - nicht aktualisiert" 'Warning' }
                     $st.Logged["$pc|$($p[1])"] = $true
                     return
                 }
