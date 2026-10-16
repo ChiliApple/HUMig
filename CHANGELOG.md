@@ -6,7 +6,8 @@
 - **Lebenszeichen ueber die Fernsitzung:** waehrend langer Wartezeiten am Ziel-PC schickt HUMig alle 60 s eine stille Zeile, damit WinRM/Firewalls die Verbindung nicht als tot abraeumen
 - **Bereich unbekannter Pakete:** Programme ohne erkennbaren Deinstallations-Eintrag laufen zuerst fuer alle Benutzer (als SYSTEM) und wandern erst ins Benutzerkonto, wenn WinGet sie dort nicht findet - maschinenweite Installer unter anderem Namen (Visual C++ "v14" vs. "2015-2022", ASP.NET Core; Codepruefung B61) warteten sonst im Benutzerkonto 15 min auf eine UAC-Bestaetigung
 - Store-Apps, die weder fuer alle Benutzer gefunden noch im Benutzerkonto aktualisiert werden koennen, melden das als Store-App statt "nicht gefunden" (Codepruefung B60, in beide Richtungen - z. B. GeoGebra Classic, neues Outlook); kein zweiter SYSTEM-Versuch fuer Pakete, die schon aus dem SYSTEM-Lauf kamen
-- WinGet-Code 0x8A15005C (Archiv des Installers nicht entpackbar, z. B. paint.net) und 005B/005E auf Deutsch
+- WinGet-Code 0x8A15005C (Archiv des Installers nicht entpackbar, z. B. paint.net) und 005B/005E auf Deutsch - auch im Zeitplan (Codepruefung B66)
+- Laeuft ein Programm im selben Lauf ein zweites Mal (z. B. nach dem SYSTEM-Versuch im Benutzerkonto), gilt bei einem Verbindungsabbruch nicht mehr das ueberholte erste Ergebnis (Codepruefung B65)
 ### Allgemein
 - **Anleitung (F1 / Knopf)** oeffnet die Online-Anleitung auf GitHub Pages (immer der neueste Stand); ohne Erreichbarkeit wie bisher die Fassung zur Version bzw. die lokale Kopie
 

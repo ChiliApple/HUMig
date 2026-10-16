@@ -3437,10 +3437,13 @@ Describe '2.1.15: Live-Ergebnisse, Lebenszeichen, Bereich unbekannter Pakete' {
         $e | Should -Match 'Live = @\{\}'
         $e | Should -Match '\$st\.Live\["\$pc\|\$\(\$p\[1\]\)"\] = @\{ Status = '
         $e | Should -Match '-not \$x -and \$st\.Live\.ContainsKey'
+        $e | Should -Match '\$st\.Live\.Remove\('   # B65: zweiter Start verwirft das alte Live-Ergebnis
         $e | Should -Match 'Verbindung endete ohne Ergebnis \(Zustand'
         $t = Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw
         $t | Should -Match 'Out-L "#WAIT\|'
         $t | Should -Match '\$fromSys -notcontains'
         $t | Should -Match "Store-App: fuer alle Benutzer nicht gefunden"
+        $a = Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Auto.ps1') -Raw
+        foreach ($c in @('0x8A15005C', '0x8A15005B', '0x8A15005E')) { $a | Should -Match ([regex]::Escape("'$c'")) }   # B66
     }
 }

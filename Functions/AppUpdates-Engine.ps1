@@ -733,6 +733,7 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
         if ($p[0] -eq 'START') {
             # zweiter Versuch desselben Programms (z.B. im Benutzerkonto nach SYSTEM): Ergebnis wieder anzeigen
             if ($st.Logged.ContainsKey("$pc|$($p[1])")) { $st.Logged.Remove("$pc|$($p[1])"); if ($st.Done -gt 0) { $st.Done-- } }
+            if ($st.Live.ContainsKey("$pc|$($p[1])")) { $st.Live.Remove("$pc|$($p[1])") }   # altes Live-Ergebnis verwerfen, sonst zeigte ein Verbindungsabbruch den ueberholten Fehler
             $st.Job.Status = "$($st.Done + 1)/$($st.Total): $($x.Name)$(if ($st.Multi) { " ($pc)" })"
             $st.Job.Progress = [int]($st.Done * 100 / $st.Total)
             Write-HMLog $st.Job "  $pre$($x.Name) ($($x.Id))$(if ($x.Installed -or $x.Available) { ": $($x.Installed) -> $($x.Available)" }) ..." 'Info'
