@@ -1450,16 +1450,24 @@ function Show-HMSbLogs {
         )
 }
 # Protokoll zu einem Lauf im Verlauf: Aufgabe_*.log (Zeitplan/Hintergrund) mit passender Startzeit, sonst Hinweis auf den Bericht
+# Ab 2.1.12 steht der Name im Verlaufseintrag (TaskLog). Aeltere Eintraege: das zuletzt VOR dem Lauf gestartete Aufgaben-Protokoll
+# desselben Profils (hoechstens 12 h vorher - eine Aufgabe kann auf einen anderen Sicherungsvorgang warten), 2 min Spielraum (B44)
 function Find-HMSbRunLog($Entry, [object[]]$Files) {
+    if ("$($Entry.TaskLog)") {
+        $hit = @($Files | Where-Object { $_ -and "$($_.Name)" -ieq "$($Entry.TaskLog)" })[0]
+        if ($hit) { return $hit }
+    }
     $dt = Get-HMSbDate "$($Entry.Date)"
     if (-not $dt) { return $null }
     $safe = "$($Entry.Profile)" -replace '[^\w\-]', '_'
-    foreach ($f in @($Files | Where-Object { $_ -and "$($_.Name)" -match '^Aufgabe_(\d{4}-\d{2}-\d{2}_\d{4})_(.+)\.log$' })) {
+    $best = $null; $bestD = $null
+    foreach ($f in @($Files | Where-Object { $_ })) {
         if ("$($f.Name)" -notmatch '^Aufgabe_(\d{4}-\d{2}-\d{2}_\d{4})_(.+)\.log$' -or $Matches[2] -ne $safe) { continue }
         $fd = $null; try { $fd = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd_HHmm', [System.Globalization.CultureInfo]::InvariantCulture) } catch { }
-        if ($fd -and [math]::Abs(($fd - $dt).TotalMinutes) -le 10) { return $f }
+        if (-not $fd -or $fd -gt $dt.AddMinutes(2) -or ($dt - $fd).TotalHours -gt 12) { continue }
+        if (-not $bestD -or $fd -gt $bestD) { $best = $f; $bestD = $fd }
     }
-    return $null
+    return $best
 }
 function Show-HMSbRunLog($Entry) {
     $f = Find-HMSbRunLog $Entry @(Get-HMSbLogFiles $script:SbReportDir)

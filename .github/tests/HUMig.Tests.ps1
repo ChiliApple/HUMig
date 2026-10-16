@@ -3218,6 +3218,22 @@ Describe '2.1.12: Versionen (UTC), Schattenkopie-Speicher, Schreibtempo, Protoko
         Set-HMSbShadowStorage 'ab' | Should -Match '^FEHLER: ungueltiger'
         if ($env:SystemDrive) { Set-HMSbShadowStorage "$env:SystemDrive" | Should -Match 'Systemlaufwerk' }
     }
+    It 'Versionszahl: gestoertes get versions gilt als unbekannt, nicht als 0 (B42)' {
+        Get-HMSbVersionCount $null | Should -Be -1
+        Get-HMSbVersionCount ([pscustomobject]@{ Versions = @(); ExitCode = -1; Text = 'Fehler: Der Vorgang ist ausgelastet' }) | Should -Be -1
+        Get-HMSbVersionCount ([pscustomobject]@{ Versions = @(); ExitCode = 0; Text = '' }) | Should -Be 0
+        Get-HMSbVersionCount ([pscustomobject]@{ Versions = @(1, 2); ExitCode = 5; Text = '' }) | Should -Be 2
+        Get-HMSbVersionCount ([pscustomobject]@{ Versions = @(); ExitCode = 1; Text = 'There are no backups available at the specified location.' }) | Should -Be 0
+        Get-HMSbVersionLossNote 5 (Get-HMSbVersionCount ([pscustomobject]@{ Versions = @(); ExitCode = -1; Text = 'x' })) 1 $null 'F' | Should -Be ''
+    }
+    It 'Speicher auf einem anderen Laufwerk: kein Plan, Anzeige sagt es (B43)' {
+        $s = [pscustomobject]@{ MaxBytes = [long]100GB; UsedBytes = [long]10GB; Percent = -1; CapacityBytes = [long]5589GB; DiffSame = $false }
+        (Get-HMSbShadowResizePlan $s ([long]5589GB) 50).Ok | Should -BeFalse
+        (Get-HMSbShadowResizePlan $s ([long]5589GB) 50).Reason | Should -Match 'anderen Laufwerk'
+        Format-HMSbShadowStorage $s | Should -Be 'auf einem anderen Laufwerk'
+        $s.DiffSame = $true
+        (Get-HMSbShadowResizePlan $s ([long]5589GB) 50).Ok | Should -BeTrue
+    }
     It 'Schreibtempo in MB/s' {
         Get-HMSbRateMBs 60 10 | Should -Be 102.4
         Get-HMSbRateMBs 0 10 | Should -Be 0
@@ -3259,7 +3275,13 @@ Describe '2.1.12: Versionen (UTC), Schattenkopie-Speicher, Schreibtempo, Protoko
         $f[2].Kind | Should -Be 'VM-Export'; $f[2].Profile | Should -Be 'EUGym'
         @(Get-HMSbLogFiles (Join-Path $TestDrive 'gibtsnicht')).Count | Should -Be 0
         (Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:01'; Profile = 'GYM-Leoben' }) $f).Name | Should -Be 'Aufgabe_2026-10-14_0300_GYM-Leoben.log'
-        Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:30'; Profile = 'GYM-Leoben' }) $f | Should -BeNullOrEmpty
+        # verzoegerter Start (Aufgabe wartet): das zuletzt vorher gestartete Protokoll, nicht spaeter als 2 min nach dem Lauf (B44)
+        (Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:45'; Profile = 'GYM-Leoben' }) $f).Name | Should -Be 'Aufgabe_2026-10-14_0300_GYM-Leoben.log'
+        Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 02:50'; Profile = 'GYM-Leoben' }) $f | Should -BeNullOrEmpty
+        Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 16:00'; Profile = 'GYM-Leoben' }) $f | Should -BeNullOrEmpty
+        $f2 = @($f) + [pscustomobject]@{ Name = 'Aufgabe_2026-10-14_0320_GYM-Leoben.log'; Kind = 'x'; Profile = 'GYM-Leoben'; Path = 'x' }
+        (Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:21'; Profile = 'GYM-Leoben' }) $f2).Name | Should -Be 'Aufgabe_2026-10-14_0320_GYM-Leoben.log'
+        (Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:21'; Profile = 'GYM-Leoben'; TaskLog = 'Aufgabe_2026-10-14_0300_GYM-Leoben.log' }) $f2).Name | Should -Be 'Aufgabe_2026-10-14_0300_GYM-Leoben.log'
         Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:00'; Profile = 'EUGym' }) $f | Should -BeNullOrEmpty
     }
     It 'Fehlende Programme: Web-Apps getrennt, Add-ins installierter Programme ausgeblendet' {
@@ -3276,6 +3298,7 @@ Describe '2.1.12: Versionen (UTC), Schattenkopie-Speicher, Schreibtempo, Protoko
         Test-HMNetworkPath '\\?\UNC\srv\share\x' | Should -BeTrue
         Test-HMNetworkPath '\\srv\share' | Should -BeTrue
         Test-HMNetworkPath 'relativ\pfad' | Should -BeFalse
+        Test-HMNetworkPath '\\?\Volume{0f1e2d3c-1111-2222-3333-444455556666}\x' | Should -BeFalse
         Get-HMShareRoot '\\srv\share\a\b' | Should -Be '\\srv\share'
         Get-HMShareRoot '\\srv' | Should -Be ''
         Get-HMShareRoot 'D:\Backup' | Should -Be ''

@@ -130,7 +130,7 @@ $ctx = @{
     Scheduled = $true
     Profile = $ProfileName; DiskPrefix = $prefix; Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
     VMs = @($list); Volumes = @($volList); HostConfig = [bool]$HostConfig; HostSystem = [bool]$HostSystem; Verify = -not $NoVerify
-    LocalHistory = $localHist; LocalHealth = $localHealth; LocalReportDir = $repDir; Version = $version; ProfileData = $prof
+    LocalHistory = $localHist; LocalHealth = $localHealth; LocalReportDir = $repDir; Version = $version; ProfileData = $prof; TaskLog = (Split-Path $script:TaskLog -Leaf)
     After = (Get-HMSbAfterMode $prof "$($d.Label)")
     Export = (Get-HMSbExportOptions $prof)
 }

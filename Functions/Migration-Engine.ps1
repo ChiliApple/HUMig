@@ -1616,6 +1616,8 @@ function Test-HMNetworkPath([string]$Path) {
     $p = "$Path"
     # Praefix fuer lange Pfade: \\?\UNC\server\... = Freigabe, \\?\C:\... bzw. \\.\C:\... = lokales Laufwerk (B40)
     if ($p -match '^\\\\\?\\UNC\\') { return $true }
+    # Volume-GUID-Pfad (Platte ohne Buchstabe) ist lokal (B47)
+    if ($p -match '^\\\\[\?\.]\\Volume\{') { return $false }
     if ($p -match '^\\\\[\?\.]\\([A-Za-z]:.*)$') { $p = $Matches[1] }
     if ($p -match '^(\\\\|//)') { return $true }
     if ($p -notmatch '^[A-Za-z]:') { return $false }
@@ -1699,7 +1701,7 @@ function Set-HMBackupFolderAcl {
         [System.IO.Directory]::SetAccessControl($Path, $ds)
         $r.Ok = $true
         return [pscustomobject]$r
-    } catch { }
+    } catch { $r.Notes += "Rechte ueber .NET nicht gesetzt ($($_.Exception.Message)) - Ersatzweg icacls" }
     # Ersatzweg icacls (z. B. wenn .NET das nicht kann)
     $grants = @(foreach ($k in $exp.Keys) { "*${k}:(OI)(CI)$($exp[$k])" })
     $o = & icacls.exe "$Path" /inheritance:r /grant:r @grants /C /Q 2>&1

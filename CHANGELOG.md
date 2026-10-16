@@ -16,6 +16,7 @@
 - **Schreibtempo:** MB/s in Bericht, Verlauf und Teams-Karte; Hinweis, wenn ein Lauf deutlich langsamer ist als fruehere Laeufe des Profils (USB 2.0?)
 - Teams-Karte eines in HUMig gestarteten Laufs: Rotations-/Archiv-Erinnerungen wie beim Zeitplan
 - Versions-Zeitpunkte: die wbadmin-ID ist UTC - Anzeige, Karte und Pruefung jetzt in Ortszeit (bisher 2 h verschoben)
+- Pruefung (Grok B42-B47): ein gestoertes `wbadmin get versions` nach dem Lauf loest keinen falschen "Versionen verworfen"-Alarm mehr aus (Vergleich nur bei gueltig gelesener Liste); liegt der Schattenkopie-Speicher auf einem anderen Laufwerk, aendert der Knopf nichts und sagt das; "Protokoll des Laufs anzeigen" findet das Protokoll ueber den Verlaufseintrag (bei aelteren Laeufen das zuletzt vorher gestartete, auch bei verzoegertem Start); Schreibtempo nur ueber die eigentliche Sicherung (ohne Pruefen, Host-System, Export, Warten); waehrend des Mehrfach-Loeschens sind Liste und Backup-Knoepfe gesperrt; Volume-GUID-Pfade gelten als lokal
 
 ## v2.1.11 - 2026-10-15
 ### Backup

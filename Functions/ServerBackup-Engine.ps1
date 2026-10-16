@@ -578,6 +578,17 @@ function Get-HMSbVersions([string]$Target) {
     return [pscustomobject]@{ Versions = $sorted; ExitCode = $r.ExitCode; Text = $r.Text }
 }
 
+# Anzahl Versionen aus einem Get-HMSbVersions-Ergebnis - -1 = nicht feststellbar (wbadmin-Fehler, busy, Platte kurz weg).
+# Eine leere Liste zaehlt nur als 0, wenn wbadmin ohne Fehler endete oder ausdruecklich "keine Sicherungen" meldet (B42).
+function Get-HMSbVersionCount($Result) {
+    if (-not $Result) { return -1 }
+    $n = @($Result.Versions).Count
+    if ($n -gt 0) { return $n }
+    if ($null -ne $Result.ExitCode -and "$($Result.ExitCode)" -eq '0') { return 0 }
+    if ("$($Result.Text)" -match '(?i)keine\s+Sicherung|no\s+backups?\s+(are\s+)?(available|found)|there\s+are\s+no\s+backups') { return 0 }
+    return -1
+}
+
 # Zeitpunkt einer Sicherungsversion lesbar (dd.MM.yyyy HH:mm, sonst Text von wbadmin)
 function Format-HMSbVersionTime($V) {
     if ($null -eq $V) { return '' }
@@ -611,14 +622,17 @@ function Get-HMSbShadowStorage([string]$Letter) {
         if (-not $vol) { return $null }
         foreach ($s in @(Get-CimInstance Win32_ShadowStorage -ErrorAction Stop)) {
             if ("$($s.Volume.DeviceID)" -ne "$($vol.DeviceID)") { continue }
+            # liegt der Speicher auf einem anderen Laufwerk (Zuordnung X->Y), gelten Max/Belegt fuer Y - nicht automatisch aendern (B43)
+            $same = ("$($s.DiffVolume.DeviceID)" -eq "$($vol.DeviceID)")
             $max = [uint64]$s.MaxSpace
-            return [pscustomobject]@{ MaxBytes = $(if ($max -ge [uint64][long]::MaxValue) { [long]-1 } else { [long]$max }); UsedBytes = [long]$s.UsedSpace; Percent = $(if ($vol.Capacity -gt 0 -and $max -lt [uint64][long]::MaxValue) { [int][math]::Round(100.0 * $max / $vol.Capacity) } else { -1 }); CapacityBytes = [long]$vol.Capacity }
+            return [pscustomobject]@{ MaxBytes = $(if ($max -ge [uint64][long]::MaxValue) { [long]-1 } else { [long]$max }); UsedBytes = [long]$s.UsedSpace; Percent = $(if ($same -and $vol.Capacity -gt 0 -and $max -lt [uint64][long]::MaxValue) { [int][math]::Round(100.0 * $max / $vol.Capacity) } else { -1 }); CapacityBytes = [long]$vol.Capacity; DiffSame = $same }
         }
     } catch { }
     return $null
 }
 function Format-HMSbShadowStorage($Shadow) {
     if (-not $Shadow) { return '' }
+    if ($Shadow.PSObject.Properties['DiffSame'] -and -not $Shadow.DiffSame) { return 'auf einem anderen Laufwerk' }
     if ([long]$Shadow.MaxBytes -lt 0) { return 'unbegrenzt' }
     return ('max. {0:N0} GB{1}' -f ([long]$Shadow.MaxBytes / 1GB), $(if ([int]$Shadow.Percent -ge 0) { " ($($Shadow.Percent) %)" } else { '' }))
 }
@@ -629,6 +643,7 @@ function Get-HMSbShadowResizePlan($Shadow, [long]$CapacityBytes, [int]$Percent =
     $no = { param($r) [pscustomobject]@{ Ok = $false; NewBytes = [long]0; OldBytes = [long]$(if ($Shadow) { $Shadow.MaxBytes } else { 0 }); Percent = $Percent; Reason = $r } }
     if ($Percent -lt 10 -or $Percent -gt 90) { return (& $no 'Anteil muss zwischen 10 und 90 % liegen') }
     if (-not $Shadow) { return (& $no 'Speicher fuer aeltere Versionen nicht lesbar (noch keine Sicherung auf dieser Platte?)') }
+    if ($Shadow.PSObject.Properties['DiffSame'] -and -not $Shadow.DiffSame) { return (& $no 'der Speicher fuer aeltere Versionen liegt auf einem anderen Laufwerk - nicht automatisch (von Hand mit vssadmin list/resize shadowstorage)') }
     if ([long]$Shadow.MaxBytes -lt 0) { return (& $no 'bereits unbegrenzt - nichts zu tun') }
     if ($CapacityBytes -le 0) { return (& $no 'Groesse der Platte nicht lesbar') }
     $new = [long][math]::Floor($CapacityBytes * ($Percent / 100.0))
@@ -1921,6 +1936,7 @@ function Start-HMServerBackup {
     param([hashtable]$Ctx, [hashtable]$Job)
     $script:SbJob = $Job
     $t0 = Get-Date
+    $wbSec = 0.0
     $status = 'OK'; $notes = @(); $hints = @()
     $script:SbRunLog = New-Object System.Collections.Generic.List[string]
     $L = "$($Ctx.Drive)".TrimEnd(':', '\').ToUpper()
@@ -1964,7 +1980,7 @@ function Start-HMServerBackup {
     }
     # Versionen vor dem Lauf (danach: hat Windows aeltere verworfen?); -1 = nicht feststellbar
     $verBefore = -1
-    try { $vb = Get-HMSbVersions $target; $verBefore = $(if ($vb.ExitCode -eq 0 -or @($vb.Versions).Count) { @($vb.Versions).Count } else { 0 }) } catch { }
+    try { $verBefore = Get-HMSbVersionCount (Get-HMSbVersions $target) } catch { }
     try {
         $vol = Get-Volume -DriveLetter $L -ErrorAction Stop
         Write-HMSbLog ("Ziel {0} {1}: {2:N0} GB frei von {3:N0} GB" -f $target, "$($vol.FileSystemLabel)", ($vol.SizeRemaining / 1GB), ($vol.Size / 1GB)) 'Info'
@@ -2021,7 +2037,9 @@ function Start-HMServerBackup {
             $Job.Status = 'VMs: Schattenkopie wird erstellt ...'
             Write-HMSbLog "wbadmin: VMs sichern -> $target (Online-Sicherung ueber VSS, VMs laufen weiter)" 'Header'
             $argList = "start backup -backupTarget:$target -hyperv:""$($vms -join ',')"" -quiet"
+            $swWb = [System.Diagnostics.Stopwatch]::StartNew()
             $r = Invoke-HMSbStart -Arguments $argList -Phase 'VMs' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-VMs.log') -Job $Job
+            $wbSec += $swWb.Elapsed.TotalSeconds
             if ($Job.Cancel) {
                 Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
                 [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
@@ -2080,7 +2098,9 @@ function Start-HMServerBackup {
         if ($vols.Count) {
             $Job.Status = 'Laufwerke: Schattenkopie wird erstellt ...'
             Write-HMSbLog "wbadmin: Laufwerke sichern ($($vols -join ', ')) -> $target" 'Header'
+            $swWb = [System.Diagnostics.Stopwatch]::StartNew()
             $r3 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -include:$($vols -join ',') -quiet" -Phase 'Laufwerke' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-Laufwerke.log') -Job $Job
+            $wbSec += $swWb.Elapsed.TotalSeconds
             $pb += $span
             if ($Job.Cancel) {
                 Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
@@ -2182,7 +2202,8 @@ function Start-HMServerBackup {
 
     # --- Versionen auf der Platte, Speicher fuer aeltere Versionen (Schattenkopien), Schreibtempo
     $vaNow = $null
-    try { $vaNow = @((Get-HMSbVersions $target).Versions) } catch { }
+    # nur eine gueltig gelesene Liste verwenden - ein gestoertes "get versions" ergaebe sonst einen falschen Verlust-Alarm (B42)
+    try { $vv = Get-HMSbVersions $target; if ((Get-HMSbVersionCount $vv) -ge 0) { $vaNow = @($vv.Versions) } else { Write-HMSbLog "Versionen auf der Platte nach dem Lauf nicht lesbar (wbadmin Code $($vv.ExitCode)) - kein Vergleich mit vorher" 'Warning' } } catch { }
     $shadow = Get-HMSbShadowStorage $L
     if ($null -ne $vaNow) {
         $expNew = [int][bool]($vms.Count -and $r -and $r.ExitCode -eq 0) + [int][bool]$volOk + [int][bool]$hostSysOk
@@ -2195,7 +2216,8 @@ function Start-HMServerBackup {
         }
     }
     if ($shadow) { Write-HMSbLog "Speicher fuer aeltere Versionen (Schattenkopien) auf ${target}: $(Format-HMSbShadowStorage $shadow), belegt $([math]::Round([long]$shadow.UsedBytes / 1GB, 1)) GB" 'Info' }
-    $rate = Get-HMSbRateMBs ([double]$res.SizeBytes / 1GB) ((Get-Date) - $t0).TotalMinutes
+    # Tempo nur ueber die Sicherung der VMs/Laufwerke (deren Groesse steckt in SizeBytes) - ohne Pruefen, Host-System, Export, Warten (B45)
+    $rate = Get-HMSbRateMBs ([double]$res.SizeBytes / 1GB) ($wbSec / 60)
     if ($rate -gt 0) {
         $slow = ''
         if ($Ctx.LocalHistory) { try { $hp = Read-HMSbHistory "$($Ctx.LocalHistory)"; $slow = Get-HMSbSlowDiskNote @($hp) "$($Ctx.Profile)" "$($Ctx.DiskLabel)" $rate } catch { } }
@@ -2212,7 +2234,7 @@ function Start-HMServerBackup {
         VMs = ($vms -join ', '); Volumes = ($vols -join ', '); VolVersionId = "$($res.VolVersionId)"; Status = $status; Minutes = $dur; SizeGB = [math]::Round($res.SizeBytes / 1GB, 1); VersionId = $verId
         HostConfig = $hostCfgOk; HostSystem = $hostSysOk; HostVersionId = "$($res.HostVersionId)"; Note = ($notes -join '; '); Tool = "HUMig $($Ctx.Version)"; Report = (Split-Path $rep -Leaf)
         Health = $healthLvl; HealthText = $healthTxt; Export = "$($res.Export)"; ExportStatus = "$($res.ExportStatus)"
-        MBs = $rate; ShadowStorage = "$($res.ShadowStorage)"; Versions = $(if ($null -ne $vaNow) { @($vaNow).Count } else { -1 })
+        MBs = $rate; ShadowStorage = "$($res.ShadowStorage)"; TaskLog = "$($Ctx.TaskLog)"; Versions = $(if ($null -ne $vaNow) { @($vaNow).Count } else { -1 })
     }
     try { Add-HMSbHistory (Join-Path "$target\$($script:SbDirName)" 'history.json') $entry } catch { Write-HMSbLog "Verlauf auf der Platte nicht gespeichert: $($_.Exception.Message)" 'Warning' }
     if ($Ctx.LocalHistory) { try { Add-HMSbHistory "$($Ctx.LocalHistory)" $entry } catch { Write-HMSbLog "Verlauf im Tool-Ordner nicht gespeichert: $($_.Exception.Message)" 'Warning' } }

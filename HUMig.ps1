@@ -1747,7 +1747,7 @@ function Update-HMBackupMultiUi {
     foreach ($bn in $script:BackupSingleButtons) {
         if (-not $ui.$bn) { continue }
         # Restore/Geloeschte leeren sperrt auch ein laufender Vorgang (Set-JobUi)
-        $ui.$bn.IsEnabled = ($n -le 1) -and -not ($script:JobRunning -and $bn -in @('btnRestore', 'btnEmptyDeleted'))
+        $ui.$bn.IsEnabled = ($n -le 1) -and -not $script:MultiDelBusy -and -not ($script:JobRunning -and $bn -in @('btnRestore', 'btnEmptyDeleted'))
     }
     $ui.btnDeleteBackup.Content = $(if ($n -gt 1) { "Loeschen ($n)" } else { 'Loeschen' })
 }
@@ -1822,7 +1822,7 @@ $ui.btnDeleteBackup.Add_Click({
 function Remove-HMSelectedBackups {
     $sel = @(@($ui.dgBackups.SelectedItems) | ForEach-Object { $_.Info } | Where-Object { $_ -and "$($_.Path)" })
     if (-not $sel.Count) { return }
-    if ($script:JobRunning) { Out-Console 'Waehrend ein Vorgang laeuft, wird nichts geloescht - bitte nach Abschluss.' 'Warning'; return }
+    if ($script:JobRunning -or $script:MultiDelBusy) { Out-Console 'Waehrend ein Vorgang laeuft, wird nichts geloescht - bitte nach Abschluss.' 'Warning'; return }
     $arch = @($sel | Where-Object { Test-HMBackupArchived $_.Path })
     $run = @($sel | Where-Object { "$($_.Status)" -eq 'Running' -and -not (Test-HMBackupArchived $_.Path) })
     $todo = @($sel | Where-Object { -not (Test-HMBackupArchived $_.Path) -and "$($_.Status)" -ne 'Running' })
@@ -1838,12 +1838,17 @@ function Remove-HMSelectedBackups {
     if (-not (Confirm-Action $msg)) { return }
     Out-Console "Loesche $($todo.Count) Backups ..." 'Warning'
     $script:MultiDelNames = @{}; foreach ($t in $todo) { $script:MultiDelNames["$($t.Path)"] = "$($t.Name)" }
+    # waehrend des Loeschens Liste und Backup-Knoepfe sperren - sonst koennte ein gerade geloeschtes Backup markiert und gestartet werden (B46)
+    $script:MultiDelBusy = $true; $ui.dgBackups.IsEnabled = $false
+    foreach ($bn in @($script:BackupSingleButtons + @('btnDeleteBackup', 'btnCleanupBackups'))) { if ($ui.$bn) { $ui.$bn.IsEnabled = $false } }
     Invoke-AsyncCommand -ScriptBlock {
         param($eng, $paths)
         . $eng
         foreach ($p in @($paths)) { $r = 'FEHLER: unbekannt'; try { $r = Remove-HMBackupFolder $p } catch { $r = "FEHLER: $($_.Exception.Message)" }; [pscustomobject]@{ Path = $p; Result = "$r" } }
-    } -ArgumentList @($script:Engine, @($todo | ForEach-Object { "$($_.Path)" })) -TimeoutSec 7200 -OnComplete {
+    } -ArgumentList @($script:Engine, @($todo | ForEach-Object { "$($_.Path)" })) -TimeoutSec 7200 -BusyTag 'Del' -BusyText 'Backups werden geloescht ...' -OnComplete {
         param($res)
+        $script:MultiDelBusy = $false; $ui.dgBackups.IsEnabled = $true
+        foreach ($bn in @('btnDeleteBackup', 'btnCleanupBackups')) { if ($ui.$bn) { $ui.$bn.IsEnabled = -not $script:JobRunning } }
         $ok = 0; $bad = 0
         foreach ($x in @($res | Where-Object { $_ -and $_.PSObject.Properties['Path'] })) {
             $nm = $script:MultiDelNames["$($x.Path)"]; if (-not $nm) { $nm = Split-Path "$($x.Path)" -Leaf }
@@ -1852,6 +1857,7 @@ function Remove-HMSelectedBackups {
         if ($res -is [string]) { $bad++; Out-Console "Loeschen: $res" 'Error' }
         Out-Console "Loeschen fertig: $ok geloescht$(if ($bad) { ", $bad mit Fehler" })" $(if ($bad) { 'Warning' } else { 'Success' })
         $script:SelectedBackup = $null; Update-BackupList; Update-BackupRootInfo
+        try { Update-HMBackupMultiUi } catch { }
     }
 }
 $ui.btnCleanupBackups.Add_Click({ Start-HMRetentionCleanup })
