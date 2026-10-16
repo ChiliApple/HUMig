@@ -552,6 +552,10 @@ function Invoke-HMSbStart {
 $script:HMSbBusyFix = 'Es lief bereits eine andere Sicherung/Wiederherstellung am Host (die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig). Laufenden Vorgang in wbadmin.msc bzw. mit "wbadmin get status" pruefen, Zeitplaene verschiedener Profile am selben Host zeitlich trennen und die Sicherung spaeter erneut starten.'
 
 # Sicherungsversionen auf einem Ziel (wbadmin get versions), neueste zuletzt
+# wbadmin-Versions-ID (MM/dd/yyyy-HH:mm, UTC) als Ortszeit
+function ConvertFrom-HMSbVersionId([string]$Id) {
+    return [datetime]::ParseExact($Id, 'MM/dd/yyyy-HH:mm', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal)
+}
 function Get-HMSbVersions([string]$Target) {
     $r = Invoke-HMSbWbadmin -Arguments "get versions -backupTarget:$Target" -Quiet
     $list = @(); $cur = $null
@@ -564,7 +568,8 @@ function Get-HMSbVersions([string]$Target) {
         if (-not $cur) { continue }
         if ($t -match '(\d{2}/\d{2}/\d{4}-\d{2}:\d{2})' -and -not $cur.Id) {
             $cur.Id = $Matches[1]
-            try { $cur.When = [datetime]::ParseExact($cur.Id, 'MM/dd/yyyy-HH:mm', [System.Globalization.CultureInfo]::InvariantCulture) } catch { }
+            # Versions-ID ist UTC (Sicherungszeit 08:12 MESZ = ID 06:12) -> in Ortszeit umrechnen
+            try { $cur.When = ConvertFrom-HMSbVersionId $cur.Id } catch { }
         } elseif ($t -match '^(Wiederherstellbar|Can recover)\s*:\s*(.+)$') { $cur.Items = $Matches[2].Trim() }
         elseif ($t -match '^(Sicherungsziel|Backup target|Backup location)\s*:\s*(.+)$') { $cur.Target = $Matches[2].Trim() }
     }
@@ -587,6 +592,61 @@ function Test-HMSbLowSpace([long]$Free, [long]$Total, [long]$Need) {
     return ($Free -lt ($Total * 0.1))
 }
 
+# Erinnerungen fuer die Teams-Karte (Plattenwechsel laut Rotation, Archiv faellig, auffaelliger Plattenzustand) - wie auf der
+# Statusseite, ohne die Meldungen zum Lauf selbst. Braucht Get-HMStatusData (UI-Status.ps1) im selben Runspace, sonst leer.
+function Get-HMSbReminders($ProfileData, [string]$HistoryPath) {
+    if (-not $ProfileData -or -not $HistoryPath -or -not (Get-Command Get-HMStatusData -ErrorAction SilentlyContinue)) { return @() }
+    try {
+        $hh = Read-HMSbHistory $HistoryPath   # erst zuweisen (Liste kommt als EIN Objekt)
+        $sd = Get-HMStatusData -SbProfiles @($ProfileData) -SbHistory @($hh)
+        return @(@($sd.Warnings) | Where-Object { "$($_.Area)" -eq 'Server-Backup' -and "$($_.Text)" -notmatch 'letzter Lauf fehlgeschlagen|keine erfolgreiche Sicherung|letzte erfolgreiche Sicherung vor' } | ForEach-Object { "$($_.Text)" })
+    } catch { return @() }
+}
+
+# Speicher fuer aeltere Versionen auf der Backup-Platte (Schattenkopie-Speicher, Win32_ShadowStorage).
+# Rueckgabe: MaxBytes (-1 = unbegrenzt), UsedBytes - oder $null, wenn nicht lesbar
+function Get-HMSbShadowStorage([string]$Letter) {
+    try {
+        $vol = Get-CimInstance Win32_Volume -Filter ("DriveLetter='{0}:'" -f $Letter.TrimEnd(':')) -ErrorAction Stop | Select-Object -First 1
+        if (-not $vol) { return $null }
+        foreach ($s in @(Get-CimInstance Win32_ShadowStorage -ErrorAction Stop)) {
+            if ("$($s.Volume.DeviceID)" -ne "$($vol.DeviceID)") { continue }
+            $max = [uint64]$s.MaxSpace
+            return [pscustomobject]@{ MaxBytes = $(if ($max -ge [uint64][long]::MaxValue) { [long]-1 } else { [long]$max }); UsedBytes = [long]$s.UsedSpace; Percent = $(if ($vol.Capacity -gt 0 -and $max -lt [uint64][long]::MaxValue) { [int][math]::Round(100.0 * $max / $vol.Capacity) } else { -1 }) }
+        }
+    } catch { }
+    return $null
+}
+function Format-HMSbShadowStorage($Shadow) {
+    if (-not $Shadow) { return '' }
+    if ([long]$Shadow.MaxBytes -lt 0) { return 'unbegrenzt' }
+    return ('max. {0:N0} GB{1}' -f ([long]$Shadow.MaxBytes / 1GB), $(if ([int]$Shadow.Percent -ge 0) { " ($($Shadow.Percent) %)" } else { '' }))
+}
+# Hat Windows bei diesem Lauf aeltere Versionen verworfen? (vorher + neu angelegte > jetzt). '' = nein / nicht feststellbar
+function Get-HMSbVersionLossNote([int]$Before, [int]$After, [int]$NewRuns, $Shadow, [string]$Letter) {
+    if ($Before -lt 0 -or $After -lt 0 -or $NewRuns -le 0) { return '' }
+    $lost = $Before + $NewRuns - $After
+    if ($lost -le 0) { return '' }
+    return ("Windows hat {0} aeltere Version(en) auf der Platte verworfen (vorher {1}, neu {2}, jetzt {3}) - der Speicher fuer aeltere Versionen (Schattenkopien, {4}) oder der freie Platz reicht nicht. Abhilfe: vssadmin resize shadowstorage /for={5}: /on={5}: /maxsize=50%% (als Administrator) oder eine groessere Platte" -f $lost, $Before, $NewRuns, $After, $(if ($Shadow) { Format-HMSbShadowStorage $Shadow } else { 'Groesse unbekannt' }), $Letter.TrimEnd(':')) -replace '%%', '%'
+}
+# Schreibtempo eines Laufs in MB/s (0 = nicht berechenbar)
+function Get-HMSbRateMBs([double]$SizeGB, [double]$Minutes) {
+    if ($SizeGB -le 0 -or $Minutes -lt 1) { return 0 }
+    return [math]::Round($SizeGB * 1024 / ($Minutes * 60), 1)
+}
+# Deutlich langsamer als fruehere erfolgreiche Laeufe dieses Profils? (unter der Haelfte des Medians, mind. 3 fruehere Laeufe ab 10 min)
+function Get-HMSbSlowDiskNote($History, [string]$ProfileName, [string]$Disk, [double]$Rate) {
+    if ($Rate -le 0) { return '' }
+    $prev = @(foreach ($h in @($History | Where-Object { $_ -and "$($_.Profile)" -eq $ProfileName -and "$($_.Status)" -ne 'Error' -and [double]"0$($_.Minutes)" -ge 10 })) {
+        $x = if ([double]"0$($h.MBs)" -gt 0) { [double]$h.MBs } else { Get-HMSbRateMBs ([double]"0$($h.SizeGB)") ([double]"0$($h.Minutes)") }
+        if ($x -gt 0) { $x }
+    })
+    if ($prev.Count -lt 3) { return '' }
+    $s = @($prev | Sort-Object); $med = [double]$s[[int][math]::Floor(($s.Count - 1) / 2)]
+    if ($med -lt 20 -or $Rate -ge ($med / 2)) { return '' }
+    return ("Platte {0} hat mit ca. {1:N0} MB/s geschrieben, fruehere Laeufe dieses Profils ca. {2:N0} MB/s - laeuft die Platte ueber USB 2.0 (Anschluss, Hub, Kabel)? Blauen USB-3-Anschluss direkt am Server verwenden." -f $Disk, $Rate, $med)
+}
+
 # Teams-Meldung nach einem in der Oberflaeche gestarteten Server-Backup - gleiche Ziele und Kategorien wie im Zeitplan.
 # Braucht Core-Notify.ps1 im selben Runspace. $ErrText: Abbruch (Ausnahme) - wird als Fehler gemeldet (Kategorie SbError).
 function Send-HMSbRunNotify($Ctx, $Job, [string]$ErrText = '') {
@@ -597,6 +657,8 @@ function Send-HMSbRunNotify($Ctx, $Job, [string]$ErrText = '') {
         $nc = Get-HMNotifyConfig
         if (-not $nc.Configured) { if ($nc.Error) { Write-HMSbLog "Teams-Benachrichtigung: Webhook nicht lesbar: $($nc.Error)" 'Warning' }; return }
         $prof = "$($Ctx.Profile)"
+        # Erinnerungen wie beim Zeitplan (Verlauf ist zu diesem Zeitpunkt schon um diesen Lauf ergaenzt)
+        $rem = @(Get-HMSbReminders $Ctx.ProfileData "$($Ctx.LocalHistory)")
         foreach ($tg in @($nc.Targets | Where-Object { $_ })) {
             if (-not (Test-HMNotifySbProfile $tg $prof)) { continue }
             if ($ErrText -or -not $Job.Result) {
@@ -604,7 +666,7 @@ function Send-HMSbRunNotify($Ctx, $Job, [string]$ErrText = '') {
                 $why = if ($ErrText) { $ErrText } else { 'kein Ergebnis' }
                 $r = Send-HMTeamsMessage -Title "Server-Backup '$prof' auf $env:COMPUTERNAME FEHLGESCHLAGEN (manuell gestartet)" -Lines @("Abbruch: $why", "Platte: $($Ctx.DiskLabel)", "HUMig $($Ctx.Version)") -Level 'Error' -Url $tg.Url
             } else {
-                $msg = New-HMSbNotifyMessage -Result $Job.Result -ProfileName $prof -Disk "$($Ctx.DiskLabel)" -Reminders @() -Cats $tg.Cats
+                $msg = New-HMSbNotifyMessage -Result $Job.Result -ProfileName $prof -Disk "$($Ctx.DiskLabel)" -Reminders $rem -Cats $tg.Cats
                 if (-not $msg) { continue }
                 $r = Send-HMTeamsMessage -Title "$($msg.Title) (manuell gestartet)" -Lines $msg.Lines -Level $msg.Level -Url $tg.Url
             }
@@ -669,6 +731,7 @@ function New-HMSbNotifyMessage {
         $dl = @()
         if ([double]"0$($Result.Minutes)" -gt 0) { $dl += "Dauer $(Format-HMDuration $Result.Minutes)" }
         if ([long]"0$($Result.SizeBytes)" -gt 0) { $dl += ("Datenmenge ca. {0:N1} GB" -f ([long]$Result.SizeBytes / 1GB)) }
+        if ([double]"0$($Result.MBs)" -gt 0) { $dl += ("ca. {0:N0} MB/s" -f [double]$Result.MBs) }
         if ($dl.Count) { $lines.Add($dl -join ' | ') }
         if ([long]"0$($Result.TotalBytes)" -gt 0) {
             $lines.Add(("Backup-Platte: {0:N0} GB frei von {1:N0} GB ({2:N0} % frei)" -f ([long]$Result.FreeBytes / 1GB), ([long]$Result.TotalBytes / 1GB), (100.0 * [long]$Result.FreeBytes / [long]$Result.TotalBytes)))
@@ -1430,6 +1493,8 @@ function Write-HMSbReport {
         @('Virtuelle Computer', $(if ($Entry.VMs) { $Entry.VMs } else { '-' })),
         @('Laufwerke dieses Servers', $(if ($Entry.Volumes) { "$($Entry.Volumes)$(if ($Entry.VolVersionId) { " - Version $($Entry.VolVersionId) (UTC)" })" } else { '-' })),
         @('Dauer', (Format-HMDuration $Entry.Minutes)), @('Gesicherte Datenmenge', "ca. $($Entry.SizeGB) GB (virtuelle Festplatten der VMs + belegter Platz der Laufwerke)"),
+        @('Schreibtempo', $(if ([double]"0$($Entry.MBs)" -gt 0) { "ca. $([math]::Round([double]$Entry.MBs)) MB/s (Datenmenge / Dauer des ganzen Laufs)" } else { '-' })),
+        @('Versionen auf der Platte', $(if ([int]"$($Entry.Versions)" -ge 0 -and "$($Entry.Versions)" -ne '') { "$($Entry.Versions)$(if ("$($Entry.ShadowStorage)") { " - Speicher fuer aeltere Versionen (Schattenkopien): $($Entry.ShadowStorage)" })" } else { '-' })),
         @('Sicherungsversion', $(if ($Entry.VersionId) { "$($Entry.VersionId) (UTC) - fuer die Wiederherstellung" } else { '-' })),
         @('Host-Konfiguration', (& $ja $Entry.HostConfig)),
         @('Host-System (Bare-Metal)', "$(& $ja $Entry.HostSystem)$(if ($Entry.HostVersionId) { " - Version $($Entry.HostVersionId) (UTC)" })"),
@@ -1449,6 +1514,9 @@ function Write-HMSbReport {
             [void]$sb.Append("<div class='box $($h.Lvl)'><b>$lab</b>: $(& $e $h.Text)$(if ($h.Fix) { "<div class='fix'><b>Was tun:</b> $(& $e $h.Fix)</div>" })</div>")
         }
     } else { [void]$sb.Append("<p class='muted'>Keine - alles in Ordnung.</p>") }
+    if ($Entry.VMs -or $Entry.Volumes -or $Entry.HostSystem) {
+        [void]$sb.Append("<h2>Warum die Platte fast leer aussieht</h2><p>Die Windows Server-Sicherung legt im Ordner <code>WindowsImageBackup</code> nur den <b>neuesten</b> Stand als Datei ab. Aeltere Versionen stecken in <b>Schattenkopien</b> der Platte - Explorer und Laufwerkseigenschaften zeigen diesen Platz als frei an. Welche Versionen es gibt: Knopf <i>Versionen auf der Platte</i> bzw. <code>wbadmin get versions</code>.$(if ("$($Entry.ShadowStorage)") { " Speicher fuer aeltere Versionen auf dieser Platte: $(& $e $Entry.ShadowStorage). Reicht er nicht, verwirft Windows die aeltesten Versionen - HUMig warnt dann." })</p>")
+    }
     # Dateien im Ordner mit Erklaerung
     $desc = [ordered]@{
         'wbadmin-VMs.log' = 'Ausgabe der Windows Server-Sicherung (wbadmin) waehrend der VM-Sicherung'
@@ -1831,7 +1899,7 @@ function Start-HMServerBackup {
     $vols = @($Ctx.Volumes | Where-Object { "$_".Trim() } | ForEach-Object { ("$_".Trim().TrimEnd('\', ':')).ToUpper() + ':' } | Select-Object -Unique)
     $res = [ordered]@{ Status = 'Error'; SizeBytes = [long]0; Report = ''; VersionId = ''; HostVersionId = ''; VolVersionId = ''; Notes = @(); Health = ''; HealthText = ''
         Minutes = 0; FreeBytes = [long]0; TotalBytes = [long]0; LowSpace = $false; VersionCount = 0; OldestVersion = ''; NewestVersion = ''; VMs = ''; Volumes = ''; HostSystem = ''
-        Export = ''; ExportStatus = '' }
+        Export = ''; ExportStatus = ''; MBs = 0; ShadowStorage = '' }
     $Job.Result = [pscustomobject]$res
 
     Write-HMSbLog "SERVER-BACKUP $($Ctx.Profile) - Host $env:COMPUTERNAME - Ziel $target $($Ctx.DiskLabel)" 'Header'
@@ -1864,6 +1932,9 @@ function Start-HMServerBackup {
         $res.SizeBytes += $volUsed
         Write-HMSbLog ("Laufwerke dieses Servers: {0} - belegt ca. {1:N1} GB" -f ($vols -join ', '), ($volUsed / 1GB)) 'Info'
     }
+    # Versionen vor dem Lauf (danach: hat Windows aeltere verworfen?); -1 = nicht feststellbar
+    $verBefore = -1
+    try { $vb = Get-HMSbVersions $target; $verBefore = $(if ($vb.ExitCode -eq 0 -or @($vb.Versions).Count) { @($vb.Versions).Count } else { 0 }) } catch { }
     try {
         $vol = Get-Volume -DriveLetter $L -ErrorAction Stop
         Write-HMSbLog ("Ziel {0} {1}: {2:N0} GB frei von {3:N0} GB" -f $target, "$($vol.FileSystemLabel)", ($vol.SizeRemaining / 1GB), ($vol.Size / 1GB)) 'Info'
@@ -2079,6 +2150,29 @@ function Start-HMServerBackup {
         }
     } catch { Write-HMSbLog "Plattenzustand nicht lesbar: $($_.Exception.Message)" 'Info' }
 
+    # --- Versionen auf der Platte, Speicher fuer aeltere Versionen (Schattenkopien), Schreibtempo
+    $vaNow = $null
+    try { $vaNow = @((Get-HMSbVersions $target).Versions) } catch { }
+    $shadow = Get-HMSbShadowStorage $L
+    if ($null -ne $vaNow) {
+        $expNew = [int][bool]($vms.Count -and $r -and $r.ExitCode -eq 0) + [int][bool]$volOk + [int][bool]$hostSysOk
+        $ln = Get-HMSbVersionLossNote -Before $verBefore -After @($vaNow).Count -NewRuns $expNew -Shadow $shadow -Letter $L
+        if ($ln) {
+            if ($status -eq 'OK') { $status = 'Warning' }
+            $notes += $ln
+            $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = $ln; Fix = 'Die aelteren Staende fehlen fuer eine Wiederherstellung. Speicher fuer aeltere Versionen vergroessern (vssadmin resize shadowstorage, siehe oben) oder weniger je Platte sichern; der aktuelle Lauf selbst ist davon nicht betroffen.' }
+            Write-HMSbLog $ln 'Warning'
+        }
+    }
+    if ($shadow) { Write-HMSbLog "Speicher fuer aeltere Versionen (Schattenkopien) auf ${target}: $(Format-HMSbShadowStorage $shadow), belegt $([math]::Round([long]$shadow.UsedBytes / 1GB, 1)) GB" 'Info' }
+    $rate = Get-HMSbRateMBs ([double]$res.SizeBytes / 1GB) ((Get-Date) - $t0).TotalMinutes
+    if ($rate -gt 0) {
+        $slow = ''
+        if ($Ctx.LocalHistory) { try { $hp = Read-HMSbHistory "$($Ctx.LocalHistory)"; $slow = Get-HMSbSlowDiskNote @($hp) "$($Ctx.Profile)" "$($Ctx.DiskLabel)" $rate } catch { } }
+        if ($slow) { $notes += "Hinweis: $slow"; $hints += [pscustomobject]@{ Lvl = 'Info'; Text = $slow; Fix = 'Platte an einen USB-3-Anschluss (blau, SS) direkt am Server stecken, ohne Hub/Verlaengerung; anderes Kabel probieren. Dauert es weiter so lange, die Platte pruefen (Plattenzustand).' }; Write-HMSbLog "Hinweis: $slow" 'Warning' }
+    }
+    $res.MBs = $rate; $res.ShadowStorage = $(if ($shadow) { Format-HMSbShadowStorage $shadow } else { '' })
+
     # --- Verlauf, Bericht
     $Job.Status = 'Bericht'
     $dur = [math]::Round(((Get-Date) - $t0).TotalMinutes, 1)
@@ -2088,6 +2182,7 @@ function Start-HMServerBackup {
         VMs = ($vms -join ', '); Volumes = ($vols -join ', '); VolVersionId = "$($res.VolVersionId)"; Status = $status; Minutes = $dur; SizeGB = [math]::Round($res.SizeBytes / 1GB, 1); VersionId = $verId
         HostConfig = $hostCfgOk; HostSystem = $hostSysOk; HostVersionId = "$($res.HostVersionId)"; Note = ($notes -join '; '); Tool = "HUMig $($Ctx.Version)"; Report = (Split-Path $rep -Leaf)
         Health = $healthLvl; HealthText = $healthTxt; Export = "$($res.Export)"; ExportStatus = "$($res.ExportStatus)"
+        MBs = $rate; ShadowStorage = "$($res.ShadowStorage)"; Versions = $(if ($null -ne $vaNow) { @($vaNow).Count } else { -1 })
     }
     try { Add-HMSbHistory (Join-Path "$target\$($script:SbDirName)" 'history.json') $entry } catch { Write-HMSbLog "Verlauf auf der Platte nicht gespeichert: $($_.Exception.Message)" 'Warning' }
     if ($Ctx.LocalHistory) { try { Add-HMSbHistory "$($Ctx.LocalHistory)" $entry } catch { Write-HMSbLog "Verlauf im Tool-Ordner nicht gespeichert: $($_.Exception.Message)" 'Warning' } }
@@ -2112,8 +2207,7 @@ function Start-HMServerBackup {
     } catch { }
     if ($status -ne 'Error' -or $verId) {
         try {
-            $vvA = Get-HMSbVersions $target
-            $va = @($vvA.Versions)
+            $va = $(if ($null -ne $vaNow) { @($vaNow) } else { @((Get-HMSbVersions $target).Versions) })
             $res.VersionCount = $va.Count
             if ($va.Count) { $res.OldestVersion = Format-HMSbVersionTime $va[0]; $res.NewestVersion = Format-HMSbVersionTime $va[$va.Count - 1] }
         } catch { }

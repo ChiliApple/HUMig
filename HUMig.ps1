@@ -722,7 +722,7 @@ foreach ($n in @('btnWizard', 'btnRemote', 'brdMonBackup', 'brdMonRestore', 'brd
     'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnBackupSearch', 'btnFileSearch', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnFeedback', 'btnFeedbackR', 'btnReinstall', 'btnADDevices',
     'tabServerBackup', 'btnSbHealth', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
     'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'cmbSbAfter', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
-    'pnlSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbHostOnly', 'btnSbExport', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'btnSbConflicts', 'dotSbBusy', 'lblSbBusy', 'dotBusy', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule',
+    'pnlSbDisks', 'dgSbHistory', 'btnSbBackup', 'btnSbCancel', 'btnSbOverview', 'btnSbVersions', 'btnSbLogs', 'btnSbHostOnly', 'btnSbExport', 'btnSbRestore', 'btnSbFeature', 'btnSbSchedule', 'btnSbConflicts', 'dotSbBusy', 'lblSbBusy', 'dotBusy', 'lblSbSchedule', 'btnBackupSchedule', 'lblBackupSchedule',
     'tabAppUpdates', 'btnAuSearch', 'btnAuUpdateSel', 'btnAuUpdateAll', 'btnAuCancel', 'chkAuUnknown', 'btnAuSetup', 'dotAuBusy', 'lblAuBusy', 'lblAuInfo', 'lblAuTarget', 'btnAuPcs', 'btnAuPcTop', 'btnAuSchedule', 'btnAuScheduleView', 'lblAuListTitle', 'dgAu',
     'lblAuLocation', 'pnlAuSources', 'btnAuSourceAdd', 'btnAuExclAdd', 'btnAuExclDel', 'lstAuExcl', 'dgAuHistory')) { $ui[$n] = Get-UI $n }
 Initialize-HMTaskbar
@@ -811,6 +811,32 @@ $ui.btnBrowseRoot.Add_MouseRightButtonUp({
     Update-BackupRootInfo; Update-BackupList
     Out-Console "Backup-Ordner: Standard ($(Get-BackupRoot))" 'Success'
 })
+# Backup-Ordner auch eintippen (UNC-Pfade gehen im Ordner-Dialog nicht): Enter = uebernehmen, Esc = zuruecksetzen
+$ui.txtBackupRoot.IsReadOnly = $false
+$ui.txtBackupRoot.ToolTip = 'Pfad eintippen (auch \\server\freigabe\ordner) und Enter druecken - oder Knopf "..." (Rechtsklick dort = Standard)'
+function Set-HMBackupRootTyped([string]$Path) {
+    $p = "$Path".Trim().Trim('"').TrimEnd('\')
+    if ($p -match '^[A-Za-z]:$') { $p += '\' }
+    $back = { $ui.txtBackupRoot.Text = Get-BackupRoot }
+    if (-not $p -or $p -ieq "$(Get-BackupRoot)".TrimEnd('\')) { & $back; return }
+    if ($p -notmatch '^([A-Za-z]:\\|\\\\[^\\/]+\\[^\\/]+)') { Out-Console "Backup-Ordner: '$p' ist kein vollstaendiger Pfad (z. B. E:\Backups oder \\server\freigabe\Backups)." 'Warning'; & $back; return }
+    if (-not (Test-Path -LiteralPath $p)) {
+        $shr = if ($p -match '^(\\\\[^\\/]+\\[^\\/]+)') { $Matches[1] } else { '' }
+        if ($shr -and -not (Test-Path -LiteralPath $shr)) { Out-Console "Backup-Ordner: Freigabe '$shr' ist nicht erreichbar - es gibt sie nicht (z. B. keine Admin-Freigabe C`$/D`$) oder es fehlt der Zugriff." 'Warning'; & $back; return }
+        if (-not (Confirm-Action "Backup-Ordner '$p' existiert nicht. Anlegen?")) { & $back; return }
+        try { New-Item -ItemType Directory -Path $p -Force -ErrorAction Stop | Out-Null } catch { Out-Console "Backup-Ordner nicht angelegt: $($_.Exception.Message)" 'Error'; & $back; return }
+    }
+    Set-BackupRootSetting $p
+    Update-BackupRootInfo; Update-BackupList
+    Out-Console "Backup-Ordner: $p$(if ($script:ActiveSchool) { " (Standort $($script:ActiveSchool.Name))" })" 'Success'
+}
+$ui.txtBackupRoot.Add_KeyDown({
+    param($s, $e)
+    if ("$($e.Key)" -eq 'Escape') { $ui.txtBackupRoot.Text = Get-BackupRoot; $e.Handled = $true; return }
+    if ("$($e.Key)" -eq 'Return') { $e.Handled = $true; Set-HMBackupRootTyped "$($ui.txtBackupRoot.Text)" }
+})
+# nicht mit Enter bestaetigt: Anzeige wieder auf den gueltigen Ordner
+$ui.txtBackupRoot.Add_LostKeyboardFocus({ if ("$($ui.txtBackupRoot.Text)".Trim() -ne "$(Get-BackupRoot)") { $ui.txtBackupRoot.Text = Get-BackupRoot } })
 $ui.btnOpenRoot.Add_Click({ $r = Get-BackupRoot; if (Test-Path -LiteralPath $r) { Start-Process explorer.exe -ArgumentList "`"$r`"" } })
 
 # ============================================================================
@@ -1341,6 +1367,8 @@ function Set-JobUi([bool]$Running) {
     if ($ui.btnSbCancel) { $ui.btnSbCancel.IsEnabled = $Running }
     foreach ($b in @($script:AuButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
     if ($ui.btnAuCancel) { $ui.btnAuCancel.IsEnabled = $Running }
+    # mehrere Backups markiert: Restore/Geloeschte leeren bleiben gesperrt
+    if (-not $Running -and (Get-Command Update-HMBackupMultiUi -ErrorAction SilentlyContinue)) { try { Update-HMBackupMultiUi } catch { } }
 }
 function Start-EngineJob {
     param([string]$Command, [hashtable]$Ctx, [string]$Title, [scriptblock]$OnFinished, [string[]]$ScriptFiles = @())
@@ -1711,7 +1739,26 @@ function Update-RestoreTargetLabel {
     if ($script:SelectedBackup -and $script:SelectedBackup.User -and ($script:SelectedBackup.User -ne $p.Folder)) { $t += "`nACHTUNG: Backup stammt von '$($script:SelectedBackup.User)'" }
     $ui.lblRestoreTarget.Text = $t
 }
+# Mehrere Backups markiert? (Loeschen gilt dann fuer alle markierten, die anderen Knoepfe brauchen genau eines)
+function Test-HMBackupMulti { return (@($ui.dgBackups.SelectedItems).Count -gt 1) }
+$script:BackupSingleButtons = @('btnReport', 'btnVerifyBackup', 'btnCompare', 'btnBackupSearch', 'btnArchiveBackup', 'btnEmptyDeleted', 'btnRestore')
+function Update-HMBackupMultiUi {
+    $n = @($ui.dgBackups.SelectedItems).Count
+    foreach ($bn in $script:BackupSingleButtons) {
+        if (-not $ui.$bn) { continue }
+        # Restore/Geloeschte leeren sperrt auch ein laufender Vorgang (Set-JobUi)
+        $ui.$bn.IsEnabled = ($n -le 1) -and -not ($script:JobRunning -and $bn -in @('btnRestore', 'btnEmptyDeleted'))
+    }
+    $ui.btnDeleteBackup.Content = $(if ($n -gt 1) { "Loeschen ($n)" } else { 'Loeschen' })
+}
 $ui.dgBackups.Add_SelectionChanged({
+    Update-HMBackupMultiUi
+    if (Test-HMBackupMulti) {
+        $script:SelectedBackup = $null
+        $ui.lblRestoreInfo.Text = "$(@($ui.dgBackups.SelectedItems).Count) Backups markiert - 'Loeschen' gilt fuer alle markierten; Restore, Protokoll, Pruefen usw. brauchen genau ein markiertes Backup"
+        Update-RestoreTargetLabel
+        return
+    }
     $row = $ui.dgBackups.SelectedItem
     if (-not $row) { $script:SelectedBackup = $null; $ui.btnArchiveBackup.Content = 'Als Archiv'; return }
     $b = $row.Info
@@ -1761,6 +1808,7 @@ $ui.btnReport.Add_Click({
     $m.PlacementTarget = $ui.btnReport; $m.IsOpen = $true
 })
 $ui.btnDeleteBackup.Add_Click({
+    if (Test-HMBackupMulti) { Remove-HMSelectedBackups; return }
     $b = $script:SelectedBackup
     if (-not $b) { return }
     if (Test-HMBackupArchived $b.Path) { Out-Console "Backup '$($b.Name)' ist als Archiv markiert und wird nicht geloescht - zuerst 'Archiv aufheben'." 'Warning'; return }
@@ -1770,6 +1818,42 @@ $ui.btnDeleteBackup.Add_Click({
         param($r) Out-Console $(if ($r -eq 'OK') { 'Backup geloescht' } else { "$r" }) $(if ($r -eq 'OK') { 'Success' } else { 'Error' }); $script:SelectedBackup = $null; Update-BackupList; Update-BackupRootInfo
     }
 })
+# Mehrere markierte Backups loeschen: eine Rueckfrage (Anzahl, Groesse, Namen), Archive und unvollstaendige ausgelassen, Ergebnis je Backup
+function Remove-HMSelectedBackups {
+    $sel = @(@($ui.dgBackups.SelectedItems) | ForEach-Object { $_.Info } | Where-Object { $_ -and "$($_.Path)" })
+    if (-not $sel.Count) { return }
+    if ($script:JobRunning) { Out-Console 'Waehrend ein Vorgang laeuft, wird nichts geloescht - bitte nach Abschluss.' 'Warning'; return }
+    $arch = @($sel | Where-Object { Test-HMBackupArchived $_.Path })
+    $run = @($sel | Where-Object { "$($_.Status)" -eq 'Running' -and -not (Test-HMBackupArchived $_.Path) })
+    $todo = @($sel | Where-Object { -not (Test-HMBackupArchived $_.Path) -and "$($_.Status)" -ne 'Running' })
+    foreach ($a in $arch) { Out-Console "Backup '$($a.Name)' ist als Archiv markiert und wird nicht geloescht - zuerst 'Archiv aufheben'." 'Warning' }
+    if (-not $todo.Count) { Out-Console 'Keines der markierten Backups kann geloescht werden (Archiv bzw. wird gerade geschrieben).' 'Warning'; return }
+    $sum = [long]0; foreach ($t in $todo) { $sum += [long]"0$($t.SizeBytes)" }
+    $names = @($todo | Select-Object -First 15 | ForEach-Object { "  $($_.Name)" })
+    if ($todo.Count -gt 15) { $names += "  ... und $($todo.Count - 15) weitere" }
+    $skip = @()
+    if ($arch.Count) { $skip += "$($arch.Count) Archiv(e) - werden nicht geloescht" }
+    if ($run.Count) { $skip += "$($run.Count) unvollstaendige(s)/laufende(s) - $(if ($run.Count -eq 1) { 'wird' } else { 'werden' }) einzeln geloescht, wenn wirklich gewollt" }
+    $msg = "$($todo.Count) Backups endgueltig loeschen$(if ($sum -gt 0) { " (zusammen ca. $(Format-HMSize $sum))" })?`n`n$($names -join "`n")$(if ($skip.Count) { "`n`nAusgelassen: $($skip -join '; ')" })"
+    if (-not (Confirm-Action $msg)) { return }
+    Out-Console "Loesche $($todo.Count) Backups ..." 'Warning'
+    $script:MultiDelNames = @{}; foreach ($t in $todo) { $script:MultiDelNames["$($t.Path)"] = "$($t.Name)" }
+    Invoke-AsyncCommand -ScriptBlock {
+        param($eng, $paths)
+        . $eng
+        foreach ($p in @($paths)) { $r = 'FEHLER: unbekannt'; try { $r = Remove-HMBackupFolder $p } catch { $r = "FEHLER: $($_.Exception.Message)" }; [pscustomobject]@{ Path = $p; Result = "$r" } }
+    } -ArgumentList @($script:Engine, @($todo | ForEach-Object { "$($_.Path)" })) -TimeoutSec 7200 -OnComplete {
+        param($res)
+        $ok = 0; $bad = 0
+        foreach ($x in @($res | Where-Object { $_ -and $_.PSObject.Properties['Path'] })) {
+            $nm = $script:MultiDelNames["$($x.Path)"]; if (-not $nm) { $nm = Split-Path "$($x.Path)" -Leaf }
+            if ("$($x.Result)" -eq 'OK') { $ok++; Out-Console "   Backup '$nm' geloescht" 'Success' } else { $bad++; Out-Console "   Backup '$nm': $($x.Result)" 'Error' }
+        }
+        if ($res -is [string]) { $bad++; Out-Console "Loeschen: $res" 'Error' }
+        Out-Console "Loeschen fertig: $ok geloescht$(if ($bad) { ", $bad mit Fehler" })" $(if ($bad) { 'Warning' } else { 'Success' })
+        $script:SelectedBackup = $null; Update-BackupList; Update-BackupRootInfo
+    }
+}
 $ui.btnCleanupBackups.Add_Click({ Start-HMRetentionCleanup })
 # Backup als Archiv markieren (einfrieren) bzw. Markierung aufheben
 $ui.btnArchiveBackup.Add_Click({

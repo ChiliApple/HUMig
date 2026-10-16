@@ -3173,3 +3173,95 @@ Describe '2.1.11: Teams-Karte, Lebenszeichen, Rechte der Backup-Ordner' {
         Test-HMFolderAclMatch $d @{ 'S-1-5-18' = 'F'; 'S-1-5-32-544' = 'F'; $me = 'RX' } | Should -BeFalse
     }
 }
+
+Describe '2.1.12: Versionen (UTC), Schattenkopie-Speicher, Schreibtempo, Protokolle, Web-Apps' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        . (Join-Path $script:Root 'Functions\Migration-Quality.ps1')
+        . (Join-Path $script:Root 'Functions\UI-Apps.ps1')
+        . (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1')
+        . (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+        . (Join-Path $script:Root 'Functions\UI-Settings.ps1')
+    }
+    It 'wbadmin-Versions-ID wird als UTC gelesen (Anzeige in Ortszeit)' {
+        $d = ConvertFrom-HMSbVersionId '10/15/2026-06:12'
+        $d.ToUniversalTime().ToString('yyyy-MM-dd HH:mm') | Should -Be '2026-10-15 06:12'
+        $d.Kind | Should -Be 'Local'
+    }
+    It 'Schattenkopie-Speicher: unbegrenzt / Groesse mit Prozent' {
+        Format-HMSbShadowStorage $null | Should -Be ''
+        Format-HMSbShadowStorage ([pscustomobject]@{ MaxBytes = [long]-1; Percent = -1 }) | Should -Be 'unbegrenzt'
+        Format-HMSbShadowStorage ([pscustomobject]@{ MaxBytes = [long]500GB; Percent = 10 }) | Should -Match '500 GB \(10 %\)'
+    }
+    It 'verworfene Versionen erkennen, sonst nichts melden' {
+        Get-HMSbVersionLossNote 1 2 1 $null 'F' | Should -Be ''
+        Get-HMSbVersionLossNote -1 1 1 $null 'F' | Should -Be ''
+        Get-HMSbVersionLossNote 3 3 0 $null 'F' | Should -Be ''
+        $n = Get-HMSbVersionLossNote 2 2 2 ([pscustomobject]@{ MaxBytes = [long]100GB; Percent = 2 }) 'F:'
+        $n | Should -Match '^Windows hat 2 aeltere'
+        $n | Should -Match '/for=F: /on=F: /maxsize=50% '
+        $n | Should -Not -Match '%%'
+    }
+    It 'Schreibtempo in MB/s' {
+        Get-HMSbRateMBs 60 10 | Should -Be 102.4
+        Get-HMSbRateMBs 0 10 | Should -Be 0
+        Get-HMSbRateMBs 5 0.5 | Should -Be 0
+    }
+    It 'langsame Platte: nur bei deutlich unter frueheren Laeufen desselben Profils' {
+        $h = @(
+            [pscustomobject]@{ Profile = 'P'; Status = 'OK'; Minutes = 60; MBs = 100 },
+            [pscustomobject]@{ Profile = 'P'; Status = 'OK'; Minutes = 60; SizeGB = 351.6 },
+            [pscustomobject]@{ Profile = 'P'; Status = 'Warning'; Minutes = 30; MBs = 90 },
+            [pscustomobject]@{ Profile = 'P'; Status = 'Error'; Minutes = 60; MBs = 5 },
+            [pscustomobject]@{ Profile = 'Q'; Status = 'OK'; Minutes = 60; MBs = 5 })
+        Get-HMSbSlowDiskNote $h 'P' 'D-2' 30 | Should -Match 'Platte D-2 .*ca\. 30 MB/s.*USB 2\.0'
+        Get-HMSbSlowDiskNote $h 'P' 'D-2' 60 | Should -Be ''
+        Get-HMSbSlowDiskNote @($h[0], $h[1]) 'P' 'D-2' 10 | Should -Be ''
+        Get-HMSbSlowDiskNote $h 'Q' 'D-2' 1 | Should -Be ''
+    }
+    It 'Protokollzeilen zerlegen (Datum+Zeit, nur Zeit, Folgezeilen)' {
+        $r = @(ConvertFrom-HMSbLogLines @('2026-10-15 08:11:08 [INFO] Start', '08:12:00 [ERROR] kaputt', '   Fortsetzung', '', '2026-10-15 08:13:00 [SUCCESS] fertig', '2026-10-15 08:14:00 [WARNING] w', '2026-10-15 08:15:00 [HEADER] Teil'))
+        @($r).Count | Should -Be 6
+        $r[0][1] | Should -Be 'Info'; $r[0][2] | Should -Be 'Start'
+        $r[1][0] | Should -Be '08:12:00'; $r[1][1] | Should -Be 'Fehler'
+        $r[2][0] | Should -Be ''; $r[2][2] | Should -Be '   Fortsetzung'
+        $r[3][1] | Should -Be 'OK'; $r[4][1] | Should -Be 'Warnung'; $r[5][1] | Should -Be 'Abschnitt'
+        @(ConvertFrom-HMSbLogLines @()).Count | Should -Be 0; @(ConvertFrom-HMSbLogLines @('08:00:00 [INFO] x')).Count | Should -Be 1
+    }
+    It 'Protokolle finden: Art und Profil, neueste zuerst, passender Lauf zum Verlauf' {
+        $d = Join-Path $TestDrive 'SbLogs'; $sub = Join-Path $d '2026-10-15_0811_GYM-Leoben'
+        New-Item -ItemType Directory -Path $sub -Force | Out-Null
+        Set-Content (Join-Path $d 'Aufgabe_2026-10-14_0300_GYM-Leoben.log') 'a'
+        Set-Content (Join-Path $d 'Export_2026-10-13_0300_EUGym.log') 'b'
+        Set-Content (Join-Path $sub 'wbadmin-VMs.log') 'c'
+        (Get-Item (Join-Path $d 'Export_2026-10-13_0300_EUGym.log')).LastWriteTime = (Get-Date).AddDays(-3)
+        (Get-Item (Join-Path $d 'Aufgabe_2026-10-14_0300_GYM-Leoben.log')).LastWriteTime = (Get-Date).AddDays(-2)
+        $f = @(Get-HMSbLogFiles $d)
+        $f.Count | Should -Be 3
+        $f[0].Kind | Should -Be 'wbadmin-Ausgabe'; $f[0].Profile | Should -Be 'GYM-Leoben'
+        $f[1].Kind | Should -Be 'Zeitplan/Hintergrund (SYSTEM)'; $f[1].Profile | Should -Be 'GYM-Leoben'
+        $f[2].Kind | Should -Be 'VM-Export'; $f[2].Profile | Should -Be 'EUGym'
+        @(Get-HMSbLogFiles (Join-Path $TestDrive 'gibtsnicht')).Count | Should -Be 0
+        (Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:01'; Profile = 'GYM-Leoben' }) $f).Name | Should -Be 'Aufgabe_2026-10-14_0300_GYM-Leoben.log'
+        Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:30'; Profile = 'GYM-Leoben' }) $f | Should -BeNullOrEmpty
+        Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:00'; Profile = 'EUGym' }) $f | Should -BeNullOrEmpty
+    }
+    It 'Fehlende Programme: Web-Apps getrennt, Add-ins installierter Programme ausgeblendet' {
+        $src = @([pscustomobject]@{ Name = 'Outlook (PWA)'; Version = '1.0'; Scope = 'WebApp' }, [pscustomobject]@{ Name = 'LogiOptionsPlusExcelAddin'; Version = '1' }, [pscustomobject]@{ Name = 'Fremdes Word Add-in'; Version = '1' })
+        $p = Get-HMMissingAppPlan -Src $src -Have @('Logi Options+') -Packages @() -Catalog @()
+        $p.WebApps | Should -Be 1
+        @($p.Rows | Where-Object { $_[1] -eq 'Outlook (PWA)' -and $_[4] -eq 'Browser-Web-App' }).Count | Should -Be 1
+        @($p.Rows | Where-Object { $_[1] -eq 'LogiOptionsPlusExcelAddin' }).Count | Should -Be 0
+        @($p.Rows | Where-Object { $_[1] -eq 'Fremdes Word Add-in' }).Count | Should -Be 1
+        $q = Get-HMMissingAppPlan -Src $src -Have @() -Packages @() -Catalog @() -OnlyApps @() -Restrict
+        @($q.Rows).Count | Should -Be 0
+    }
+    It 'Netzwerkpfad mit Praefix fuer lange Pfade, Freigabe-Wurzel' {
+        Test-HMNetworkPath '\\?\UNC\srv\share\x' | Should -BeTrue
+        Test-HMNetworkPath '\\srv\share' | Should -BeTrue
+        Test-HMNetworkPath 'relativ\pfad' | Should -BeFalse
+        Get-HMShareRoot '\\srv\share\a\b' | Should -Be '\\srv\share'
+        Get-HMShareRoot '\\srv' | Should -Be ''
+        Get-HMShareRoot 'D:\Backup' | Should -Be ''
+    }
+}

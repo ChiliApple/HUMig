@@ -1,5 +1,21 @@
 ﻿# Changelog
 
+## v2.1.12 - 2026-10-16
+### Backup / Restore
+- **Mehrere Backups auf einmal loeschen:** in der Backup-Liste (Reiter Restore) mit Strg/Umschalt+Klick mehrere markieren, dann *Loeschen (n)*: eine Rueckfrage mit Anzahl, Groesse und Namen, Archive und laufende Backups werden ausgelassen, Ergebnis je Backup. Die anderen Knoepfe (Bericht, Pruefen, Vergleichen, Suchen, Archiv, Geloeschte leeren, Restore) gehen nur mit genau einem markierten Backup
+- **Backup-Ordner eintippen:** das Feld nimmt einen Pfad an (auch `\\server\freigabe\...`), Enter uebernimmt, Esc verwirft; fehlt der Ordner, fragt HUMig, ob er angelegt werden soll. Ist die Freigabe nicht erreichbar, sagt das die Meldung
+- Einstellungen: unerreichbare Freigabe ergibt jetzt die Meldung "nicht erreichbar" statt "ungueltiges Format" (z. B. PC ohne Admin-Freigaben C$/D$) - es wird nichts gespeichert
+- **Fehlende Programme:** Browser-Web-Apps (Edge/Chrome, im Backup als *WebApp* vermerkt) stehen getrennt mit Art *Web-App*; Office-Add-ins eines installierten Programms (z. B. "LogiOptionsPlusExcelAddin" zu "Logi Options+") werden nicht mehr als fehlend gezeigt
+- Kontrolle nach dem Restore nennt Teile, die wegen einer Verknuepfung im Zielprofil ausgelassen wurden; die Meldung zu einer Verknuepfungskette nennt das Endziel
+- Rechte der Backup-Ordner: in einem Schritt gesetzt (.NET, icacls nur noch als Rueckfall); zusaetzliche Konten, die nicht von HUMig sind, stehen im Protokoll ("zusaetzlich (nicht von HUMig, bleibt)"). Fremde Verweigern-Eintraege loesen ein Neusetzen aus
+- Lange Pfade mit Praefix `\\?\UNC\` gelten als Netzwerkfreigabe, `\\?\C:` als lokal (Grok B40/B41)
+### Server-Backup
+- **Protokolle lesen ohne Ordner:** neuer Knopf *Protokolle ...* - Liste aller Protokolle im Tool-Ordner (Zeitplan/Hintergrund als SYSTEM, VM-Export, wbadmin-Ausgaben), *Anzeigen* als Tabelle (Zeit, Stufe, Meldung) mit Filter und *Neu laden* fuer laufende Vorgaenge. Im Verlauf: Rechtsklick -> *Protokoll des Laufs anzeigen*
+- **Versionen auf der Platte:** HUMig vergleicht die Zahl der Versionen vor und nach dem Lauf. Hat Windows aeltere Versionen verworfen (Schattenkopie-Speicher zu klein oder Platte voll), wird der Lauf zur Warnung mit Abhilfe (`vssadmin resize shadowstorage ...`). Bericht: Versionen, Speicher fuer aeltere Versionen und Abschnitt "Warum die Platte fast leer aussieht". HUMig aendert den Speicher nicht selbst
+- **Schreibtempo:** MB/s in Bericht, Verlauf und Teams-Karte; Hinweis, wenn ein Lauf deutlich langsamer ist als fruehere Laeufe des Profils (USB 2.0?)
+- Teams-Karte eines in HUMig gestarteten Laufs: Rotations-/Archiv-Erinnerungen wie beim Zeitplan
+- Versions-Zeitpunkte: die wbadmin-ID ist UTC - Anzeige, Karte und Pruefung jetzt in Ortszeit (bisher 2 h verschoben)
+
 ## v2.1.11 - 2026-10-15
 ### Backup
 - **Rechte der Backup-Ordner:** jeder Backup-Ordner auf einem lokalen Laufwerk bekommt eigene Rechte - egal ob im HUMig-Ordner oder auf einer USB-Platte: Vererbung aus, Vollzugriff SYSTEM, Administratoren und das ausfuehrende Konto, dazu der gesicherte Benutzer (Admin-Backup: lesen, Benutzer-Modus: aendern). Stimmen die Rechte schon (fortlaufendes Backup), schreibt HUMig nichts. Netzwerkfreigaben (UNC, Netzlaufwerk) bleiben unveraendert - dort waeren SYSTEM/Administratoren die Konten des Dateiservers; wer lesen darf, regeln die Rechte der Freigabe. Bisher erbte ein Backup ausserhalb von `BACKUPS` die Rechte des Ziels (z. B. lesbar fuer alle Benutzer einer USB-Platte). Neue Einstellung `Backup.ExtraReadGroup` (settings.json, Name oder SID): diese Gruppe darf alle Backups lesen (z. B. Techniker ohne Adminrechte). Kennt das Ziel keine Rechte (FAT32/exFAT) oder scheitert das Setzen: Warnung im Protokoll, das Backup laeuft weiter. Entra-ID-Konten (S-1-12-1) werden jetzt ebenfalls berechtigt

@@ -147,12 +147,7 @@ try {
 $st = "$($Job.Result.Status)"
 # Benachrichtigung (Teams, wenn auf diesem Server eingetragen): Fehler/Warnung, Plattenzustand, Erinnerungen Plattenwechsel/Archiv
 try {
-    $rem = @()
-    try {
-        $hh = Read-HMSbHistory $localHist   # erst zuweisen (Liste kommt als EIN Objekt)
-        $sd = Get-HMStatusData -SbProfiles @($prof) -SbHistory @($hh)
-        $rem = @(@($sd.Warnings) | Where-Object { "$($_.Area)" -eq 'Server-Backup' -and "$($_.Text)" -notmatch 'letzter Lauf fehlgeschlagen|keine erfolgreiche Sicherung|letzte erfolgreiche Sicherung vor' } | ForEach-Object { "$($_.Text)" })
-    } catch { }
+    $rem = @(Get-HMSbReminders $prof $localHist)
     # eine Karte je Lauf aus den eingeschalteten Kategorien (Einstellungen > Allgemein > Teams-Benachrichtigung)
     # je Ziel (Chat/Kanal) mit dessen Kategorien - nicht jeder bekommt alles
     $nc = Get-HMNotifyConfig
