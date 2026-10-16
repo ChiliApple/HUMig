@@ -79,6 +79,12 @@ function Format-HMAuCliResult([int64]$Code, [string]$Out) {
         '0x8A150010' { 'kein passender Installer fuer alle Benutzer bzw. diesen PC (nur pro Benutzer installierbar?)' }
         '0x8A150061' { 'schon installiert' }
         '0x8A15010D' { 'andere Version ist schon installiert' }
+        '0x8A15010B' { 'PC startet neu, um die Installation abzuschliessen' }
+        '0x8A15010C' { 'Installation abgebrochen - meist lief das Programm noch; evtl. unvollstaendig: Programm beenden und erneut aktualisieren (fehlt es danach in der Liste, neu installieren)' }
+        '0x8A15010E' { 'hoehere Version ist schon installiert' }
+        '0x8A150105' { 'Datentraeger voll' }
+        '0x8A150107' { 'Installer braucht eine Internetverbindung' }
+        '0x8A150108' { 'Installer meldet Fehler (Hersteller kontaktieren)' }
         '0x8A150003' { 'Befehl fehlgeschlagen (oft: Datei oder Programm in Benutzung - Programm schliessen und erneut versuchen)' }
         '0x8A150103' { 'Datei in Benutzung - Programm schliessen und erneut versuchen' }
         '0xC0000135' { 'winget.exe startet als SYSTEM nicht (DLL fehlt - Visual C++-Laufzeit). Abhilfe: VC++ Redistributable x64 am PC installieren (Microsoft.VCRedist.2015+.x64)' }
@@ -86,6 +92,13 @@ function Format-HMAuCliResult([int64]$Code, [string]$Out) {
         default { 'Fehler' }
     }
     return @{ Ok = $false; Reboot = $false; Text = "$t ($hex)$(if ("$Out".Trim() -and $t -eq 'Fehler') { ": $Out" })" }
+}
+# Fehlertext aus dem Modul/winget (englisch) verstaendlich machen - unbekannte Texte bleiben, wie sie sind
+function Format-HMAuExceptionText([string]$Text) {
+    $t = "$Text".Trim()
+    if ($t -match '(?i)No packages? (were )?(matched|found)|No installed package found') { return 'kein installiertes Paket gefunden - evtl. nur noch Dateireste (Installation abgebrochen?): Programm neu installieren' }
+    if ($t -match '(?i)error occurred while connecting to the catalog|Failed when searching source') { return "Quelle nicht erreichbar ($t)" }
+    return $t
 }
 # Neuinstallation: "kein passendes Update" bzw. "schon installiert" heisst, das Programm ist schon da (z. B. andere Variante,
 # zweiter Lauf nach Abbruch) - kein Fehler. Gilt nur fuer Install, nicht fuer Update.
@@ -626,7 +639,8 @@ function Restart-HMAuStopped($Job, [hashtable]$Restart) {
 # ----------------------------------------------------------------------------
 # Aktualisieren / Installieren (Start-LongJob): $Ctx.Op = Update | Install, $Ctx.ByPc: PC -> @{ Items; UserSid; UserAccount }
 #   Items: Id, Name, Source, Installed, Available, Unknown, Scope (Machine/User). $Ctx.Credential
-#   Nur am eigenen PC: $Ctx.Running (Get-HMAuRunning), $Ctx.ProcDecisions (Id -> Close/CloseForce/Skip/Run)
+#   Am eigenen PC: $Ctx.Running (Get-HMAuRunning), $Ctx.ProcDecisions (Id -> Close/CloseForce/Skip/Run)
+#   Andere PCs: $Ctx.ProcDecisions ("PC|Id" -> Stop/Skip/Run) - Stop beendet das Programm am Ziel-PC (AppUpdates-Target.ps1)
 #   Am Ziel-PC: Machine -> als SYSTEM (winget.exe), User -> als angemeldeter Benutzer
 # ----------------------------------------------------------------------------
 function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
@@ -638,7 +652,7 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
     Write-HMLog $Job "App-Updates: $n Programm(e) $(if ($op -eq 'Install') { 'installieren' } else { 'aktualisieren' }) an $($pcs.Count) PC(s)$(if ($pcs.Count -le 5) { ': ' + ($pcs -join ', ') })" 'Header'
     $res = @()
     $new = { param($pc, $it) [ordered]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Computer = $pc; Id = "$($it.Id)"; Name = "$($it.Name)"; From = "$($it.Installed)"; To = "$($it.Available)"; Source = "$($it.Source)"; Scope = "$($it.Scope)"; Status = ''; Text = ''; Reboot = $false } }
-    $byPc = @{}; $names = @{}
+    $byPc = @{}; $names = @{}; $procMap = @{}
     $restart = @{ Services = [System.Collections.Generic.List[string]]::new(); Apps = [System.Collections.Generic.List[object]]::new() }   # nach dem Update wieder starten
     foreach ($k in $pcs) {
         $todo = @()
@@ -661,12 +675,22 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
                     }
                 }
             }
+            $proc = ''
+            if ($k -ne $lk -and $Ctx.ProcDecisions) {
+                $rd = "$($Ctx.ProcDecisions["$k|$($it.Id)"])"
+                if ($rd -eq 'Skip') {
+                    $e = & $new $k $it; $e.Status = 'Skipped'; $e.Text = 'uebersprungen - laeuft am PC (vorher gemeldet)'
+                    Write-HMLog $Job "  $(if ($pcs.Count -gt 1) { "[$k] " })$($it.Name): $($e.Text)" 'Warning'; $res += [pscustomobject]$e; continue
+                }
+                if ($rd -eq 'Stop') { $proc = 'Stop' }
+            }
+            $procMap["$k|$($it.Id)"] = $proc
             $todo += $it
             $names["$k|$($it.Id)"] = $it
         }
         if ($todo.Count) {
             # Name + Ausnahmen: am Ziel-PC werden die Ausnahmen vor dem Update noch einmal geprueft
-            $byPc[$k] = @{ UserSid = "$($Ctx.ByPc[$k].UserSid)"; Items = @($todo | ForEach-Object { @{ Id = "$($_.Id)"; Name = "$($_.Name)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown; Scope = "$($_.Scope)" } })
+            $byPc[$k] = @{ UserSid = "$($Ctx.ByPc[$k].UserSid)"; Items = @($todo | ForEach-Object { @{ Id = "$($_.Id)"; Name = "$($_.Name)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown; Scope = "$($_.Scope)"; Proc = "$($procMap["$k|$($_.Id)"])" } })
                 Exclude = @(@($Ctx.ByPc[$k].Exclude) | Where-Object { $_ } | ForEach-Object { @{ Pattern = "$($_.Pattern)"; Reason = "$($_.Reason)" } }) }
         }
     }
@@ -691,9 +715,9 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
             # Ergebnis sofort zeigen (DONE|Id|Status|Code|InstallerCode|ExtendedCode|Reboot)
             $c = $null
             if ($p.Count -ge 7) {
-                if ($p[2] -eq 'Excluded') {
-                    # Ausnahme am Ziel-PC (vor dem Update erneut geprueft): wie uebersprungen anzeigen
-                    Write-HMLog $st.Job "  $pre$($x.Name): Ausnahme - nicht aktualisiert" 'Warning'
+                if ($p[2] -in @('Excluded', 'Skipped')) {
+                    # Ausnahme am Ziel-PC (vor dem Update erneut geprueft) bzw. laufendes Programm liess sich nicht beenden: wie uebersprungen anzeigen
+                    Write-HMLog $st.Job "  $pre$($x.Name): $(if ($p[2] -eq 'Skipped') { 'liess sich nicht beenden - nicht aktualisiert' } else { 'Ausnahme - nicht aktualisiert' })" 'Warning'
                     $st.Logged["$pc|$($p[1])"] = $true
                     return
                 }
@@ -720,8 +744,8 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
                 $cn = [bool](Test-HMCancel $Job)
                 $e.Status = $(if ($cn) { 'Skipped' } else { 'Error' })
                 $e.Text = $(if ($cn) { 'abgebrochen' } elseif (@($v.Errors).Count) { "nicht ausgefuehrt: $(@($v.Errors)[0])" } else { 'kein Ergebnis' })
-            } elseif ("$($x.Status)" -eq 'Excluded') { $e.Status = 'Skipped'; $e.Text = $(if ("$($x.Text)") { "$($x.Text)" } else { 'Ausnahme - nicht aktualisiert' }) }
-            elseif ("$($x.Status)" -eq 'Exception') { $e.Status = 'Error'; $e.Text = "$($x.Text)" }
+            } elseif ("$($x.Status)" -in @('Excluded', 'Skipped')) { $e.Status = 'Skipped'; $e.Text = $(if ("$($x.Text)") { "$($x.Text)" } else { 'Ausnahme - nicht aktualisiert' }) }
+            elseif ("$($x.Status)" -eq 'Exception') { $e.Status = 'Error'; $e.Text = Format-HMAuExceptionText "$($x.Text)" }
             elseif ("$($x.Status)" -eq 'Cli') {
                 $c = Convert-HMAuInstallResult (Format-HMAuCliResult ([int64]$x.Code) "$($x.Text)") ($op -eq 'Install')
                 $e.Status = $(if ($c.Ok) { 'OK' } else { 'Error' }); $e.Reboot = [bool]$c.Reboot

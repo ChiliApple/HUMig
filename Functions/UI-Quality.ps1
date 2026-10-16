@@ -377,6 +377,7 @@ function Format-HMBackupStatus($b) {
     switch ("$($b.Status)") { 'OK' { 'OK' } 'Warning' { 'Warnung' } 'Error' { 'FEHLER' } 'Cancelled' { 'abgebrochen' } 'Running' { 'laeuft/unvollstaendig' } default { "unbekannt ($($b.Status))" } }
 }
 function Start-HMRetentionCleanup {
+    if ($script:MultiDelBusy) { Out-Console 'Waehrend Backups geloescht werden, nicht moeglich - bitte nach Abschluss.' 'Warning'; return }
     Update-BackupList
     $days = [int]$script:Settings.RetentionDays
     $keep = [int]$script:Settings.RetentionKeepPerUser

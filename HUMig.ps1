@@ -1359,6 +1359,8 @@ function Set-JobUi([bool]$Running) {
     # Live-Anzeige (Durchsatz, CPU, RAM) in Backup/Restore
     try { if ($Running) { Start-HMMonitor } else { Stop-HMMonitor } } catch { }
     foreach ($b in @($ui.btnBackup, $ui.btnRestore, $ui.btnProfileSize, $ui.btnConnect, $ui.btnLocal, $ui.btnDeleteBackup, $ui.btnCleanupBackups, $ui.btnEmptyDeleted, $ui.btnUpdate, $ui.btnPrecheck)) { $b.IsEnabled = -not $Running }
+    # waehrend des Mehrfach-Loeschens bleiben Loeschen und Alte loeschen gesperrt, auch wenn ein anderer Vorgang endet (B48)
+    if ($script:MultiDelBusy) { foreach ($b in @($ui.btnDeleteBackup, $ui.btnCleanupBackups)) { if ($b) { $b.IsEnabled = $false } } }
     $ui.btnCancel.IsEnabled = $Running
     $ui.btnCancelRestore.IsEnabled = $Running
     $ui.cmbComputer.IsEnabled = -not $Running -and -not $script:UserMode

@@ -3282,6 +3282,8 @@ Describe '2.1.12: Versionen (UTC), Schattenkopie-Speicher, Schreibtempo, Protoko
         $f2 = @($f) + [pscustomobject]@{ Name = 'Aufgabe_2026-10-14_0320_GYM-Leoben.log'; Kind = 'x'; Profile = 'GYM-Leoben'; Path = 'x' }
         (Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:21'; Profile = 'GYM-Leoben' }) $f2).Name | Should -Be 'Aufgabe_2026-10-14_0320_GYM-Leoben.log'
         (Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:21'; Profile = 'GYM-Leoben'; TaskLog = 'Aufgabe_2026-10-14_0300_GYM-Leoben.log' }) $f2).Name | Should -Be 'Aufgabe_2026-10-14_0300_GYM-Leoben.log'
+        # B49: Eintrag ab 2.1.12 mit leerem TaskLog = in HUMig gestartet - kein Raten ueber die Zeit
+        Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:21'; Profile = 'GYM-Leoben'; TaskLog = '' }) $f2 | Should -BeNullOrEmpty
         Find-HMSbRunLog ([pscustomobject]@{ Date = '2026-10-14 03:00'; Profile = 'EUGym' }) $f | Should -BeNullOrEmpty
     }
     It 'Fehlende Programme: Web-Apps getrennt, Add-ins installierter Programme ausgeblendet' {
@@ -3302,5 +3304,47 @@ Describe '2.1.12: Versionen (UTC), Schattenkopie-Speicher, Schreibtempo, Protoko
         Get-HMShareRoot '\\srv\share\a\b' | Should -Be '\\srv\share'
         Get-HMShareRoot '\\srv' | Should -Be ''
         Get-HMShareRoot 'D:\Backup' | Should -Be ''
+    }
+}
+Describe '2.1.13: laufende Programme bei App-Updates, WinGet-Codes, Fernsitzung' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1')
+        $script:FnFrom = {
+            param([string]$File, [string[]]$Names)
+            $tk = $null; $er = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root $File), [ref]$tk, [ref]$er)
+            foreach ($n in $Names) {
+                $f = $ast.Find({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true)
+                if ($f) { $f.Extent.Text }
+            }
+        }
+    }
+    It 'WinGet-Codes: 010C erklaert (Programm lief), weitere Codes auf Deutsch' {
+        (Format-HMAuCliResult ([int64]0x8A15010C) '').Text | Should -Match 'abgebrochen.*lief das Programm noch.*0x8A15010C'
+        (Format-HMAuCliResult ([int64]0x8A15010E) '').Text | Should -Match 'hoehere Version'
+        (Format-HMAuCliResult ([int64]0x8A150105) '').Text | Should -Match 'voll'
+        (Format-HMAuCliResult ([int64]0x8A150107) '').Text | Should -Match 'Internet'
+    }
+    It 'englische Modul-Meldungen verstaendlich, unbekannte unveraendert' {
+        Format-HMAuExceptionText 'No packages matched the given input criteria.' | Should -Match 'kein installiertes Paket gefunden.*neu installieren'
+        Format-HMAuExceptionText 'An error occurred while connecting to the catalog.' | Should -Match '^Quelle nicht erreichbar'
+        Format-HMAuExceptionText 'Irgendwas anderes' | Should -Be 'Irgendwas anderes'
+    }
+    It 'Ziel-PC: Pruefung laufender Programme, Beenden und Neustart vorhanden; Fernsitzung mit Bypass nur fuer die Sitzung' {
+        $txt = Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw
+        $tk = $null; $er = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($txt, [ref]$tk, [ref]$er)
+        @($er).Count | Should -Be 0
+        foreach ($n in @('Get-TRunning', 'Stop-TRunning', 'Restart-TStopped')) { $ast.Find({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true) | Should -Not -BeNullOrEmpty }
+        $txt | Should -Match "'Running' \{"
+        $txt | Should -Match 'if \(\$PSSenderInfo\) \{ try \{ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass'
+        $txt | Should -Match 'Proc\)" -eq ''Stop'''
+    }
+    It 'Zeitplan-Skript: Codes und Pruefung laufender Programme' {
+        . ([scriptblock]::Create((@(& $script:FnFrom 'Functions\AppUpdates-Auto.ps1' @('Format-ACode', 'Get-ARunningText')) -join "`n")))
+        (Format-ACode ([int64]0x8A15010C)).Text | Should -Match 'abgebrochen'
+        (Format-ACode 0).Ok | Should -BeTrue
+        Get-ARunningText '' | Should -Be ''
+        Get-ARunningText 'Programm das es sicher nicht gibt 4711' | Should -Be ''
     }
 }

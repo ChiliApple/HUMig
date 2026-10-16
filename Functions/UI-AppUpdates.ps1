@@ -278,7 +278,7 @@ function Start-HMAuUpdate([switch]$All) {
     $list = @($all2 | Select-Object -First 25) -join "`n"
     if ($all2.Count -gt 25) { $list += "`n  ... und $($all2.Count - 25) weitere" }
     $where = if ($byPc.Count -eq 1) { @($byPc.Keys)[0] } else { "$($byPc.Count) PCs" }
-    if (-not (Confirm-Action "$cnt Programm(e) an $where still aktualisieren?`n`n$list`n`nLaufende Programme: an diesem PC wird vorher gefragt; an anderen PCs meldet der Installer sie (dann spaeter erneut)." 'App-Updates')) { return }
+    if (-not (Confirm-Action "$cnt Programm(e) an $where still aktualisieren?`n`n$list`n`nLaufende Programme werden vorher geprueft - HUMig fragt dann, was geschehen soll." 'App-Updates')) { return }
     $lk = "$env:COMPUTERNAME".ToUpper()
     $localItems = @(); if ($byPc.ContainsKey($lk)) { $localItems = @($byPc[$lk].Items) }
     $go = {
@@ -290,13 +290,45 @@ function Start-HMAuUpdate([switch]$All) {
             if ($j.Result -and $j.Result.Reboot) { Out-Console 'App-Updates: mindestens ein Programm braucht einen Neustart.' 'Warning' }
         }
     }
-    if (-not $localItems.Count) { & $go $byPc @() @{}; return }
+    # andere PCs: laufende Programme am Ziel-PC pruefen und fragen (Beenden / nicht aktualisieren / trotzdem) - danach starten
+    $remote = {
+        param($byPc, $running, $dec)
+        $lk2 = "$env:COMPUTERNAME".ToUpper()
+        $rk = @($byPc.Keys | Where-Object { "$_" -ne $lk2 })
+        if (-not $rk.Count) { & $script:AuGoBlock $byPc $running $dec; return }
+        $rp = @{}; foreach ($k in $rk) { $rp[$k] = @{ Items = @($byPc[$k].Items | ForEach-Object { @{ Id = "$($_.Id)"; Name = "$($_.Name)" } }) } }
+        Invoke-AsyncCommand -ScriptBlock {
+            param($eng, $au, $keys, $rp, $cred)
+            . $eng; . $au
+            Invoke-HMAuTarget $keys 'Running' @{ ByPc = $rp } $cred
+        } -ArgumentList @($script:Engine, $script:AuEngine, $rk, $rp, $script:RemoteCred) -TimeoutSec 180 -BusyTag 'Au' -BusyText 'Laufende Programme an den PCs pruefen ...' -State @{ ByPc = $byPc; Running = $running; Dec = $dec; Go = $script:AuGoBlock } -OnComplete {
+            param($r, $st)
+            $d2 = @{}; foreach ($kk in @($st.Dec.Keys)) { $d2[$kk] = $st.Dec[$kk] }
+            $res = @($r | Where-Object { $_ -is [hashtable] })[0]
+            if (-not $res) { Out-Console "App-Updates: laufende Programme an den PCs nicht pruefbar ($(@($r) -join ' ')) - Installer melden sich dann selbst" 'Warning'; & $st.Go $st.ByPc $st.Running $d2; return }
+            $rows = @()
+            foreach ($k in @($res.Keys | Sort-Object)) {
+                $v = $res[$k]
+                foreach ($x in @($v.Running | Where-Object { $_ -and "$($_.Id)" })) { $rows += [pscustomobject]@{ Id = "$k|$($x.Id)"; Name = "$($x.Name) ($k)"; Running = "$($x.Running)" } }
+            }
+            if ($rows.Count) {
+                $dr = Show-HMProcDialog $rows 'App-Update' $(if (@($res.Keys).Count -eq 1) { @($res.Keys)[0] } else { "$(@($res.Keys).Count) PCs" }) -Options @(@('Stop', 'Beenden, danach neu starten'), @('Skip', 'Nicht aktualisieren'), @('Run', 'Trotzdem aktualisieren')) `
+                    -Note 'Beenden: das Programm wird am PC hart beendet (aus der Ferne laesst sich kein Fenster schliessen - ungespeicherte Arbeit geht verloren), Dienste werden gestoppt; nach dem Update startet HUMig beides wieder (Programme im Konto des Benutzers, falls er noch angemeldet ist). Trotzdem aktualisieren: der Installer bricht dann oft ab (z. B. 0x8A15010C) und kann das Programm halb entfernt zuruecklassen.'
+                if ($null -eq $dr) { Out-Console 'App-Updates abgebrochen (laufende Programme).' 'Warning'; return }
+                foreach ($x in $rows) { $d2[$x.Id] = $dr[$x.Id]; Out-Console ("   {0}: {1} -> {2}" -f $x.Name, $x.Running, $(switch ("$($dr[$x.Id])") { 'Stop' { 'beenden, danach neu starten' } 'Skip' { 'nicht aktualisieren' } default { 'trotzdem aktualisieren' } })) 'Info' }
+            }
+            & $st.Go $st.ByPc $st.Running $d2
+        }
+    }
+    # Bloecke im Skriptbereich ablegen - die Rueckrufe (OnComplete) laufen in einem anderen Bereich
+    $script:AuGoBlock = $go; $script:AuRemoteBlock = $remote
+    if (-not $localItems.Count) { & $remote $byPc @() @{}; return }
     Out-Console 'App-Updates: laufende Programme pruefen ...' 'Debug'
     Invoke-AsyncCommand -ScriptBlock {
         param($eng, $items)
         . $eng
         @(Get-HMAuRunning $items)
-    } -ArgumentList @($script:AuEngine, $localItems) -TimeoutSec 60 -BusyTag 'Au' -BusyText 'Laufende Programme pruefen ...' -State @{ ByPc = $byPc; Go = $go } -OnComplete {
+    } -ArgumentList @($script:AuEngine, $localItems) -TimeoutSec 60 -BusyTag 'Au' -BusyText 'Laufende Programme pruefen ...' -State @{ ByPc = $byPc; Go = $script:AuRemoteBlock } -OnComplete {
         param($r, $st)
         $running = @()
         if ($r -is [string]) { Out-Console "App-Updates: laufende Programme nicht pruefbar ($r) - Installer melden sich dann selbst" 'Warning' }

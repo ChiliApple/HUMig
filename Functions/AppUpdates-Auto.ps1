@@ -42,9 +42,35 @@ function Format-ACode([int64]$Code) {
         '0x8A150006' { 'Installer meldet Fehler' }
         '0x8A150115' { 'Installer meldet Fehler' }
         '0x8A150011' { 'Pruefsumme passt nicht - nicht installiert' }
+        '0x8A15010C' { 'Installation abgebrochen - meist lief das Programm noch; evtl. unvollstaendig' }
+        '0x8A15010B' { 'PC startet neu, um die Installation abzuschliessen' }
+        '0x8A15010D' { 'andere Version ist schon installiert' }
+        '0x8A15010E' { 'hoehere Version ist schon installiert' }
+        '0x8A150103' { 'Datei in Benutzung' }
+        '0x8A150105' { 'Datentraeger voll' }
+        '0x8A150107' { 'Installer braucht eine Internetverbindung' }
+        '0x8A150108' { 'Installer meldet Fehler (Hersteller kontaktieren)' }
         default { 'Fehler' }
     }
     return @{ Ok = $false; Reboot = $false; Text = "$t ($hex)" }
+}
+# Laeuft das Programm in einer Benutzersitzung? (Installationsordner aus den Deinstallations-Eintraegen, Prozesse darin, Sitzung > 0)
+# Dann im Zeitplan nicht aktualisieren - der Installer bricht sonst oft ab und hinterlaesst ein halb entferntes Programm.
+# Dienste (Sitzung 0) stoppen die Installer selbst. Rueckgabe: Text der laufenden Prozesse oder ''
+function Get-ARunningText([string]$Name) {
+    $n = "$Name".Trim()
+    if (-not $n) { return '' }
+    $bad = @("$env:SystemRoot", "$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramData", "$env:SystemDrive\") | Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\').ToLower() }
+    $dirs = @(foreach ($k in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
+            foreach ($r in @(Get-ItemProperty -Path $k -ErrorAction SilentlyContinue | Where-Object { "$($_.DisplayName)" -eq $n -or "$($_.DisplayName)" -like "$n *" })) {
+                $d = "$($r.InstallLocation)".Trim().Trim('"')
+                if (-not $d -and "$($r.DisplayIcon)") { try { $d = Split-Path ("$($r.DisplayIcon)" -replace ',\s*-?\d+$', '').Trim('"') -Parent } catch { $d = '' } }
+                if ($d) { $d.TrimEnd('\') }
+            }
+        }) | Where-Object { $_ -and $bad -notcontains $_.ToLower() -and $_.Length -gt 3 } | Select-Object -Unique
+    if (-not @($dirs).Count) { return '' }
+    $run = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { [int]$_.SessionId -gt 0 -and $_.ExecutablePath -and $(foreach ($d in $dirs) { if ("$($_.ExecutablePath)".ToLower().StartsWith($d.ToLower() + '\')) { $true; break } }) })
+    return (@($run | ForEach-Object { "$($_.Name) ($($_.ProcessId))" }) -join ', ')
 }
 # Verlauf und Fortschritt nach jedem Programm speichern (HUMig > Zeitplaene ansehen liest beides auch waehrend des Laufs)
 $hf = Join-Path $Dir 'history.json'
@@ -60,7 +86,7 @@ function Set-AProgress([bool]$Running, [int]$Done, [int]$Total, [string]$Current
 }
 $script:Started = (Get-Date).ToString('yyyy-MM-dd HH:mm')
 Write-ALog '=== Start'
-$ok = 0; $err = 0; $excl = 0; $found = 0; $i = 0; $todo = @()
+$ok = 0; $err = 0; $excl = 0; $skip = 0; $found = 0; $i = 0; $todo = @()
 try {
     # Log kurz halten (letzte 2000 Zeilen)
     try { $lf = Join-Path $Dir 'log.txt'; if ((Get-Item -LiteralPath $lf -ErrorAction Stop).Length -gt 400KB) { Get-Content -LiteralPath $lf -Tail 2000 | Set-Content -LiteralPath $lf -Encoding UTF8 } } catch { }
@@ -93,6 +119,13 @@ try {
         Set-AProgress $true $i $todo.Count "$($t.Name)" $ok $err
         # Paket-ID pruefen (keine Optionen/Leerzeichen), sonst nicht an winget weitergeben
         if ("$($t.Id)" -notmatch '^[^\s\-"][^\s"]{0,254}\z' -or "$($t.Source)" -notmatch '^(?=.{1,64}\z)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?\z') { $i++; $err++; Write-ALog "$($t.Name): ungueltige Paket-ID '$($t.Id)' bzw. Quelle '$($t.Source)' - uebersprungen"; continue }
+        $rt = ''; try { $rt = Get-ARunningText $t.Name } catch { }
+        if ($rt) {
+            $i++; $skip++
+            Write-ALog "$($t.Name): laeuft ($rt) - nicht aktualisiert, naechster Lauf versucht es erneut"
+            Add-AHistory ([pscustomobject]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Computer = $PC; Id = $t.Id; Name = $t.Name; From = $t.From; To = $t.To; Source = $t.Source; Scope = 'Machine'; Status = 'Skipped'; Text = "uebersprungen - laeuft ($rt) (Zeitplan)"; Reboot = $false })
+            continue
+        }
         $out = @(& $wg upgrade --id $t.Id --exact --source $t.Source --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | ForEach-Object { "$_" })
         $r = Format-ACode ([int64]$LASTEXITCODE)
         $i++
@@ -105,6 +138,6 @@ try {
 } catch { $err++; Write-ALog "FEHLER: $($_.Exception.Message)" }
 Set-AProgress $false $i $(if ($todo) { @($todo).Count } else { 0 }) '' $ok $err
 try {
-    [pscustomobject]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Found = $found; Ok = $ok; Err = $err; Excluded = $excl } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Dir 'last.json') -Encoding UTF8
+    [pscustomobject]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Found = $found; Ok = $ok; Err = $err; Excluded = $excl; Skipped = $skip } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Dir 'last.json') -Encoding UTF8
 } catch { Write-ALog "Bericht nicht speicherbar: $($_.Exception.Message)" }
-Write-ALog "=== Ende: $ok aktualisiert, $err Fehler"
+Write-ALog "=== Ende: $ok aktualisiert, $err Fehler$(if ($skip) { ", $skip uebersprungen (lief)" })"

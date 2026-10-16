@@ -45,7 +45,7 @@ Fragt nach dem Zielordner (Vorschlag `C:\Program Files\HUMig`), lädt die freige
 | **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
 | **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash (auch an HUPilot), BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung (Setups vorher in der **Windows Sandbox** testen) |
 | **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |
-| **App-Updates** | installierte Programme über **WinGet** aktualisieren - Liste mit Haken, **Ausnahmen** (z. B. Prüfungssoftware) und Quellen je Standort, Verlauf |
+| **App-Updates** | installierte Programme über **WinGet** aktualisieren - Liste mit Haken, **Ausnahmen** (z. B. Prüfungssoftware) und Quellen je Standort, laufende Programme werden vorher erkannt (auch an anderen PCs), Verlauf |
 | **Benutzer-Modus** | ohne Administratorrechte: eigenes Profil sichern/wiederherstellen, Dateien aus dem Backup holen |
 | **Update** | Kanal **Stabil** (freigegebene Versionen) oder **Test**, Vorversion per Klick, jede Datei per **SHA-256** geprüft, nur **signierte** Releases werden installiert |
 | **Anleitung** | im Tool mit **F1** – aus diesem Repository, passend zur installierten Version |

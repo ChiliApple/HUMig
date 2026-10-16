@@ -1,5 +1,17 @@
 ﻿# Changelog
 
+## v2.1.13 - 2026-10-16
+### App-Updates
+- **Laufende Programme an anderen PCs:** vor dem Aktualisieren prueft HUMig auch an entfernten PCs, ob ein Programm laeuft, und fragt je Programm: *Beenden, danach neu starten* (hart beendet - aus der Ferne laesst sich kein Fenster schliessen; Dienste werden gestoppt; danach startet HUMig beides wieder, Programme im Konto des Benutzers, falls noch angemeldet), *Nicht aktualisieren* oder *Trotzdem aktualisieren*. Laesst sich ein Programm nicht beenden, wird es nicht aktualisiert. Bisher lief der Installer trotzdem und brach z. B. bei Greenshot ab - teils mit halb entferntem Programm
+- **Zeitplan:** Programme, die gerade in einer Benutzersitzung laufen, werden ausgelassen ("uebersprungen - laeuft") und beim naechsten Lauf erneut versucht; Zusammenfassung nennt die Anzahl
+- **Fernsitzung mit Ausfuehrungsrichtlinie Bypass nur fuer die Sitzung:** PCs ohne Richtlinie (Windows-Standard *Restricted*) scheiterten beim Einrichten des WinGet-Moduls ("PackageManagement konnte nicht geladen werden") - die Einstellung des PCs bleibt unveraendert
+- WinGet-Codes auf Deutsch: 0x8A15010C (abgebrochen - meist lief das Programm noch, evtl. unvollstaendig), 010B, 010E, 0105, 0107, 0108 (auch im Zeitplan, dort zusaetzlich 010D, 0103); englische Meldungen "No packages matched ..." (kein installiertes Paket - evtl. nur Dateireste, neu installieren) und "error occurred while connecting to the catalog" (Quelle nicht erreichbar)
+### Backup / Server-Backup
+- Waehrend des Mehrfach-Loeschens bleiben *Loeschen* und *Alte loeschen* gesperrt, auch wenn ein anderer Vorgang endet; *Alte loeschen* lehnt dann ab (Grok B48)
+- "Protokoll des Laufs anzeigen" bei einem in HUMig gestarteten Lauf (ab 2.1.12) oeffnet den Bericht statt eines frueheren Zeitplan-Protokolls (Grok B49)
+### Doku
+- README, Funktionen und Anleitung auf Stand 2.1.12/2.1.13
+
 ## v2.1.12 - 2026-10-16
 ### Backup / Restore
 - **Mehrere Backups auf einmal loeschen:** in der Backup-Liste (Reiter Restore) mit Strg/Umschalt+Klick mehrere markieren, dann *Loeschen (n)*: eine Rueckfrage mit Anzahl, Groesse und Namen, Archive und laufende Backups werden ausgelassen, Ergebnis je Backup. Die anderen Knoepfe (Bericht, Pruefen, Vergleichen, Suchen, Archiv, Geloeschte leeren, Restore) gehen nur mit genau einem markierten Backup
