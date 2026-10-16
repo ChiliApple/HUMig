@@ -50,6 +50,9 @@ function Format-ACode([int64]$Code) {
         '0x8A150105' { 'Datentraeger voll' }
         '0x8A150107' { 'Installer braucht eine Internetverbindung' }
         '0x8A150108' { 'Installer meldet Fehler (Hersteller kontaktieren)' }
+        '0x8A15005C' { 'Archiv des Installers konnte nicht entpackt werden' }
+        '0x8A15005B' { 'Installer im Archiv nicht gefunden' }
+        '0x8A15005E' { 'Zertifikat des Download-Servers passt nicht' }
         default { 'Fehler' }
     }
     return @{ Ok = $false; Reboot = $false; Text = "$t ($hex)" }

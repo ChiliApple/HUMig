@@ -144,9 +144,11 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec, 
         $pr = if ($sys) { New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest } else { New-ScheduledTaskPrincipal -UserId (Get-TAccount $Who) -LogonType Interactive -RunLevel Limited }
         Register-ScheduledTask -TaskName $name -TaskPath '\' -Action $a -Principal $pr -Settings $s -Force -ErrorAction Stop | Out-Null
         Start-ScheduledTask -TaskPath '\' -TaskName $name
-        $t0 = Get-Date; $seen = 0; $doneAt = $null; $cancelSent = $false
+        $t0 = Get-Date; $seen = 0; $doneAt = $null; $cancelSent = $false; $beat = Get-Date
         $rf = Join-Path $dir 'result.json'; $lf = Join-Path $dir 'log.txt'
         while ($true) {
+            # Lebenszeichen fuer die Fernsitzung (WinRM/Firewalls beenden stille Verbindungen): alle 60 s eine Zeile, die HUMig nicht anzeigt
+            if (((Get-Date) - $beat).TotalSeconds -ge 60) { Out-L "#WAIT|$($curId)|$([int]((Get-Date) - $t0).TotalSeconds)"; $beat = Get-Date }
             if (Test-Path -LiteralPath $lf) {
                 $lines = @(Get-Content -LiteralPath $lf -Encoding UTF8 -ErrorAction SilentlyContinue)
                 for ($i = $seen; $i -lt $lines.Count; $i++) {
@@ -483,6 +485,7 @@ try {
                 if ($script:TRes) { $res += @($script:TRes.Results) }
             }
             $usid = "$($My.UserSid)"
+            $fromSys = @()   # Pakete, die als SYSTEM nicht gefunden wurden und ins Benutzerkonto wanderten (kein zweiter SYSTEM-Versuch, B60)
             # 0x8A150014 als SYSTEM: Paket ist nur im Benutzerkonto sichtbar (z.B. WSL) -> im Benutzerkonto noch einmal versuchen
             if ($Op -eq 'Update' -and $res.Count) {
                 $nf = @($res | Where-Object { "$($_.Status)" -eq 'Cli' -and "$($_.Code)" -eq '-1978335212' })
@@ -492,6 +495,7 @@ try {
                         $ids = @($nf | ForEach-Object { "$($_.Id)" })
                         $res = @($res | Where-Object { $ids -notcontains "$($_.Id)" })
                         $usr = @($usr) + @($mach | Where-Object { $ids -contains "$($_.Id)" })
+                        $fromSys = @($ids)
                         if (-not $usid -or @(Get-TLoggedOnSids) -notcontains $usid) { $usid = $rsid }
                         Out-L "$($ids.Count) Programm(e) als SYSTEM nicht gefunden - neuer Versuch im Benutzerkonto $(Get-TAccount $usid) ..."
                     }
@@ -525,14 +529,23 @@ try {
             }
             # interner WinGet-Fehler im Benutzerkonto (meist Store-/MSIX-Apps): einmal fuer alle Benutzer als SYSTEM versuchen (B57)
             if ($Op -eq 'Update') {
-                $ie = @($res | Where-Object { "$($_.Status)" -eq 'InternalError' })
+                $ie = @($res | Where-Object { "$($_.Status)" -eq 'InternalError' -and $fromSys -notcontains "$($_.Id)" })
+                foreach ($x in @($res | Where-Object { "$($_.Status)" -eq 'InternalError' -and $fromSys -contains "$($_.Id)" })) {
+                    $x.Status = 'Exception'; $x.Text = 'Store-App: fuer alle Benutzer nicht gefunden, im Benutzerkonto interner WinGet-Fehler - ueber den Microsoft Store aktualisieren'
+                }
                 if ($ie.Count) {
                     $ids2 = @($ie | ForEach-Object { "$($_.Id)" })
                     Out-L "$($ids2.Count) Programm(e) im Benutzerkonto gescheitert (interner WinGet-Fehler, meist Store-Apps) - neuer Versuch fuer alle Benutzer (als SYSTEM) ..."
                     $res = @($res | Where-Object { $ids2 -notcontains "$($_.Id)" })
                     $retry = @($all | Where-Object { $ids2 -contains "$($_.Id)" })
                     Invoke-TTask 'SYSTEM' @{ Mode = 'Update'; Cli = $true; Items = @($retry | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) } $false 10800
-                    if ($script:TRes) { $res += @($script:TRes.Results) }
+                    if ($script:TRes) {
+                        foreach ($x in @($script:TRes.Results | Where-Object { $_ })) {
+                            # auch als SYSTEM nicht gefunden: es ist eine Store-App - der Store-Hinweis ist hilfreicher als "nicht gefunden" (B60)
+                            if ("$($x.Status)" -eq 'Cli' -and "$($x.Code)" -eq '-1978335212') { $x.Status = 'Exception'; $x.Text = 'Store-App: im Benutzerkonto interner WinGet-Fehler, fuer alle Benutzer nicht gefunden - ueber den Microsoft Store aktualisieren (oder am PC als Benutzer: winget upgrade --id ' + "$($x.Id)" + ')' }
+                            $res += $x
+                        }
+                    }
                 }
             }
             if ($rs.Services.Count -or $rs.Apps.Count) { Restart-TStopped $rs }
