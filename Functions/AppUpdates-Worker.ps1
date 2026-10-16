@@ -40,7 +40,9 @@ function Get-WScope($Map, [string]$Name) {
     $pre = { param($a, $b) $a.Length -ge 5 -and $b.Length -ge 5 -and ($a.StartsWith($b) -or $b.StartsWith($a)) }
     if (@($uk | Where-Object { & $pre $_ $k }).Count) { return 'User' }
     if (@($mk | Where-Object { & $pre $_ $k }).Count) { return 'Machine' }
-    return 'User'   # nicht gefunden (z.B. MSIX-Apps wie Outlook) = im Benutzerkonto aktualisieren
+    return 'Machine'   # nicht gefunden: zuerst fuer alle Benutzer (SYSTEM) - maschinenweite Installer unter anderem Namen (VC++ "v14" vs.
+                       # "2015-2022", ASP.NET Core) warteten sonst im Benutzerkonto auf eine UAC-Bestaetigung; Pakete, die nur im
+                       # Benutzerkonto sichtbar sind (MSIX wie Outlook, Terminal), wandern ueber 0x8A150014 automatisch dorthin
 }
 # winget.exe fuer SYSTEM (dort nicht als Befehl registriert): aus dem App-Installer-Paketordner
 function Get-WWingetExe {

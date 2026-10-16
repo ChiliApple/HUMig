@@ -85,6 +85,9 @@ function Format-HMAuCliResult([int64]$Code, [string]$Out) {
         '0x8A150105' { 'Datentraeger voll' }
         '0x8A150107' { 'Installer braucht eine Internetverbindung' }
         '0x8A150108' { 'Installer meldet Fehler (Hersteller kontaktieren)' }
+        '0x8A15005C' { 'Archiv des Installers konnte nicht entpackt werden (Download beschaedigt oder Paket fehlerhaft) - spaeter erneut versuchen' }
+        '0x8A15005B' { 'Installer im Archiv nicht gefunden (Paketbeschreibung fehlerhaft)' }
+        '0x8A15005E' { 'Zertifikat des Download-Servers passt nicht (Proxy/Filter dazwischen?)' }
         '0x8A150003' { 'Befehl fehlgeschlagen (oft: Datei oder Programm in Benutzung - Programm schliessen und erneut versuchen)' }
         '0x8A150103' { 'Datei in Benutzung - Programm schliessen und erneut versuchen' }
         '0xC0000135' { 'winget.exe startet als SYSTEM nicht (DLL fehlt - Visual C++-Laufzeit). Abhilfe: VC++ Redistributable x64 am PC installieren (Microsoft.VCRedist.2015+.x64)' }
@@ -476,7 +479,7 @@ function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payloa
             $why = ''
             try { $why = "$($cj.JobStateInfo.Reason.Message)" } catch { }
             if (-not $why) { try { $why = "$(@($cj.Error)[0])" } catch { } }
-            $txt2 = if ($stopped) { 'abgebrochen' } elseif ($why) { "nicht erreichbar: $($why.Trim())" } else { 'kein Ergebnis' }
+            $txt2 = if ($stopped) { 'abgebrochen' } elseif ($why) { "nicht erreichbar: $($why.Trim())" } else { "Verbindung endete ohne Ergebnis (Zustand $($cj.State)) - eine am PC gestartete Aufgabe laeuft dort weiter (ggf. UAC-Abfrage beim Benutzer); Ergebnisse spaeter mit 'Updates suchen' pruefen" }
             $out[$k] = [pscustomobject]@{ Errors = @($txt2) }
         }
         Remove-Job -Job $rj -Force -ErrorAction SilentlyContinue
@@ -719,7 +722,7 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
                 Exclude = @(@($Ctx.ByPc[$k].Exclude) | Where-Object { $_ } | ForEach-Object { @{ Pattern = "$($_.Pattern)"; Reason = "$($_.Reason)" } }) }
         }
     }
-    $st = @{ Job = $Job; Names = $names; Done = 0; Total = [Math]::Max(1, $names.Count); Logged = @{}; Multi = ($pcs.Count -gt 1); Verb = $verb; Install = ($op -eq 'Install') }
+    $st = @{ Job = $Job; Names = $names; Done = 0; Total = [Math]::Max(1, $names.Count); Logged = @{}; Live = @{}; Multi = ($pcs.Count -gt 1); Verb = $verb; Install = ($op -eq 'Install') }
     $on = {
         param($pc, $ln)
         $pre = if ($st.Multi) { "[$pc] " } else { '' }
@@ -744,6 +747,7 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
                     # Ausnahme bzw. uebersprungen (Grund stand gerade als Zeile vom Ziel-PC, z. B. "liess sich nicht beenden" oder App Installer)
                     if ($p[2] -eq 'Excluded') { Write-HMLog $st.Job "  $pre$($x.Name): Ausnahme - nicht aktualisiert" 'Warning' }
                     $st.Logged["$pc|$($p[1])"] = $true
+                    $st.Live["$pc|$($p[1])"] = @{ Status = 'Skipped'; Text = $(if ($p[2] -eq 'Excluded') { 'Ausnahme - nicht aktualisiert' } else { 'uebersprungen' }); Reboot = $false }
                     return
                 }
                 if ($p[2] -eq 'Cli') { $c = Format-HMAuCliResult ([int64]$p[3]) '' }
@@ -754,6 +758,8 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
                 $txt = if ($c.Ok -and $c.Text -eq 'aktualisiert') { $st.Verb } else { $c.Text }
                 Write-HMLog $st.Job "  $pre$($x.Name): $txt" $(if ($c.Ok) { 'Success' } else { 'Error' })
                 $st.Logged["$pc|$($p[1])"] = $true
+                # Live-Ergebnis merken: bricht die Verbindung zum PC spaeter ab, gilt es trotzdem (sonst zaehlte alles als Fehler)
+                $st.Live["$pc|$($p[1])"] = @{ Status = $(if ($c.Ok) { 'OK' } else { 'Error' }); Text = $txt; Reboot = [bool]$c.Reboot }
             }
         }
     }
@@ -765,7 +771,10 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
         foreach ($it in @($Ctx.ByPc[$k].Items | Where-Object { $_ -and $names.ContainsKey("$k|$($_.Id)") })) {
             $e = & $new $k $it
             $x = $null; if ($v -and $v.PSObject.Properties['Results']) { $x = @(@($v.Results) | Where-Object { "$($_.Id)" -eq "$($it.Id)" })[0] }
-            if (-not $x) {
+            if (-not $x -and $st.Live.ContainsKey("$k|$($it.Id)")) {
+                # Endergebnis des PCs fehlt (Verbindung endete), das Programm war aber schon fertig gemeldet
+                $lv = $st.Live["$k|$($it.Id)"]; $e.Status = "$($lv.Status)"; $e.Text = "$($lv.Text)"; $e.Reboot = [bool]$lv.Reboot
+            } elseif (-not $x) {
                 $cn = [bool](Test-HMCancel $Job)
                 $e.Status = $(if ($cn) { 'Skipped' } else { 'Error' })
                 $e.Text = $(if ($cn) { 'abgebrochen' } elseif (@($v.Errors).Count) { "nicht ausgefuehrt: $(@($v.Errors)[0])" } else { 'kein Ergebnis' })
@@ -782,8 +791,11 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
                 $c = Convert-HMAuInstallResult @{ Ok = ($e.Status -eq 'OK'); Reboot = $e.Reboot; Text = $e.Text } ($op -eq 'Install')
                 if ($c.Ok -and $e.Status -ne 'OK') { $e.Status = 'OK'; $e.Text = $c.Text }
             }
-            if (-not $st.Logged.ContainsKey("$k|$($it.Id)") -or $e.Status -ne 'OK') {
-                if (-not $st.Logged.ContainsKey("$k|$($it.Id)")) { Write-HMLog $Job "  $(if ($st.Multi) { "[$k] " })$($it.Name): $($e.Text)" $(if ($e.Status -eq 'OK') { 'Success' } elseif ($e.Status -eq 'Skipped') { 'Warning' } else { 'Error' }) }
+            # noch nicht gemeldet - oder der Ziel-PC hat den Grund nachtraeglich praezisiert (z. B. Store-App statt "nicht gefunden")
+            $lk2 = "$k|$($it.Id)"
+            $refined = ($x -and "$($x.Status)" -eq 'Exception' -and $st.Live.ContainsKey($lk2) -and "$($st.Live[$lk2].Text)" -ne "$($e.Text)")
+            if (-not $st.Logged.ContainsKey($lk2) -or $refined) {
+                Write-HMLog $Job "  $(if ($st.Multi) { "[$k] " })$($it.Name): $($e.Text)" $(if ($e.Status -eq 'OK') { 'Success' } elseif ($e.Status -eq 'Skipped') { 'Warning' } else { 'Error' })
             }
             $res += [pscustomobject]$e
         }

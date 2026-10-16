@@ -3400,7 +3400,7 @@ Describe '2.1.14: Hotfix Beenden/Neustart, Store-Apps (B57), Neustart-Liste (B58
         . ([scriptblock]::Create((@(& $script:FnFrom14 'Functions\AppUpdates-Worker.ps1' @('ConvertTo-WKey', 'Get-WScope')) -join "`n")))
         $map = @{ Machine = @('Microsoft Windows Desktop Runtime - 8.0.16 (x64)'); User = @() }
         Get-WScope $map 'Microsoft .NET Windows Desktop Runtime 8.0' | Should -Be 'Machine'
-        Get-WScope $map 'Windows Terminal' | Should -Be 'User'
+        Get-WScope $map 'Windows Terminal' | Should -Be 'Machine'   # unbekannt: zuerst fuer alle Benutzer (ab 2.1.15)
         (ConvertTo-WKey 'ASP.NET Core Runtime') | Should -Match 'asp'
     }
     It 'B58: Neustart-Liste wird nicht mehr ueberschrieben; App Installer wird ausgelassen; SYSTEM-Wiederholung vorhanden' {
@@ -3408,10 +3408,39 @@ Describe '2.1.14: Hotfix Beenden/Neustart, Store-Apps (B57), Neustart-Liste (B58
         $tx | Should -Not -Match '\$rs = Get-TUserSid'
         $tx | Should -Match '\$rsid = Get-TUserSid'
         $tx | Should -Match "-ieq 'Microsoft.AppInstaller'"
-        $tx | Should -Match ([regex]::Escape("-eq 'InternalError' }"))
+        $tx | Should -Match ([regex]::Escape("-eq 'InternalError' -and"))
         (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Auto.ps1') -Raw) | Should -Match "Microsoft.AppInstaller"
     }
     It 'interner WinGet-Fehler nennt Store-Apps und den SYSTEM-Versuch' {
         Format-HMAuResult 'InternalError' 0 0 $false | Should -Match 'Store-App.*SYSTEM'
+    }
+}
+Describe '2.1.15: Live-Ergebnisse, Lebenszeichen, Bereich unbekannter Pakete' {
+    BeforeAll {
+        $script:FnFrom15 = {
+            param([string]$File, [string[]]$Names)
+            $tk = $null; $er = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root $File), [ref]$tk, [ref]$er)
+            foreach ($n in $Names) { $f = $ast.Find({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true); if ($f) { $f.Extent.Text } }
+        }
+    }
+    It 'unbekannte Pakete zuerst fuer alle Benutzer, Eintraege unter HKCU bleiben Benutzer' {
+        . ([scriptblock]::Create((@(& $script:FnFrom15 'Functions\AppUpdates-Worker.ps1' @('ConvertTo-WKey', 'Get-WScope')) -join "`n")))
+        $map = @{ Machine = @('Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.44.35211'); User = @('Mozilla Firefox (x64 de)') }
+        Get-WScope $map 'Microsoft Visual C++ v14 Redistributable (x64)' | Should -Be 'Machine'
+        Get-WScope $map 'Mozilla Firefox (x64 de)' | Should -Be 'User'
+        Get-WScope $map 'Windows Terminal' | Should -Be 'Machine'
+        Get-WScope $map '' | Should -Be 'User'
+    }
+    It 'Engine haelt Live-Ergebnisse fest; Ziel-PC sendet Lebenszeichen und wiederholt SYSTEM-Umzuege nicht (B60)' {
+        $e = Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1') -Raw
+        $e | Should -Match 'Live = @\{\}'
+        $e | Should -Match '\$st\.Live\["\$pc\|\$\(\$p\[1\]\)"\] = @\{ Status = '
+        $e | Should -Match '-not \$x -and \$st\.Live\.ContainsKey'
+        $e | Should -Match 'Verbindung endete ohne Ergebnis \(Zustand'
+        $t = Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw
+        $t | Should -Match 'Out-L "#WAIT\|'
+        $t | Should -Match '\$fromSys -notcontains'
+        $t | Should -Match "Store-App: fuer alle Benutzer nicht gefunden"
     }
 }

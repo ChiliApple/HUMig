@@ -2353,7 +2353,9 @@ function Show-About {
     $w.Owner = $script:Window; Set-HMWindowScale $w
     [void]$w.ShowDialog()
 }
-# Anleitung: immer aktuell aus dem Repo laden (Docs/Anleitung.html), sonst lokale Kopie
+# Anleitung (F1 / Knopf): zuerst die Online-Fassung (GitHub Pages, immer der neueste Stand); ohne Internet die Fassung
+# aus dem Repo zur eigenen Version, sonst die lokale Kopie
+$script:ManualUrl = 'https://chiliapple.github.io/HUMig/Docs/Anleitung.html'
 function Show-HMManual {
     # Ziele der Reihe nach: Kopie im Tool-Ordner (bleibt aktuell) -> sonst eine Ablage, die dem aktuellen Benutzer gehoert
     # (Benutzer-Modus: eigenes LocalAppData; Administrator: Oeffentliche Dokumente, lesbar fuer den angemeldeten Benutzer)
@@ -2361,10 +2363,15 @@ function Show-HMManual {
     $alt = if ($script:UserMode) { Join-Path $env:LOCALAPPDATA 'HUMig\Anleitung.html' } else { Join-Path ([Environment]::GetFolderPath('CommonDocuments')) 'HUMig_Anleitung.html' }
     Out-Console 'Anleitung wird geladen ...' 'Debug'
     Invoke-AsyncCommand -ScriptBlock {
-        param($token, $owner, $repo, $branch, $targets)
+        param($url, $token, $owner, $repo, $branch, $targets)
+        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+        # Online-Anleitung erreichbar? (GitHub Pages, immer aktuell) - dann im Browser oeffnen
+        try {
+            $h = Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
+            if ([int]$h.StatusCode -eq 200) { return "URL:$url" }
+        } catch { }
         $dl = Join-Path $env:TEMP ('HUMig_Anleitung_{0}.html' -f [guid]::NewGuid().ToString('N'))
         try {
-            try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
             $rel = 'Docs/Anleitung.html'
             if ($token) {
                 $h = @{ Accept = 'application/vnd.github.v3.raw'; 'User-Agent' = 'HUMig'; Authorization = "token $token" }
@@ -2386,10 +2393,15 @@ function Show-HMManual {
             return "ERR:nicht speicherbar ($why)"
         } catch { return "ERR:$($_.Exception.Message)" }
         finally { Remove-Item -LiteralPath $dl -Force -ErrorAction SilentlyContinue }
-    } -ArgumentList @((Read-GitHubToken), $script:UpdateOwner, $script:UpdateRepo, $(if ($script:UpdateCfg -and $script:UpdateCfg.UseBranch) { $script:UpdateBranch } else { "v$($script:Version)" }), @($script:ManualLocal, $alt)) -TimeoutSec 30 -OnComplete {
+    } -ArgumentList @($script:ManualUrl, (Read-GitHubToken), $script:UpdateOwner, $script:UpdateRepo, $(if ($script:UpdateCfg -and $script:UpdateCfg.UseBranch) { $script:UpdateBranch } else { "v$($script:Version)" }), @($script:ManualLocal, $alt)) -TimeoutSec 30 -OnComplete {
         param($r)
         $f = $null
-        if ("$r" -match '^OK:(.+)$') { $f = $Matches[1]; Out-Console 'Anleitung geoeffnet (aktuelle Fassung von GitHub)' 'Debug' }
+        if ("$r" -match '^URL:(.+)$') {
+            Out-Console 'Anleitung geoeffnet (online, immer der neueste Stand)' 'Debug'
+            try { Open-HMUrl $Matches[1] } catch { Out-Console "Anleitung konnte nicht geoeffnet werden: $($_.Exception.Message)" 'Error' }
+            return
+        }
+        if ("$r" -match '^OK:(.+)$') { $f = $Matches[1]; Out-Console 'Anleitung geoeffnet (Fassung zur eigenen Version von GitHub)' 'Debug' }
         elseif (Test-Path -LiteralPath $script:ManualLocal) { $f = $script:ManualLocal; Out-Console "Aktuelle Anleitung nicht ladbar ($("$r" -replace '^ERR:', '')) - lokale Anleitung geoeffnet" 'Warning' }
         else { Out-Console "Anleitung nicht verfuegbar: $("$r" -replace '^ERR:', '')" 'Error'; return }
         # ueber den Explorer oeffnen: Browser startet im Kontext des angemeldeten Benutzers (nicht erhoeht);
