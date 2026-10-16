@@ -1457,6 +1457,8 @@ function Find-HMSbRunLog($Entry, [object[]]$Files) {
         $hit = @($Files | Where-Object { $_ -and "$($_.Name)" -ieq "$($Entry.TaskLog)" })[0]
         if ($hit) { return $hit }
     }
+    # Eintrag ab 2.1.12 (Feld TaskLog vorhanden, leer = in HUMig gestartet): kein Aufgaben-Protokoll - nicht raten (B49)
+    if ($Entry -and $Entry.PSObject.Properties['TaskLog']) { return $null }
     $dt = Get-HMSbDate "$($Entry.Date)"
     if (-not $dt) { return $null }
     $safe = "$($Entry.Profile)" -replace '[^\w\-]', '_'

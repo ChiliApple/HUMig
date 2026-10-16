@@ -45,7 +45,7 @@ Fragt nach dem Zielordner (Vorschlag `C:\Program Files\HUMig`), lädt die freige
 | **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
 | **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash (auch an HUPilot), BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung (Setups vorher in der **Windows Sandbox** testen) |
 | **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |
-| **App-Updates** | installierte Programme über **WinGet** aktualisieren - Liste mit Haken, **Ausnahmen** (z. B. Prüfungssoftware) und Quellen je Standort, Verlauf |
+| **App-Updates** | installierte Programme über **WinGet** aktualisieren - Liste mit Haken, **Ausnahmen** (z. B. Prüfungssoftware) und Quellen je Standort, laufende Programme werden vorher erkannt (auch an anderen PCs), Verlauf |
 | **Benutzer-Modus** | ohne Administratorrechte: eigenes Profil sichern/wiederherstellen, Dateien aus dem Backup holen |
 | **Update** | Kanal **Stabil** (freigegebene Versionen) oder **Test**, Vorversion per Klick, jede Datei per **SHA-256** geprüft, nur **signierte** Releases werden installiert |
 | **Anleitung** | im Tool mit **F1** – aus diesem Repository, passend zur installierten Version |
@@ -134,8 +134,10 @@ Aufbau der Einträge mit allen Feldern: Anleitung, Kapitel *Programme*.
 | Vorschau | je Datei: neu / überschreibt / Ziel neuer / gleich |
 | Neuere Dateien am Ziel behalten | Robocopy `/XO` |
 | Fehlende Programme installieren | Vergleich Backup ↔ neuer PC, Installation aus der Softwareverteilung, sonst WinGet – beim Restore automatisch angeboten (zuerst installieren, dann zurückspielen) |
+| Browser-Web-Apps | als App installierte Webseiten (Edge/Chrome) stehen getrennt – im Browser neu anlegen bzw. über die Synchronisierung |
 | Programm-Module ohne Programm | werden ausgelassen und für einen 2. Lauf nach der Installation angehakt |
-| Kontrolle | nach dem Restore Backup ↔ Ziel vergleichen, fehlende Dateien als Liste |
+| Kontrolle | nach dem Restore Backup ↔ Ziel vergleichen, fehlende Dateien als Liste; wegen einer Verknüpfung im Zielprofil ausgelassene Teile werden genannt |
+| Backups löschen | einzeln, mehrere markierte auf einmal (eine Rückfrage, Archive bleiben) oder nach Aufbewahrungsregel |
 | Fortlaufendes Backup | an der Quelle gelöschte Dateien, herausgenommene Zusätzliche Ordner und neu ausgeschlossene Pfade werden beiseitegelegt (`_GELOESCHT`), nicht angehakte Module im Protokoll genannt |
 | Live-Anzeige | Lesen/Schreiben (MB/s), CPU, Arbeitsspeicher – auch bei Backup und Server-Backup |
 | Checkliste | Nacharbeiten abhaken, Stand landet im Protokoll |
@@ -174,7 +176,9 @@ Hyper-V-VMs oder die Laufwerke eines Servers mit der Windows Server-Sicherung au
 
 - Profile je Schule/Standort, Platten werden an ihrer Bezeichnung erkannt
 - Online-Sicherung der VMs, optional Host-System, Host-Konfiguration mit Skript zum Wiederherstellen der Switches
-- Zeitplan, Verlauf, Bericht je Lauf, Einträge in der Ereignisanzeige
+- Zeitplan, Verlauf, Bericht je Lauf, Einträge in der Ereignisanzeige; **Protokolle aller Läufe** (auch Zeitplan/Hintergrund als SYSTEM) direkt in HUMig lesen, mit Filter
+- **Versionen auf der Platte** mit Erklärung der Schattenkopien; Warnung, wenn Windows ältere Versionen verworfen hat; Knopf **Speicher für Versionen** erhöht den Schattenkopie-Speicher der Backup-Platte (nur erhöhen, mit Rückfrage)
+- **Schreibtempo** je Lauf mit Hinweis auf eine zu langsame Verbindung (z. B. USB 2.0)
 - **Plattenzustand (SMART)** je Platte, automatisch gelesen und gemerkt
 - **Teams-Benachrichtigung** über Workflows, mehrere Ziele (Chat/Kanal) mit je eigenen Kategorien - Server-Backups und geplante Profil-Backups (Fehler, Warnungen, Erfolg, Plattenzustand, Plattenwechsel/Archiv, Speicherplatz, Massenlöschung, Details mit Stand der Platte)
 - **VM-Export** per Knopf oder automatisch nach jeder Sicherung (auch im Zeitplan): vollständige Kopie je VM, an jedem Hyper-V-Host importierbar, mit einstellbarer Anzahl je VM
