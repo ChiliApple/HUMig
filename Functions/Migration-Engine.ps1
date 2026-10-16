@@ -1613,9 +1613,15 @@ function Get-HMPathFileSystem([string]$Path) {
 
 # Liegt ein Pfad auf einer Netzwerkfreigabe (UNC oder verbundenes Netzlaufwerk)?
 function Test-HMNetworkPath([string]$Path) {
-    if ("$Path" -match '^(\\\\|//)') { return $true }
-    if ("$Path" -notmatch '^[A-Za-z]:') { return $false }
-    try { return ("$((New-Object System.IO.DriveInfo($Path.Substring(0, 2))).DriveType)" -eq 'Network') } catch { return $false }
+    $p = "$Path"
+    # Praefix fuer lange Pfade: \\?\UNC\server\... = Freigabe, \\?\C:\... bzw. \\.\C:\... = lokales Laufwerk (B40)
+    if ($p -match '^\\\\\?\\UNC\\') { return $true }
+    # Volume-GUID-Pfad (Platte ohne Buchstabe) ist lokal (B47)
+    if ($p -match '^\\\\[\?\.]\\Volume\{') { return $false }
+    if ($p -match '^\\\\[\?\.]\\([A-Za-z]:.*)$') { $p = $Matches[1] }
+    if ($p -match '^(\\\\|//)') { return $true }
+    if ($p -notmatch '^[A-Za-z]:') { return $false }
+    try { return ("$((New-Object System.IO.DriveInfo($p.Substring(0, 2))).DriveType)" -eq 'Network') } catch { return $false }
 }
 
 # Hat ein Ordner schon diese Rechte (Vererbung aus, je Soll-Konto genau dieses Recht, an Unterordner/Dateien vererbt)?
@@ -1654,7 +1660,7 @@ function Test-HMFolderAclMatch([string]$Path, [hashtable]$Expected) {
 # Rueckgabe: Ok, Unchanged, Skipped (Netzwerk), Error (Grund, wenn nicht gesetzt), Who (berechtigte Konten), Notes (Hinweise)
 function Set-HMBackupFolderAcl {
     param([string]$Path, [string]$UserSid = '', [switch]$UserMode, [string]$ExtraGroup = '')
-    $r = [ordered]@{ Ok = $false; Unchanged = $false; Skipped = $false; Error = ''; Who = @(); Notes = @() }
+    $r = [ordered]@{ Ok = $false; Unchanged = $false; Skipped = $false; Error = ''; Who = @(); Notes = @(); Extra = @() }
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { $r.Error = 'Ordner fehlt'; return [pscustomobject]$r }
     if (Test-HMNetworkPath $Path) { $r.Skipped = $true; $r.Error = 'Netzwerkfreigabe - Rechte bleiben wie am Dateiserver eingestellt'; return [pscustomobject]$r }
     $fs = Get-HMPathFileSystem $Path
@@ -1678,7 +1684,25 @@ function Set-HMBackupFolderAcl {
     }
     $r.Who = $who
     $h = @{}; foreach ($k in $exp.Keys) { $h[$k] = $exp[$k] }
-    if (Test-HMFolderAclMatch $Path $h) { $r.Ok = $true; $r.Unchanged = $true; return [pscustomobject]$r }
+    if (Test-HMFolderAclMatch $Path $h) {
+        $r.Ok = $true; $r.Unchanged = $true
+        # geduldete weitere Konten (z. B. Explorer-Eintrag eines Admins) im Protokoll nennen - sonst stimmt "nur ..." nicht
+        try { $r.Extra = @(@((Get-Acl -LiteralPath $Path -ErrorAction Stop).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])) | ForEach-Object { "$($_.IdentityReference.Value)" } | Where-Object { -not $exp.Contains($_) } | Select-Object -Unique | ForEach-Object { & $name $_ }) } catch { }
+        return [pscustomobject]$r
+    }
+    # in EINEM Schritt setzen (Vererbung aus, nur diese Eintraege) - Windows reicht die Rechte dann nur einmal durch den Ordnerbaum (B41)
+    try {
+        $ds = New-Object System.Security.AccessControl.DirectorySecurity
+        $ds.SetAccessRuleProtection($true, $false)
+        $rm = @{ F = [System.Security.AccessControl.FileSystemRights]::FullControl; M = [System.Security.AccessControl.FileSystemRights]::Modify; RX = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute }
+        foreach ($k in $exp.Keys) {
+            $ds.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier($k)), $rm["$($exp[$k])"], ([System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'), ([System.Security.AccessControl.PropagationFlags]::None), ([System.Security.AccessControl.AccessControlType]::Allow))))
+        }
+        [System.IO.Directory]::SetAccessControl($Path, $ds)
+        $r.Ok = $true
+        return [pscustomobject]$r
+    } catch { $r.Notes += "Rechte ueber .NET nicht gesetzt ($($_.Exception.Message)) - Ersatzweg icacls" }
+    # Ersatzweg icacls (z. B. wenn .NET das nicht kann)
     $grants = @(foreach ($k in $exp.Keys) { "*${k}:(OI)(CI)$($exp[$k])" })
     $o = & icacls.exe "$Path" /inheritance:r /grant:r @grants /C /Q 2>&1
     if ($LASTEXITCODE -ne 0) { $r.Error = "icacls Exitcode ${LASTEXITCODE}: $((@($o) | Where-Object { "$_".Trim() } | Select-Object -First 2) -join ' ')"; return [pscustomobject]$r }
@@ -2710,7 +2734,7 @@ function Start-HMBackup {
         $xg = if ($Ctx.Settings -and $Ctx.Settings.Backup) { "$($Ctx.Settings.Backup.ExtraReadGroup)".Trim() } else { '' }
         $acl = Set-HMBackupFolderAcl -Path $Ctx.BackupPath -UserSid "$($Ctx.UserSid)" -UserMode:([bool]$Ctx.UserMode) -ExtraGroup $xg
         foreach ($n in @($acl.Notes)) { Write-HMLog $Job "Backup-Ordner-Rechte: $n" 'Warning' }
-        if ($acl.Ok) { Write-HMLog $Job "Backup-Ordner-Rechte$(if ($acl.Unchanged) { ' (schon gesetzt)' }): nur $($acl.Who -join ', ')" 'Info' }
+        if ($acl.Ok) { Write-HMLog $Job "Backup-Ordner-Rechte$(if ($acl.Unchanged) { ' (schon gesetzt)' }): $(if (@($acl.Extra).Count) { "$($acl.Who -join ', ') - zusaetzlich (nicht von HUMig, bleibt): $(@($acl.Extra) -join ', ')" } else { "nur $($acl.Who -join ', ')" })" 'Info' }
         elseif ($acl.Skipped) { Write-HMLog $Job "Backup-Ordner-Rechte: $($acl.Error) - wer das Backup lesen darf, regeln die Rechte der Freigabe am Server" 'Info' }
         else { Write-HMLog $Job "Backup-Ordner-Rechte NICHT gesetzt ($($acl.Error)) - das Backup (u. a. Browser-Daten) ist fuer alle lesbar, die auf diesen Speicherort zugreifen koennen. Fuer ein geschuetztes Backup ein NTFS-Ziel verwenden." 'Warning' }
         $Job.LogFile = Join-Path $Ctx.BackupPath 'HUMig.log'
@@ -3953,6 +3977,28 @@ $script:HMUnsafeLinkScript = {
     }
     return $out.ToArray()
 }
+# Endziel einer Verknuepfung (Kette Junction -> Junction -> ... aufloesen, hoechstens 16 Schritte); laeuft am Ziel-PC
+$script:HMLinkEndScript = {
+    param($p)
+    $cur = "$p"
+    for ($i = 0; $i -lt 16; $i++) {
+        $it = $null; try { $it = Get-Item -LiteralPath $cur -Force -ErrorAction Stop } catch { break }
+        if (-not $it.LinkType -or -not @($it.Target).Count) { break }
+        $t = "$(@($it.Target)[0])" -replace '^\\\?\?\\', ''
+        if (-not [System.IO.Path]::IsPathRooted($t)) { $t = Join-Path (Split-Path $cur -Parent) $t }
+        $cur = $t
+    }
+    $cur
+}
+function Resolve-HMLinkEnd([hashtable]$Ctx, [string]$Path, [string]$Fallback) {
+    try { $r = "$(@(Invoke-HMTarget $Ctx $script:HMLinkEndScript @($Path))[-1])"; if ($r -and $r -ne $Path) { return $r } } catch { }
+    return $Fallback
+}
+# Teil wegen einer Verknuepfung nicht (ganz) zurueckgespielt - fuer die Kontrolle am Ende
+function Add-HMLinkSkipped([hashtable]$Ctx, [string]$Name) {
+    if (-not $Ctx.ContainsKey('LinkSkipped') -or $null -eq $Ctx.LinkSkipped) { $Ctx.LinkSkipped = New-Object System.Collections.Generic.List[string] }
+    if (-not $Ctx.LinkSkipped.Contains($Name)) { $Ctx.LinkSkipped.Add($Name) }
+}
 function Find-HMUnsafeLinks([hashtable]$Ctx, [string]$DstLocal, [string]$RootLocal, [string[]]$RelDirs = $null) {
     try { return @(Invoke-HMTarget $Ctx $script:HMUnsafeLinkScript @($DstLocal, $RootLocal, 50, $RelDirs)) } catch { return @([pscustomobject]@{ Path = $DstLocal; Target = '?'; Dir = $true; Error = "$($_.Exception.Message)" }) }
 }
@@ -3996,13 +4042,15 @@ function Restore-HMFolderItem {
         $links = @(Find-HMUnsafeLinks $Ctx $dstLocal $pRoot $rel | Where-Object { $_ })
         $top = @($links | Where-Object { -not "$($_.Path)".StartsWith($dl + '\', [StringComparison]::OrdinalIgnoreCase) })
         if ($top.Count) {
-            return [pscustomobject]@{ Name = $Item.Name; Status = 'Error'; Msg = "Verknuepfung im Zielpfad: $($top[0].Path) -> $($top[0].Target)$(if ($top[0].Error) { " (Pruefung nicht moeglich: $($top[0].Error))" }) - aus Sicherheitsgruenden nicht zurueckgespielt. Verknuepfung pruefen/entfernen und Restore fuer dieses Modul wiederholen. Ist es eine gewollte Ordner-Umleitung (z. B. Dokumente auf ein anderes Laufwerk): die Daten von Hand aus dem Backup ($src) nach $($top[0].Target) kopieren" }
+            Add-HMLinkSkipped $Ctx "$($Item.Name)"
+            $endT = Resolve-HMLinkEnd $Ctx "$($top[0].Path)" "$($top[0].Target)"
+            return [pscustomobject]@{ Name = $Item.Name; Status = 'Error'; Msg = "Verknuepfung im Zielpfad: $($top[0].Path) -> $($top[0].Target)$(if ($top[0].Error) { " (Pruefung nicht moeglich: $($top[0].Error))" }) - aus Sicherheitsgruenden nicht zurueckgespielt. Verknuepfung pruefen/entfernen und Restore fuer dieses Modul wiederholen. Ist es eine gewollte Ordner-Umleitung (z. B. Dokumente auf ein anderes Laufwerk): die Daten von Hand aus dem Backup ($src) nach $endT kopieren$(if ($endT -ne "$($top[0].Target)") { " (Endziel der Verknuepfungskette)" })" }
         }
         foreach ($l in $links) {
             $lr = "$($l.Path)".Substring($dl.Length).TrimStart('\')
             if ($l.Dir) { $xd += (Join-Path $src $lr) } else { $xf += (Join-Path $src $lr) }
         }
-        if ($links.Count) { $linkNote = " | ACHTUNG: $($links.Count) Verknuepfung(en) im Ziel ausgelassen (z.B. $($links[0].Path) -> $($links[0].Target)) - pruefen" }
+        if ($links.Count) { Add-HMLinkSkipped $Ctx "$($Item.Name)"; $linkNote = " | ACHTUNG: $($links.Count) Verknuepfung(en) im Ziel ausgelassen (z.B. $($links[0].Path) -> $($links[0].Target)) - pruefen" }
     }
     $rc = Invoke-HMRobocopy -Job $Job -Source $src -Dest $dst -Files $files -XD $xd -XF $xf -NoRecurse:$noRec -ExcludeOlder:([bool]$Ctx.Options.KeepNewer) -Threads $Ctx.Threads -LogFile $Ctx.RoboLog
     # Nachpruefung: waehrend des Kopierens im Ziel angelegte Verknuepfung? (Robocopy /XJ wirkt nur auf die Quelle)
@@ -4745,7 +4793,10 @@ function Start-HMRestore {
             [System.IO.File]::WriteAllLines($missList, [string[]](@($hdr) + @($Ctx.MissingAfter)), (New-Object System.Text.UTF8Encoding($true)))
         } catch { $missList = '' }
         Write-HMLog $Job ("KONTROLLE: {0} Datei(en) aus dem Backup fehlen am Ziel{1}" -f $Ctx.MissingAfter.Count, $(if ($missList) { " - Liste: $missList" } else { '' })) 'Warning'
-    } elseif ($Ctx.Options.VerifyAfter -and -not (Test-HMCancel $Job)) { Write-HMLog $Job 'Kontrolle: alle Dateien aus dem Backup liegen am Ziel' 'Success' }
+    } elseif ($Ctx.Options.VerifyAfter -and -not (Test-HMCancel $Job)) {
+        if ($Ctx.LinkSkipped -and $Ctx.LinkSkipped.Count) { Write-HMLog $Job "Kontrolle: alle zurueckgespielten Dateien liegen am Ziel - wegen einer Verknuepfung nicht (ganz) zurueckgespielt: $($Ctx.LinkSkipped -join ', ') (siehe oben)" 'Warning' }
+        else { Write-HMLog $Job 'Kontrolle: alle Dateien aus dem Backup liegen am Ziel' 'Success' }
+    }
     $notes = @('Benutzer ab- und wieder anmelden bzw. Neustart, damit alle Einstellungen wirken.')
     if ($Ctx.MissingAfter -and $Ctx.MissingAfter.Count) { $notes += "Kontrolle: $($Ctx.MissingAfter.Count) Datei(en) aus dem Backup fehlen am Ziel$(if ($missList) { " - Liste: $(Split-Path $missList -Leaf) im Backup-Ordner" })." }
     if ($skipApps.Count) { $notes += "Programm-Einstellungen ausgelassen (Programm fehlt am Ziel): $($skipApps -join ', ') - Programm installieren, dann Restore nur mit diesen Programm-Modulen wiederholen." }

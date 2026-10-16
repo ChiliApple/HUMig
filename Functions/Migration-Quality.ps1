@@ -283,7 +283,9 @@ $script:HMSoftwareScript = {
             $key = "$($p.DisplayName)|$($p.DisplayVersion)"
             if ($seen.ContainsKey($key)) { continue }
             $seen[$key] = 1
-            [pscustomobject]@{ Name = "$($p.DisplayName)".Trim(); Version = "$($p.DisplayVersion)"; Publisher = "$($p.Publisher)"; Scope = $(if ($root -like '*HKEY_USERS*') { 'Benutzer' } else { 'Computer' }) }
+            # Browser-Web-Apps (Edge/Chrome "App installieren") stehen auch hier - Deinstallation ueber *_proxy.exe --uninstall-app-id
+            $web = "$($p.UninstallString)" -match '(?i)--uninstall-app-id'
+            [pscustomobject]@{ Name = "$($p.DisplayName)".Trim(); Version = "$($p.DisplayVersion)"; Publisher = "$($p.Publisher)"; Scope = $(if ($web) { 'WebApp' } elseif ($root -like '*HKEY_USERS*') { 'Benutzer' } else { 'Computer' }) }
         }
     }
 }

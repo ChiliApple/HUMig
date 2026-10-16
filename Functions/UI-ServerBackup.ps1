@@ -877,7 +877,7 @@ function Start-HMSbBackup {
     $script:SbRunProfile = $pName
     # Teams-Meldung auch fuer manuell gestartete Laeufe (auch bei Abbruch durch einen Fehler; nicht bei "Abbrechen")
     $cmd = '$e = ''''; try { Start-HMServerBackup -Ctx $Ctx -Job $Job } catch { $e = "$($_.Exception.Message)"; throw } finally { Send-HMSbRunNotify $Ctx $Job $e }'
-    Start-EngineJob -Command $cmd -Ctx $ctx -Title 'Server-Backup' -ScriptFiles @($script:SbEngine, (Join-Path $script:AppRoot 'Functions\Core-Notify.ps1')) -OnFinished {
+    Start-EngineJob -Command $cmd -Ctx $ctx -Title 'Server-Backup' -ScriptFiles @($script:SbEngine, (Join-Path $script:AppRoot 'Functions\Core-Notify.ps1'), (Join-Path $script:AppRoot 'Functions\UI-Status.ps1')) -OnFinished {
         param($j)
         Update-HMSbHistory
         if ($j.Result -and $j.Result.Report) { Out-Console "Berichtsordner: $($j.Result.Report)" 'Info' }
@@ -1310,6 +1310,35 @@ function Show-HMSbVersions {
     }
 }
 
+# Speicher fuer aeltere Versionen der Ziel-Platte auf 50 % erhoehen: lesen, Plan zeigen, Rueckfrage, setzen, Ergebnis
+$script:SbShadowPercent = 50
+function Set-HMSbShadowStorageUi {
+    $d = Get-HMSbDrive
+    if (-not $d) { Out-Console 'Keine Ziel-Platte gewaehlt.' 'Warning'; return }
+    if ($script:JobRunning) { Out-Console 'Waehrend eines Vorgangs nicht moeglich.' 'Warning'; return }
+    $alive = @(); try { $alive = @(Get-HMSbAliveRuns (Split-Path $script:SbHistFile -Parent)) } catch { }
+    if ($alive.Count) { Out-Console "Es laeuft gerade ein Server-Backup ($(@($alive | ForEach-Object { "$($_.Profile)" }) -join ', ')) - Speicher erst danach aendern." 'Warning'; return }
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $l) . $eng; Get-HMSbShadowStorage $l } -ArgumentList @($script:SbEngine, "$($d.Letter)") -TimeoutSec 60 -State $d -BusyTag 'Sb' -BusyText 'Speicher fuer Versionen wird gelesen ...' -OnComplete {
+        param($s, $d)
+        if ($s -is [string]) { Out-Console "Speicher fuer Versionen: $s" 'Error'; return }
+        $plan = Get-HMSbShadowResizePlan $s $(if ($s) { [long]$s.CapacityBytes } else { 0 }) $script:SbShadowPercent
+        $cur = if ($s) { "$(Format-HMSbShadowStorage $s), belegt $(Format-HMSize ([long]$s.UsedBytes))" } else { 'nicht lesbar' }
+        if (-not $plan.Ok) { Out-Console "Speicher fuer Versionen auf $($d.Letter): ($($d.Label)): $cur - $($plan.Reason)" 'Info'; return }
+        $msg = "Speicher fuer aeltere Versionen auf $($d.Letter): $($d.Label) erhoehen?`n`n" +
+            "Jetzt: $cur`nNeu: max. $('{0:N0}' -f ($plan.NewBytes / 1GB)) GB ($($plan.Percent) % der Platte)`n`n" +
+            "Mehr Platz fuer aeltere Versionen = mehr Staende auf dieser Platte. Vorhandene Versionen bleiben (es wird nur erhoeht). " +
+            "Rueckgaengig nur durch Verkleinern - das verwirft Versionen, deshalb macht HUMig das nie.`n`nBefehl: vssadmin resize shadowstorage /for=$($d.Letter): /on=$($d.Letter): /maxsize=$([long][math]::Floor($plan.NewBytes / 1MB))MB"
+        if (-not (Confirm-Action $msg 'Server-Backup')) { return }
+        Invoke-AsyncCommand -ScriptBlock { param($eng, $l, $p) . $eng; Set-HMSbShadowStorage $l $p } -ArgumentList @($script:SbEngine, "$($d.Letter)", $script:SbShadowPercent) -TimeoutSec 120 -State $d -BusyTag 'Sb' -BusyText 'Speicher fuer Versionen wird geaendert ...' -OnComplete {
+            param($r, $d)
+            if ($r -is [string]) { Out-Console "Speicher fuer Versionen auf $($d.Letter): $r" 'Error'; return }
+            $txt = "Speicher fuer Versionen auf $($d.Letter): ($($d.Label)): vorher $(Format-HMSbShadowStorage $r.Before), jetzt $(if ($r.After) { Format-HMSbShadowStorage $r.After } else { 'nicht lesbar' })"
+            if ($r.Ok) { Out-Console $txt 'Success' }
+            else { Out-Console "$txt - nicht geaendert (vssadmin Code $($r.ExitCode)): $("$($r.Output)" -replace '\s+', ' ')" 'Error' }
+        }
+    }
+}
+
 function Start-HMSbHostOnly {
     $d = Get-HMSbDrive
     $base = if ($d) { "$($d.Letter):\$($script:SbDirName)" } else { $script:SbReportDir }
@@ -1371,6 +1400,80 @@ function Update-HMSbAll {
     Update-HMSbProfileList
     Update-HMSbVms
     Update-HMSbDrives
+}
+
+# ----------------------------------------------------------------------------
+# Protokolle lesen, ohne Ordner und Textdateien zu suchen: Zeitplan/Hintergrund (SYSTEM) Aufgabe_*.log, VM-Export Export_*.log,
+# wbadmin-Ausgaben der Laeufe (Kopie des Berichtsordners im Tool-Ordner)
+# ----------------------------------------------------------------------------
+function Get-HMSbLogFiles([string]$Dir, [int]$Max = 300) {
+    if (-not $Dir -or -not (Test-Path -LiteralPath $Dir)) { return @() }
+    $files = @(Get-ChildItem -LiteralPath $Dir -Filter '*.log' -File -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First $Max)
+    return @(foreach ($f in $files) {
+        $kind = switch -Regex ($f.Name) { '^Aufgabe_' { 'Zeitplan/Hintergrund (SYSTEM)' } '^Export_' { 'VM-Export' } '^wbadmin-' { 'wbadmin-Ausgabe' } default { 'Protokoll' } }
+        $prof = if ($f.Name -match '^(Aufgabe|Export)_\d{4}-\d{2}-\d{2}_\d{4}_(.+)\.log$') { $Matches[2] } elseif ("$($f.Directory.Name)" -match '^\d{4}-\d{2}-\d{2}_\d{4}_(.+)$') { $Matches[1] } else { '' }
+        [pscustomobject]@{ Name = $f.Name; Kind = $kind; Profile = $prof; Changed = $f.LastWriteTime; Size = [long]$f.Length; Path = $f.FullName }
+    })
+}
+# Zeilen "yyyy-MM-dd HH:mm:ss [STUFE] Text" bzw. "HH:mm:ss [STUFE] Text" in Zeit/Stufe/Meldung zerlegen (andere Zeilen: nur Meldung)
+function ConvertFrom-HMSbLogLines([string[]]$Lines) {
+    $out = New-Object System.Collections.Generic.List[object]
+    foreach ($l in @($Lines)) {
+        if ("$l" -match '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2}) \[([A-Za-z]+)\] ?(.*)$') {
+            $lv = switch ($Matches[2].ToUpper()) { 'ERROR' { 'Fehler' } 'WARNING' { 'Warnung' } 'SUCCESS' { 'OK' } 'HEADER' { 'Abschnitt' } 'DEBUG' { 'Debug' } default { 'Info' } }
+            $out.Add(@($Matches[1], $lv, $Matches[3]))
+        } elseif ("$l".Trim()) { $out.Add(@('', '', "$l".TrimEnd())) }
+    }
+    return $out.ToArray()
+}
+function Show-HMSbLogFile([string]$Path) {
+    $lines = @()
+    try { $lines = @(Get-Content -LiteralPath $Path -Encoding UTF8 -ErrorAction Stop) } catch { Out-Console "Protokoll nicht lesbar: $($_.Exception.Message)" 'Error'; return }
+    $rows = @(ConvertFrom-HMSbLogLines $lines)
+    if (-not $rows.Count) { Out-Console "Protokoll $(Split-Path $Path -Leaf) ist leer." 'Info'; return }
+    $nErr = @($rows | Where-Object { $_[1] -eq 'Fehler' }).Count; $nWarn = @($rows | Where-Object { $_[1] -eq 'Warnung' }).Count
+    Show-DataGridWindow -Title "Protokoll - $(Split-Path $Path -Leaf)" -Columns @('Zeit', 'Stufe', 'Meldung') -Rows $rows `
+        -CountText "$($rows.Count) Zeilen, $nErr Fehler, $nWarn Warnungen - Filter oben (z. B. Fehler) - Stand beim Oeffnen, 'Neu laden' bei einem laufenden Vorgang" -Width 1300 -Height 700 `
+        -ActionContext @{ Path = $Path } -Actions @(
+            @{ Text = 'Neu laden'; Color = '#FFA6E3A1'; NoSelection = $true; Handler = { param($rows, $win, $ctx) $win.Close(); Show-HMSbLogFile "$($ctx.Path)" } },
+            @{ Text = 'Im Editor oeffnen'; Color = '#FFA6ADC8'; NoSelection = $true; Handler = { param($rows, $win, $ctx) Open-HMFile "$($ctx.Path)" } }
+        )
+}
+function Show-HMSbLogs {
+    $fl = @(Get-HMSbLogFiles $script:SbReportDir)
+    if (-not $fl.Count) { Out-Console "Server-Backup: noch keine Protokolle im Tool-Ordner ($script:SbReportDir)." 'Info'; return }
+    $rows = @(foreach ($f in $fl) { , @($f.Changed.ToString('yyyy-MM-dd HH:mm'), $f.Kind, $f.Profile, $f.Name, (Format-HMSize $f.Size), $f.Path) })
+    Show-DataGridWindow -Title 'Server-Backup - Protokolle' -Columns @('Geaendert', 'Art', 'Profil', 'Datei', 'Groesse', 'Pfad') -Rows $rows -Sort 'Geaendert DESC' `
+        -CountText "$($rows.Count) Protokolle (neueste oben) - Zeile markieren, dann 'Anzeigen'" -Width 1250 -Height 600 -Actions @(
+            @{ Text = 'Anzeigen'; Color = '#FF89B4FA'; Handler = { param($rows, $win, $ctx) foreach ($r in @($rows | Select-Object -First 3)) { Show-HMSbLogFile "$($r.Pfad)" } } },
+            @{ Text = 'Im Editor oeffnen'; Color = '#FFA6ADC8'; Handler = { param($rows, $win, $ctx) foreach ($r in @($rows | Select-Object -First 1)) { Open-HMFile "$($r.Pfad)" } } }
+        )
+}
+# Protokoll zu einem Lauf im Verlauf: Aufgabe_*.log (Zeitplan/Hintergrund) mit passender Startzeit, sonst Hinweis auf den Bericht
+# Ab 2.1.12 steht der Name im Verlaufseintrag (TaskLog). Aeltere Eintraege: das zuletzt VOR dem Lauf gestartete Aufgaben-Protokoll
+# desselben Profils (hoechstens 12 h vorher - eine Aufgabe kann auf einen anderen Sicherungsvorgang warten), 2 min Spielraum (B44)
+function Find-HMSbRunLog($Entry, [object[]]$Files) {
+    if ("$($Entry.TaskLog)") {
+        $hit = @($Files | Where-Object { $_ -and "$($_.Name)" -ieq "$($Entry.TaskLog)" })[0]
+        if ($hit) { return $hit }
+    }
+    $dt = Get-HMSbDate "$($Entry.Date)"
+    if (-not $dt) { return $null }
+    $safe = "$($Entry.Profile)" -replace '[^\w\-]', '_'
+    $best = $null; $bestD = $null
+    foreach ($f in @($Files | Where-Object { $_ })) {
+        if ("$($f.Name)" -notmatch '^Aufgabe_(\d{4}-\d{2}-\d{2}_\d{4})_(.+)\.log$' -or $Matches[2] -ne $safe) { continue }
+        $fd = $null; try { $fd = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd_HHmm', [System.Globalization.CultureInfo]::InvariantCulture) } catch { }
+        if (-not $fd -or $fd -gt $dt.AddMinutes(2) -or ($dt - $fd).TotalHours -gt 12) { continue }
+        if (-not $bestD -or $fd -gt $bestD) { $best = $f; $bestD = $fd }
+    }
+    return $best
+}
+function Show-HMSbRunLog($Entry) {
+    $f = Find-HMSbRunLog $Entry @(Get-HMSbLogFiles $script:SbReportDir)
+    if ($f) { Show-HMSbLogFile "$($f.Path)"; return }
+    Out-Console "Kein Aufgaben-Protokoll zu diesem Lauf (in HUMig gestartet oder aelter) - das Protokoll des Laufs steht im Bericht (wird geoeffnet), alle Protokolle: Knopf 'Protokolle ...'." 'Info'
+    Open-HMSbReport $Entry
 }
 
 # Bericht eines Laufs finden (Platte oder Tool-Ordner\Logs\ServerBackup) und oeffnen
@@ -1716,11 +1819,15 @@ function Initialize-HMServerBackupTab {
         try { Start-Process explorer.exe -ArgumentList "`"$f`"" } catch { }
     })
     $ui.btnSbVersions.Add_Click({ Show-HMSbVersions })
+    if ($ui.btnSbLogs) { $ui.btnSbLogs.Add_Click({ Show-HMSbLogs }) }
+    if ($ui.btnSbShadow) { $ui.btnSbShadow.Add_Click({ Set-HMSbShadowStorageUi }) }
     $ui.dgSbHistory.Add_MouseDoubleClick({ $it = $ui.dgSbHistory.SelectedItem; if ($it -and $it.Entry) { Open-HMSbReport $it.Entry } })
     # Kontextmenue: Bericht oeffnen, markierte / alle fehlgeschlagenen aus dem Verlauf entfernen
     $cm = New-Object System.Windows.Controls.ContextMenu
     $mi1 = New-Object System.Windows.Controls.MenuItem; $mi1.Header = 'Bericht oeffnen'
     $mi1.Add_Click({ $it = $ui.dgSbHistory.SelectedItem; if ($it -and $it.Entry) { Open-HMSbReport $it.Entry } })
+    $mi1b = New-Object System.Windows.Controls.MenuItem; $mi1b.Header = 'Protokoll des Laufs anzeigen'
+    $mi1b.Add_Click({ $it = $ui.dgSbHistory.SelectedItem; if ($it -and $it.Entry) { Show-HMSbRunLog $it.Entry } })
     $mi2 = New-Object System.Windows.Controls.MenuItem; $mi2.Header = 'Markierte aus dem Verlauf entfernen'
     $mi2.Add_Click({ $k = @(@($ui.dgSbHistory.SelectedItems) | Where-Object { $_.Entry } | ForEach-Object { "$($_.Entry.Date)|$($_.Entry.Host)|$($_.Entry.Disk)" }); if ($k.Count) { Remove-HMSbRuns $k } })
     $mi3 = New-Object System.Windows.Controls.MenuItem; $mi3.Header = 'Alle fehlgeschlagenen dieses Profils aus dem Verlauf entfernen'
@@ -1728,7 +1835,7 @@ function Initialize-HMServerBackupTab {
         $k = @(@($ui.dgSbHistory.ItemsSource) | Where-Object { $_.Entry -and "$($_.Entry.Status)" -eq 'Error' } | ForEach-Object { "$($_.Entry.Date)|$($_.Entry.Host)|$($_.Entry.Disk)" })
         if ($k.Count) { Remove-HMSbRuns $k } else { Out-Console 'Server-Backup: keine fehlgeschlagenen Laeufe in diesem Profil.' 'Info' }
     })
-    foreach ($m in @($mi1, (New-Object System.Windows.Controls.Separator), $mi2, $mi3)) { [void]$cm.Items.Add($m) }
+    foreach ($m in @($mi1, $mi1b, (New-Object System.Windows.Controls.Separator), $mi2, $mi3)) { [void]$cm.Items.Add($m) }
     $ui.dgSbHistory.ContextMenu = $cm
     $ui.dgSbHistory.ToolTip = 'Doppelklick = Bericht des Laufs oeffnen - Rechtsklick = Laeufe aus dem Verlauf entfernen'
     $ui.dgSbHistory.SelectionMode = 'Extended' 

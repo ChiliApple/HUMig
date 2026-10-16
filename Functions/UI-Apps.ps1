@@ -315,7 +315,7 @@ function Get-HMAppAfterSteps($Backup) {
 # ----------------------------------------------------------------------------
 function Get-HMBackupSoftware($Backup) {
     if ($Backup.Manifest -and @($Backup.Manifest.Software | Where-Object { $_ }).Count) {
-        return @(foreach ($l in @($Backup.Manifest.Software | Where-Object { $_ })) { $p = "$l".Split('|'); [pscustomobject]@{ Name = $p[0]; Version = $(if ($p.Count -gt 1) { $p[1] }) } })
+        return @(foreach ($l in @($Backup.Manifest.Software | Where-Object { $_ })) { $p = "$l".Split('|'); [pscustomobject]@{ Name = $p[0]; Version = $(if ($p.Count -gt 1) { $p[1] }); Scope = $(if ($p.Count -gt 3) { $p[3] } else { '' }) } })
     }
     $csv = Join-Path $Backup.Path 'Info\01-Software.csv'
     if (Test-Path -LiteralPath $csv) { try { return @(Import-Csv -LiteralPath $csv -Delimiter ';' -Encoding UTF8 | ForEach-Object { [pscustomobject]@{ Name = "$($_.Name)"; Version = "$($_.Version)" } }) } catch { } }
@@ -328,9 +328,22 @@ function Get-HMBackupSoftware($Backup) {
 function Get-HMMissingAppPlan {
     param([object[]]$Src = @(), [string[]]$Have = @(), [object[]]$Packages = @(), [object[]]$Catalog = @(), [string[]]$OnlyApps = @(), [switch]$Restrict)
     $rows = New-Object System.Collections.Generic.List[object]
-    $pkgs = @{}; $wgs = @{}; $noPkg = 0; $other = 0
+    $pkgs = @{}; $wgs = @{}; $noPkg = 0; $other = 0; $web = 0
+    $norm = { param($x) (("$x" -replace '\+', 'plus') -replace '[^A-Za-z0-9]', '').ToLowerInvariant() }
+    $haveN = @($Have | ForEach-Object { & $norm $_ } | Where-Object { $_.Length -ge 5 })
     foreach ($s in @($Src | Where-Object { $_ -and "$($_.Name)" } | Sort-Object Name -Unique)) {
         if ($Have -contains $s.Name) { continue }
+        # Office-Add-in eines installierten Programms (z. B. "LogiOptionsPlusExcelAddin" zu "Logi Options+") - richtet das Programm selbst ein
+        if ("$($s.Name)" -match '(?i)^(.+?)(Excel|Word|PowerPoint|Outlook|OneNote|Office)?\s*Add-?in$') {
+            $ab = & $norm $Matches[1]
+            if ($ab.Length -ge 5 -and @($haveN | Where-Object { $ab.StartsWith($_) -or $_.StartsWith($ab) }).Count) { continue }
+        }
+        # Browser-Web-App (im Backup als Scope WebApp vermerkt): kein Programm zum Installieren - im Browser neu anlegen
+        if ("$($s.Scope)" -eq 'WebApp') {
+            $web++
+            if (-not $Restrict) { $rows.Add(@('Web-App', "$($s.Name)", "$($s.Version)", '', 'Browser-Web-App', 'im Browser (Edge/Chrome) wieder als App installieren bzw. ueber die Browser-Synchronisierung')) }
+            continue
+        }
         # gleiches Programm laut Katalog-Erkennung schon installiert (andere Variante/Schreibweise, z. B. "7-Zip 26.04 (x64)" vs. "... (x64 edition)").
         # Nur wenn der erkannte Teil gleich ist - sonst verdeckt ein Familien-Muster ein fehlendes Programm (B34: Revit vs. AutoCAD,
         # Python 3.12 vs. 3.8). Eintraege mit DetectFamily (ein Muster fuer verschiedene Produkte, z. B. Acrobat Pro/Reader) nie.
@@ -358,7 +371,7 @@ function Get-HMMissingAppPlan {
         if ($pkg) { $pkgs["$($pkg.Id)"] = $pkg } elseif (-not $wg) { $noPkg++ }
         $rows.Add(@($(if ($pkg) { 'Paket vorhanden' } elseif ($wg) { 'WinGet' } else { 'kein Paket' }), "$($s.Name)", "$($s.Version)", $(if ($pkg) { "$($pkg.Id)" } elseif ($wg) { "winget:$wg" } else { '' }), $how, $(if ($app) { "$($app.License)" } else { '' })))
     }
-    return [pscustomobject]@{ Rows = $rows.ToArray(); Packages = $pkgs; Winget = $wgs; NoPkg = $noPkg; Installable = ($pkgs.Count + $wgs.Count); Other = $other }
+    return [pscustomobject]@{ Rows = $rows.ToArray(); Packages = $pkgs; Winget = $wgs; NoPkg = $noPkg; Installable = ($pkgs.Count + $wgs.Count); Other = $other; WebApps = $web }
 }
 
 # Programm-Module (eigene Katalog-Module) im Restore, deren Programm am Ziel NICHT installiert ist.
@@ -393,9 +406,11 @@ function Start-HMAppReinstall {
         if (-not $rows.Count) { Out-Console "Alle Programme aus dem Backup sind an $($st.Computer) installiert." 'Success'; return }
         $nWg = $plan.Winget.Count
         $withPkg = $plan.Packages.Count
-        Out-Console "$($rows.Count) Programme fehlen an $($st.Computer) - $withPkg mit Paket in der Softwareverteilung$(if ($nWg) { ", $nWg ueber WinGet" })" $(if ($withPkg + $nWg) { 'Info' } else { 'Warning' })
+        $nWeb = [int]$plan.WebApps
+        $nProg = $rows.Count - $nWeb
+        Out-Console "$nProg Programme fehlen an $($st.Computer) - $withPkg mit Paket in der Softwareverteilung$(if ($nWg) { ", $nWg ueber WinGet" })$(if ($nWeb) { " - dazu $nWeb Browser-Web-App(s), im Browser neu anlegen" })" $(if ($withPkg + $nWg) { 'Info' } else { 'Warning' })
         Show-DataGridWindow -Title "Fehlende Programme - $($st.Computer)  (Backup $($b.Name))" -Columns @('Status', 'Programm', 'Version (Backup)', 'Paket', 'Zuordnung', 'Lizenz') -Rows $rows `
-            -Sort 'Status DESC, Programm ASC' -CountText "$($rows.Count) fehlen, $withPkg mit Paket, $nWg ueber WinGet (aktuelle Version, fuer alle Benutzer) - Pakete ablegen: Softwareverteilung-Ordner" -Width 1400 -Height 620 `
+            -Sort 'Status DESC, Programm ASC' -CountText "$nProg Programme fehlen, $withPkg mit Paket, $nWg ueber WinGet (aktuelle Version, fuer alle Benutzer)$(if ($nWeb) { ", $nWeb Web-App(s)" }) - Pakete ablegen: Softwareverteilung-Ordner" -Width 1400 -Height 620 `
             -ActionContext @{ Computer = $st.Computer } -Actions @(
                 @{ Text = 'Markierte installieren'; Color = '#FFA6E3A1'; Handler = { param($rows, $win, $ctx) [void](Start-HMReinstallQueue $win $ctx.Computer @($rows | Where-Object { $_.Paket } | ForEach-Object { "$($_.Paket)" })) } }
                 @{ Text = 'Alle mit Paket / WinGet installieren'; Color = '#FF89B4FA'; NoSelection = $true; Handler = { param($rows, $win, $ctx) [void](Start-HMReinstallQueue $win $ctx.Computer (@($script:ReinstallPackages.Keys) + @($script:ReinstallWinget.Keys))) } }

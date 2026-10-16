@@ -9,6 +9,11 @@
 
 # --- Teams-Ziele im Einstellungsfenster ($script:SetDlg.TeamsList: Id, Name, Url, Cats, Saved, NewUrl)
 # Vergleichswert einer Ziel-Liste (geaendert ja/nein)
+# Wurzel einer Freigabe (\\server\freigabe) aus einem UNC-Pfad, sonst ''
+function Get-HMShareRoot([string]$Path) {
+    if ("$Path" -match '^(\\\\[^\\/]+\\[^\\/]+)') { return $Matches[1] }
+    return ''
+}
 function Get-HMTeamsListKey($List) {
     $parts = foreach ($t in @($List | Where-Object { $_ })) {
         $c = ConvertTo-HMNotifyCats $t.Cats
@@ -433,6 +438,9 @@ function Show-SettingsDialog {
         if ($dup.Count) { [void][System.Windows.MessageBox]::Show($W, "Standort-Name doppelt: $($dup[0].Group[0].Name)", 'Einstellungen', 'OK', 'Warning'); return }
         $root = "$($F.txtRoot.Text)".Trim()
         if ($root -and -not (Test-Path -LiteralPath $root)) {
+            # Freigabe selbst nicht erreichbar (gibt es nicht - z. B. keine Admin-Freigabe C$/D$ - oder kein Zugriff): klare Meldung statt "ungueltiges Format"
+            $shr = Get-HMShareRoot $root
+            if ($shr -and -not (Test-Path -LiteralPath $shr)) { [void][System.Windows.MessageBox]::Show($W, "Die Freigabe '$shr' ist nicht erreichbar - es gibt sie nicht (z. B. keine Admin-Freigabe C`$/D`$ an diesem PC) oder es fehlt der Zugriff.`n`nPfad pruefen bzw. die Freigabe einrichten - nichts gespeichert.", 'Einstellungen', 'OK', 'Warning'); return }
             if ("$([System.Windows.MessageBox]::Show($W, "Backup-Ordner '$root' existiert nicht. Anlegen?", 'Einstellungen', 'YesNo', 'Question'))" -ne 'Yes') { return }
             try { New-Item -ItemType Directory -Path $root -Force -ErrorAction Stop | Out-Null } catch { [void][System.Windows.MessageBox]::Show($W, "Anlegen fehlgeschlagen: $($_.Exception.Message)", 'Einstellungen', 'OK', 'Error'); return }
         }

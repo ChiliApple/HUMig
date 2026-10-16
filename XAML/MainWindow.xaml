@@ -375,11 +375,11 @@
                                 <Button x:Name="btnBackupSearch" Content="Im Backup suchen ..." Style="{StaticResource BtnTeal}" ToolTip="Dateien im markierten Backup suchen und einzeln herauskopieren (auch unter Werkzeuge)"/>
                                 <Button x:Name="btnOverview" Content="Uebersicht (HTML)" Style="{StaticResource BtnDefault}" ToolTip="HTML-Uebersicht aller Backups im Backup-Ordner erstellen und oeffnen (Backups.html)"/>
                                 <Button x:Name="btnArchiveBackup" Content="Als Archiv" Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup einfrieren: kein fortlaufendes Backup schreibt mehr hinein (der naechste Lauf legt ein neues an), Aufbewahrung und Loeschen lassen es in Ruhe, _GELOESCHT bleibt erhalten. Nochmals klicken = Markierung aufheben"/>
-                                <Button x:Name="btnDeleteBackup" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Markiertes Backup loeschen (mit Bestaetigung) - Archiv erst nach 'Archiv aufheben'"/>
+                                <Button x:Name="btnDeleteBackup" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Markierte Backups loeschen (mit Bestaetigung; mehrere mit Strg/Umschalt markieren) - Archive werden ausgelassen, erst nach &apos;Archiv aufheben&apos;"/>
                                 <Button x:Name="btnCleanupBackups" Content="Alte loeschen" Style="{StaticResource BtnPeach}" ToolTip="Backups aelter als die Aufbewahrungsdauer (Einstellungen) anzeigen und loeschen"/>
                                 <Button x:Name="btnEmptyDeleted" Content="Geloeschte leeren" Style="{StaticResource BtnPeach}" ToolTip="Im markierten (fortlaufenden) Backup die beiseitegelegten, an der Quelle geloeschten Dateien (_GELOESCHT) endgueltig loeschen - mit Rueckfrage"/>
                             </WrapPanel>
-                            <DataGrid x:Name="dgBackups" Style="{StaticResource DarkGrid}" SelectionMode="Single">
+                            <DataGrid x:Name="dgBackups" Style="{StaticResource DarkGrid}" SelectionMode="Extended">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="Auto"/>
                                     <DataGridTextColumn Header="Archiv" Binding="{Binding Archiv}" Width="Auto"/>
@@ -664,6 +664,8 @@
                                 <Button x:Name="btnSbCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False" Padding="14,6"/>
                                 <Button x:Name="btnSbOverview" Content="Statistik / Uebersicht" Style="{StaticResource BtnMauve}" Padding="12,6" ToolTip="Alle Profile und Platten: letzte Sicherung, Alter, Anzahl, Status - Rechts: alle Laeufe"/>
                                 <Button x:Name="btnSbVersions" Content="Versionen auf der Platte" Style="{StaticResource BtnBlue}" Padding="12,6" ToolTip="wbadmin get versions der Ziel-Platte"/>
+                                <Button x:Name="btnSbShadow" Content="Speicher fuer Versionen ..." Style="{StaticResource BtnDefault}" Padding="12,6" ToolTip="Speicher fuer aeltere Versionen (Schattenkopien) auf der Ziel-Platte auf 50 % erhoehen - mit Rueckfrage, nur erhoehen, nie verkleinern"/>
+                                <Button x:Name="btnSbLogs" Content="Protokolle ..." Style="{StaticResource BtnBlue}" Padding="12,6" ToolTip="Protokolle der Laeufe lesen (Zeitplan/Hintergrund als SYSTEM, VM-Export, wbadmin-Ausgaben) - ohne Ordner zu oeffnen"/>
                                 <Button x:Name="btnSbSchedule" Content="Zeitplan ..." Style="{StaticResource BtnMauve}" Padding="12,6" ToolTip="Links: Server-Backup planen (einmalig, taeglich, woechentlich - als SYSTEM ohne Anmeldung, angehakte VMs) | Rechts: geplante Server-Backups anzeigen, starten, loeschen"/>
                                 <Button x:Name="btnSbConflicts" Content="Zeitplan-Pruefung" Style="{StaticResource BtnDefault}" Padding="12,6" ToolTip="Alle geplanten Sicherungsaufgaben am Host anzeigen (andere Programme, alte Aufgaben, Zeitplaene aller HUMig-Profile) - Suchwoerter frei aenderbar"/>
                                 <Button x:Name="btnSbExport" Content="VMs exportieren ..." Style="{StaticResource BtnTeal}" Padding="12,6" ToolTip="Ausgewaehlte VMs mit Hyper-V exportieren (vollstaendige Kopie, mit 'VM importieren' an jedem Hyper-V-Host wiederherstellbar) - auf die Platte oder in einen Ordner. Im Profil auch automatisch nach jeder Sicherung (Zeitplan)."/>
