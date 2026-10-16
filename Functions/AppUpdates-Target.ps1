@@ -225,6 +225,26 @@ function Install-TPwsh {
     finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
 }
 
+# Taugt ein Ordner als Programmordner fuer die Suche nach laufenden Prozessen? Nie der Windows-Ordner (samt Unterordnern -
+# DisplayIcon zeigt manchmal auf System32\msiexec.exe), nie Sammelordner (Programme, Common Files, ProgramData, Laufwerk,
+# Benutzer-, Profil- und AppData-Wurzeln) - sonst gaelten svchost, ctfmon usw. als "laeuft" (B50)
+function Test-TAppDir([string]$Dir) {
+    $d = "$Dir".Trim().Trim('"').TrimEnd('\')
+    if ($d.Length -le 3 -or $d -notmatch '^[A-Za-z]:\\') { return $false }
+    $l = $d.ToLower()
+    $win = "$env:SystemRoot".TrimEnd('\').ToLower()
+    if ($win -and ($l -eq $win -or $l.StartsWith($win + '\'))) { return $false }
+    $roots = @("$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramW6432", "$env:ProgramData", "$env:SystemDrive\", "$env:CommonProgramFiles", "${env:CommonProgramFiles(x86)}", "$env:CommonProgramW6432", "$env:PUBLIC") |
+        Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\').ToLower() }
+    if ($roots -contains $l) { return $false }
+    if ($l -match '^[a-z]:\\(users|documents and settings)(\\[^\\]+(\\appdata(\\(local|roaming|locallow)(\\(programs|temp|microsoft|packages))?)?)?)?$') { return $false }
+    return $true
+}
+# Prozess-/Dienstpfad im Windows-Ordner? Dort beendet bzw. stoppt HUMig nie etwas (Absicherung zusaetzlich zu Test-TAppDir)
+function Test-TWinPath([string]$Path) {
+    $win = "$env:SystemRoot".TrimEnd('\').ToLower()
+    return [bool]($win -and "$Path".ToLower().StartsWith($win + '\'))
+}
 # Laufende Programme zu Paketen (wie Get-HMAuRunning in HUMig, hier fuer entfernte PCs - Fenster sind aus der Fernsitzung nicht
 # erkennbar): Installationsordner aus den Deinstallations-Eintraegen (auch der angemeldeten Benutzer), Prozesse darin.
 # Art: Service (Dienst), ServiceChild (Sitzung 0), App (in einer Benutzersitzung, mit Besitzer). Heuristik.
@@ -234,25 +254,27 @@ function Get-TRunning($Items) {
     $procs = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath })
     $svc = @{}
     foreach ($x in @(Get-CimInstance -ClassName Win32_Service -Filter "State='Running'" -ErrorAction SilentlyContinue)) { if ([int]$x.ProcessId -gt 0) { $svc[[int]$x.ProcessId] = @(@($svc[[int]$x.ProcessId]) + @("$($x.Name)") | Where-Object { $_ }) } }
-    $bad = @("$env:SystemRoot", "$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramData", "$env:SystemDrive\") | Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\').ToLower() }
     foreach ($it in @($Items | Where-Object { $_ })) {
         $n = "$($it.Name)".Trim()
         if (-not $n) { continue }
-        $cand = @(foreach ($r in @($reg | Where-Object { "$($_.DisplayName)" -eq $n -or "$($_.DisplayName)" -like "$n *" })) {
+        $cand = @(foreach ($r in @($reg | Where-Object { "$($_.DisplayName)" -eq $n -or "$($_.DisplayName)".StartsWith("$n ", [StringComparison]::OrdinalIgnoreCase) })) {
                 $d = "$($r.InstallLocation)".Trim().Trim('"')
                 if (-not $d -and "$($r.DisplayIcon)") { try { $d = Split-Path ("$($r.DisplayIcon)" -replace ',\s*-?\d+$', '').Trim('"') -Parent } catch { $d = '' } }
                 if ($d) { $d.TrimEnd('\') }
             })
-        $dirs = @($cand | Where-Object { $_ -and $bad -notcontains $_.ToLower() -and $_.Length -gt 3 } | Select-Object -Unique)
+        $dirs = @($cand | Where-Object { $_ -and (Test-TAppDir $_) } | Select-Object -Unique)
         if (-not $dirs.Count) { continue }
-        $run = @($procs | Where-Object { $pp = "$($_.ExecutablePath)".ToLower(); @($dirs | Where-Object { $pp.StartsWith($_.ToLower() + '\') }).Count })
+        $run = @($procs | Where-Object { $pp = "$($_.ExecutablePath)".ToLower(); -not (Test-TWinPath $pp) -and @($dirs | Where-Object { $pp.StartsWith($_.ToLower() + '\') }).Count })
         if (-not $run.Count) { continue }
         $pl = @(foreach ($p in $run) {
                 $pid2 = [int]$p.ProcessId
                 $kind = if ($svc.ContainsKey($pid2)) { 'Service' } elseif ([int]$p.SessionId -eq 0) { 'ServiceChild' } else { 'App' }
-                $own = ''
-                if ($kind -eq 'App') { try { $o = Invoke-CimMethod -InputObject $p -MethodName GetOwner -ErrorAction Stop; if ($o.User) { $own = "$($o.Domain)\$($o.User)" } } catch { } }
-                [pscustomobject]@{ Name = "$($p.Name)"; Id = $pid2; SessionId = [int]$p.SessionId; Kind = $kind; Path = "$($p.ExecutablePath)"; Services = @($(if ($kind -eq 'Service') { $svc[$pid2] })); Owner = $own }
+                $own = ''; $osid = ''
+                if ($kind -eq 'App') {
+                    try { $o = Invoke-CimMethod -InputObject $p -MethodName GetOwner -ErrorAction Stop; if ($o.User) { $own = "$($o.Domain)\$($o.User)" } } catch { }
+                    try { $osid = "$((Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid -ErrorAction Stop).Sid)" } catch { }
+                }
+                [pscustomobject]@{ Name = "$($p.Name)"; Id = $pid2; SessionId = [int]$p.SessionId; Kind = $kind; Path = "$($p.ExecutablePath)"; Services = @($(if ($kind -eq 'Service') { $svc[$pid2] })); Owner = $own; OwnerSid = $osid }
             })
         $kt = @{ Service = 'Dienst'; App = 'Programm'; ServiceChild = 'Dienst-Unterprozess' }
         [pscustomobject]@{
@@ -265,19 +287,24 @@ function Get-TRunning($Items) {
 # beenden (hart - aus der Fernsitzung laesst sich kein Fenster hoeflich schliessen). $Rs merkt, was danach wieder zu starten ist.
 # Rueckgabe: Prozess-Ids, die noch laufen
 function Stop-TRunning($Run, [hashtable]$Rs) {
-    $pl = @($Run.Procs | Where-Object { $_ })
+    # nie etwas aus dem Windows-Ordner anfassen (svchost, ctfmon ...) - auch wenn die Erkennung es faelschlich zuordnet (B50)
+    $pl = @($Run.Procs | Where-Object { $_ -and -not (Test-TWinPath "$($_.Path)") })
+    foreach ($x in @($Run.Procs | Where-Object { $_ -and (Test-TWinPath "$($_.Path)") })) { Out-L "  $($x.Name) ($($x.Id)) liegt im Windows-Ordner - wird nicht angefasst" }
     foreach ($sn in @($pl | Where-Object { "$($_.Kind)" -eq 'Service' } | ForEach-Object { @($_.Services) } | Where-Object { $_ } | Select-Object -Unique)) {
         try {
+            # abhaengige Dienste stoppt -Force mit - merken und danach wieder starten (B53)
+            $dep = @(@((Get-Service -Name $sn -ErrorAction Stop).DependentServices) | Where-Object { "$($_.Status)" -eq 'Running' } | ForEach-Object { "$($_.Name)" })
             Stop-Service -Name $sn -Force -ErrorAction Stop
-            Out-L "  Dienst $sn gestoppt (wird nach dem Update wieder gestartet)"
+            Out-L "  Dienst $sn gestoppt$(if ($dep.Count) { " (mit abhaengigen: $($dep -join ', '))" }) - wird nach dem Update wieder gestartet"
             if ($Rs.Services -notcontains $sn) { $Rs.Services += $sn }
+            foreach ($dn in $dep) { if ($Rs.Services -notcontains $dn) { $Rs.Services += $dn } }
         } catch { Out-L "  Dienst $sn nicht stoppbar: $($_.Exception.Message)" }
     }
     foreach ($p in @($pl | Where-Object { "$($_.Kind)" -eq 'App' })) {
         try {
             Stop-Process -Id ([int]$p.Id) -Force -ErrorAction Stop
             Out-L "  $($p.Name) ($($p.Id)$(if ($p.Owner) { ", $($p.Owner)" })) beendet"
-            if ($p.Path -and $p.Owner -and -not @($Rs.Apps | Where-Object { $_.Path -eq $p.Path -and $_.Owner -eq $p.Owner }).Count) { $Rs.Apps += [pscustomobject]@{ Path = "$($p.Path)"; Owner = "$($p.Owner)"; Name = "$($p.Name)" } }
+            if ($p.Path -and ($p.Owner -or $p.OwnerSid) -and -not @($Rs.Apps | Where-Object { $_.Path -eq $p.Path -and $_.Owner -eq $p.Owner }).Count) { $Rs.Apps += [pscustomobject]@{ Path = "$($p.Path)"; Owner = "$($p.Owner)"; OwnerSid = "$($p.OwnerSid)"; Name = "$($p.Name)" } }
         } catch { Out-L "  $($p.Name) ($($p.Id)) nicht beendbar: $($_.Exception.Message)" }
     }
     $ids = @($pl | ForEach-Object { [int]$_.Id })
@@ -296,17 +323,24 @@ function Restart-TStopped([hashtable]$Rs) {
         try { $s = Get-Service -Name $sn -ErrorAction Stop; if ("$($s.Status)" -ne 'Running') { Start-Service -Name $sn -ErrorAction Stop; Out-L "Dienst $sn wieder gestartet" } }
         catch { $script:TErr += "Dienst $sn nicht startbar: $($_.Exception.Message)" }
     }
-    $logged = @(Get-TLoggedOnSids | ForEach-Object { Get-TAccount $_ })
+    $lsids = @(Get-TLoggedOnSids)
+    $logged = @($lsids | ForEach-Object { Get-TAccount $_ })
     foreach ($a in @($Rs.Apps)) {
         if (@(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { "$($_.ExecutablePath)" -ieq $a.Path }).Count) { continue }
-        if ($logged -notcontains $a.Owner) { Out-L "$($a.Name) nicht neu gestartet: $($a.Owner) ist nicht mehr angemeldet"; continue }
+        # angemeldet? per SID (robust auch ohne DC-Verbindung), sonst per Kontoname
+        $on = if ("$($a.OwnerSid)") { $lsids -contains "$($a.OwnerSid)" } else { $logged -contains "$($a.Owner)" }
+        if (-not $on) { Out-L "$($a.Name) nicht neu gestartet: $(if ($a.Owner) { $a.Owner } else { $a.OwnerSid }) ist nicht mehr angemeldet"; continue }
         if (-not (Test-Path -LiteralPath $a.Path)) { Out-L "$($a.Name) nicht neu gestartet: $($a.Path) gibt es nach dem Update nicht mehr"; continue }
         $tn = 'HUMig_Restart_' + [guid]::NewGuid().ToString('N')
         try {
-            $act = New-ScheduledTaskAction -Execute $a.Path
-            $pr = New-ScheduledTaskPrincipal -UserId $a.Owner -LogonType Interactive -RunLevel Limited
+            # Arbeitsordner = Programmordner (sonst System32 - manche Programme finden ihre Dateien nicht, B52)
+            $act = New-ScheduledTaskAction -Execute $a.Path -WorkingDirectory (Split-Path $a.Path -Parent)
             $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
-            Register-ScheduledTask -TaskName $tn -TaskPath '\' -Action $act -Principal $pr -Settings $set -Force -ErrorAction Stop | Out-Null
+            $reg = $false; $rerr = ''
+            foreach ($uid in @("$($a.Owner)", "$($a.OwnerSid)") | Where-Object { $_ }) {
+                try { $pr = New-ScheduledTaskPrincipal -UserId $uid -LogonType Interactive -RunLevel Limited; Register-ScheduledTask -TaskName $tn -TaskPath '\' -Action $act -Principal $pr -Settings $set -Force -ErrorAction Stop | Out-Null; $reg = $true; break } catch { $rerr = $_.Exception.Message }
+            }
+            if (-not $reg) { throw $rerr }
             Start-ScheduledTask -TaskPath '\' -TaskName $tn
             Start-Sleep -Seconds 3
             Out-L "$($a.Name) fuer $($a.Owner) wieder gestartet"

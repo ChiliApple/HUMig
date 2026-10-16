@@ -54,22 +54,41 @@ function Format-ACode([int64]$Code) {
     }
     return @{ Ok = $false; Reboot = $false; Text = "$t ($hex)" }
 }
+# Taugt ein Ordner als Programmordner fuer die Suche nach laufenden Prozessen? Nie der Windows-Ordner (samt Unterordnern -
+# DisplayIcon zeigt manchmal auf System32\msiexec.exe), nie Sammelordner (Programme, Common Files, ProgramData, Laufwerk,
+# Benutzer-, Profil- und AppData-Wurzeln) - sonst gaelten svchost, ctfmon usw. als "laeuft" (B50)
+function Test-AAppDir([string]$Dir) {
+    $d = "$Dir".Trim().Trim('"').TrimEnd('\')
+    if ($d.Length -le 3 -or $d -notmatch '^[A-Za-z]:\\') { return $false }
+    $l = $d.ToLower()
+    $win = "$env:SystemRoot".TrimEnd('\').ToLower()
+    if ($win -and ($l -eq $win -or $l.StartsWith($win + '\'))) { return $false }
+    $roots = @("$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramW6432", "$env:ProgramData", "$env:SystemDrive\", "$env:CommonProgramFiles", "${env:CommonProgramFiles(x86)}", "$env:CommonProgramW6432", "$env:PUBLIC") |
+        Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\').ToLower() }
+    if ($roots -contains $l) { return $false }
+    if ($l -match '^[a-z]:\\(users|documents and settings)(\\[^\\]+(\\appdata(\\(local|roaming|locallow)(\\(programs|temp|microsoft|packages))?)?)?)?$') { return $false }
+    return $true
+}
+# Prozess-/Dienstpfad im Windows-Ordner? Dort beendet bzw. stoppt HUMig nie etwas (Absicherung zusaetzlich zu Test-AAppDir)
+function Test-AWinPath([string]$Path) {
+    $win = "$env:SystemRoot".TrimEnd('\').ToLower()
+    return [bool]($win -and "$Path".ToLower().StartsWith($win + '\'))
+}
 # Laeuft das Programm in einer Benutzersitzung? (Installationsordner aus den Deinstallations-Eintraegen, Prozesse darin, Sitzung > 0)
 # Dann im Zeitplan nicht aktualisieren - der Installer bricht sonst oft ab und hinterlaesst ein halb entferntes Programm.
 # Dienste (Sitzung 0) stoppen die Installer selbst. Rueckgabe: Text der laufenden Prozesse oder ''
 function Get-ARunningText([string]$Name) {
     $n = "$Name".Trim()
     if (-not $n) { return '' }
-    $bad = @("$env:SystemRoot", "$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramData", "$env:SystemDrive\") | Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\').ToLower() }
     $dirs = @(foreach ($k in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
-            foreach ($r in @(Get-ItemProperty -Path $k -ErrorAction SilentlyContinue | Where-Object { "$($_.DisplayName)" -eq $n -or "$($_.DisplayName)" -like "$n *" })) {
+            foreach ($r in @(Get-ItemProperty -Path $k -ErrorAction SilentlyContinue | Where-Object { "$($_.DisplayName)" -eq $n -or "$($_.DisplayName)".StartsWith("$n ", [StringComparison]::OrdinalIgnoreCase) })) {
                 $d = "$($r.InstallLocation)".Trim().Trim('"')
                 if (-not $d -and "$($r.DisplayIcon)") { try { $d = Split-Path ("$($r.DisplayIcon)" -replace ',\s*-?\d+$', '').Trim('"') -Parent } catch { $d = '' } }
                 if ($d) { $d.TrimEnd('\') }
             }
-        }) | Where-Object { $_ -and $bad -notcontains $_.ToLower() -and $_.Length -gt 3 } | Select-Object -Unique
+        }) | Where-Object { $_ -and (Test-AAppDir $_) } | Select-Object -Unique
     if (-not @($dirs).Count) { return '' }
-    $run = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { [int]$_.SessionId -gt 0 -and $_.ExecutablePath -and $(foreach ($d in $dirs) { if ("$($_.ExecutablePath)".ToLower().StartsWith($d.ToLower() + '\')) { $true; break } }) })
+    $run = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { [int]$_.SessionId -gt 0 -and $_.ExecutablePath -and -not (Test-AWinPath "$($_.ExecutablePath)") -and $(foreach ($d in $dirs) { if ("$($_.ExecutablePath)".ToLower().StartsWith($d.ToLower() + '\')) { $true; break } }) })
     return (@($run | ForEach-Object { "$($_.Name) ($($_.ProcessId))" }) -join ', ')
 }
 # Verlauf und Fortschritt nach jedem Programm speichern (HUMig > Zeitplaene ansehen liest beides auch waehrend des Laufs)

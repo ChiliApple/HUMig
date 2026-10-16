@@ -514,6 +514,26 @@ function Start-HMAuSearchJob([hashtable]$Ctx, $Job) {
     $Job.Result = [pscustomobject]@{ Status = $(if ($Job.Cancel) { 'Cancelled' } else { 'OK' }); ByPc = $r }
 }
 
+# Taugt ein Ordner als Programmordner fuer die Suche nach laufenden Prozessen? Nie der Windows-Ordner (samt Unterordnern -
+# DisplayIcon zeigt manchmal auf System32\msiexec.exe), nie Sammelordner (Programme, Common Files, ProgramData, Laufwerk,
+# Benutzer-, Profil- und AppData-Wurzeln) - sonst gaelten svchost, ctfmon usw. als "laeuft" (B50)
+function Test-HMAuAppDir([string]$Dir) {
+    $d = "$Dir".Trim().Trim('"').TrimEnd('\')
+    if ($d.Length -le 3 -or $d -notmatch '^[A-Za-z]:\\') { return $false }
+    $l = $d.ToLower()
+    $win = "$env:SystemRoot".TrimEnd('\').ToLower()
+    if ($win -and ($l -eq $win -or $l.StartsWith($win + '\'))) { return $false }
+    $roots = @("$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramW6432", "$env:ProgramData", "$env:SystemDrive\", "$env:CommonProgramFiles", "${env:CommonProgramFiles(x86)}", "$env:CommonProgramW6432", "$env:PUBLIC") |
+        Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\').ToLower() }
+    if ($roots -contains $l) { return $false }
+    if ($l -match '^[a-z]:\\(users|documents and settings)(\\[^\\]+(\\appdata(\\(local|roaming|locallow)(\\(programs|temp|microsoft|packages))?)?)?)?$') { return $false }
+    return $true
+}
+# Prozess-/Dienstpfad im Windows-Ordner? Dort beendet bzw. stoppt HUMig nie etwas (Absicherung zusaetzlich zu Test-HMAuAppDir)
+function Test-HMAuWinPath([string]$Path) {
+    $win = "$env:SystemRoot".TrimEnd('\').ToLower()
+    return [bool]($win -and "$Path".ToLower().StartsWith($win + '\'))
+}
 # Laufende Programme zu Paketen finden: Installationsordner aus der Registry (Deinstallations-Eintraege), Prozesse darin.
 # Heuristik - findet nicht jedes Programm (fehlender Installationsordner, abweichender Name).
 function Get-HMAuRunning($Items) {
@@ -539,18 +559,17 @@ function Get-HMAuRunning($Items) {
         try { $w = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$id" -ErrorAction Stop; $o = Invoke-CimMethod -InputObject $w -MethodName GetOwner -ErrorAction Stop; if ($o.User) { return "$($o.Domain)\$($o.User)" } } catch { }
         return ''
     }
-    $bad = @("$env:SystemRoot", "$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramData", "$env:SystemDrive\") | Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\').ToLower() }
     foreach ($it in @($Items)) {
         $n = "$($it.Name)".Trim()
         if (-not $n) { continue }
-        $cand = @(foreach ($r in @($reg | Where-Object { "$($_.DisplayName)" -eq $n -or "$($_.DisplayName)" -like "$n *" })) {
+        $cand = @(foreach ($r in @($reg | Where-Object { "$($_.DisplayName)" -eq $n -or "$($_.DisplayName)".StartsWith("$n ", [StringComparison]::OrdinalIgnoreCase) })) {
                 $d = "$($r.InstallLocation)".Trim().Trim('"')
                 if (-not $d -and "$($r.DisplayIcon)") { try { $d = Split-Path ("$($r.DisplayIcon)" -replace ',\s*-?\d+$', '').Trim('"') -Parent } catch { $d = '' } }
                 if ($d) { $d.TrimEnd('\') }
             })
-        $dirs = @($cand | Where-Object { $_ -and $bad -notcontains $_.ToLower() -and $_.Length -gt 3 } | Select-Object -Unique)
+        $dirs = @($cand | Where-Object { $_ -and (Test-HMAuAppDir $_) } | Select-Object -Unique)
         if (-not $dirs.Count) { continue }
-        $run = @($procs | Where-Object { $pp = "$($_.Path)".ToLower(); @($dirs | Where-Object { $pp.StartsWith($_.ToLower() + '\') }).Count })
+        $run = @($procs | Where-Object { $pp = "$($_.Path)".ToLower(); -not (Test-HMAuWinPath $pp) -and @($dirs | Where-Object { $pp.StartsWith($_.ToLower() + '\') }).Count })
         if ($run.Count) {
             $pl = @($run | ForEach-Object {
                     $k = & $kindOf $_
@@ -572,6 +591,7 @@ function Get-HMAuRunning($Items) {
 #   Dienst: Dienst stoppen; nach dem Update wieder starten, falls der Installer das nicht selbst getan hat
 # Rueckgabe: Ids, die noch laufen
 function Stop-HMAuRunning([hashtable]$Pc, $Job, $Item, [object[]]$Procs, [bool]$Force, [hashtable]$Restart) {
+    $Procs = @($Procs | Where-Object { $_ -and -not (Test-HMAuWinPath "$($_.Path)") })   # nie etwas aus dem Windows-Ordner (B50)
     $win = @($Procs | Where-Object { "$($_.Kind)" -notin @('Service', 'Background', 'ServiceChild') })
     $bg = @($Procs | Where-Object { "$($_.Kind)" -eq 'Background' })
     $sv = @($Procs | Where-Object { "$($_.Kind)" -eq 'Service' })
@@ -579,9 +599,11 @@ function Stop-HMAuRunning([hashtable]$Pc, $Job, $Item, [object[]]$Procs, [bool]$
     $left = @()
     foreach ($n in @($sv | ForEach-Object { @($_.Services) } | Where-Object { $_ } | Select-Object -Unique)) {
         try {
+            $dep = @(@((Get-Service -Name $n -ErrorAction Stop).DependentServices) | Where-Object { "$($_.Status)" -eq 'Running' } | ForEach-Object { "$($_.Name)" })
             Stop-Service -Name $n -Force -ErrorAction Stop
-            Write-HMLog $Job "      Dienst $n gestoppt (wird nach dem Update wieder gestartet)" 'Info'
+            Write-HMLog $Job "      Dienst $n gestoppt$(if ($dep.Count) { " (mit abhaengigen: $($dep -join ', '))" }) - wird nach dem Update wieder gestartet" 'Info'
             if (-not $Restart.Services.Contains($n)) { $Restart.Services.Add($n) }
+            foreach ($dn in $dep) { if (-not $Restart.Services.Contains($dn)) { $Restart.Services.Add($dn) } }
         } catch { Write-HMLog $Job "      Dienst $n nicht stoppbar: $($_.Exception.Message)" 'Warning' }
     }
     foreach ($p in $bg) {
@@ -624,7 +646,7 @@ function Restart-HMAuStopped($Job, [hashtable]$Restart) {
         if (-not (Test-Path -LiteralPath $a.Path)) { Write-HMLog $Job "  $($a.Name) nicht neu gestartet: $($a.Path) gibt es nach dem Update nicht mehr" 'Warning'; continue }
         $n = 'HUMig_Restart_' + [guid]::NewGuid().ToString('N')
         try {
-            $act = New-ScheduledTaskAction -Execute $a.Path
+            $act = New-ScheduledTaskAction -Execute $a.Path -WorkingDirectory (Split-Path $a.Path -Parent)
             $pr = New-ScheduledTaskPrincipal -UserId $a.Owner -LogonType Interactive -RunLevel Limited
             $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
             Register-ScheduledTask -TaskName $n -TaskPath '\' -Action $act -Principal $pr -Settings $set -Force -ErrorAction Stop | Out-Null

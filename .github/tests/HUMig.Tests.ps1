@@ -3340,6 +3340,22 @@ Describe '2.1.13: laufende Programme bei App-Updates, WinGet-Codes, Fernsitzung'
         $txt | Should -Match 'if \(\$PSSenderInfo\) \{ try \{ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass'
         $txt | Should -Match 'Proc\)" -eq ''Stop'''
     }
+    It 'Programmordner: nie Windows-Ordner, Sammel-, Profil- und AppData-Wurzeln; Namen ohne Platzhalter (B50/B51)' {
+        $old = @{}; foreach ($v in 'SystemRoot', 'ProgramFiles', 'ProgramData', 'SystemDrive', 'CommonProgramFiles', 'PUBLIC') { $old[$v] = [Environment]::GetEnvironmentVariable($v) }
+        try {
+            $env:SystemRoot = 'C:\Windows'; $env:ProgramFiles = 'C:\Program Files'; $env:ProgramData = 'C:\ProgramData'; $env:SystemDrive = 'C:'; $env:CommonProgramFiles = 'C:\Program Files\Common Files'; $env:PUBLIC = 'C:\Users\Public'
+            foreach ($bad in @('C:\Windows', 'C:\Windows\System32', 'c:\windows\system32\', 'C:\Program Files', 'C:\Program Files\Common Files', 'C:\ProgramData', 'C:\', 'C:\Users', 'C:\Users\birgit', 'C:\Users\birgit\AppData', 'C:\Users\birgit\AppData\Local', 'C:\Users\birgit\AppData\Roaming', 'C:\Users\birgit\AppData\Local\Programs', 'relativ', '')) {
+                Test-HMAuAppDir $bad | Should -BeFalse -Because $bad
+            }
+            foreach ($ok in @('C:\Program Files\Greenshot', 'C:\Users\birgit\AppData\Local\Programs\Microsoft VS Code', 'D:\Tools\App', 'C:\Program Files\Common Files\Vendor')) { Test-HMAuAppDir $ok | Should -BeTrue -Because $ok }
+            Test-HMAuWinPath 'C:\Windows\System32\svchost.exe' | Should -BeTrue
+            Test-HMAuWinPath 'C:\Program Files\Greenshot\Greenshot.exe' | Should -BeFalse
+        } finally { foreach ($v in $old.Keys) { [Environment]::SetEnvironmentVariable($v, $old[$v]) } }
+        $tx = (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw) + (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Auto.ps1') -Raw) + (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1') -Raw)
+        $tx | Should -Not -Match '-like "\$n \*"'
+        ([regex]::Matches($tx, 'StartsWith\("\$n ", \[StringComparison\]::OrdinalIgnoreCase\)')).Count | Should -Be 3
+        (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw) | Should -Match 'Where-Object \{ \$_ -and -not \(Test-TWinPath'
+    }
     It 'Zeitplan-Skript: Codes und Pruefung laufender Programme' {
         . ([scriptblock]::Create((@(& $script:FnFrom 'Functions\AppUpdates-Auto.ps1' @('Format-ACode', 'Get-ARunningText')) -join "`n")))
         (Format-ACode ([int64]0x8A15010C)).Text | Should -Match 'abgebrochen'
