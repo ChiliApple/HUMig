@@ -3456,5 +3456,7 @@ Describe '2.1.16: Online-Check uebernehmen' {
         $m | Should -Match "Text = 'Markierte uebernehmen'"
         $m | Should -Match '-ActionContext \$rows\.ToArray\(\)'
         $m | Should -Match '\$script:MultiHosts = \$names'   # geschlossener Dialog oeffnet mit dieser Auswahl
+        foreach ($f in @('Functions\AppUpdates-Engine.ps1', 'Functions\AppUpdates-Auto.ps1')) { $c = Get-Content (Join-Path $script:Root $f) -Raw; foreach ($k in @('0x8A150030', '0x8A150049')) { $c | Should -Match ([regex]::Escape("'$k'")) } }
+        (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw) | Should -Match 'schon beendet \(mit dem Dienst\)'
     }
 }

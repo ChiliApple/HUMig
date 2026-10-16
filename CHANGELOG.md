@@ -3,6 +3,9 @@
 ## v2.1.16 - 2026-10-16
 ### Werkzeuge / Geraete (AD)
 - **Online-Check als Vorauswahl:** im Ergebnisfenster "Online uebernehmen" (nur erreichbare PCs bleiben angehakt) und "Markierte uebernehmen" (nur markierte Zeilen) - danach direkt die naechste Aktion waehlen, statt die PCs erneut aus der AD-Liste herauszusuchen; geschlossener Geraete-Dialog oeffnet sich mit genau dieser Auswahl
+### App-Updates
+- WinGet-Codes 0x8A150030 (Deinstallation der alten Version fehlgeschlagen, z. B. Blender) und 0x8A150049 (MSI-Installation fehlgeschlagen, z. B. Arduino IDE) auf Deutsch, auch im Zeitplan
+- Ist ein Programm beim Beenden schon weg (Kind eines gerade gestoppten Dienstes, z. B. veyon-server.exe), heisst es "schon beendet (mit dem Dienst)" statt "nicht beendbar"
 
 ## v2.1.15 - 2026-10-16
 ### App-Updates

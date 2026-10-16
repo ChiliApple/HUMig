@@ -312,7 +312,7 @@ function Stop-TRunning($Run, [hashtable]$Rs) {
             Stop-Process -Id ([int]$p.Id) -Force -ErrorAction Stop
             Out-L "  $($p.Name) ($($p.Id)$(if ($p.Owner) { ", $($p.Owner)" })) beendet"
             if ($p.Path -and ($p.Owner -or $p.OwnerSid) -and -not @($Rs.Apps | Where-Object { $_.Path -eq $p.Path -and $_.Owner -eq $p.Owner -and "$($_.OwnerSid)" -eq "$($p.OwnerSid)" }).Count) { $Rs.Apps += [pscustomobject]@{ Path = "$($p.Path)"; Owner = "$($p.Owner)"; OwnerSid = "$($p.OwnerSid)"; Name = "$($p.Name)" } }
-        } catch { Out-L "  $($p.Name) ($($p.Id)) nicht beendbar: $($_.Exception.Message)" }
+        } catch { if (Get-Process -Id ([int]$p.Id) -ErrorAction SilentlyContinue) { Out-L "  $($p.Name) ($($p.Id)) nicht beendbar: $($_.Exception.Message)" } else { Out-L "  $($p.Name) ($($p.Id)) schon beendet (mit dem Dienst)" } }
     }
     $ids = @($pl | ForEach-Object { [int]$_.Id })
     $t0 = Get-Date
