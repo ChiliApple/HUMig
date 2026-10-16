@@ -40,6 +40,8 @@ function Format-ACode([int64]$Code) {
         '0x8A150008' { 'Download fehlgeschlagen' }
         '0x8A15003A' { 'durch Gruppenrichtlinie blockiert' }
         '0x8A150006' { 'Installer meldet Fehler' }
+        '0x8A150030' { 'Deinstallation der alten Version fehlgeschlagen' }
+        '0x8A150049' { 'MSI-Installation fehlgeschlagen' }
         '0x8A150115' { 'Installer meldet Fehler' }
         '0x8A150011' { 'Pruefsumme passt nicht - nicht installiert' }
         '0x8A15010C' { 'Installation abgebrochen - meist lief das Programm noch; evtl. unvollstaendig' }

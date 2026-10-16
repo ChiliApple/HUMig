@@ -382,6 +382,21 @@ function Invoke-HMMultiRemote {
     }
 }
 
+# Auswahl im Geraete-Dialog auf diese PCs setzen (nur diese angehakt); Dialog geschlossen -> wieder oeffnen mit genau dieser Auswahl
+function Set-HMMultiSelection([string[]]$Names, [string]$What = '') {
+    $names = @($Names | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    if (-not $names.Count) { [void][System.Windows.MessageBox]::Show($script:Window, "Keine PCs zum Uebernehmen$(if ($What) { " ($What)" }).", 'Geraete', 'OK', 'Information'); return }
+    $script:MultiHosts = $names
+    $s = $script:MultiDlg
+    if (-not ($s -and $s.W -and $s.W.IsLoaded)) { Show-HMMultiDialog; return }
+    $want = @{}; foreach ($n in $names) { $want[$n.ToUpper()] = $true }
+    foreach ($r in @($s.Dt.Rows)) { $k = "$($r.Name)".ToUpper(); $r.Sel = $want.ContainsKey($k); $want.Remove($k) }
+    foreach ($k in @($want.Keys)) { $n = @($names | Where-Object { $_.ToUpper() -eq $k })[0]; $r = $s.Dt.NewRow(); $r.Sel = $true; $r.Name = $n; $r.OU = '(manuell)'; $s.Dt.Rows.Add($r) }
+    & $script:MultiDlgCount
+    $s.Lbl.Text = "$($names.Count) uebernommen$(if ($What) { " ($What)" })  |  $($s.Lbl.Text)"
+    try { $s.W.Activate() } catch { }
+}
+
 # Online-Check (Ping, sonst TCP 5985) parallel
 function Start-HMOnlineCheck([string[]]$Hosts) {
     Out-Console "Online-Check: $($Hosts.Count) PC(s) ..." 'Info'
@@ -406,9 +421,11 @@ function Start-HMOnlineCheck([string[]]$Hosts) {
         foreach ($l in @($r)) { $p = "$l".Split("`t"); if ($p.Count -ge 5) { $rows.Add(@($p[0], $p[1], $p[2], $p[3], $p[4])) } }
         $on = @($rows | Where-Object { $_[1] -eq 'Online' }).Count
         Out-Console "Online-Check: $on von $($rows.Count) erreichbar" 'Success'
-        Show-DataGridWindow -Title 'Online-Check' -Columns @('Computer', 'Status', 'Ping', 'WinRM', 'IP') -Rows $rows.ToArray() -Sort 'Status DESC, Computer ASC' -CountText "$on von $($rows.Count) online" -Width 800 -Height 560 -Actions @(
+        Show-DataGridWindow -Title 'Online-Check' -Columns @('Computer', 'Status', 'Ping', 'WinRM', 'IP') -Rows $rows.ToArray() -Sort 'Status DESC, Computer ASC' -CountText "$on von $($rows.Count) online" -Width 860 -Height 560 -Actions @(
+            @{ Text = 'Online uebernehmen'; Color = '#FF89B4FA'; NoSelection = $true; Handler = { param($rows, $win, $ctx) Set-HMMultiSelection @($ctx | Where-Object { "$($_[1])" -eq 'Online' } | ForEach-Object { "$($_[0])" }) 'online' } },
+            @{ Text = 'Markierte uebernehmen'; Color = '#FF89B4FA'; Handler = { param($rows, $win, $ctx) Set-HMMultiSelection @($rows | ForEach-Object { "$($_.Computer)" }) 'markiert' } },
             @{ Text = 'Markierte: Fernwartung aktivieren'; Color = '#FFA6E3A1'; Handler = { param($rows, $win, $ctx) Start-HMEnableRemoteMulti @($rows | ForEach-Object { "$($_.Computer)" }) } }
-        )
+        ) -ActionContext $rows.ToArray()
     }
 }
 
