@@ -8,12 +8,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
 <style>
-/* Layout: Kopf mit Name + Kennzahlen, Rangliste Top 10 als zweispaltiges Raster, darunter Kategorien als Kacheln in der Farbe ihres HUMig-Knopfs */
+/* Gleiche Farben, Schriften und Bausteine wie Einstieg.html: Kopf mit Logo, Kennzahlen, Top 3 als grosse Karten,
+   Platz 4-10 kompakt, danach alle Bereiche als Kacheln in der Farbe ihres HUMig-Knopfs (Spaltenlayout ohne Luecken) */
 :root {
   --bg: #eff1f5; --surface: #ffffff; --surface-2: #e6e9ef; --line: #ccd0da;
   --fg: #3b3e52; --fg-strong: #1e1e2e; --muted: #6c6f85;
   --green: #40a02b; --mauve: #8839ef; --yellow: #c78b0a; --teal: #13867f; --blue: #1e66f5; --red: #d20f39; --peach: #e2620e;
-  --tint: 12%;
+  --tint: 12%; --chip-fg: #ffffff;
   --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
   --f-body: "Figtree", "Segoe UI", system-ui, sans-serif;
   --f-mono: "JetBrains Mono", Consolas, ui-monospace, monospace;
@@ -22,103 +23,190 @@
   --bg: #1e1e2e; --surface: #262637; --surface-2: #313244; --line: #3d3e55;
   --fg: #cdd6f4; --fg-strong: #ffffff; --muted: #a6adc8;
   --green: #a6e3a1; --mauve: #cba6f7; --yellow: #f9e2af; --teal: #94e2d5; --blue: #89b4fa; --red: #f38ba8; --peach: #fab387;
-  --tint: 16%; color-scheme: dark } }
+  --tint: 16%; --chip-fg: #1e1e2e; color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #1e1e2e; --surface: #262637; --surface-2: #313244; --line: #3d3e55;
   --fg: #cdd6f4; --fg-strong: #ffffff; --muted: #a6adc8;
   --green: #a6e3a1; --mauve: #cba6f7; --yellow: #f9e2af; --teal: #94e2d5; --blue: #89b4fa; --red: #f38ba8; --peach: #fab387;
-  --tint: 16%; color-scheme: dark }
+  --tint: 16%; --chip-fg: #1e1e2e; color-scheme: dark }
 
-body { background: var(--bg); color: var(--fg); font: 400 15px/1.55 var(--f-body); }
-.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 64px; display: grid; gap: 56px; }
-h1, h2, h3 { font-family: var(--f-display); color: var(--fg-strong); text-wrap: balance; margin: 0; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 400 16px/1.6 var(--f-body); }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 40px 16px 72px; display: grid; gap: 64px; }
+h1, h2, h3, h4 { font-family: var(--f-display); color: var(--fg-strong); margin: 0; text-wrap: balance; }
 p { margin: 0; }
+a { color: var(--blue); }
+code { font: 500 .88em/1.4 var(--f-mono); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
 
 /* Kopf */
-header { display: grid; gap: 22px; }
-.brand { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.logo { width: 52px; height: 52px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); display: grid; place-items: center; font: 800 20px/1 var(--f-display); color: var(--blue); }
-h1 { font-size: clamp(34px, 6vw, 56px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.02; }
+header { display: grid; gap: 20px; }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 12px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+.logo { width: 44px; height: 44px; border-radius: 11px; background: var(--surface); border: 1px solid var(--line); display: grid; place-items: center; overflow: hidden; }
+.logo img { width: 30px; height: 30px; }
 .ver { font: 500 13px/1 var(--f-mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; }
-.lead { font-size: 18px; max-width: 62ch; color: var(--fg); }
-.facts { display: flex; flex-wrap: wrap; gap: 8px; }
-.fact { font: 500 12.5px/1 var(--f-mono); padding: 7px 10px; border-radius: 6px; background: var(--surface-2); color: var(--fg); }
+nav { display: flex; gap: 6px; flex-wrap: wrap; }
+nav a { text-decoration: none; color: var(--fg); font-size: 14px; font-weight: 600; padding: 7px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
+nav a:hover { border-color: var(--blue); color: var(--blue); }
+nav a[aria-current] { background: var(--fg-strong); color: var(--bg); border-color: var(--fg-strong); }
+h1 { font-size: clamp(32px, 6vw, 54px); font-weight: 800; line-height: 1.05; letter-spacing: -.02em; }
+h1 em { font-style: normal; color: var(--mauve); }
+.lead { font-size: 19px; max-width: 64ch; }
+.promise { display: flex; flex-wrap: wrap; gap: 10px; }
+.promise span { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 600; }
 
-.label { font: 600 12px/1 var(--f-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
-section { display: grid; gap: 20px; }
-section > h2 { font-size: clamp(24px, 3.5vw, 32px); font-weight: 700; letter-spacing: -0.01em; }
+/* Kennzahlen */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.stats div { --c: var(--blue); background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--c); border-radius: 12px; padding: 14px 16px; display: grid; gap: 2px; }
+.stats b { font: 800 34px/1.05 var(--f-display); color: var(--c); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.stats span { font-size: 14px; color: var(--fg); }
 
-/* Top 10 */
-.top { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap: 10px; }
-.top li { display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: start; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
-.rank { font: 800 28px/1 var(--f-display); color: var(--c, var(--blue)); font-variant-numeric: tabular-nums; padding-top: 2px; }
-.top h3 { font-size: 17px; font-weight: 700; margin-bottom: 3px; }
-.top p { color: var(--muted); font-size: 14.5px; }
-.top li:nth-child(-n+3) { border-color: color-mix(in srgb, var(--c) 45%, var(--line)); background: color-mix(in srgb, var(--c) var(--tint), var(--surface)); }
-.top li:nth-child(-n+3) p { color: var(--fg); }
+/* Abschnittskopf */
+.sec { display: grid; gap: 22px; }
+.sec > h2 { font-size: clamp(24px, 4vw, 32px); font-weight: 700; }
+.sec > p.sub { color: var(--muted); max-width: 70ch; margin-top: -10px; }
+.kicker { font: 600 12px/1 var(--f-body); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: -14px; }
 
-/* Kategorien */
-.cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 16px; align-items: start; }
-.cat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 20px 22px; display: grid; gap: 14px; min-width: 0; }
-.cat-head { display: flex; align-items: center; gap: 10px; }
-.chip { font: 600 12.5px/1 var(--f-body); padding: 7px 11px; border-radius: 6px; background: var(--c); color: #1e1e2e; white-space: nowrap; }
-.cat h3 { font-size: 20px; font-weight: 700; }
+/* Top 3 */
+.podium { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 14px; }
+.podium li { --c: var(--blue); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; display: grid; grid-template-rows: auto 1fr; }
+.podium .head { padding: 18px 20px 14px; background: color-mix(in srgb, var(--c) var(--tint), var(--surface)); border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.podium .rank { font: 800 40px/1 var(--f-display); color: var(--c); letter-spacing: -.03em; }
+.podium .body { padding: 16px 20px 20px; display: grid; gap: 8px; align-content: start; }
+.podium h3 { font-size: 21px; font-weight: 700; }
+.podium p { font-size: 15px; }
+.area { font: 600 11.5px/1 var(--f-body); text-transform: uppercase; letter-spacing: .08em; color: var(--c); text-decoration: none; border: 1px solid color-mix(in srgb, var(--c) 55%, var(--line)); border-radius: 999px; padding: 6px 10px; white-space: nowrap; }
+.area:hover { background: var(--c); color: var(--surface); }
+
+/* Platz 4-10 */
+.rest { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 10px; }
+.rest li { --c: var(--blue); display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; align-items: start; padding: 14px 16px 14px 14px; background: var(--surface); border: 1px solid var(--line); border-left: 5px solid var(--c); border-radius: 12px; min-width: 0; }
+.rest .rank { font: 800 26px/1 var(--f-display); color: var(--c); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.rest h3 { font-size: 16.5px; font-weight: 700; margin-bottom: 2px; }
+.rest p { color: var(--muted); font-size: 14.5px; }
+.rest .area { align-self: center; }
+
+/* Sprungleiste */
+.jump { display: flex; flex-wrap: wrap; gap: 8px; }
+.jump a { --c: var(--blue); display: inline-flex; align-items: center; gap: 8px; text-decoration: none; color: var(--fg-strong); font-size: 14px; font-weight: 600; padding: 7px 12px 7px 9px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); }
+.jump a::before { content: ""; width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
+.jump a:hover { border-color: var(--c); }
+
+/* Bereiche: drei Spalten, Kacheln von Hand verteilt, damit alle Spalten etwa gleich lang sind */
+.cats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
+.col { display: grid; gap: 16px; min-width: 0; }
+.cat { --c: var(--blue); margin: 0; background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--c); border-radius: 14px; overflow: hidden; scroll-margin-top: 16px; }
+.cat-head { padding: 16px 18px 14px; background: color-mix(in srgb, var(--c) var(--tint), var(--surface)); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chip { font: 600 12px/1 var(--f-body); padding: 7px 10px; border-radius: 6px; background: var(--c); color: var(--chip-fg); white-space: nowrap; }
+.cat h3 { font-size: 19px; font-weight: 700; flex: 1; }
+.count { font: 500 12px/1 var(--f-mono); color: var(--muted); }
+.cat-body { padding: 14px 18px 18px; display: grid; gap: 14px; }
 .group { display: grid; gap: 6px; }
-.group h4 { margin: 0; font: 600 12px/1 var(--f-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--c); }
+.group h4 { font: 600 12px/1 var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--c); display: flex; align-items: center; gap: 8px; }
+.group h4::after { content: ""; flex: 1; height: 1px; background: color-mix(in srgb, var(--c) 35%, var(--line)); }
 .cat ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
-.cat li { position: relative; padding-left: 16px; font-size: 14.5px; }
-.cat li::before { content: ""; position: absolute; left: 2px; top: 0.62em; width: 6px; height: 6px; border-radius: 2px; background: var(--c); }
-.new { font: 600 10.5px/1 var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--c); border: 1px solid var(--c); border-radius: 4px; padding: 2px 5px; margin-left: 4px; vertical-align: 1px; white-space: nowrap; }
-code { font: 500 13px/1.4 var(--f-mono); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+.cat li { position: relative; padding-left: 16px; font-size: 14.5px; line-height: 1.5; }
+.cat li::before { content: ""; position: absolute; left: 2px; top: .6em; width: 6px; height: 6px; border-radius: 2px; background: var(--c); }
+.new { font: 600 10.5px/1 var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--c); border: 1px solid var(--c); border-radius: 4px; padding: 2px 5px; margin-left: 4px; vertical-align: 1px; white-space: nowrap; }
+.shot { margin: 2px 0 0; display: grid; gap: 6px; }
+.shot a { display: block; }
+.shot img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); }
+.shot figcaption { font-size: 12.5px; color: var(--muted); }
+.shot.phone { max-width: 180px; }
 
-footer a { color: var(--blue); text-decoration: none; } footer a:hover, footer a:focus-visible { text-decoration: underline; }
-footer { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 6px 18px; border-top: 1px solid var(--line); padding-top: 18px; }
-@media (max-width: 480px) { .wrap { gap: 44px; padding-block: 28px 48px; } .top li { grid-template-columns: 34px 1fr; padding: 14px; } .rank { font-size: 24px; } }
+footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); padding-top: 20px; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+footer a { text-decoration: none; } footer a:hover { text-decoration: underline; }
+
+@media (max-width: 980px) { .cats { grid-template-columns: 1fr 1fr; } .col:nth-child(3) { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; align-items: start; } }
+@media (max-width: 640px) {
+  .wrap { gap: 48px; padding-top: 28px; }
+  .cats, .col:nth-child(3) { grid-template-columns: 1fr; }
+  .lead { font-size: 17px; }
+  .rest li { grid-template-columns: 32px 1fr; }
+  .rest .area { grid-column: 2; justify-self: start; }
+  .podium .rank { font-size: 34px; }
+}
 </style>
 </head>
-<body style="margin:0">
-
+<body>
 <div class="wrap">
-  <header>
+
+<header>
+  <div class="topbar">
     <div class="brand">
-      <div class="logo" aria-hidden="true">HU</div>
-      <h1>HUMig</h1>
-      <span class="ver">v2.1.13</span>
+      <div class="logo"><img src="../Assets/logo64.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Assets/logo64.png'" alt=""></div>
+      HUMig · Funktionsübersicht <span class="ver">v2.1.14</span>
     </div>
-    <p class="lead">Profile von PC zu PC umziehen und automatisch sichern – am eigenen PC oder per Fernzugriff auf viele PCs gleichzeitig.</p>
-    <div class="facts">
-      <span class="fact">Windows 10 / 11</span>
-      <span class="fact">Server 2022 / 2025</span>
-      <span class="fact">PowerShell 5.1</span>
-      <span class="fact">Selbst-Update aus GitHub</span>
-      <span class="fact">bis 8 PCs parallel</span>
-    </div>
-  </header>
+    <nav aria-label="Seiten">
+      <a href="Einstieg.html">Einstieg</a>
+      <a href="Funktionen.html" aria-current="page">Funktionen</a>
+      <a href="Anleitung.html">Anleitung</a>
+      <a href="https://github.com/ChiliApple/HUMig/releases">Download</a>
+    </nav>
+  </div>
+  <h1>Alles, was HUMig <em>kann</em> – auf einer Seite.</h1>
+  <p class="lead">Profile von PC zu PC umziehen und automatisch sichern – am eigenen PC oder per Fernzugriff auf viele PCs gleichzeitig. Zuerst die zehn stärksten Funktionen, darunter alle Bereiche im Detail.</p>
+  <div class="promise">
+    <span>Windows 10 / 11</span><span>Server 2022 / 2025</span><span>PowerShell 5.1</span><span>Selbst-Update aus GitHub</span><span>bis 8 PCs parallel</span>
+  </div>
+  <div class="stats" aria-label="Kennzahlen">
+    <div style="--c: var(--blue)"><b>480+</b><span>Programme im Katalog</span></div>
+    <div style="--c: var(--green)"><b>8</b><span>PCs gleichzeitig</span></div>
+    <div style="--c: var(--mauve)"><b>6</b><span>Schritte im Umzugs-Assistenten</span></div>
+    <div style="--c: var(--peach)"><b>10</b><span>Teams-Ziele je PC</span></div>
+    <div style="--c: var(--teal)"><b>0</b><span>Server, Lizenzen oder Cloud nötig</span></div>
+  </div>
+</header>
 
-  <section aria-labelledby="t-top">
-    <span class="label">Die Stärksten zuerst</span>
-    <h2 id="t-top">Top 10</h2>
-    <ol class="top">
-      <li style="--c: var(--green)"><span class="rank">1</span><div><h3>Profil-Umzug Backup → Restore</h3><p>Ganzes Benutzerprofil samt Programm-Einstellungen auf einen neuen PC – lokal oder remote, auch bei anderem Profilnamen.</p></div></li>
-      <li style="--c: var(--mauve)"><span class="rank">2</span><div><h3>Umzugs-Assistent</h3><p>Führt in sechs Schritten durch den kompletten Umzug und macht nach einem Neustart dort weiter.</p></div></li>
-      <li style="--c: var(--blue)"><span class="rank">3</span><div><h3>Programm-Katalog</h3><p>Über 480 Einträge: erkennt installierte Programme und nimmt Einstellungen, Lizenzen und Datenbanken mit.</p></div></li>
-      <li style="--c: var(--teal)"><span class="rank">4</span><div><h3>Geplante Profil-Backups</h3><p>Täglich oder wöchentlich, fortlaufend oder neu; USB wird danach ausgeworfen, Schutz bei Massenlöschung.</p></div></li>
-      <li style="--c: var(--yellow)"><span class="rank">5</span><div><h3>Softwareverteilung mit Sandbox-Test</h3><p>Setup erst in der Windows Sandbox prüfen, dann still auf viele PCs verteilen.</p></div></li>
-      <li style="--c: var(--peach)"><span class="rank">6</span><div><h3>Hyper-V- und Server-Backup</h3><p>Server und VMs auf rotierende USB-Platten, mit SMART-Prüfung und Plattenwechsel-Erinnerung.</p></div></li>
-      <li style="--c: var(--mauve)"><span class="rank">7</span><div><h3>Teams und Handy</h3><p>Ergebnisse von Server- und Profil-Backups in Teams-Kanäle (je Ziel eigene Kategorien); laufende Vorgänge live am Handy, Push-Meldung bei Vorgangsende.</p></div></li>
-      <li style="--c: var(--blue)"><span class="rank">8</span><div><h3>App-Updates per WinGet</h3><p>Ganze EDV-Säle aktualisieren, Prüfungssoftware als Ausnahme, auf Wunsch per Zeitplan.</p></div></li>
-      <li style="--c: var(--green)"><span class="rank">9</span><div><h3>Fehlende Programme installieren</h3><p>Beim Restore zuerst die Programme des alten PCs nachinstallieren, dann die Daten zurückspielen.</p></div></li>
-      <li style="--c: var(--red)"><span class="rank">10</span><div><h3>PC-Werkzeuge und Mehrfachaktionen</h3><p>Profil erneuern, Speicher aufräumen, Inventar, Neustart – an vielen PCs gleichzeitig.</p></div></li>
-    </ol>
-  </section>
+<section class="sec" aria-labelledby="t-top">
+  <span class="kicker">Die Stärksten zuerst</span>
+  <h2 id="t-top">Top 10</h2>
+  <ol class="podium">
+    <li style="--c: var(--green)">
+      <div class="head"><span class="rank">1</span><a class="area" href="#backup">Backup · Restore</a></div>
+      <div class="body"><h3>Profil-Umzug Backup → Restore</h3><p>Ganzes Benutzerprofil samt Programm-Einstellungen auf einen neuen PC – lokal oder remote, auch bei anderem Profilnamen.</p></div>
+    </li>
+    <li style="--c: var(--mauve)">
+      <div class="head"><span class="rank">2</span><a class="area" href="#betrieb">Betrieb</a></div>
+      <div class="body"><h3>Umzugs-Assistent</h3><p>Führt in sechs Schritten durch den kompletten Umzug und macht nach einem Neustart dort weiter.</p></div>
+    </li>
+    <li style="--c: var(--blue)">
+      <div class="head"><span class="rank">3</span><a class="area" href="#software">Software</a></div>
+      <div class="body"><h3>Programm-Katalog</h3><p>Über 480 Einträge: erkennt installierte Programme und nimmt Einstellungen, Lizenzen und Datenbanken mit.</p></div>
+    </li>
+  </ol>
+  <ol class="rest" start="4">
+    <li style="--c: var(--teal)"><span class="rank">4</span><div><h3>Geplante Profil-Backups</h3><p>Täglich oder wöchentlich, fortlaufend oder neu; USB wird danach ausgeworfen, Schutz bei Massenlöschung.</p></div><a class="area" href="#restore">Zeitplan</a></li>
+    <li style="--c: var(--yellow)"><span class="rank">5</span><div><h3>Softwareverteilung mit Sandbox-Test</h3><p>Setup erst in der Windows Sandbox prüfen, dann still auf viele PCs verteilen.</p></div><a class="area" href="#software">Software</a></li>
+    <li style="--c: var(--peach)"><span class="rank">6</span><div><h3>Hyper-V- und Server-Backup</h3><p>Server und VMs auf rotierende USB-Platten, mit SMART-Prüfung und Plattenwechsel-Erinnerung.</p></div><a class="area" href="#server">Server</a></li>
+    <li style="--c: var(--peach)"><span class="rank">7</span><div><h3>Teams und Handy</h3><p>Ergebnisse von Server- und Profil-Backups in Teams-Kanäle (je Ziel eigene Kategorien); laufende Vorgänge live am Handy, Push-Meldung bei Vorgangsende.</p></div><a class="area" href="#handy">Handy</a></li>
+    <li style="--c: var(--teal)"><span class="rank">8</span><div><h3>App-Updates per WinGet</h3><p>Ganze EDV-Säle aktualisieren, Prüfungssoftware als Ausnahme, auf Wunsch per Zeitplan.</p></div><a class="area" href="#updates">Updates</a></li>
+    <li style="--c: var(--green)"><span class="rank">9</span><div><h3>Fehlende Programme installieren</h3><p>Beim Restore zuerst die Programme des alten PCs nachinstallieren, dann die Daten zurückspielen.</p></div><a class="area" href="#restore">Restore</a></li>
+    <li style="--c: var(--red)"><span class="rank">10</span><div><h3>PC-Werkzeuge und Mehrfachaktionen</h3><p>Profil erneuern, Speicher aufräumen, Inventar, Neustart – an vielen PCs gleichzeitig.</p></div><a class="area" href="#werkzeuge">Werkzeuge</a></li>
+  </ol>
+</section>
 
-  <section aria-labelledby="t-cats">
-    <span class="label">Alle Funktionen</span>
-    <h2 id="t-cats">Nach Bereichen</h2>
-    <div class="cats">
+<section class="sec" aria-labelledby="t-cats">
+  <span class="kicker">Alle Funktionen</span>
+  <h2 id="t-cats">Nach Bereichen</h2>
+  <p class="sub">Jede Kachel entspricht einem Reiter oder Knopf in HUMig – in derselben Farbe.</p>
+  <div class="jump" aria-label="Zu Bereich springen">
+    <a href="#backup" style="--c: var(--green)">Sichern</a>
+    <a href="#restore" style="--c: var(--blue)">Zurückspielen</a>
+    <a href="#software" style="--c: var(--yellow)">Programme</a>
+    <a href="#updates" style="--c: var(--teal)">App-Updates und Treiber</a>
+    <a href="#server" style="--c: var(--peach)">Server-Backup</a>
+    <a href="#handy" style="--c: var(--peach)">Teams und Handy</a>
+    <a href="#werkzeuge" style="--c: var(--red)">PC-Werkzeuge</a>
+    <a href="#betrieb" style="--c: var(--mauve)">Sicherheit und Update</a>
+  </div>
 
-      <article class="cat" style="--c: var(--green)">
-        <div class="cat-head"><span class="chip">Backup</span><h3>Sichern</h3></div>
+  <div class="cats">
+    <div class="col">
+<article class="cat" id="backup" style="--c: var(--green)">
+      <div class="cat-head"><span class="chip">Backup</span><h3>Sichern</h3><span class="count">10 Punkte</span></div>
+      <div class="cat-body">
         <ul>
           <li>Benutzerprofil, Daten auf C:\, Zusätzliche Ordner mit Ausschlüssen</li>
           <li>Edge, Chrome, Firefox; Office-Signaturen, Vorlagen, PST, OneNote</li>
@@ -131,10 +219,48 @@ footer { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap;
           <li>Vorab-Prüfung, Platzbedarf, Prüfsummen, Bericht als HTML</li>
           <li>Benutzer-Modus: Lehrkräfte sichern selbst, ohne Adminrechte</li>
         </ul>
-      </article>
+        <figure class="shot"><a href="img/backup.png" target="_blank"><img src="img/backup.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Docs/img/backup.png'" alt="Reiter Backup: Module links, Ausnahmen und Optionen rechts" loading="lazy"></a><figcaption>Reiter Backup: Module links, Ausnahmen und Optionen rechts</figcaption></figure>
+      </div>
+    </article>
 
-      <article class="cat" style="--c: var(--blue)">
-        <div class="cat-head"><span class="chip">Restore</span><h3>Zurückspielen</h3></div>
+<article class="cat" id="server" style="--c: var(--peach)">
+      <div class="cat-head"><span class="chip">Server</span><h3>Server-Backup</h3><span class="count">9 Punkte</span></div>
+      <div class="cat-body">
+        <div class="group"><h4>Hyper-V</h4>
+          <ul>
+            <li>Server und VMs mit der Windows Server-Sicherung, Profil je Host</li>
+            <li>Plattenrotation mit Archivplatten, Wechsel-Erinnerung</li>
+            <li>SMART-Zustand, Speicherwarnung, Versionen je Platte</li>
+            <li>Warnung bei verworfenen Versionen, Speicher für Versionen per Knopf erhöhen</li>
+            <li>Schreibtempo je Lauf, Hinweis bei langsamer Platte (USB 2.0)</li>
+            <li>Protokolle aller Läufe direkt lesen – auch Zeitplan und Hintergrund</li>
+            <li>Danach auswerfen oder offline schalten</li>
+            <li>VM-Export zum Importieren, per Knopf oder nach jeder Sicherung</li>
+            <li>Im Hintergrund als SYSTEM starten – danach abmelden</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+<article class="cat" id="betrieb" style="--c: var(--mauve)">
+      <div class="cat-head"><span class="chip">Betrieb</span><h3>Sicherheit und Update</h3><span class="count">7 Punkte</span></div>
+      <div class="cat-body">
+        <ul>
+          <li>Selbst-Update mit Prüfsummen und Signatur, Kanäle Stabil/Test</li>
+          <li>Ordnerrechte-Prüfung beim Start (auch Ordner darüber), Absichern per Klick</li>
+          <li>Backups sieht nur der Benutzer selbst und die Admins – auch auf der USB-Platte (NTFS)</li>
+          <li>Abgesicherter Restore: Rückfrage bei fremden Backups</li>
+          <li>Standorte: je Schule eigene Ordner und Domäne</li>
+          <li>Startseite mit Status, Live-Anzeige CPU/RAM</li>
+          <li>Selbsttest <code>Test-HUMig.ps1</code>, Support-Paket, Anleitung</li>
+        </ul>
+      </div>
+    </article>
+    </div>
+    <div class="col">
+<article class="cat" id="restore" style="--c: var(--blue)">
+      <div class="cat-head"><span class="chip">Restore</span><h3>Zurückspielen</h3><span class="count">11 Punkte</span></div>
+      <div class="cat-body">
         <ul>
           <li>Auf neuen PC oder anderen Benutzer, Pfade und Registry umgeschrieben</li>
           <li>Restore-Vorschau, Checkliste für Nacharbeiten</li>
@@ -152,83 +278,13 @@ footer { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap;
             <li>Outlook und Browser vorher schließen – oder Hinweis zum Nachsichern</li>
           </ul>
         </div>
-      </article>
+        <figure class="shot"><a href="img/restore.png" target="_blank"><img src="img/restore.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Docs/img/restore.png'" alt="Reiter Restore: Backup wählen, Module, Optionen und Nacharbeiten" loading="lazy"></a><figcaption>Reiter Restore: Backup wählen, Module, Optionen und Nacharbeiten</figcaption></figure>
+      </div>
+    </article>
 
-      <article class="cat" style="--c: var(--yellow)">
-        <div class="cat-head"><span class="chip">Software</span><h3>Programme</h3></div>
-        <div class="group"><h4>Softwareverteilung</h4>
-          <ul>
-            <li>MSI/EXE still auf einen oder viele PCs, Silent-Schalter erkannt</li>
-            <li>Testinstallation in der Windows Sandbox <span class="new">neu</span></li>
-            <li>Erkennung per ProductCode, Name, Schlüssel oder Datei</li>
-            <li>Abhängigkeiten, keine Desktop-Verknüpfung</li>
-            <li>Deinstallieren, Status je PC, neue Version per WinGet</li>
-          </ul>
-        </div>
-        <div class="group"><h4>Katalog</h4>
-          <ul>
-            <li>Erkennt Programme, schlägt Module vor</li>
-            <li>Geprüfte Einträge mit Datum, Rückmeldung per GitHub/E-Mail</li>
-            <li>Eigene Einträge per Assistent oder Editor</li>
-          </ul>
-        </div>
-      </article>
-
-      <article class="cat" style="--c: var(--teal)">
-        <div class="cat-head"><span class="chip">Updates</span><h3>App-Updates und Treiber</h3></div>
-        <div class="group"><h4>App-Updates (WinGet)</h4>
-          <ul>
-            <li>Ein PC oder ganze EDV-Säle parallel</li>
-            <li>Ausnahmen mit Muster, z. B. Next-Exam, Safe Exam Browser</li>
-            <li>Zeitplan als SYSTEM, PCs wecken, Verlauf</li>
-            <li>Laufende Programme vorher erkennen – auch an anderen PCs: beenden und danach neu starten, auslassen oder trotzdem</li>
-          </ul>
-        </div>
-        <div class="group"><h4>Treiberverteilung</h4>
-          <ul>
-            <li>INF oder Hersteller-Setup nur bei passender Hardware</li>
-            <li>Treiber erzwingen, vor Windows Update schützen</li>
-          </ul>
-        </div>
-      </article>
-
-      <article class="cat" style="--c: var(--peach)">
-        <div class="cat-head"><span class="chip">Server</span><h3>Server-Backup, Teams und Handy</h3></div>
-        <div class="group"><h4>Hyper-V</h4>
-          <ul>
-            <li>Server und VMs mit der Windows Server-Sicherung, Profil je Host</li>
-            <li>Plattenrotation mit Archivplatten, Wechsel-Erinnerung</li>
-            <li>SMART-Zustand, Speicherwarnung, Versionen je Platte</li>
-            <li>Warnung bei verworfenen Versionen, Speicher für Versionen per Knopf erhöhen</li>
-            <li>Schreibtempo je Lauf, Hinweis bei langsamer Platte (USB 2.0)</li>
-            <li>Protokolle aller Läufe direkt lesen – auch Zeitplan und Hintergrund</li>
-            <li>Danach auswerfen oder offline schalten</li>
-            <li>VM-Export zum Importieren, per Knopf oder nach jeder Sicherung</li>
-            <li>Im Hintergrund als SYSTEM starten – danach abmelden</li>
-          </ul>
-        </div>
-        <div class="group"><h4>Handy-Fernbedienung</h4>
-          <ul>
-            <li>App am Startbildschirm (Android und iPhone), Kopplung per QR-Code und Einmal-Code</li>
-            <li>Startseite mit Server-Backup-Kachel (angesteckte und nächste Platte, Archiv, Zustand) und App-Updates je PC</li>
-            <li>Laufender Vorgang mit Restzeit, Menge, Live-Anzeige (Durchsatz, CPU, RAM) und Konsole, Abbrechen mit Bestätigung</li>
-            <li>Zeitpläne vom Handy sofort starten (Profil-Backup, Server-Backup, App-Updates; je Art einschaltbar, Standard aus)</li>
-            <li>Verlauf der letzten 10 Vorgänge, Bericht am Handy öffnen</li>
-            <li>Push-Meldung bei Vorgangsende und bei Fehlern im App-Updates-Zeitplan – ohne Inhalt über den Push-Dienst, Text direkt vom PC</li>
-            <li>HTTPS mit eigener, auf den PC beschränkter Zertifizierungsstelle; auch im Benutzer-Modus (einmalig vom Admin eingerichtet)</li>
-          </ul>
-        </div>
-        <div class="group"><h4>Teams</h4>
-          <ul>
-            <li>Bis zu 10 Ziele, Adressen verschlüsselt nur am PC</li>
-            <li>Je Ziel eigene Kategorien und Server-Backup-Profile</li>
-            <li>Eine Karte je Lauf mit Stand und Speicherplatz – geplant oder in HUMig gestartet, auch bei Abbruch</li>
-          </ul>
-        </div>
-      </article>
-
-      <article class="cat" style="--c: var(--red)">
-        <div class="cat-head"><span class="chip">Werkzeuge</span><h3>PC-Werkzeuge</h3></div>
+<article class="cat" id="werkzeuge" style="--c: var(--red)">
+      <div class="cat-head"><span class="chip">Werkzeuge</span><h3>PC-Werkzeuge</h3><span class="count">10 Punkte</span></div>
+      <div class="cat-body">
         <div class="group"><h4>Am gewählten PC</h4>
           <ul>
             <li>Profil erneuern, zurückholen, anderem Konto zuweisen</li>
@@ -247,32 +303,91 @@ footer { color: var(--muted); font-size: 13.5px; display: flex; flex-wrap: wrap;
             <li>App-Updates für die ausgewählten PCs suchen</li>
           </ul>
         </div>
-      </article>
+        <figure class="shot"><a href="img/werkzeuge.png" target="_blank"><img src="img/werkzeuge.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Docs/img/werkzeuge.png'" alt="Reiter Werkzeuge" loading="lazy"></a><figcaption>Reiter Werkzeuge</figcaption></figure>
+      </div>
+    </article>
 
-      <article class="cat" style="--c: var(--mauve)">
-        <div class="cat-head"><span class="chip">Betrieb</span><h3>Sicherheit und Update</h3></div>
-        <ul>
-          <li>Selbst-Update mit Prüfsummen und Signatur, Kanäle Stabil/Test</li>
-          <li>Ordnerrechte-Prüfung beim Start (auch Ordner darüber), Absichern per Klick</li>
-          <li>Backups sieht nur der Benutzer selbst und die Admins – auch auf der USB-Platte (NTFS)</li>
-          <li>Abgesicherter Restore: Rückfrage bei fremden Backups</li>
-          <li>Standorte: je Schule eigene Ordner und Domäne</li>
-          <li>Startseite mit Status, Live-Anzeige CPU/RAM</li>
-          <li>Selbsttest <code>Test-HUMig.ps1</code>, Support-Paket, Anleitung</li>
-        </ul>
-      </article>
+<article class="cat" id="updates" style="--c: var(--teal)">
+      <div class="cat-head"><span class="chip">Updates</span><h3>App-Updates und Treiber</h3><span class="count">6 Punkte</span></div>
+      <div class="cat-body">
+        <div class="group"><h4>App-Updates (WinGet)</h4>
+          <ul>
+            <li>Ein PC oder ganze EDV-Säle parallel</li>
+            <li>Ausnahmen mit Muster, z. B. Next-Exam, Safe Exam Browser</li>
+            <li>Zeitplan als SYSTEM, PCs wecken, Verlauf</li>
+            <li>Laufende Programme vorher erkennen – auch an anderen PCs: beenden und danach neu starten, auslassen oder trotzdem</li>
+          </ul>
+        </div>
+        <div class="group"><h4>Treiberverteilung</h4>
+          <ul>
+            <li>INF oder Hersteller-Setup nur bei passender Hardware</li>
+            <li>Treiber erzwingen, vor Windows Update schützen</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+    </div>
+    <div class="col">
+<article class="cat" id="handy" style="--c: var(--peach)">
+      <div class="cat-head"><span class="chip">Server</span><h3>Teams und Handy</h3><span class="count">10 Punkte</span></div>
+      <div class="cat-body">
+        <div class="group"><h4>Handy-Fernbedienung</h4>
+          <ul>
+            <li>App am Startbildschirm (Android und iPhone), Kopplung per QR-Code und Einmal-Code</li>
+            <li>Startseite mit Server-Backup-Kachel (angesteckte und nächste Platte, Archiv, Zustand) und App-Updates je PC</li>
+            <li>Laufender Vorgang mit Restzeit, Menge, Live-Anzeige (Durchsatz, CPU, RAM) und Konsole, Abbrechen mit Bestätigung</li>
+            <li>Zeitpläne vom Handy sofort starten (Profil-Backup, Server-Backup, App-Updates; je Art einschaltbar, Standard aus)</li>
+            <li>Verlauf der letzten 10 Vorgänge, Bericht am Handy öffnen</li>
+            <li>Push-Meldung bei Vorgangsende und bei Fehlern im App-Updates-Zeitplan – ohne Inhalt über den Push-Dienst, Text direkt vom PC</li>
+            <li>HTTPS mit eigener, auf den PC beschränkter Zertifizierungsstelle; auch im Benutzer-Modus (einmalig vom Admin eingerichtet)</li>
+          </ul>
+        </div>
+        <div class="group"><h4>Teams</h4>
+          <ul>
+            <li>Bis zu 10 Ziele, Adressen verschlüsselt nur am PC</li>
+            <li>Je Ziel eigene Kategorien und Server-Backup-Profile</li>
+            <li>Eine Karte je Lauf mit Stand und Speicherplatz – geplant oder in HUMig gestartet, auch bei Abbruch</li>
+          </ul>
+        </div>
+        <figure class="shot phone"><a href="img/handy_status.png" target="_blank"><img src="img/handy_status.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Docs/img/handy_status.png'" alt="Startseite am Handy" loading="lazy"></a><figcaption>Startseite am Handy mit Hinweisen und letzten Sicherungen</figcaption></figure>
+      </div>
+    </article>
+
+<article class="cat" id="software" style="--c: var(--yellow)">
+      <div class="cat-head"><span class="chip">Software</span><h3>Programme</h3><span class="count">8 Punkte</span></div>
+      <div class="cat-body">
+        <div class="group"><h4>Softwareverteilung</h4>
+          <ul>
+            <li>MSI/EXE still auf einen oder viele PCs, Silent-Schalter erkannt</li>
+            <li>Testinstallation in der Windows Sandbox <span class="new">neu</span></li>
+            <li>Erkennung per ProductCode, Name, Schlüssel oder Datei</li>
+            <li>Abhängigkeiten, keine Desktop-Verknüpfung</li>
+            <li>Deinstallieren, Status je PC, neue Version per WinGet</li>
+          </ul>
+        </div>
+        <div class="group"><h4>Katalog</h4>
+          <ul>
+            <li>Erkennt Programme, schlägt Module vor</li>
+            <li>Geprüfte Einträge mit Datum, Rückmeldung per GitHub/E-Mail</li>
+            <li>Eigene Einträge per Assistent oder Editor</li>
+          </ul>
+        </div>
+      </div>
+    </article>
 
     </div>
-  </section>
+  </div>
+</section>
 
-  <footer>
-    <span>Stand 16.10.2026 · Version 2.1.13</span>
-    <a href="Einstieg.html">Einstieg</a>
-    <a href="Anleitung.html">Anleitung</a>
-    <a href="https://github.com/ChiliApple/HUMig">Projekt auf GitHub</a>
-    <a href="https://github.com/ChiliApple/HUMig/releases">Download (Releases)</a>
-    <a href="https://github.com/ChiliApple/HUMig/blob/main/INSTALL.md">Installation</a>
-  </footer>
+<footer>
+  <span>Stand 16.10.2026 · Version 2.1.14</span>
+  <a href="Einstieg.html">Einstieg</a>
+  <a href="Anleitung.html">Anleitung</a>
+  <a href="https://github.com/ChiliApple/HUMig">Projekt auf GitHub</a>
+  <a href="https://github.com/ChiliApple/HUMig/releases">Download (Releases)</a>
+  <a href="https://github.com/ChiliApple/HUMig/blob/main/INSTALL.md">Installation</a>
+</footer>
+
 </div>
 </body>
 </html>

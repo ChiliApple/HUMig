@@ -39,6 +39,11 @@ a { color: var(--blue); }
 
 /* Kopf */
 header { display: grid; gap: 20px; }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pnav { display: flex; gap: 6px; flex-wrap: wrap; }
+.pnav a { text-decoration: none; color: var(--fg); font-size: 14px; font-weight: 600; padding: 7px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
+.pnav a:hover { border-color: var(--blue); color: var(--blue); }
+.pnav a[aria-current] { background: var(--fg-strong); color: var(--bg); border-color: var(--fg-strong); }
 .brand { display: flex; align-items: center; gap: 12px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
 .logo { width: 44px; height: 44px; border-radius: 11px; background: var(--surface); border: 1px solid var(--line); display: grid; place-items: center; overflow: hidden; }
 .logo img { width: 30px; height: 30px; }
@@ -120,9 +125,17 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
 <div class="wrap">
 
 <header>
-  <div class="brand">
-    <div class="logo"><img src="../Assets/logo64.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Assets/logo64.png'" alt=""></div>
-    HUMig · Einstieg für IT-Betreuung und Administration
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo"><img src="../Assets/logo64.png" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/ChiliApple/HUMig/main/Assets/logo64.png'" alt=""></div>
+      HUMig · Einstieg für IT-Betreuung und Administration
+    </div>
+    <nav class="pnav" aria-label="Seiten">
+      <a href="Einstieg.html" aria-current="page">Einstieg</a>
+      <a href="Funktionen.html">Funktionen</a>
+      <a href="Anleitung.html">Anleitung</a>
+      <a href="https://github.com/ChiliApple/HUMig/releases">Download</a>
+    </nav>
   </div>
   <h1>Was mache ich im Alltag <em>konkret</em> damit?</h1>
   <p class="lead">HUMig kann viel – und genau das macht den Einstieg schwer. Diese Seite zeigt nicht alle Funktionen, sondern <b>typische Situationen aus dem IT-Alltag</b> in Verwaltung, Büro und Schulungsräumen: was du tust, was HUMig dabei erledigt und was du am Ende hast.</p>
