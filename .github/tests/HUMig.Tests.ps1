@@ -3202,6 +3202,22 @@ Describe '2.1.12: Versionen (UTC), Schattenkopie-Speicher, Schreibtempo, Protoko
         $n | Should -Match '/for=F: /on=F: /maxsize=50% '
         $n | Should -Not -Match '%%'
     }
+    It 'Speicher fuer Versionen: nur erhoehen, nie verkleinern' {
+        $s = [pscustomobject]@{ MaxBytes = [long]838GB; UsedBytes = [long]100GB; Percent = 15; CapacityBytes = [long]5589GB }
+        $p = Get-HMSbShadowResizePlan $s ([long]5589GB) 50
+        $p.Ok | Should -BeTrue
+        $p.NewBytes | Should -Be ([long][math]::Floor(5589GB * 0.5))
+        $p.OldBytes | Should -Be ([long]838GB)
+        (Get-HMSbShadowResizePlan $s ([long]5589GB) 10).Ok | Should -BeFalse
+        (Get-HMSbShadowResizePlan $s ([long]5589GB) 10).Reason | Should -Match 'verkleinert nie'
+        (Get-HMSbShadowResizePlan ([pscustomobject]@{ MaxBytes = [long]-1; UsedBytes = 0 }) ([long]5589GB) 50).Reason | Should -Match 'unbegrenzt'
+        (Get-HMSbShadowResizePlan $null ([long]5589GB) 50).Ok | Should -BeFalse
+        (Get-HMSbShadowResizePlan $s 0 50).Ok | Should -BeFalse
+        (Get-HMSbShadowResizePlan $s ([long]5589GB) 95).Ok | Should -BeFalse
+        (Get-HMSbShadowResizePlan ([pscustomobject]@{ MaxBytes = [long]100GB; UsedBytes = [long]3000GB }) ([long]5589GB) 50).Ok | Should -BeFalse
+        Set-HMSbShadowStorage 'ab' | Should -Match '^FEHLER: ungueltiger'
+        if ($env:SystemDrive) { Set-HMSbShadowStorage "$env:SystemDrive" | Should -Match 'Systemlaufwerk' }
+    }
     It 'Schreibtempo in MB/s' {
         Get-HMSbRateMBs 60 10 | Should -Be 102.4
         Get-HMSbRateMBs 0 10 | Should -Be 0

@@ -1310,6 +1310,35 @@ function Show-HMSbVersions {
     }
 }
 
+# Speicher fuer aeltere Versionen der Ziel-Platte auf 50 % erhoehen: lesen, Plan zeigen, Rueckfrage, setzen, Ergebnis
+$script:SbShadowPercent = 50
+function Set-HMSbShadowStorageUi {
+    $d = Get-HMSbDrive
+    if (-not $d) { Out-Console 'Keine Ziel-Platte gewaehlt.' 'Warning'; return }
+    if ($script:JobRunning) { Out-Console 'Waehrend eines Vorgangs nicht moeglich.' 'Warning'; return }
+    $alive = @(); try { $alive = @(Get-HMSbAliveRuns (Split-Path $script:SbHistFile -Parent)) } catch { }
+    if ($alive.Count) { Out-Console "Es laeuft gerade ein Server-Backup ($(@($alive | ForEach-Object { "$($_.Profile)" }) -join ', ')) - Speicher erst danach aendern." 'Warning'; return }
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $l) . $eng; Get-HMSbShadowStorage $l } -ArgumentList @($script:SbEngine, "$($d.Letter)") -TimeoutSec 60 -State $d -BusyTag 'Sb' -BusyText 'Speicher fuer Versionen wird gelesen ...' -OnComplete {
+        param($s, $d)
+        if ($s -is [string]) { Out-Console "Speicher fuer Versionen: $s" 'Error'; return }
+        $plan = Get-HMSbShadowResizePlan $s $(if ($s) { [long]$s.CapacityBytes } else { 0 }) $script:SbShadowPercent
+        $cur = if ($s) { "$(Format-HMSbShadowStorage $s), belegt $(Format-HMSize ([long]$s.UsedBytes))" } else { 'nicht lesbar' }
+        if (-not $plan.Ok) { Out-Console "Speicher fuer Versionen auf $($d.Letter): ($($d.Label)): $cur - $($plan.Reason)" 'Info'; return }
+        $msg = "Speicher fuer aeltere Versionen auf $($d.Letter): $($d.Label) erhoehen?`n`n" +
+            "Jetzt: $cur`nNeu: max. $('{0:N0}' -f ($plan.NewBytes / 1GB)) GB ($($plan.Percent) % der Platte)`n`n" +
+            "Mehr Platz fuer aeltere Versionen = mehr Staende auf dieser Platte. Vorhandene Versionen bleiben (es wird nur erhoeht). " +
+            "Rueckgaengig nur durch Verkleinern - das verwirft Versionen, deshalb macht HUMig das nie.`n`nBefehl: vssadmin resize shadowstorage /for=$($d.Letter): /on=$($d.Letter): /maxsize=$([long][math]::Floor($plan.NewBytes / 1MB))MB"
+        if (-not (Confirm-Action $msg 'Server-Backup')) { return }
+        Invoke-AsyncCommand -ScriptBlock { param($eng, $l, $p) . $eng; Set-HMSbShadowStorage $l $p } -ArgumentList @($script:SbEngine, "$($d.Letter)", $script:SbShadowPercent) -TimeoutSec 120 -State $d -BusyTag 'Sb' -BusyText 'Speicher fuer Versionen wird geaendert ...' -OnComplete {
+            param($r, $d)
+            if ($r -is [string]) { Out-Console "Speicher fuer Versionen auf $($d.Letter): $r" 'Error'; return }
+            $txt = "Speicher fuer Versionen auf $($d.Letter): ($($d.Label)): vorher $(Format-HMSbShadowStorage $r.Before), jetzt $(if ($r.After) { Format-HMSbShadowStorage $r.After } else { 'nicht lesbar' })"
+            if ($r.Ok) { Out-Console $txt 'Success' }
+            else { Out-Console "$txt - nicht geaendert (vssadmin Code $($r.ExitCode)): $("$($r.Output)" -replace '\s+', ' ')" 'Error' }
+        }
+    }
+}
+
 function Start-HMSbHostOnly {
     $d = Get-HMSbDrive
     $base = if ($d) { "$($d.Letter):\$($script:SbDirName)" } else { $script:SbReportDir }
@@ -1783,6 +1812,7 @@ function Initialize-HMServerBackupTab {
     })
     $ui.btnSbVersions.Add_Click({ Show-HMSbVersions })
     if ($ui.btnSbLogs) { $ui.btnSbLogs.Add_Click({ Show-HMSbLogs }) }
+    if ($ui.btnSbShadow) { $ui.btnSbShadow.Add_Click({ Set-HMSbShadowStorageUi }) }
     $ui.dgSbHistory.Add_MouseDoubleClick({ $it = $ui.dgSbHistory.SelectedItem; if ($it -and $it.Entry) { Open-HMSbReport $it.Entry } })
     # Kontextmenue: Bericht oeffnen, markierte / alle fehlgeschlagenen aus dem Verlauf entfernen
     $cm = New-Object System.Windows.Controls.ContextMenu

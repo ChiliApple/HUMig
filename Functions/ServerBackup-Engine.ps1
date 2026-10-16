@@ -612,7 +612,7 @@ function Get-HMSbShadowStorage([string]$Letter) {
         foreach ($s in @(Get-CimInstance Win32_ShadowStorage -ErrorAction Stop)) {
             if ("$($s.Volume.DeviceID)" -ne "$($vol.DeviceID)") { continue }
             $max = [uint64]$s.MaxSpace
-            return [pscustomobject]@{ MaxBytes = $(if ($max -ge [uint64][long]::MaxValue) { [long]-1 } else { [long]$max }); UsedBytes = [long]$s.UsedSpace; Percent = $(if ($vol.Capacity -gt 0 -and $max -lt [uint64][long]::MaxValue) { [int][math]::Round(100.0 * $max / $vol.Capacity) } else { -1 }) }
+            return [pscustomobject]@{ MaxBytes = $(if ($max -ge [uint64][long]::MaxValue) { [long]-1 } else { [long]$max }); UsedBytes = [long]$s.UsedSpace; Percent = $(if ($vol.Capacity -gt 0 -and $max -lt [uint64][long]::MaxValue) { [int][math]::Round(100.0 * $max / $vol.Capacity) } else { -1 }); CapacityBytes = [long]$vol.Capacity }
         }
     } catch { }
     return $null
@@ -622,12 +622,42 @@ function Format-HMSbShadowStorage($Shadow) {
     if ([long]$Shadow.MaxBytes -lt 0) { return 'unbegrenzt' }
     return ('max. {0:N0} GB{1}' -f ([long]$Shadow.MaxBytes / 1GB), $(if ([int]$Shadow.Percent -ge 0) { " ($($Shadow.Percent) %)" } else { '' }))
 }
+# Plan zum Vergroessern des Speichers fuer aeltere Versionen: nur ERHOEHEN - ein kleinerer Wert als der belegte Platz
+# verwirft Versionen sofort (Microsoft: "Resizing the storage association may cause shadow copies to disappear").
+# Rueckgabe: Ok, NewBytes, OldBytes, Percent, Reason
+function Get-HMSbShadowResizePlan($Shadow, [long]$CapacityBytes, [int]$Percent = 50) {
+    $no = { param($r) [pscustomobject]@{ Ok = $false; NewBytes = [long]0; OldBytes = [long]$(if ($Shadow) { $Shadow.MaxBytes } else { 0 }); Percent = $Percent; Reason = $r } }
+    if ($Percent -lt 10 -or $Percent -gt 90) { return (& $no 'Anteil muss zwischen 10 und 90 % liegen') }
+    if (-not $Shadow) { return (& $no 'Speicher fuer aeltere Versionen nicht lesbar (noch keine Sicherung auf dieser Platte?)') }
+    if ([long]$Shadow.MaxBytes -lt 0) { return (& $no 'bereits unbegrenzt - nichts zu tun') }
+    if ($CapacityBytes -le 0) { return (& $no 'Groesse der Platte nicht lesbar') }
+    $new = [long][math]::Floor($CapacityBytes * ($Percent / 100.0))
+    if ($new -le [long]$Shadow.MaxBytes) { return (& $no ('schon max. {0:N0} GB - mit {1} % wuerde der Speicher nicht groesser (HUMig verkleinert nie)' -f ([long]$Shadow.MaxBytes / 1GB), $Percent)) }
+    if ($new -lt [long]$Shadow.UsedBytes) { return (& $no 'neuer Wert waere kleiner als der belegte Platz') }
+    return [pscustomobject]@{ Ok = $true; NewBytes = $new; OldBytes = [long]$Shadow.MaxBytes; Percent = $Percent; Reason = '' }
+}
+# Speicher fuer aeltere Versionen auf der Backup-Platte vergroessern (vssadmin, /for und /on = dieselbe Platte, absoluter Wert in MB).
+# Nie auf dem Systemlaufwerk, nie kleiner. Rueckgabe: Objekt (Ok, ExitCode, Before, After, Output) oder 'FEHLER: ...'
+function Set-HMSbShadowStorage([string]$Letter, [int]$Percent = 50) {
+    $L = "$Letter".Trim().TrimEnd('\').TrimEnd(':')
+    if ($L -notmatch '^[A-Za-z]$') { return "FEHLER: ungueltiger Laufwerksbuchstabe '$Letter'" }
+    if ("$env:SystemDrive".TrimEnd(':') -ieq $L) { return 'FEHLER: nicht auf dem Systemlaufwerk' }
+    $before = Get-HMSbShadowStorage $L
+    $plan = Get-HMSbShadowResizePlan $before $(if ($before) { [long]$before.CapacityBytes } else { 0 }) $Percent
+    if (-not $plan.Ok) { return "FEHLER: $($plan.Reason)" }
+    $mb = [long][math]::Floor($plan.NewBytes / 1MB)
+    $out = & "$env:SystemRoot\System32\vssadmin.exe" resize shadowstorage "/for=$($L):" "/on=$($L):" "/maxsize=$($mb)MB" 2>&1 | Out-String
+    $code = $LASTEXITCODE
+    $after = Get-HMSbShadowStorage $L
+    $ok = ($code -eq 0 -and $after -and ([long]$after.MaxBytes -lt 0 -or [long]$after.MaxBytes -gt [long]$before.MaxBytes))
+    return [pscustomobject]@{ Ok = $ok; ExitCode = $code; Before = $before; After = $after; Output = "$out".Trim(); Letter = $L }
+}
 # Hat Windows bei diesem Lauf aeltere Versionen verworfen? (vorher + neu angelegte > jetzt). '' = nein / nicht feststellbar
 function Get-HMSbVersionLossNote([int]$Before, [int]$After, [int]$NewRuns, $Shadow, [string]$Letter) {
     if ($Before -lt 0 -or $After -lt 0 -or $NewRuns -le 0) { return '' }
     $lost = $Before + $NewRuns - $After
     if ($lost -le 0) { return '' }
-    return ("Windows hat {0} aeltere Version(en) auf der Platte verworfen (vorher {1}, neu {2}, jetzt {3}) - der Speicher fuer aeltere Versionen (Schattenkopien, {4}) oder der freie Platz reicht nicht. Abhilfe: vssadmin resize shadowstorage /for={5}: /on={5}: /maxsize=50%% (als Administrator) oder eine groessere Platte" -f $lost, $Before, $NewRuns, $After, $(if ($Shadow) { Format-HMSbShadowStorage $Shadow } else { 'Groesse unbekannt' }), $Letter.TrimEnd(':')) -replace '%%', '%'
+    return ("Windows hat {0} aeltere Version(en) auf der Platte verworfen (vorher {1}, neu {2}, jetzt {3}) - der Speicher fuer aeltere Versionen (Schattenkopien, {4}) oder der freie Platz reicht nicht. Abhilfe: Knopf 'Speicher fuer Versionen ...' im Reiter Server-Backup bzw. vssadmin resize shadowstorage /for={5}: /on={5}: /maxsize=50%% (als Administrator) oder eine groessere Platte" -f $lost, $Before, $NewRuns, $After, $(if ($Shadow) { Format-HMSbShadowStorage $Shadow } else { 'Groesse unbekannt' }), $Letter.TrimEnd(':')) -replace '%%', '%'
 }
 # Schreibtempo eines Laufs in MB/s (0 = nicht berechenbar)
 function Get-HMSbRateMBs([double]$SizeGB, [double]$Minutes) {
@@ -1515,7 +1545,7 @@ function Write-HMSbReport {
         }
     } else { [void]$sb.Append("<p class='muted'>Keine - alles in Ordnung.</p>") }
     if ($Entry.VMs -or $Entry.Volumes -or $Entry.HostSystem) {
-        [void]$sb.Append("<h2>Warum die Platte fast leer aussieht</h2><p>Die Windows Server-Sicherung legt im Ordner <code>WindowsImageBackup</code> nur den <b>neuesten</b> Stand als Datei ab. Aeltere Versionen stecken in <b>Schattenkopien</b> der Platte - Explorer und Laufwerkseigenschaften zeigen diesen Platz als frei an. Welche Versionen es gibt: Knopf <i>Versionen auf der Platte</i> bzw. <code>wbadmin get versions</code>.$(if ("$($Entry.ShadowStorage)") { " Speicher fuer aeltere Versionen auf dieser Platte: $(& $e $Entry.ShadowStorage). Reicht er nicht, verwirft Windows die aeltesten Versionen - HUMig warnt dann." })</p>")
+        [void]$sb.Append("<h2>Warum die Platte fast leer aussieht</h2><p>Die Windows Server-Sicherung legt im Ordner <code>WindowsImageBackup</code> nur den <b>neuesten</b> Stand als Datei ab. Aeltere Versionen stecken in <b>Schattenkopien</b> der Platte - Explorer und Laufwerkseigenschaften zeigen diesen Platz als frei an. Welche Versionen es gibt: Knopf <i>Versionen auf der Platte</i> bzw. <code>wbadmin get versions</code>.$(if ("$($Entry.ShadowStorage)") { " Speicher fuer aeltere Versionen auf dieser Platte: $(& $e $Entry.ShadowStorage). Reicht er nicht, verwirft Windows die aeltesten Versionen - HUMig warnt dann; erhoehen mit dem Knopf <i>Speicher fuer Versionen ...</i> im Reiter Server-Backup." })</p>")
     }
     # Dateien im Ordner mit Erklaerung
     $desc = [ordered]@{
@@ -2160,7 +2190,7 @@ function Start-HMServerBackup {
         if ($ln) {
             if ($status -eq 'OK') { $status = 'Warning' }
             $notes += $ln
-            $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = $ln; Fix = 'Die aelteren Staende fehlen fuer eine Wiederherstellung. Speicher fuer aeltere Versionen vergroessern (vssadmin resize shadowstorage, siehe oben) oder weniger je Platte sichern; der aktuelle Lauf selbst ist davon nicht betroffen.' }
+            $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = $ln; Fix = 'Die aelteren Staende fehlen fuer eine Wiederherstellung. Speicher fuer aeltere Versionen vergroessern (Knopf ''Speicher fuer Versionen ...'' im Reiter Server-Backup bzw. vssadmin resize shadowstorage, siehe oben) oder weniger je Platte sichern; der aktuelle Lauf selbst ist davon nicht betroffen.' }
             Write-HMSbLog $ln 'Warning'
         }
     }

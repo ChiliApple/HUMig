@@ -11,7 +11,8 @@
 - Lange Pfade mit Praefix `\\?\UNC\` gelten als Netzwerkfreigabe, `\\?\C:` als lokal (Grok B40/B41)
 ### Server-Backup
 - **Protokolle lesen ohne Ordner:** neuer Knopf *Protokolle ...* - Liste aller Protokolle im Tool-Ordner (Zeitplan/Hintergrund als SYSTEM, VM-Export, wbadmin-Ausgaben), *Anzeigen* als Tabelle (Zeit, Stufe, Meldung) mit Filter und *Neu laden* fuer laufende Vorgaenge. Im Verlauf: Rechtsklick -> *Protokoll des Laufs anzeigen*
-- **Versionen auf der Platte:** HUMig vergleicht die Zahl der Versionen vor und nach dem Lauf. Hat Windows aeltere Versionen verworfen (Schattenkopie-Speicher zu klein oder Platte voll), wird der Lauf zur Warnung mit Abhilfe (`vssadmin resize shadowstorage ...`). Bericht: Versionen, Speicher fuer aeltere Versionen und Abschnitt "Warum die Platte fast leer aussieht". HUMig aendert den Speicher nicht selbst
+- **Versionen auf der Platte:** HUMig vergleicht die Zahl der Versionen vor und nach dem Lauf. Hat Windows aeltere Versionen verworfen (Schattenkopie-Speicher zu klein oder Platte voll), wird der Lauf zur Warnung mit Abhilfe (`vssadmin resize shadowstorage ...`). Bericht: Versionen, Speicher fuer aeltere Versionen und Abschnitt "Warum die Platte fast leer aussieht"
+- **Neuer Knopf *Speicher fuer Versionen ...*:** erhoeht den Speicher fuer aeltere Versionen (Schattenkopien) der Ziel-Platte auf 50 % - mit Rueckfrage (jetziger und neuer Wert, genauer `vssadmin`-Befehl). Nur erhoehen, nie verkleinern (wuerde Versionen verwerfen), nie auf dem Systemlaufwerk, nicht waehrend ein Server-Backup laeuft; Ergebnis wird nachgelesen und gemeldet
 - **Schreibtempo:** MB/s in Bericht, Verlauf und Teams-Karte; Hinweis, wenn ein Lauf deutlich langsamer ist als fruehere Laeufe des Profils (USB 2.0?)
 - Teams-Karte eines in HUMig gestarteten Laufs: Rotations-/Archiv-Erinnerungen wie beim Zeitplan
 - Versions-Zeitpunkte: die wbadmin-ID ist UTC - Anzeige, Karte und Pruefung jetzt in Ortszeit (bisher 2 h verschoben)
