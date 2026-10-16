@@ -3360,6 +3360,21 @@ Describe '2.1.13: laufende Programme bei App-Updates, WinGet-Codes, Fernsitzung'
         ([regex]::Matches($tx, 'StartsWith\("\$n ", \[StringComparison\]::OrdinalIgnoreCase\)')).Count | Should -Be 3
         (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw) | Should -Match 'Where-Object \{ \$_ -and -not \(Test-TWinPath'
     }
+    It 'Stop-TRunning: Protokollzeilen verfaelschen das Ergebnis nicht (Befund v2.1.13: "liess sich nicht beenden" trotz Erfolg)' {
+        . ([scriptblock]::Create((@(& $script:FnFrom 'Functions\AppUpdates-Target.ps1' @('Stop-TRunning')) -join "`n")))
+        function script:Out-L([string]$t) { [pscustomobject]@{ HMAu = 'L'; PC = 'T'; V = $t } }
+        function script:Test-TWinPath([string]$p) { return $false }
+        do { $fakePid = Get-Random -Minimum 400000 -Maximum 999999 } while (Get-Process -Id $fakePid -ErrorAction SilentlyContinue)
+        $run = [pscustomobject]@{ Name = 'X'; Id = 'Pkg.X'; Procs = @([pscustomobject]@{ Name = 'fake'; Id = $fakePid; SessionId = 2; Kind = 'App'; Path = 'C:\x\y.exe'; Owner = 'A\b'; OwnerSid = 'S-1-5-21-1'; Services = @() }) }
+        $out = @(Stop-TRunning $run @{ Services = @(); Apps = @() })
+        # alles, was die Funktion ausgibt, sind Protokollzeilen - das Ergebnis steht in $script:TLeft
+        @($out | Where-Object { -not $_.PSObject.Properties['HMAu'] }).Count | Should -Be 0
+        @($script:TLeft).Count | Should -Be 0
+        $tx = Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw
+        $tx | Should -Not -Match '\$left = @\(Stop-TRunning'
+        $tx | Should -Match 'Stop-TRunning \$rn \$rs'
+        $tx | Should -Match '@\(\$script:TLeft\)\.Count'
+    }
     It 'Zeitplan-Skript: Codes und Pruefung laufender Programme' {
         . ([scriptblock]::Create((@(& $script:FnFrom 'Functions\AppUpdates-Auto.ps1' @('Format-ACode', 'Get-ARunningText')) -join "`n")))
         (Format-ACode ([int64]0x8A15010C)).Text | Should -Match 'abgebrochen'

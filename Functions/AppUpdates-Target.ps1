@@ -288,8 +288,10 @@ function Get-TRunning($Items) {
 }
 # Laufendes Programm vor dem Update beenden (nur nach Entscheidung in HUMig): Dienste stoppen, Programme in Benutzersitzungen
 # beenden (hart - aus der Fernsitzung laesst sich kein Fenster hoeflich schliessen). $Rs merkt, was danach wieder zu starten ist.
-# Rueckgabe: Prozess-Ids, die noch laufen
+# Ergebnis in $script:TLeft (Prozess-Ids, die noch laufen) - NICHT als Rueckgabe: die Out-L-Zeilen der Funktion gehen in die
+# Ausgabe-Pipeline, eine eingefangene Rueckgabe enthielte sie mit und saehe wie "laeuft noch" aus (Befund aus v2.1.13)
 function Stop-TRunning($Run, [hashtable]$Rs) {
+    $script:TLeft = @()
     # nie etwas aus dem Windows-Ordner anfassen (svchost, ctfmon ...) - auch wenn die Erkennung es faelschlich zuordnet (B50)
     $pl = @($Run.Procs | Where-Object { $_ -and -not (Test-TWinPath "$($_.Path)") })
     foreach ($x in @($Run.Procs | Where-Object { $_ -and (Test-TWinPath "$($_.Path)") })) { Out-L "  $($x.Name) ($($x.Id)) liegt im Windows-Ordner - wird nicht angefasst" }
@@ -317,7 +319,7 @@ function Stop-TRunning($Run, [hashtable]$Rs) {
         if (@($pl | Where-Object { [int]$_.Id -eq $i -and "$($_.Kind)" -in @('Service', 'ServiceChild') }).Count) { try { Stop-Process -Id $i -Force -ErrorAction Stop; Out-L "  Prozess $i (zum gestoppten Dienst) beendet" } catch { } }
     }
     Start-Sleep -Seconds 1
-    return @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+    $script:TLeft = @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | Select-Object -Unique)
 }
 # Nach dem Update: gestoppte Dienste und beendete Programme wieder starten (Programme im Konto des Besitzers, wenn er noch
 # angemeldet ist und der Installer es nicht schon gestartet hat)
@@ -458,8 +460,8 @@ try {
             if ($stopIt.Count) {
                 foreach ($rn in @(Get-TRunning $stopIt)) {
                     Out-L "$($rn.Name): laeuft ($($rn.Running)) - wird beendet ..."
-                    $left = @(Stop-TRunning $rn $rs)
-                    if ($left.Count) {
+                    Stop-TRunning $rn $rs
+                    if (@($script:TLeft).Count) {
                         $res += [pscustomobject]@{ Id = "$($rn.Id)"; Status = 'Skipped'; Code = 0; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = 'uebersprungen - Programm liess sich nicht beenden' }
                         Out-L "$($rn.Name): liess sich nicht beenden - nicht aktualisiert"
                         Out-L "#DONE|$($rn.Id)|Skipped|0|0|0|False"
