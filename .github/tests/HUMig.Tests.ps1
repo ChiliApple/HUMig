@@ -3341,15 +3341,19 @@ Describe '2.1.13: laufende Programme bei App-Updates, WinGet-Codes, Fernsitzung'
         $txt | Should -Match 'Proc\)" -eq ''Stop'''
     }
     It 'Programmordner: nie Windows-Ordner, Sammel-, Profil- und AppData-Wurzeln; Namen ohne Platzhalter (B50/B51)' {
-        $old = @{}; foreach ($v in 'SystemRoot', 'ProgramFiles', 'ProgramData', 'SystemDrive', 'CommonProgramFiles', 'PUBLIC') { $old[$v] = [Environment]::GetEnvironmentVariable($v) }
+        $old = @{}; foreach ($v in 'SystemRoot', 'windir', 'ProgramFiles', 'ProgramData', 'SystemDrive', 'CommonProgramFiles', 'PUBLIC') { $old[$v] = [Environment]::GetEnvironmentVariable($v) }
         try {
             $env:SystemRoot = 'C:\Windows'; $env:ProgramFiles = 'C:\Program Files'; $env:ProgramData = 'C:\ProgramData'; $env:SystemDrive = 'C:'; $env:CommonProgramFiles = 'C:\Program Files\Common Files'; $env:PUBLIC = 'C:\Users\Public'
-            foreach ($bad in @('C:\Windows', 'C:\Windows\System32', 'c:\windows\system32\', 'C:\Program Files', 'C:\Program Files\Common Files', 'C:\ProgramData', 'C:\', 'C:\Users', 'C:\Users\birgit', 'C:\Users\birgit\AppData', 'C:\Users\birgit\AppData\Local', 'C:\Users\birgit\AppData\Roaming', 'C:\Users\birgit\AppData\Local\Programs', 'relativ', '')) {
+            foreach ($bad in @('C:\Windows', 'C:\Windows\System32', 'c:\windows\system32\', 'C:\Program Files', 'C:\Program Files\Common Files', 'C:\ProgramData', 'C:\', 'C:\Users', 'C:\Users\birgit', 'C:\Users\birgit\AppData', 'C:\Users\birgit\AppData\Local', 'C:\Users\birgit\AppData\Roaming', 'C:\Users\birgit\AppData\Local\Programs', 'C:\Users\birgit\Downloads', 'C:\Users\birgit\Downloads\SetupRest', 'C:\Users\birgit\Desktop', 'C:\Users\birgit\Documents\Tool', 'C:\Users\birgit\OneDrive - Schule\Apps', 'C:\Program Files\WindowsApps', 'C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.0_x64__8wekyb3d8bbwe', 'relativ', '')) {
                 Test-HMAuAppDir $bad | Should -BeFalse -Because $bad
             }
             foreach ($ok in @('C:\Program Files\Greenshot', 'C:\Users\birgit\AppData\Local\Programs\Microsoft VS Code', 'D:\Tools\App', 'C:\Program Files\Common Files\Vendor')) { Test-HMAuAppDir $ok | Should -BeTrue -Because $ok }
             Test-HMAuWinPath 'C:\Windows\System32\svchost.exe' | Should -BeTrue
             Test-HMAuWinPath 'C:\Program Files\Greenshot\Greenshot.exe' | Should -BeFalse
+            # B55: ohne SystemRoot greift windir
+            $env:SystemRoot = ''; $env:windir = 'C:\Windows'
+            Test-HMAuWinPath 'C:\Windows\System32\svchost.exe' | Should -BeTrue
+            Test-HMAuAppDir 'C:\Windows\System32' | Should -BeFalse
         } finally { foreach ($v in $old.Keys) { [Environment]::SetEnvironmentVariable($v, $old[$v]) } }
         $tx = (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw) + (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Auto.ps1') -Raw) + (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1') -Raw)
         $tx | Should -Not -Match '-like "\$n \*"'

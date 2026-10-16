@@ -61,17 +61,23 @@ function Test-AAppDir([string]$Dir) {
     $d = "$Dir".Trim().Trim('"').TrimEnd('\')
     if ($d.Length -le 3 -or $d -notmatch '^[A-Za-z]:\\') { return $false }
     $l = $d.ToLower()
-    $win = "$env:SystemRoot".TrimEnd('\').ToLower()
+    $win = "$(if ("$env:SystemRoot") { $env:SystemRoot } else { $env:windir })".TrimEnd('\').ToLower()
     if ($win -and ($l -eq $win -or $l.StartsWith($win + '\'))) { return $false }
     $roots = @("$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramW6432", "$env:ProgramData", "$env:SystemDrive\", "$env:CommonProgramFiles", "${env:CommonProgramFiles(x86)}", "$env:CommonProgramW6432", "$env:PUBLIC") |
         Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\').ToLower() }
     if ($roots -contains $l) { return $false }
+    # Store-Apps (WindowsApps samt Unterordnern) und Benutzerordner wie Downloads/Desktop/Dokumente: nie als Programmordner (B54)
+    foreach ($pf in @("$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramW6432") | Where-Object { $_ }) {
+        $wa = ("$pf".TrimEnd('\') + '\windowsapps').ToLower()
+        if ($l -eq $wa -or $l.StartsWith($wa + '\')) { return $false }
+    }
+    if ($l -match '^[a-z]:\\(users|documents and settings)\\[^\\]+\\(downloads|desktop|documents|dokumente|pictures|bilder|videos|music|musik|onedrive[^\\]*)(\\|$)') { return $false }
     if ($l -match '^[a-z]:\\(users|documents and settings)(\\[^\\]+(\\appdata(\\(local|roaming|locallow)(\\(programs|temp|microsoft|packages))?)?)?)?$') { return $false }
     return $true
 }
 # Prozess-/Dienstpfad im Windows-Ordner? Dort beendet bzw. stoppt HUMig nie etwas (Absicherung zusaetzlich zu Test-AAppDir)
 function Test-AWinPath([string]$Path) {
-    $win = "$env:SystemRoot".TrimEnd('\').ToLower()
+    $win = "$(if ("$env:SystemRoot") { $env:SystemRoot } else { $env:windir })".TrimEnd('\').ToLower()
     return [bool]($win -and "$Path".ToLower().StartsWith($win + '\'))
 }
 # Laeuft das Programm in einer Benutzersitzung? (Installationsordner aus den Deinstallations-Eintraegen, Prozesse darin, Sitzung > 0)

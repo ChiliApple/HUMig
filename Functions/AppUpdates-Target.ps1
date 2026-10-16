@@ -232,17 +232,23 @@ function Test-TAppDir([string]$Dir) {
     $d = "$Dir".Trim().Trim('"').TrimEnd('\')
     if ($d.Length -le 3 -or $d -notmatch '^[A-Za-z]:\\') { return $false }
     $l = $d.ToLower()
-    $win = "$env:SystemRoot".TrimEnd('\').ToLower()
+    $win = "$(if ("$env:SystemRoot") { $env:SystemRoot } else { $env:windir })".TrimEnd('\').ToLower()
     if ($win -and ($l -eq $win -or $l.StartsWith($win + '\'))) { return $false }
     $roots = @("$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramW6432", "$env:ProgramData", "$env:SystemDrive\", "$env:CommonProgramFiles", "${env:CommonProgramFiles(x86)}", "$env:CommonProgramW6432", "$env:PUBLIC") |
         Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\').ToLower() }
     if ($roots -contains $l) { return $false }
+    # Store-Apps (WindowsApps samt Unterordnern) und Benutzerordner wie Downloads/Desktop/Dokumente: nie als Programmordner (B54)
+    foreach ($pf in @("$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramW6432") | Where-Object { $_ }) {
+        $wa = ("$pf".TrimEnd('\') + '\windowsapps').ToLower()
+        if ($l -eq $wa -or $l.StartsWith($wa + '\')) { return $false }
+    }
+    if ($l -match '^[a-z]:\\(users|documents and settings)\\[^\\]+\\(downloads|desktop|documents|dokumente|pictures|bilder|videos|music|musik|onedrive[^\\]*)(\\|$)') { return $false }
     if ($l -match '^[a-z]:\\(users|documents and settings)(\\[^\\]+(\\appdata(\\(local|roaming|locallow)(\\(programs|temp|microsoft|packages))?)?)?)?$') { return $false }
     return $true
 }
 # Prozess-/Dienstpfad im Windows-Ordner? Dort beendet bzw. stoppt HUMig nie etwas (Absicherung zusaetzlich zu Test-TAppDir)
 function Test-TWinPath([string]$Path) {
-    $win = "$env:SystemRoot".TrimEnd('\').ToLower()
+    $win = "$(if ("$env:SystemRoot") { $env:SystemRoot } else { $env:windir })".TrimEnd('\').ToLower()
     return [bool]($win -and "$Path".ToLower().StartsWith($win + '\'))
 }
 # Laufende Programme zu Paketen (wie Get-HMAuRunning in HUMig, hier fuer entfernte PCs - Fenster sind aus der Fernsitzung nicht
@@ -304,7 +310,7 @@ function Stop-TRunning($Run, [hashtable]$Rs) {
         try {
             Stop-Process -Id ([int]$p.Id) -Force -ErrorAction Stop
             Out-L "  $($p.Name) ($($p.Id)$(if ($p.Owner) { ", $($p.Owner)" })) beendet"
-            if ($p.Path -and ($p.Owner -or $p.OwnerSid) -and -not @($Rs.Apps | Where-Object { $_.Path -eq $p.Path -and $_.Owner -eq $p.Owner }).Count) { $Rs.Apps += [pscustomobject]@{ Path = "$($p.Path)"; Owner = "$($p.Owner)"; OwnerSid = "$($p.OwnerSid)"; Name = "$($p.Name)" } }
+            if ($p.Path -and ($p.Owner -or $p.OwnerSid) -and -not @($Rs.Apps | Where-Object { $_.Path -eq $p.Path -and $_.Owner -eq $p.Owner -and "$($_.OwnerSid)" -eq "$($p.OwnerSid)" }).Count) { $Rs.Apps += [pscustomobject]@{ Path = "$($p.Path)"; Owner = "$($p.Owner)"; OwnerSid = "$($p.OwnerSid)"; Name = "$($p.Name)" } }
         } catch { Out-L "  $($p.Name) ($($p.Id)) nicht beendbar: $($_.Exception.Message)" }
     }
     $ids = @($pl | ForEach-Object { [int]$_.Id })
@@ -343,7 +349,7 @@ function Restart-TStopped([hashtable]$Rs) {
             if (-not $reg) { throw $rerr }
             Start-ScheduledTask -TaskPath '\' -TaskName $tn
             Start-Sleep -Seconds 3
-            Out-L "$($a.Name) fuer $($a.Owner) wieder gestartet"
+            Out-L "$($a.Name) fuer $(if ($a.Owner) { $a.Owner } else { $a.OwnerSid }) wieder gestartet"
         } catch { Out-L "$($a.Name) nicht neu gestartet: $($_.Exception.Message)" }
         finally { Unregister-ScheduledTask -TaskPath '\' -TaskName $tn -Confirm:$false -ErrorAction SilentlyContinue }
     }
