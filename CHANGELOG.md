@@ -5,12 +5,12 @@
 - **Laufende Programme an anderen PCs:** vor dem Aktualisieren prueft HUMig auch an entfernten PCs, ob ein Programm laeuft, und fragt je Programm: *Beenden, danach neu starten* (hart beendet - aus der Ferne laesst sich kein Fenster schliessen; Dienste werden gestoppt; danach startet HUMig beides wieder, Programme im Konto des Benutzers, falls noch angemeldet), *Nicht aktualisieren* oder *Trotzdem aktualisieren*. Laesst sich ein Programm nicht beenden, wird es nicht aktualisiert. Bisher lief der Installer trotzdem und brach z. B. bei Greenshot ab - teils mit halb entferntem Programm
 - **Zeitplan:** Programme, die gerade in einer Benutzersitzung laufen, werden ausgelassen ("uebersprungen - laeuft") und beim naechsten Lauf erneut versucht; Zusammenfassung nennt die Anzahl
 - **Fernsitzung mit Ausfuehrungsrichtlinie Bypass nur fuer die Sitzung:** PCs ohne Richtlinie (Windows-Standard *Restricted*) scheiterten beim Einrichten des WinGet-Moduls ("PackageManagement konnte nicht geladen werden") - die Einstellung des PCs bleibt unveraendert
-- **Schutz beim Beenden (Grok B50):** als Programmordner gelten nie der Windows-Ordner (samt Unterordnern - manche Deinstallations-Eintraege zeigen auf System32), Programme/Common Files/ProgramData/Laufwerk, Benutzer-, Profil- und AppData-Wurzeln; Prozesse und Dienste aus dem Windows-Ordner fasst HUMig nie an - auch am eigenen PC und im Zeitplan
+- **Schutz beim Beenden (Codepruefung B50):** als Programmordner gelten nie der Windows-Ordner (samt Unterordnern - manche Deinstallations-Eintraege zeigen auf System32), Programme/Common Files/ProgramData/Laufwerk, Benutzer-, Profil- und AppData-Wurzeln; Prozesse und Dienste aus dem Windows-Ordner fasst HUMig nie an - auch am eigenen PC und im Zeitplan
 - Programmnamen mit `[`/`]` brechen die Erkennung nicht mehr ab (Vergleich ohne Platzhalter, B51); neu gestartete Programme laufen im Programmordner (B52); abhaengige Dienste werden mit gestoppt und danach wieder gestartet (B53); Neustart prueft die Anmeldung per SID; auch Downloads, Desktop, Dokumente, OneDrive und WindowsApps gelten nie als Programmordner (B54), Rueckfall auf `windir`, wenn `SystemRoot` fehlt (B55), getrennte Neustart-Eintraege je Benutzer-SID (B56)
 - WinGet-Codes auf Deutsch: 0x8A15010C (abgebrochen - meist lief das Programm noch, evtl. unvollstaendig), 010B, 010E, 0105, 0107, 0108 (auch im Zeitplan, dort zusaetzlich 010D, 0103); englische Meldungen "No packages matched ..." (kein installiertes Paket - evtl. nur Dateireste, neu installieren) und "error occurred while connecting to the catalog" (Quelle nicht erreichbar)
 ### Backup / Server-Backup
-- Waehrend des Mehrfach-Loeschens bleiben *Loeschen* und *Alte loeschen* gesperrt, auch wenn ein anderer Vorgang endet; *Alte loeschen* lehnt dann ab (Grok B48)
-- "Protokoll des Laufs anzeigen" bei einem in HUMig gestarteten Lauf (ab 2.1.12) oeffnet den Bericht statt eines frueheren Zeitplan-Protokolls (Grok B49)
+- Waehrend des Mehrfach-Loeschens bleiben *Loeschen* und *Alte loeschen* gesperrt, auch wenn ein anderer Vorgang endet; *Alte loeschen* lehnt dann ab (Codepruefung B48)
+- "Protokoll des Laufs anzeigen" bei einem in HUMig gestarteten Lauf (ab 2.1.12) oeffnet den Bericht statt eines frueheren Zeitplan-Protokolls (Codepruefung B49)
 ### Doku
 - README, Funktionen und Anleitung auf Stand 2.1.12/2.1.13
 
@@ -22,7 +22,7 @@
 - **Fehlende Programme:** Browser-Web-Apps (Edge/Chrome, im Backup als *WebApp* vermerkt) stehen getrennt mit Art *Web-App*; Office-Add-ins eines installierten Programms (z. B. "LogiOptionsPlusExcelAddin" zu "Logi Options+") werden nicht mehr als fehlend gezeigt
 - Kontrolle nach dem Restore nennt Teile, die wegen einer Verknuepfung im Zielprofil ausgelassen wurden; die Meldung zu einer Verknuepfungskette nennt das Endziel
 - Rechte der Backup-Ordner: in einem Schritt gesetzt (.NET, icacls nur noch als Rueckfall); zusaetzliche Konten, die nicht von HUMig sind, stehen im Protokoll ("zusaetzlich (nicht von HUMig, bleibt)"). Fremde Verweigern-Eintraege loesen ein Neusetzen aus
-- Lange Pfade mit Praefix `\\?\UNC\` gelten als Netzwerkfreigabe, `\\?\C:` als lokal (Grok B40/B41)
+- Lange Pfade mit Praefix `\\?\UNC\` gelten als Netzwerkfreigabe, `\\?\C:` als lokal (Codepruefung B40/B41)
 ### Server-Backup
 - **Protokolle lesen ohne Ordner:** neuer Knopf *Protokolle ...* - Liste aller Protokolle im Tool-Ordner (Zeitplan/Hintergrund als SYSTEM, VM-Export, wbadmin-Ausgaben), *Anzeigen* als Tabelle (Zeit, Stufe, Meldung) mit Filter und *Neu laden* fuer laufende Vorgaenge. Im Verlauf: Rechtsklick -> *Protokoll des Laufs anzeigen*
 - **Versionen auf der Platte:** HUMig vergleicht die Zahl der Versionen vor und nach dem Lauf. Hat Windows aeltere Versionen verworfen (Schattenkopie-Speicher zu klein oder Platte voll), wird der Lauf zur Warnung mit Abhilfe (`vssadmin resize shadowstorage ...`). Bericht: Versionen, Speicher fuer aeltere Versionen und Abschnitt "Warum die Platte fast leer aussieht"
@@ -30,7 +30,7 @@
 - **Schreibtempo:** MB/s in Bericht, Verlauf und Teams-Karte; Hinweis, wenn ein Lauf deutlich langsamer ist als fruehere Laeufe des Profils (USB 2.0?)
 - Teams-Karte eines in HUMig gestarteten Laufs: Rotations-/Archiv-Erinnerungen wie beim Zeitplan
 - Versions-Zeitpunkte: die wbadmin-ID ist UTC - Anzeige, Karte und Pruefung jetzt in Ortszeit (bisher 2 h verschoben)
-- Pruefung (Grok B42-B47): ein gestoertes `wbadmin get versions` nach dem Lauf loest keinen falschen "Versionen verworfen"-Alarm mehr aus (Vergleich nur bei gueltig gelesener Liste); liegt der Schattenkopie-Speicher auf einem anderen Laufwerk, aendert der Knopf nichts und sagt das; "Protokoll des Laufs anzeigen" findet das Protokoll ueber den Verlaufseintrag (bei aelteren Laeufen das zuletzt vorher gestartete, auch bei verzoegertem Start); Schreibtempo nur ueber die eigentliche Sicherung (ohne Pruefen, Host-System, Export, Warten); waehrend des Mehrfach-Loeschens sind Liste und Backup-Knoepfe gesperrt; Volume-GUID-Pfade gelten als lokal
+- Codepruefung (B42-B47): ein gestoertes `wbadmin get versions` nach dem Lauf loest keinen falschen "Versionen verworfen"-Alarm mehr aus (Vergleich nur bei gueltig gelesener Liste); liegt der Schattenkopie-Speicher auf einem anderen Laufwerk, aendert der Knopf nichts und sagt das; "Protokoll des Laufs anzeigen" findet das Protokoll ueber den Verlaufseintrag (bei aelteren Laeufen das zuletzt vorher gestartete, auch bei verzoegertem Start); Schreibtempo nur ueber die eigentliche Sicherung (ohne Pruefen, Host-System, Export, Warten); waehrend des Mehrfach-Loeschens sind Liste und Backup-Knoepfe gesperrt; Volume-GUID-Pfade gelten als lokal
 
 ## v2.1.11 - 2026-10-15
 ### Backup
