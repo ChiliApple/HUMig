@@ -238,10 +238,7 @@ function Test-TAppDir([string]$Dir) {
         Where-Object { $_ } | ForEach-Object { "$_".TrimEnd('\').ToLower() }
     if ($roots -contains $l) { return $false }
     # Store-Apps (WindowsApps samt Unterordnern) und Benutzerordner wie Downloads/Desktop/Dokumente: nie als Programmordner (B54)
-    foreach ($pf in @("$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:ProgramW6432") | Where-Object { $_ }) {
-        $wa = ("$pf".TrimEnd('\') + '\windowsapps').ToLower()
-        if ($l -eq $wa -or $l.StartsWith($wa + '\')) { return $false }
-    }
+    if ($l -match '\\windowsapps(\\|$)') { return $false }
     if ($l -match '^[a-z]:\\(users|documents and settings)\\[^\\]+\\(downloads|desktop|documents|dokumente|pictures|bilder|videos|music|musik|onedrive[^\\]*)(\\|$)') { return $false }
     if ($l -match '^[a-z]:\\(users|documents and settings)(\\[^\\]+(\\appdata(\\(local|roaming|locallow)(\\(programs|temp|microsoft|packages))?)?)?)?$') { return $false }
     return $true
