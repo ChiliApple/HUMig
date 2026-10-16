@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## v2.1.16 - 2026-10-16
+### Werkzeuge / Geraete (AD)
+- **Online-Check als Vorauswahl:** im Ergebnisfenster "Online uebernehmen" (nur erreichbare PCs bleiben angehakt) und "Markierte uebernehmen" (nur markierte Zeilen) - danach direkt die naechste Aktion waehlen, statt die PCs erneut aus der AD-Liste herauszusuchen; geschlossener Geraete-Dialog oeffnet sich mit genau dieser Auswahl
+
 ## v2.1.15 - 2026-10-16
 ### App-Updates
 - **Verbindungsabbruch zum Ziel-PC:** bereits gemeldete Ergebnisse (aktualisiert, uebersprungen, Fehler) bleiben erhalten - bisher zaehlten dann alle Programme des PCs als Fehler ("nicht ausgefuehrt: kein Ergebnis"); die Meldung nennt jetzt den Verbindungszustand und dass eine am PC gestartete Aufgabe dort weiterlaeuft (z. B. wartet eine UAC-Abfrage beim Benutzer)

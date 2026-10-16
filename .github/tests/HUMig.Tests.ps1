@@ -3447,3 +3447,14 @@ Describe '2.1.15: Live-Ergebnisse, Lebenszeichen, Bereich unbekannter Pakete' {
         foreach ($c in @('0x8A15005C', '0x8A15005B', '0x8A15005E')) { $a | Should -Match ([regex]::Escape("'$c'")) }   # B66
     }
 }
+
+Describe '2.1.16: Online-Check uebernehmen' {
+    It 'Set-HMMultiSelection vorhanden, Online-Check bietet Uebernahme an' {
+        $m = Get-Content (Join-Path $script:Root 'Functions\Tools-Multi.ps1') -Raw
+        $m | Should -Match 'function Set-HMMultiSelection\('
+        $m | Should -Match ([regex]::Escape("Text = 'Online uebernehmen'; Color = '#FF89B4FA'; NoSelection = `$true"))
+        $m | Should -Match "Text = 'Markierte uebernehmen'"
+        $m | Should -Match '-ActionContext \$rows\.ToArray\(\)'
+        $m | Should -Match '\$script:MultiHosts = \$names'   # geschlossener Dialog oeffnet mit dieser Auswahl
+    }
+}
