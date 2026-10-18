@@ -22,9 +22,17 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
   <a href="LICENSE">Lizenz</a>
 </p>
 
+<table>
+  <tr>
+    <td align="center"><a href="Docs/img/backup.png"><img src="Docs/img/backup.png" width="260" alt="Backup"/></a><br><sub>Backup</sub></td>
+    <td align="center"><a href="Docs/img/restore.png"><img src="Docs/img/restore.png" width="260" alt="Restore"/></a><br><sub>Restore</sub></td>
+    <td align="center"><a href="Docs/img/werkzeuge.png"><img src="Docs/img/werkzeuge.png" width="260" alt="Werkzeuge"/></a><br><sub>Werkzeuge</sub></td>
+  </tr>
+</table>
+
 ---
 
-## Installation in einer Zeile
+## Schnellstart
 
 PowerShell **als Administrator** öffnen und einfügen:
 
@@ -34,223 +42,13 @@ irm https://github.com/ChiliApple/HUMig/releases/latest/download/Install.ps1 | i
 
 Fragt nach dem Zielordner (Vorschlag `C:\Program Files\HUMig`), lädt die freigegebene Version, prüft jede Datei (Prüfsumme und Signatur) und startet HUMig. Was die Zeile genau tut: [Install.ps1](Install.ps1). Ohne Einzeiler: `Pull.ps1` in einen leeren Ordner legen und starten – siehe [INSTALL.md](INSTALL.md).
 
-**Neu bei HUMig?** → [Einstieg: Was mache ich im Alltag konkret damit?](https://chiliapple.github.io/HUMig/Docs/Einstieg.html) – typische Situationen Schritt für Schritt.
+Danach: Computer und Benutzer wählen → Reiter **Backup** → **Backup starten**.
 
----
+Was das Programm kann und wie es geht:
 
-| | |
-|---|---|
-| **Backup & Restore** | Dateien, Browser, Office, Windows-Einstellungen, Drucker, WLAN, Netzlaufwerke – Robocopy mit bis zu 128 Threads, inkrementell, mit Prüfung, **Zeitplan** (automatisch auf USB/Netz) |
-| **Programm-Katalog** | erkennt rund 480 Programme, sichert deren Einstellungen, Plug-ins, Datenbanken und **Lizenzdateien** mit, schließt Programme vorher, installiert fehlende am neuen PC nach - mit **Katalog-Editor** |
-| **Sicher** | Vorschau vor dem Restore, Prüfsummen-Katalog, Cloud-Dateien (OneDrive, SharePoint …) werden nie heruntergeladen |
-| **Werkzeuge** | Fernwartung, AD-Mehrfachaktionen, Inventar, Autopilot-Hash (auch an HUPilot), BitLocker, Profil-Reparatur, Diagnose, Software- und Treiberverteilung (Setups vorher in der **Windows Sandbox** testen) |
-| **Server-Backup** | Hyper-V-VMs je Schule/Standort auf rotierende USB-Platten (Windows Server-Sicherung), Host-Konfiguration mit Switch-Wiederherstellungs-Skript, Verlauf und Statistik |
-| **App-Updates** | installierte Programme über **WinGet** aktualisieren - Liste mit Haken, **Ausnahmen** (z. B. Prüfungssoftware) und Quellen je Standort, laufende Programme werden vorher erkannt (auch an anderen PCs), Verlauf |
-| **Benutzer-Modus** | ohne Administratorrechte: eigenes Profil sichern/wiederherstellen, Dateien aus dem Backup holen |
-| **Update** | Kanal **Stabil** (freigegebene Versionen) oder **Test**, Vorversion per Klick, jede Datei per **SHA-256** geprüft, nur **signierte** Releases werden installiert |
-| **Anleitung** | im Tool mit **F1** – aus diesem Repository, passend zur installierten Version |
-
-<table>
-  <tr>
-    <td align="center"><a href="Docs/img/backup.png"><img src="Docs/img/backup.png" width="260" alt="Backup"/></a><br><sub>Backup</sub></td>
-    <td align="center"><a href="Docs/img/restore.png"><img src="Docs/img/restore.png" width="260" alt="Restore"/></a><br><sub>Restore</sub></td>
-    <td align="center"><a href="Docs/img/werkzeuge.png"><img src="Docs/img/werkzeuge.png" width="260" alt="Werkzeuge"/></a><br><sub>Werkzeuge</sub></td>
-  </tr>
-</table>
-
-## Schnellstart
-
-1. Installieren: Zeile oben in PowerShell als Administrator – oder `Pull.ps1` in einen leeren Ordner legen (z. B. `C:\Program Files\HUMig`) und `powershell -ExecutionPolicy Bypass -File Pull.ps1` ausführen
-2. HUMig startet danach selbst (beim ersten Mal über **Start.cmd**) – dabei entstehen **HUMig.exe** (Administrator) und **HUMig-Benutzer.exe** (Benutzer-Modus)
-3. Computer und Benutzer wählen → Reiter **Backup** → **Backup starten**
-
-Details: [INSTALL.md](INSTALL.md) und die [Anleitung](https://chiliapple.github.io/HUMig/Docs/Anleitung.html) (im Tool mit **F1**).
-
-**Inhalt:** [Bedienung](#bedienung) · [Module und Vorlagen](#module-und-vorlagen) · [Programm-Katalog](#programm-katalog) · [Restore](#restore) · [Software- und Treiberverteilung](#software--und-treiberverteilung) · [Werkzeuge](#werkzeuge) · [Server-Backup](#server-backup) · [App-Updates](#app-updates) · [Update und Sicherheit](#update-und-sicherheit) · [Grenzen](#grenzen) · [Konfiguration](#konfiguration)
-
----
-
-## Bedienung
-
-Für einen kompletten PC-Umzug führt der **Umzugs-Assistent** (*Umzug …* im Reiter Backup neben *Rueckmeldung*) Schritt für Schritt durch alles unten – fortsetzbar nach Abbruch.
-
-| Schritt | Ablauf |
-|---|---|
-| **1 · Verbinden** | Computer wählen (dieser PC, Name/IP oder **Geräte (AD)**) → **Verbinden** → Benutzer wählen. Installierte Programme werden dabei erkannt. |
-| **2 · Backup** | Vorlage wählen oder Module anhaken → *Vorab-Prüfung* (Größe, freier Platz) → **Backup starten** |
-| **3 · Restore** | am neuen PC Backup markieren → optional *Vorschau* → **Restore starten** (fehlende Programme werden zuerst angeboten) → Checkliste |
-| **4 · Werkzeuge** | Fernwartung, Diagnose, Profil-Reparatur, Verteilung – für den gewählten PC und Benutzer |
-
-- Linksklick = Hauptfunktion, Rechtsklick = Zweitfunktion (steht im Tooltip)
-- **Strg + Mausrad** skaliert die Oberfläche, **Strg + 0** = automatisch
-- Auswahl, Optionen und die zuletzt gewählte Vorlage bleiben gespeichert
-- **Benutzer-Modus** (`HUMig-Benutzer.exe`): eigenes Profil ohne Administratorrechte sichern und wiederherstellen; Updates mit Admin-Anmeldung
-- **Standorte** (Einstellungen): eigener Backup-Ordner, Verteilungsordner und USMT-Pfad je Schule/Standort
-
-### So funktioniert es
-
-| Bereich | Technik |
-|---|---|
-| Dateien | Robocopy mit bis zu 128 Threads, inkrementell (an der Quelle gelöschte Dateien werden beiseitegelegt, nicht zurückgespielt), Ausnahmelisten |
-| Benutzer-Einstellungen | Registry-Export aus dem Benutzer-Hive, beim Restore auf den Zielbenutzer umgeschrieben |
-| Windows-Einstellungen | Microsoft USMT – legt beim Restore auch das Profil an |
-| Sicherheit | Platzprüfung, Prüfung nach dem Backup (SHA-256), optional Prüfsummen-Katalog; Nur-Cloud-Dateien werden nie heruntergeladen |
-| Protokoll | druckbarer Bericht (HTML), `manifest.json`, Logs, Übersicht `Backups.html` |
-
-## Module und Vorlagen
-
-| Gruppe | Module |
-|---|---|
-| Profil & Daten | Benutzerprofil, Daten auf C:\\, Zusätzliche Ordner |
-| Browser | Edge, Chrome, Firefox – Lesezeichen am neuen PC zusammengefuehrt, am gleichen PC alles 1:1 |
-| Office | Signaturen, Vorlagen, PST, OneNote · Office-Einstellungen (Registry) |
-| Windows | Taskleiste/Hintergrund, Desktop-Symbole, Startmenü-Pins, Schnellzugriff, Schriftarten |
-| Netzwerk & Drucker | WLAN, Ordnerfreigaben, Netzlaufwerke, Drucker (auch mit Treibern), ODBC, VPN |
-| System | Windows-Einstellungen (USMT), Aufgabenplanung, Treiber-Export, Info-Export |
-| Programme | iPhone-Backups, KeePass, Autodesk und alle erkannten Programme aus dem [Katalog](#programm-katalog) |
-
-**Vorlagen:** *Standard* und *Komplett* sind eingebaut – erkannte Programme hakt *Standard* nicht an (von Hand wählen), *Komplett* alle. Eigene Vorlage: Module anhaken → **Als Vorlage speichern …**. Rechtsklick auf die Vorlagen-Liste = umbenennen, überschreiben, löschen.
-
-> **Hinweis:** *Standard* enthält USMT – das braucht Administratorrechte und *Werkzeuge › USMT einrichten (ADK)*. Ist USMT nicht eingerichtet: Haken entfernen und als eigene Vorlage speichern (z. B. *Standard ohne USMT*). Im Benutzer-Modus ist USMT ohnehin ausgeblendet.
-
-**Zeitplan:** *Zeitplan …* sichert das eigene Profil automatisch – täglich, wöchentlich oder bei Anmeldung, auf USB (an der Bezeichnung erkannt) oder ein Netzlaufwerk, optional mit Auswerfen danach. Ergebnis als Windows-Meldung, in der Ereignisanzeige und – wenn eingerichtet – in Teams.
-
-## Programm-Katalog
-
-Rund **480 Programme** – Browser, Office- und Medienprogramme, Schul- und Fachsoftware (z. B. Next-Exam, GeoGebra, Untis, SOLIDWORKS) und Admin-Werkzeuge. Je Programm sichert HUMig Einstellungen, Plug-ins, Datenbanken und – wo möglich – **Lizenzdateien**; was nicht übertragbar ist, steht als Nacharbeit in der Checkliste.
-
-- **Geprüft / testweise:** nur Einträge mit Prüfdatum sind an einem echten PC bestätigt, alle anderen sind als *(ungeprüft)* markiert
-- **Rückmeldung:** gelbe Knöpfe *Rückmeldung* öffnen ein vorausgefülltes GitHub-Issue oder eine E-Mail – nichts wird automatisch gesendet
-- **Katalog-Statistik:** je Programm und PC, ob die Pfade beim Backup Daten hatten
-- **Erweitern:** *Programme › + Programm hinzufügen* (Assistent) oder *Katalog bearbeiten* – eigene Einträge in `Config\apps.json`
-- **Nie übertragen:** gespeicherte Kennwörter (DPAPI), Geräte-Identitäten (z. B. RustDesk, AnyDesk, VPN-Schlüssel), konto- oder hardwaregebundene Lizenzen
-
-Aufbau der Einträge mit allen Feldern: Anleitung, Kapitel *Programme*.
-
-## Restore
-
-| Funktion | Wirkung |
-|---|---|
-| Vorschau | je Datei: neu / überschreibt / Ziel neuer / gleich |
-| Neuere Dateien am Ziel behalten | Robocopy `/XO` |
-| Fehlende Programme installieren | Vergleich Backup ↔ neuer PC, Installation aus der Softwareverteilung, sonst WinGet – beim Restore automatisch angeboten (zuerst installieren, dann zurückspielen) |
-| Browser-Web-Apps | als App installierte Webseiten (Edge/Chrome) stehen getrennt – im Browser neu anlegen bzw. über die Synchronisierung |
-| Programm-Module ohne Programm | werden ausgelassen und für einen 2. Lauf nach der Installation angehakt |
-| Kontrolle | nach dem Restore Backup ↔ Ziel vergleichen, fehlende Dateien als Liste; wegen einer Verknüpfung im Zielprofil ausgelassene Teile werden genannt |
-| Backups löschen | einzeln, mehrere markierte auf einmal (eine Rückfrage, Archive bleiben) oder nach Aufbewahrungsregel |
-| Fortlaufendes Backup | an der Quelle gelöschte Dateien, herausgenommene Zusätzliche Ordner und neu ausgeschlossene Pfade werden beiseitegelegt (`_GELOESCHT`), nicht angehakte Module im Protokoll genannt |
-| Live-Anzeige | Lesen/Schreiben (MB/s), CPU, Arbeitsspeicher – auch bei Backup und Server-Backup |
-| Checkliste | Nacharbeiten abhaken, Stand landet im Protokoll |
-| Backup prüfen · Vergleichen | gegen den Prüfsummen-Katalog · zwei Backups gegenüberstellen |
-| Alte Backups | Aufbewahrung je PC und Benutzer, Löschen immer mit Rückfrage |
-| Archiv | Backup einfrieren: kein fortlaufendes Backup schreibt mehr hinein, Aufbewahrung und Löschen lassen es in Ruhe, `_GELOESCHT` bleibt |
-
-OneDrive-Dateien werden nie in den Sync-Ordner zurückgeschrieben.
-
-## Software- und Treiberverteilung
-
-| | Softwareverteilung | Treiberverteilung |
-|---|---|---|
-| Ordner | `Softwareverteilung\` | `Treiberverteilung\` |
-| Paket | MSI/EXE/MSP oder ein Unterordner | Unterordner mit INF-Dateien oder Hersteller-Setup (ZIP/CAB werden entpackt) |
-| Installation | Silent-Parameter werden aus dem Installer erkannt | INF über `pnputil` oder Setup mit Parametern |
-| Prüfung | bereits installierte Programme werden übersprungen (Erkennung per ProductCode, Name, Registry-Schlüssel oder Datei) | nur PCs mit passender Hardware und anderer Version |
-| Extras | **Testinstallation in der Windows Sandbox** (ermittelt Erkennung und stille Deinstallation), Abhängigkeiten, Paket-Deinstallation, Status je PC, neue Version per WinGet | Treiber **erzwingen**, **vor Windows Update schützen** |
-
-Ziel ist der gewählte PC oder viele PCs aus dem AD (bis zu 8 gleichzeitig). *Installierte Software* zeigt die Programme eines PCs und deinstalliert still.
-
-## Werkzeuge
-
-| Bereich | Auswahl |
-|---|---|
-| Computer | Fernwartung aktivieren, Umbenennen, IP/DHCP, lokale Gruppen, Autologon, Neustart, **Geräte (AD) / Mehrfach**, Remote-PowerShell, Inventar, BitLocker, Autopilot-Hash (auf Wunsch an HUPilot übergeben), HUPilot-Setup öffnen, Wake-on-LAN |
-| Benutzerprofil | Profil erneuern/zurückholen, Profil anderem Konto zuweisen, alte Profile löschen, Datenbanken und wichtige Dateien suchen, im Backup suchen |
-| Diagnose / Wartung | Ereignisse, Akku, Aktivierung, Entra ID/Intune, Domäne/Zeit/Kerberos (startet den Zeitdienst bei Bedarf), Druckwarteschlange, Speicher aufräumen, DISM/SFC |
-| Dieser PC | Systemprogramme (Taskmanager, Dienste, Registry, Konsolen … – immer mit Administratorrechten), Anmeldedaten, Hersteller-Treiber-Links |
-
-Remote-Werkzeuge brauchen WinRM – *Fernwartung aktivieren* schaltet es über WMI ein. Änderungen immer mit Rückfrage.
-
-## Server-Backup
-
-Hyper-V-VMs oder die Laufwerke eines Servers mit der Windows Server-Sicherung auf **rotierende USB-Platten** sichern:
-
-- Profile je Schule/Standort, Platten werden an ihrer Bezeichnung erkannt
-- Online-Sicherung der VMs, optional Host-System, Host-Konfiguration mit Skript zum Wiederherstellen der Switches
-- Zeitplan, Verlauf, Bericht je Lauf, Einträge in der Ereignisanzeige; **Protokolle aller Läufe** (auch Zeitplan/Hintergrund als SYSTEM) direkt in HUMig lesen, mit Filter
-- **Versionen auf der Platte** mit Erklärung der Schattenkopien; Warnung, wenn Windows ältere Versionen verworfen hat; Knopf **Speicher für Versionen** erhöht den Schattenkopie-Speicher der Backup-Platte (nur erhöhen, mit Rückfrage)
-- **Schreibtempo** je Lauf mit Hinweis auf eine zu langsame Verbindung (z. B. USB 2.0)
-- **Plattenzustand (SMART)** je Platte, automatisch gelesen und gemerkt
-- **Teams-Benachrichtigung** über Workflows, mehrere Ziele (Chat/Kanal) mit je eigenen Kategorien - Server-Backups und geplante Profil-Backups (Fehler, Warnungen, Erfolg, Plattenzustand, Plattenwechsel/Archiv, Speicherplatz, Massenlöschung, Details mit Stand der Platte)
-- **VM-Export** per Knopf oder automatisch nach jeder Sicherung (auch im Zeitplan): vollständige Kopie je VM, an jedem Hyper-V-Host importierbar, mit einstellbarer Anzahl je VM
-- **Archiv-Platten** gegen Verschlüsselungstrojaner; Platte danach auswerfen oder offline schalten
-- Wiederherstellung auch ohne HUMig (`wbadmin`, Installationsmedium)
-
-## Teams-Benachrichtigung
-
-Geplante Server-Backups, geplante Profil-Backups und Warnungen (Plattenzustand, Plattenwechsel, Speicherplatz, Massenlöschung) als Karte in einen Teams-Chat oder -Kanal:
-
-1. In Teams die App **Workflows** öffnen › Vorlage *Webhookbenachrichtigungen an einen Chat* bzw. *… an einen Kanal* › Speichern › Adresse kopieren. Private Kanäle gehen nicht – Gruppenchat oder Standardkanal eines privaten Teams nehmen.
-2. HUMig als Administrator auf dem PC, der melden soll (Hyper-V-Host bzw. PC mit Profil-Backup-Zeitplan) › *Einstellungen* › Allgemein › *Teams-Benachrichtigung* › *Neues Ziel*, Adresse einfügen, Kategorien wählen, *Test senden*, Speichern.
-3. Bis zu 10 Ziele mit je eigenen Kategorien – nicht jeder bekommt alles (z. B. Fehler an den Kanal, Erfolg mit Details nur an den eigenen Chat). Server-Backup-Meldungen lassen sich je Ziel auf bestimmte Profile beschränken (z. B. je Standort ein Kanal).
-
-Die Adressen liegen nur verschlüsselt in der Registry des jeweiligen PCs (nur Administratoren/SYSTEM), nie im Tool-Ordner. Details: Anleitung, Kapitel *Teams-Benachrichtigung*.
-
-## App-Updates
-
-Installierte Programme per **WinGet** aktualisieren – am gewählten PC oder in einem ganzen EDV-Saal:
-
-- Liste mit Haken, stille Installation, laufende Programme werden vorher erkannt
-- **Ausnahmen** je Standort (z. B. Prüfungssoftware), eigene Quellen, Verlauf
-- **Zeitplan** an den Ziel-PCs (als SYSTEM, PC wecken, verpasste Termine nachholen)
-
-## Handy-Fernbedienung
-
-Status und laufende Vorgänge am Handy (mit Live-Anzeige Durchsatz, CPU, RAM und Push-Meldung bei Vorgangsende) – im selben Netz, als App auf dem Startbildschirm:
-
-- Knopf **Handy** unten rechts: QR-Code scannen, 6-stelligen Code bestätigen, fertig
-- Startseite (Hinweise, Zeitpläne, letzte Sicherungen, Server-Backup, App-Updates je PC), laufender Vorgang mit Restzeit, Live-Anzeige und Konsole, *Abbrechen* mit Bestätigung
-- Verlauf der letzten Vorgänge mit Bericht, Push-Meldung bei Vorgangsende
-- Zeitpläne (Profil-Backup, Server-Backup, App-Updates) vom Handy sofort starten – je Art einzeln einschaltbar, Standard aus
-- HTTPS mit eigener, auf diesen PC beschränkter Zertifizierungsstelle; Zugriff nur für gekoppelte Handys, Firewall-Regel nur solange aktiv
-
-<table>
-  <tr>
-    <td align="center" valign="top"><a href="Docs/img/handy_status.png"><img src="Docs/img/handy_status.png" width="190" alt="Status"/></a><br><sub>Status</sub></td>
-    <td align="center" valign="top"><a href="Docs/img/handy_vorgang.png"><img src="Docs/img/handy_vorgang.png" width="190" alt="Vorgang"/></a><br><sub>Vorgang</sub></td>
-    <td align="center" valign="top"><a href="Docs/img/handy_verlauf.png"><img src="Docs/img/handy_verlauf.png" width="190" alt="Letzte Vorgänge"/></a><br><sub>Letzte Vorgänge</sub></td>
-    <td align="center" valign="top"><a href="Docs/img/handy_push.png"><img src="Docs/img/handy_push.png" width="190" alt="Push-Meldung"/></a><br><sub>Push-Meldung</sub></td>
-  </tr>
-</table>
-
-## Update und Sicherheit
-
-- Kanal **Stabil** (Standard) oder **Test**; Vorversion per Rechtsklick auf *Update*
-- jede Datei per **SHA-256** geprüft, installiert werden nur **signierte** Releases
-- automatische Tests bei jedem Push (Windows PowerShell 5.1: Syntax, XAML, PSScriptAnalyzer, Pester)
-
-## Grenzen
-
-- Browser-Kennwörter und Cookies sind an Windows gebunden → Browser-Sync verwenden
-- Startmenü- und Taskleisten-Pins unter Windows 11 nur eingeschränkt
-- USMT: keine Migration zwischen AD- und Entra-ID-Geräten; Store-Apps nicht übertragbar
-- Nur-Cloud-Dateien (OneDrive/SharePoint) werden nie heruntergeladen
-- Dienst-Datenbanken per Dateikopie nur bei gleicher Version am Ziel verlässlich
-
-## Konfiguration
-
-Alles über **Einstellungen**, gespeichert in `Config\`:
-
-| Datei | Inhalt |
-|---|---|
-| `settings.json` | Backup-Ordner, Optionen, Standorte, Checkliste, letzte Vorlage |
-| `modules.json` | eigene Module und Vorlagen |
-| `apps.json` | eigene Katalog-Einträge |
-| `exceptions.json` | Ausnahmen für Profil und C:\\ |
-| `appupdates.json` | App-Updates: Ausnahmen und Quellen je Standort |
-| `serverbackup.json` | Server-Backup-Profile (inkl. VM-Export) |
-| `update.json` | Update-Quelle und Kanal |
-
-Die `*.default.json` kommen mit dem Update, eigene Dateien bleiben erhalten.
+- [Einstieg](https://chiliapple.github.io/HUMig/Docs/Einstieg.html) – typische Situationen aus dem Alltag
+- [Funktionen](https://chiliapple.github.io/HUMig/Docs/Funktionen.html) – alles auf einer Seite
+- [Anleitung](https://chiliapple.github.io/HUMig/Docs/Anleitung.html) – Schritt für Schritt, im Programm mit **F1**
 
 ---
 
