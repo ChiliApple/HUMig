@@ -125,30 +125,17 @@ try {
     }
 } catch { }
 
+# Startbildschirm im eigenen Thread (Functions\UI-Splash.ps1): startet erst NACH der Pruefung der Ordnerrechte,
+# weil er Code aus Functions\ laedt. Status, Losfahren und Schliessen gehen ueber $script:SplashSync.
 $script:Splash = $null
-try {
-    $sx = @"
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
-        Background="Transparent" Width="420" Height="300" WindowStartupLocation="CenterScreen" Topmost="True" ShowInTaskbar="False">
-  <Border Background="#FF1E1E2E" CornerRadius="12" BorderBrush="#FFB9A88A" BorderThickness="2">
-    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-      <Image x:Name="img" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Width="120" Height="120" RenderOptions.BitmapScalingMode="HighQuality"/>
-      <TextBlock Text="HUMig v2" FontSize="34" FontWeight="Bold" Foreground="#FFCDD6F4" HorizontalAlignment="Center" Margin="0,8,0,0"/>
-      <TextBlock Text="Benutzerprofil-Migration" FontSize="15" Foreground="#FFA6ADC8" HorizontalAlignment="Center"/>
-      <TextBlock Text="wird geladen ...  v$($script:Version)" FontSize="11" Foreground="#FF6C7086" HorizontalAlignment="Center" Margin="0,10,0,0"/>
-    </StackPanel>
-  </Border>
-</Window>
-"@
-    $script:Splash = [System.Windows.Markup.XamlReader]::Parse($sx)
-    if ($script:LogoImage) { $script:Splash.FindName('img').Source = $script:LogoImage }
-    if ($script:AppIcon) { $script:Splash.Icon = $script:AppIcon }
-    $script:Splash.Show()
-    $frame = New-Object System.Windows.Threading.DispatcherFrame
-    [void][System.Windows.Threading.Dispatcher]::CurrentDispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [System.Windows.Threading.DispatcherOperationCallback] { param($f) $f.Continue = $false; $null }, $frame)
-    [System.Windows.Threading.Dispatcher]::PushFrame($frame)
-} catch { $script:Splash = $null }
-$script:SplashShown = Get-Date
+$script:SplashSync = $null
+function Set-HUSplashStatus([string]$Text) { if ($script:SplashSync) { $script:SplashSync.Status = $Text } }
+# -Animate: der Saugroboter raeumt den Startbildschirm weg, sonst sofort schliessen
+function Close-HUSplash([switch]$Animate) {
+    if (-not $script:SplashSync) { return }
+    if ($Animate) { $script:SplashSync.Go = $true; $script:SplashSync.MainReady = $true } else { $script:SplashSync.Close = $true }
+    $script:SplashSync = $null
+}
 
 # ============================================================================
 # ORDNERRECHTE DES PROGRAMMORDNERS - VOR dem Laden der Funktionen
@@ -556,19 +543,27 @@ function Confirm-HMAppFolderSafe([string]$What) {
 # Frueh pruefen (Frage ueber dem Startbildschirm). Meldungen und "nie mehr fragen" werden nach dem Laden nachgeholt.
 $script:AclChecked = $false
 $script:AclEarly = $null
-try { $script:AclEarly = Invoke-HMAppFolderCheck $script:Splash; $script:AclChecked = $true } catch { $script:AclEarly = $null }
+try { $script:AclEarly = Invoke-HMAppFolderCheck; $script:AclChecked = $true } catch { $script:AclEarly = $null }
+
+# Startbildschirm (ohne Thread oder bei Fehler: kein Startbildschirm, HUMig laeuft trotzdem)
+try {
+    $spf = Join-Path $script:AppRoot 'Functions\UI-Splash.ps1'
+    if (Test-Path -LiteralPath $spf) { . $spf; $script:SplashSync = Start-HUSplashThread $script:AppRoot $script:Version }
+} catch { $script:SplashSync = $null }
+Set-HUSplashStatus 'Module werden geladen ...'
 
 # ============================================================================
 # FUNKTIONEN LADEN
 # ============================================================================
 foreach ($mod in @('Core-Console.ps1', 'Core-Async.ps1', 'Core-Update.ps1', 'Core-Notify.ps1', 'Migration-Engine.ps1', 'Migration-Quality.ps1', 'UI-Common.ps1', 'UI-Shell.ps1', 'UI-Settings.ps1', 'UI-Extras.ps1', 'UI-Quality.ps1', 'UI-Apps.ps1', 'UI-AppEditor.ps1', 'UI-AppWizard.ps1', 'UI-BackupSchedule.ps1', 'Tools-Software.ps1', 'Tools-Sandbox.ps1', 'Tools-Drivers.ps1', 'Tools-System.ps1', 'Tools-School.ps1', 'Tools-Multi.ps1', 'ServerBackup-Engine.ps1', 'UI-ServerBackup.ps1', 'AppUpdates-Engine.ps1', 'UI-AppUpdates.ps1', 'UI-Status.ps1', 'UI-Monitor.ps1', 'UI-Wizard.ps1', 'Remote-Core.ps1', 'Remote-Web.ps1', 'UI-Remote.ps1')) {
     $mp = Join-Path $script:AppRoot "Functions\$mod"
-    try { . $mp } catch { [System.Windows.MessageBox]::Show("$mod konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null; exit 1 }
+    try { . $mp } catch { Close-HUSplash; [System.Windows.MessageBox]::Show("$mod konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null; exit 1 }
 }
 
 # ============================================================================
 # KONFIGURATION
 # ============================================================================
+Set-HUSplashStatus 'Einstellungen ...'
 function Read-JsonFile([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
     try { return (Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json) }
@@ -697,11 +692,14 @@ if ($script:AclEarly -and $script:AclEarly.CheckOff) { Save-LocalSetting 'AclChe
 # ============================================================================
 # XAML
 # ============================================================================
+Set-HUSplashStatus "Oberfl$([char]0xE4)che wird aufgebaut ..."
+# Startanimation: jetzt losfahren - der Roboter saugt, waehrend die Oberflaeche entsteht
+if ($script:SplashSync) { $script:SplashSync.Go = $true }
 try {
     [xml]$xamlDoc = Get-Content (Join-Path $script:AppRoot 'XAML\MainWindow.xaml') -Raw -Encoding UTF8
     $script:Window = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xamlDoc))
 } catch {
-    if ($script:Splash) { $script:Splash.Close() }
+    Close-HUSplash
     [System.Windows.MessageBox]::Show("Oberflaeche (XAML) konnte nicht geladen werden:`n$_", 'HUMig', 'OK', 'Error') | Out-Null
     exit 1
 }
@@ -2887,12 +2885,7 @@ public static class HMFg {
     } catch { try { $Win.Activate() | Out-Null } catch { } }
 }
 $script:Window.Add_ContentRendered({
-    if ($script:Splash) {
-        $rest = 1500 - ((Get-Date) - $script:SplashShown).TotalMilliseconds
-        if ($rest -gt 0) { Start-Sleep -Milliseconds ([int]$rest) }
-        try { $script:Splash.Close() } catch { }
-        $script:Splash = $null
-    }
+    Close-HUSplash -Animate
     Set-HMForeground $script:Window
     # nach einer UAC-Abfrage liegt der Fokus manchmal noch kurz woanders - einmal nachfassen
     $script:FgTimer = New-Object System.Windows.Threading.DispatcherTimer
