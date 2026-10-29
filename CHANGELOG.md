@@ -1,5 +1,8 @@
 ﻿# Changelog
 
+## v2.1.17 - 2026-10-29
+- Startbildschirm geaendert.
+
 ## v2.1.16 - 2026-10-16
 ### Werkzeuge / Geraete (AD)
 - **Online-Check als Vorauswahl:** im Ergebnisfenster "Online uebernehmen" (nur erreichbare PCs bleiben angehakt) und "Markierte uebernehmen" (nur markierte Zeilen) - danach direkt die naechste Aktion waehlen, statt die PCs erneut aus der AD-Liste herauszusuchen; geschlossener Geraete-Dialog oeffnet sich mit genau dieser Auswahl
