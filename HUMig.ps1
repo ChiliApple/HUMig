@@ -461,6 +461,16 @@ function Protect-HMAppParent([string]$Dir) {
 
 # Pruefen und bei Bedarf fragen (Ja = absichern, Nein = diesmal nicht, Abbrechen = nie mehr fragen).
 # Rueckgabe: Meldungen fuer die Konsole und CheckOff (= AclCheckOff in settings.json merken). $Owner: Fenster fuer die Frage.
+# Meldung: im HUMig-Design, sobald die Oberflaechen-Bausteine geladen sind (Show-HMDialogBox), davor Windows-Box
+function Show-HMMsgEarly([object]$Owner, [string]$Text, [string]$Title, [string]$Mode, [string]$Icon, [string]$Default = '') {
+    if (Get-Command Show-HMDialogBox -ErrorAction SilentlyContinue) { return "$(Show-HMDialogBox -Owner $Owner -Text $Text -Title $Title -Mode $Mode -Icon $Icon -Default $Default)" }
+    $o = $(if ($Owner -is [System.Windows.Window] -and $Owner.IsLoaded) { $Owner } else { $null })
+    $r = if ($o -and $Default) { [System.Windows.MessageBox]::Show($o, $Text, $Title, $Mode, $Icon, $Default) }
+    elseif ($o) { [System.Windows.MessageBox]::Show($o, $Text, $Title, $Mode, $Icon) }
+    elseif ($Default) { [System.Windows.MessageBox]::Show($Text, $Title, $Mode, $Icon, $Default) }
+    else { [System.Windows.MessageBox]::Show($Text, $Title, $Mode, $Icon) }
+    return "$r"
+}
 function Invoke-HMAppFolderCheck($Owner = $null) {
     $r = [pscustomobject]@{ Msgs = (New-Object System.Collections.Generic.List[object]); CheckOff = $false }
     if (-not $isAdmin -or $script:UserMode) { return $r }
@@ -488,7 +498,7 @@ function Invoke-HMAppFolderCheck($Owner = $null) {
     if ($w) { $m += "- HUMig-Ordner: Vererbung aus, Administratoren + SYSTEM Vollzugriff, Benutzer nur Lesen (gilt fuer alle Dateien darin; Protokolle und Backup-Ordner bleiben fuer den Benutzer-Modus beschreibbar - nur eigene Dateien)`n" }
     if ($pfFix.Count) { $m += "- Ordner darueber: nur der Ordner selbst - Nicht-Administratoren duerfen ihn nicht mehr umbenennen, loeschen oder seine Rechte aendern; Lesen und Anlegen bleiben, die Rechte der Unterordner (z.B. anderer Programme) bleiben unveraendert`n" }
     $m += "Nein = diesmal nicht`nAbbrechen = nie mehr fragen"
-    $a = if ($Owner) { "$([System.Windows.MessageBox]::Show($Owner, $m, 'HUMig - Ordnerrechte', 'YesNoCancel', 'Warning', 'Yes'))" } else { "$([System.Windows.MessageBox]::Show($m, 'HUMig - Ordnerrechte', 'YesNoCancel', 'Warning', 'Yes'))" }
+    $a = Show-HMMsgEarly $Owner $m 'HUMig - Ordnerrechte' 'YesNoCancel' 'Warning' 'Yes'
     if ($a -eq 'Cancel') { $r.CheckOff = $true; $r.Msgs.Add([pscustomobject]@{ Text = 'Ordnerrechte: Pruefung abgeschaltet (Einstellung AclCheckOff in settings.json).'; Level = 'Warning' }); return $r }
     if ($a -ne 'Yes') {
         if ($w) { $r.Msgs.Add([pscustomobject]@{ Text = "Ordnerrechte: Nicht-Administratoren duerfen in $root schreiben/anlegen ($($w -replace "`n", ' | '))."; Level = 'Warning' }) }
@@ -519,7 +529,7 @@ function Confirm-HMAppFolderSafe([string]$What) {
     $root = $script:AppRoot
     # HUMig auf einer Netzwerkfreigabe: deren Rechte prueft HUMig nicht - mit hoeheren Rechten (SYSTEM/Administrator) nicht von dort starten
     if ($root -like '\\*') {
-        [void][System.Windows.MessageBox]::Show($script:Window, "$What wuerde mit hoeheren Rechten direkt von der Netzwerkfreigabe $root laufen.`n`nDie Rechte auf der Freigabe prueft HUMig nicht - wer dort schreiben darf, koennte eigenen Code mit diesen Rechten ausfuehren lassen.`n`nBitte HUMig lokal installieren (z.B. C:\Program Files\HUMig) und von dort planen.", 'HUMig - Netzwerkfreigabe', 'OK', 'Warning')
+        [void](Show-HMMsgEarly $script:Window "$What wuerde mit hoeheren Rechten direkt von der Netzwerkfreigabe $root laufen.`n`nDie Rechte auf der Freigabe prueft HUMig nicht - wer dort schreiben darf, koennte eigenen Code mit diesen Rechten ausfuehren lassen.`n`nBitte HUMig lokal installieren (z.B. C:\Program Files\HUMig) und von dort planen." 'HUMig - Netzwerkfreigabe' 'OK' 'Warning')
         return $false
     }
     $w = ''; try { $w = Get-HMAppAclFindings $root } catch { return $true }
@@ -532,10 +542,10 @@ function Confirm-HMAppFolderSafe([string]$What) {
     $m += "Dann koennte jemand eigenen Code an die Stelle von HUMig legen, der mit diesen Rechten laeuft.`n`n"
     if (-not $w -and -not $fix.Count) {
         $m += "HUMig liegt in einem Benutzerprofil - das sichert HUMig nicht ab. Empfehlung: HUMig nach C:\Program Files\HUMig verschieben und dort planen.`n`nOK = trotzdem planen`nAbbrechen = nicht planen"
-        return ("$([System.Windows.MessageBox]::Show($script:Window, $m, 'HUMig - Ordnerrechte', 'OKCancel', 'Warning', 'Cancel'))" -eq 'OK')
+        return ((Show-HMMsgEarly $script:Window $m 'HUMig - Ordnerrechte' 'OKCancel' 'Warning' 'Cancel') -eq 'OK')
     }
     $m += "Ja = jetzt absichern und planen`nNein = trotzdem planen`nAbbrechen = nicht planen"
-    $a = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'HUMig - Ordnerrechte', 'YesNoCancel', 'Warning', 'Yes'))"
+    $a = Show-HMMsgEarly $script:Window $m 'HUMig - Ordnerrechte' 'YesNoCancel' 'Warning' 'Yes'
     if ($a -eq 'Cancel') { return $false }
     if ($a -eq 'Yes') { foreach ($x in @(Protect-HMAppAll $root -Parents $fix -Folder:([bool]$w))) { Out-Console $x.Text $x.Level } }
     return $true
@@ -1119,7 +1129,7 @@ $ui.btnExtraAdd.Add_Click({
     }
 })
 $ui.btnExtraAdd.Add_MouseRightButtonUp({
-    $p = [Microsoft.VisualBasic.Interaction]::InputBox('Pfad am Quell-PC eingeben (z.B. D:\Messdaten):', 'Zusaetzlicher Ordner', '')
+    $p = Show-TextInputDialog -Title 'Zusaetzlicher Ordner' -Label 'Pfad am Quell-PC eingeben (z.B. D:\Messdaten):' -Owner $script:Window
     if ($p) { [void]$ui.lstExtra.Items.Add($p.Trim()); if ($script:BackupChecks.ContainsKey('ExtraFolders')) { $script:BackupChecks['ExtraFolders'].IsChecked = $true } }
 })
 $ui.btnExtraDel.Add_Click({ if ($ui.lstExtra.SelectedItem) { $ui.lstExtra.Items.Remove($ui.lstExtra.SelectedItem) } })
@@ -1137,7 +1147,7 @@ $ui.btnExclAdd.Add_Click({
     if ($sel) { [void](Add-ExcludePath $sel) }
 })
 $ui.btnExclAdd.Add_MouseRightButtonUp({
-    $p = [Microsoft.VisualBasic.Interaction]::InputBox('Pfad am Quell-PC (Ordner oder Datei), z.B. C:\Users\max\Videos:', 'Pfad ausschliessen', '')
+    $p = Show-TextInputDialog -Title 'Pfad ausschliessen' -Label 'Pfad am Quell-PC (Ordner oder Datei), z.B. C:\Users\max\Videos:' -Owner $script:Window
     if ($p -and -not (Add-ExcludePath $p)) { Out-Console "Ungueltiger oder doppelter Pfad: $p (vollstaendiger Pfad mit Laufwerk, z.B. C:\...)" 'Warning' }
 })
 $ui.btnExclDel.Add_Click({ if ($ui.lstExclude.SelectedItem) { $ui.lstExclude.Items.Remove($ui.lstExclude.SelectedItem) } })
