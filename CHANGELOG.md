@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## v2.1.18 - 2026-10-30
+### Allgemein
+- **Meldungen und Rueckfragen im HUMig-Design:** alle Hinweis-, Fehler- und Ja/Nein-Fenster (ueber 190 Stellen) erscheinen jetzt dunkel wie das Hauptfenster statt als Windows-Standardbox - Enter loest den hell umrandeten Knopf aus (bei Warnungen mit Ja/Nein immer *Nein*), Esc schliesst wie Nein/Abbrechen, Strg+C kopiert Titel und Text, lange Texte bekommen einen Scrollbalken; Rueckfall auf die Windows-Box nur vor dem Aufbau des Hauptfensters
+### Server-Backup
+- **Wartefenster beim Start im Hintergrund:** direkt nach dem Start zeigt ein Fenster "Bitte warten", waehrend HUMig bis zu 60 s prueft, ob die Sicherung anlaeuft; es wechselt auf gruen "Sicherung laeuft - du kannst dich jetzt abmelden" (oder nennt rot den Grund, wenn die Aufgabe sofort endete) - bisher stand das nur spaet in der Konsole
+
 ## v2.1.17 - 2026-10-29
 - Startbildschirm geaendert.
 

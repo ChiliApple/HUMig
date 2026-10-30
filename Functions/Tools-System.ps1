@@ -324,7 +324,7 @@ function Show-HMLocalGroups {
                     $bad = @($sel | Where-Object { $_.Gruppe -eq 'Administratoren' -and ($_.Mitglied -match '\\Administrator$' -or $_.Mitglied -match '\\Domain Admins$|\\Domaenen-Admins$') })
                     $msg = "Auf $($ctx.Computer) entfernen?`n`n" + (($sel | ForEach-Object { "  $($_.Gruppe): $($_.Mitglied)" }) -join "`n")
                     if ($bad.Count) { $msg += "`n`nACHTUNG: eingebauter Administrator / Domaenen-Admins dabei - Zugriff kann verloren gehen!" }
-                    if ("$([System.Windows.MessageBox]::Show($win, $msg, 'Lokale Gruppen', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+                    if ("$((Show-HMDialogBox -Owner $win -Text $msg -Title 'Lokale Gruppen' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
                     $win.Close()
                     $n = 0
                     foreach ($s in $sel) {
@@ -636,7 +636,7 @@ function Show-HMProfileRestore {
             -ActionContext @{ Computer = $comp } -Actions @(@{ Text = 'Altes Profil zurueckholen (markiertes)'; Color = '#FFA6E3A1'; Handler = {
                 param($rows, $win, $ctx)
                 $r = @($rows)[0]
-                if ("$([System.Windows.MessageBox]::Show($win, "Altes Profil von $($r.Konto) auf $($ctx.Computer) zurueckholen?`n`n  SID: $($r.SID)`n  $($r.'Gesicherter Ordner')  ->  $($r.Profilpfad)`n`nDas Test-Profil wird umbenannt (.test_Datum), nicht geloescht. Der Benutzer muss abgemeldet sein.", 'Profil zurueckholen', 'YesNo', 'Question'))" -ne 'Yes') { return }
+                if ("$((Show-HMDialogBox -Owner $win -Text ("Altes Profil von $($r.Konto) auf $($ctx.Computer) zurueckholen?`n`n  SID: $($r.SID)`n  $($r.'Gesicherter Ordner')  ->  $($r.Profilpfad)`n`nDas Test-Profil wird umbenannt (.test_Datum), nicht geloescht. Der Benutzer muss abgemeldet sein.") -Title 'Profil zurueckholen' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
                 $win.Close()
                 Invoke-HMTool -Title 'Profil zurueckholen' -Computer $ctx.Computer -ArgumentList @('Undo', '', "$($r.Datei)") -Script $script:RS_ProfileOp -ProtectData -OnResult { param($x) Write-HMToolResult $x; Connect-Target }
             } })
@@ -722,7 +722,7 @@ function Show-HMTaskImport {
         -ActionContext @{ Dir = $dir } -Actions @(@{ Text = 'Auf gewaehltem Computer importieren (markierte)'; Color = '#FFA6E3A1'; Handler = {
             param($rows, $win, $ctx)
             $c = Get-TargetComputer
-            if ("$([System.Windows.MessageBox]::Show($win, "$(@($rows).Count) Aufgabe(n) auf $c importieren?`n`nAufgaben mit gespeichertem Kennwort muessen danach in der Aufgabenplanung neu mit Kennwort gespeichert werden.", 'Aufgaben', 'YesNo', 'Question'))" -ne 'Yes') { return }
+            if ("$((Show-HMDialogBox -Owner $win -Text ("$(@($rows).Count) Aufgabe(n) auf $c importieren?`n`nAufgaben mit gespeichertem Kennwort muessen danach in der Aufgabenplanung neu mit Kennwort gespeichert werden.") -Title 'Aufgaben' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
             $items = @(foreach ($r in @($rows)) { [pscustomobject]@{ Path = "$($r.Ordner)"; Name = "$($r.Name)"; Xml = (Get-Content -LiteralPath (Join-Path $ctx.Dir $r.Datei) -Raw) } })
             Invoke-HMTool -Title 'Aufgaben importieren' -Computer $c -ArgumentList @(, $items) -Script {
                 param($items)
@@ -840,7 +840,7 @@ function Show-HMCredentials {
     Show-DataGridWindow -Title "Gespeicherte Anmeldedaten - $env:USERDOMAIN\$env:USERNAME (dieses Konto)" -Columns @('Ziel', 'Typ', 'Benutzer') -Rows $rows.ToArray() -Sort 'Ziel ASC' -Width 1000 -Height 520 `
         -CountText "$($rows.Count) Eintraege (ohne Kennwoerter)" -Actions @(@{ Text = 'Markierte loeschen'; Color = '#FFF38BA8'; Handler = {
             param($rows, $win, $ctx)
-            if ("$([System.Windows.MessageBox]::Show($win, "$(@($rows).Count) gespeicherte Anmeldedaten loeschen?", 'Anmeldedaten', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+            if ("$((Show-HMDialogBox -Owner $win -Text ("$(@($rows).Count) gespeicherte Anmeldedaten loeschen?") -Title 'Anmeldedaten' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
             foreach ($r in @($rows)) {
                 $t = "$($r.Ziel)" -replace '^(LegacyGeneric|Domain|WindowsLive|Generic)[^=]*=', ''
                 $o = & cmdkey.exe "/delete:$t" 2>&1
@@ -883,12 +883,12 @@ function Show-HMFirewall {
 function Set-HMFirewallRow($Rows, $Win, $Ctx, [string]$What) {
     $r = @($Rows)[0]
     if ($What -in @('Private', 'Public')) {
-        if ($r.Art -ne 'Netzwerk') { [void][System.Windows.MessageBox]::Show($Win, 'Bitte eine Zeile "Netzwerk" markieren.', 'Firewall', 'OK', 'Information'); return }
-        if ($r.Wert -eq 'DomainAuthenticated') { [void][System.Windows.MessageBox]::Show($Win, 'Domaenennetzwerke werden automatisch erkannt und koennen nicht umgestellt werden.', 'Firewall', 'OK', 'Information'); return }
+        if ($r.Art -ne 'Netzwerk') { [void](Show-HMDialogBox -Owner $Win -Text 'Bitte eine Zeile "Netzwerk" markieren.' -Title 'Firewall' -Mode 'OK' -Icon 'Information'); return }
+        if ($r.Wert -eq 'DomainAuthenticated') { [void](Show-HMDialogBox -Owner $Win -Text 'Domaenennetzwerke werden automatisch erkannt und koennen nicht umgestellt werden.' -Title 'Firewall' -Mode 'OK' -Icon 'Information'); return }
         $arg = @{ Alias = "$($r.Name)"; Category = $What }; $act = 'Category'
     } else {
-        if ($r.Art -ne 'Firewall-Profil') { [void][System.Windows.MessageBox]::Show($Win, 'Bitte eine Zeile "Firewall-Profil" markieren.', 'Firewall', 'OK', 'Information'); return }
-        if ($What -eq 'Off' -and "$([System.Windows.MessageBox]::Show($Win, "Firewall-Profil '$($r.Name)' auf $($Ctx.Computer) AUSSCHALTEN?`n`nDer PC ist dann in diesem Netzwerk ungeschuetzt.", 'Firewall', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+        if ($r.Art -ne 'Firewall-Profil') { [void](Show-HMDialogBox -Owner $Win -Text 'Bitte eine Zeile "Firewall-Profil" markieren.' -Title 'Firewall' -Mode 'OK' -Icon 'Information'); return }
+        if ($What -eq 'Off' -and "$((Show-HMDialogBox -Owner $Win -Text ("Firewall-Profil '$($r.Name)' auf $($Ctx.Computer) AUSSCHALTEN?`n`nDer PC ist dann in diesem Netzwerk ungeschuetzt.") -Title 'Firewall' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
         $arg = @{ Profile = "$($r.Name)"; Enabled = $(if ($What -eq 'On') { 'True' } else { 'False' }) }; $act = 'Profile'
     }
     $Win.Close()
@@ -1099,7 +1099,7 @@ function Show-HMSessions {
         Show-DataGridWindow -Title "Angemeldete Benutzer - $comp" -Columns @('Benutzer', 'Sitzung', 'ID', 'Status', 'Leerlauf', 'Anmeldung') -ColumnTypes @{ ID = [int] } -Rows $rows.ToArray() -Width 850 -Height 360 `
             -ActionContext @{ Computer = $comp } -Actions @(@{ Text = 'Abmelden (markierte)'; Color = '#FFF38BA8'; Handler = {
                 param($rows, $win, $ctx)
-                if ("$([System.Windows.MessageBox]::Show($win, "$(@($rows).Count) Sitzung(en) auf $($ctx.Computer) abmelden?`n`nNicht gespeicherte Daten gehen verloren.", 'Abmelden', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+                if ("$((Show-HMDialogBox -Owner $win -Text ("$(@($rows).Count) Sitzung(en) auf $($ctx.Computer) abmelden?`n`nNicht gespeicherte Daten gehen verloren.") -Title 'Abmelden' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
                 $ids = @($rows | ForEach-Object { [int]$_.ID })
                 $win.Close()
                 Invoke-HMTool -Title 'Abmelden' -Computer $ctx.Computer -ArgumentList @(, $ids) -Script { param($ids) foreach ($i in $ids) { & logoff.exe $i 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { "OK Sitzung $i abgemeldet" } else { "FEHLER Sitzung ${i}: logoff $LASTEXITCODE" } } }

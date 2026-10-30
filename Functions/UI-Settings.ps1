@@ -141,7 +141,7 @@ function Show-SettingsDialog {
             $script:SetDlg.F.lblUsmt.Text = Get-HMUsmtLabel $d.SelectedPath
         }
     })
-    $f.btnUsmtAdk.Add_Click({ Start-HMUsmtSetup; [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "Fortschritt in der Konsole. Das Feld 'USMT-Ordner' leer lassen - HUMig findet BIN\USMT\amd64 automatisch.", 'USMT', 'OK', 'Information') })
+    $f.btnUsmtAdk.Add_Click({ Start-HMUsmtSetup; [void](Show-HMDialogBox -Owner $script:SetDlg.Win -Text "Fortschritt in der Konsole. Das Feld 'USMT-Ordner' leer lassen - HUMig findet BIN\USMT\amd64 automatisch." -Title 'USMT' -Mode 'OK' -Icon 'Information') })
     $f.btnSwDir.Add_Click({
         $d = New-Object System.Windows.Forms.FolderBrowserDialog
         $d.Description = 'Ordner fuer die Softwareverteilung (Pakete)'
@@ -154,8 +154,8 @@ function Show-SettingsDialog {
     })
     $f.btnLauncher.Add_Click({
         if (New-HMLauncher -Force -Name 'HUMig-Benutzer.exe') { Out-Console "Starter fuer den Benutzer-Modus erstellt: $(Join-Path $script:AppRoot 'HUMig-Benutzer.exe')" 'Success' }
-        if (New-HMLauncher -Force) { Out-Console "Starter erstellt: $(Join-Path $script:AppRoot 'HUMig.exe')" 'Success'; [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "HUMig.exe wurde erstellt.`n`nKann an die Taskleiste angeheftet werden (Rechtsklick > An Taskleiste anheften).", 'HUMig', 'OK', 'Information') }
-        else { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, 'Starter konnte nicht erstellt werden (Details in der Konsole). Start.cmd funktioniert weiterhin.', 'HUMig', 'OK', 'Warning') }
+        if (New-HMLauncher -Force) { Out-Console "Starter erstellt: $(Join-Path $script:AppRoot 'HUMig.exe')" 'Success'; [void](Show-HMDialogBox -Owner $script:SetDlg.Win -Text "HUMig.exe wurde erstellt.`n`nKann an die Taskleiste angeheftet werden (Rechtsklick > An Taskleiste anheften)." -Title 'HUMig' -Mode 'OK' -Icon 'Information') }
+        else { [void](Show-HMDialogBox -Owner $script:SetDlg.Win -Text 'Starter konnte nicht erstellt werden (Details in der Konsole). Start.cmd funktioniert weiterhin.' -Title 'HUMig' -Mode 'OK' -Icon 'Warning') }
     })
     # Teams-Benachrichtigung: mehrere Ziele, je Ziel Name, Adresse, Kategorien (Adressen nur auf diesem PC, verschluesselt in HKLM)
     $st.TeamsCfg = Get-HMNotifyConfig
@@ -204,7 +204,7 @@ function Show-SettingsDialog {
     })
     $f.btnTeamsAdd.Add_Click({
         $S = $script:SetDlg
-        if ($S.TeamsList.Count -ge $script:HMNotifyMaxTargets) { [void][System.Windows.MessageBox]::Show($S.Win, "Hoechstens $($script:HMNotifyMaxTargets) Ziele.", 'Teams', 'OK', 'Information'); return }
+        if ($S.TeamsList.Count -ge $script:HMNotifyMaxTargets) { [void](Show-HMDialogBox -Owner $S.Win -Text ("Hoechstens $($script:HMNotifyMaxTargets) Ziele.") -Title 'Teams' -Mode 'OK' -Icon 'Information'); return }
         Save-HMSetTeamsCur
         $nm = "Ziel $($S.TeamsList.Count + 1)"
         [void]$S.TeamsList.Add(@{ Id = [guid]::NewGuid().ToString('N').Substring(0, 8); Name = $nm; Url = ''; Cats = (Get-HMNotifyDefaultCats); SbProfiles = @(); Saved = $false; NewUrl = $false })
@@ -213,16 +213,16 @@ function Show-SettingsDialog {
     })
     $f.btnTeamsTest.Add_Click({
         $S = $script:SetDlg
-        if ($S.TeamsCur -lt 0) { [void][System.Windows.MessageBox]::Show($S.Win, "Bitte zuerst mit 'Neues Ziel' ein Ziel anlegen.", 'Teams', 'OK', 'Information'); return }
+        if ($S.TeamsCur -lt 0) { [void](Show-HMDialogBox -Owner $S.Win -Text "Bitte zuerst mit 'Neues Ziel' ein Ziel anlegen." -Title 'Teams' -Mode 'OK' -Icon 'Information'); return }
         Save-HMSetTeamsCur
         $t = $S.TeamsList[$S.TeamsCur]
         Update-HMSetTeamsCombo $S.TeamsCur
-        if (-not "$($t.Url)") { [void][System.Windows.MessageBox]::Show($S.Win, 'Bitte zuerst die Webhook-Adresse eintragen.', 'Teams', 'OK', 'Information'); return }
+        if (-not "$($t.Url)") { [void](Show-HMDialogBox -Owner $S.Win -Text 'Bitte zuerst die Webhook-Adresse eintragen.' -Title 'Teams' -Mode 'OK' -Icon 'Information'); return }
         $r = Send-HMTeamsMessage -Title "HUMig - Testnachricht ($($t.Name))" -Lines @("Die Benachrichtigung von $env:COMPUTERNAME an '$($t.Name)' funktioniert.") -Level 'OK' -Url $t.Url
-        if ($r) { [void][System.Windows.MessageBox]::Show($S.Win, "$r`n`nPruefen: Adresse vollstaendig kopiert? Workflow eingeschaltet? Ausgehendes HTTPS am PC erlaubt?", 'Teams', 'OK', 'Warning') }
+        if ($r) { [void](Show-HMDialogBox -Owner $S.Win -Text "$r`n`nPruefen: Adresse vollstaendig kopiert? Workflow eingeschaltet? Ausgehendes HTTPS am PC erlaubt?" -Title 'Teams' -Mode 'OK' -Icon 'Warning') }
         else {
             $hint = if (-not (Test-HMTeamsWebhookHostKnown $t.Url)) { "`n`nHinweis: die Adresse stammt nicht erkennbar aus der Workflows-App." } else { '' }
-            [void][System.Windows.MessageBox]::Show($S.Win, "Testnachricht an '$($t.Name)' gesendet - sie sollte gleich im Chat/Kanal stehen.$(if (-not $t.Saved -or $t.NewUrl) { ' Mit Speichern wird die Adresse uebernommen.' })$hint", 'Teams', 'OK', 'Information')
+            [void](Show-HMDialogBox -Owner $S.Win -Text ("Testnachricht an '$($t.Name)' gesendet - sie sollte gleich im Chat/Kanal stehen.$(if (-not $t.Saved -or $t.NewUrl) { ' Mit Speichern wird die Adresse uebernommen.' })$hint") -Title 'Teams' -Mode 'OK' -Icon 'Information')
         }
     })
     $f.btnTeamsDel.Add_Click({
@@ -230,10 +230,10 @@ function Show-SettingsDialog {
         if ($S.TeamsCur -lt 0) { return }
         $t = $S.TeamsList[$S.TeamsCur]
         $q = "Ziel '$($t.Name)' entfernen?$(if ($t.Saved) { "`n`nDie gespeicherte Adresse wird sofort von diesem PC geloescht, die anderen Ziele bleiben.`nDanach in Teams den Workflow loeschen oder ausschalten - sonst bleibt die Adresse gueltig." })"
-        if ("$([System.Windows.MessageBox]::Show($S.Win, $q, 'Teams', 'YesNo', 'Question'))" -ne 'Yes') { return }
+        if ("$((Show-HMDialogBox -Owner $S.Win -Text $q -Title 'Teams' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
         if ($t.Saved) {
             try { Remove-HMNotifyTarget "$($t.Id)"; Out-Console "Teams-Benachrichtigung: Ziel '$($t.Name)' entfernt." 'Info' }
-            catch { [void][System.Windows.MessageBox]::Show($S.Win, "Entfernen fehlgeschlagen: $($_.Exception.Message)", 'Teams', 'OK', 'Error'); return }
+            catch { [void](Show-HMDialogBox -Owner $S.Win -Text ("Entfernen fehlgeschlagen: $($_.Exception.Message)") -Title 'Teams' -Mode 'OK' -Icon 'Error'); return }
         }
         $S.F.pwdTeams.Password = ''   # eingetippte Adresse gehoert zum entfernten Ziel
         $S.TeamsList.RemoveAt($S.TeamsCur)
@@ -271,7 +271,7 @@ function Show-SettingsDialog {
     $st.FillEx = $fillEx
     & $fillEx $script:Exceptions
     $f.btnExcDefault.Add_Click({
-        if ("$([System.Windows.MessageBox]::Show($script:SetDlg.Win, 'Alle Ausnahmelisten auf den Standard zuruecksetzen (erst beim Speichern wirksam)?', 'Ausnahmen', 'YesNo', 'Question'))" -ne 'Yes') { return }
+        if ("$((Show-HMDialogBox -Owner $script:SetDlg.Win -Text 'Alle Ausnahmelisten auf den Standard zuruecksetzen (erst beim Speichern wirksam)?' -Title 'Ausnahmen' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
         & $script:SetDlg.FillEx (Read-JsonFile (Join-Path $script:ConfigDir 'exceptions.default.json'))
     })
 
@@ -301,13 +301,13 @@ function Show-SettingsDialog {
     $f.btnNmAdd.Add_Click({
         $F = $script:SetDlg.F
         $name = "$($F.txtNmName.Text)".Trim(); $path = "$($F.txtNmPath.Text)".Trim(); $grp = "$($F.cmbNmGroup.Text)".Trim()
-        if (-not $name -or -not $path) { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, 'Name und Pfad/Schluessel angeben.', 'Eigenes Modul', 'OK', 'Warning'); return }
+        if (-not $name -or -not $path) { [void](Show-HMDialogBox -Owner $script:SetDlg.Win -Text 'Name und Pfad/Schluessel angeben.' -Title 'Eigenes Modul' -Mode 'OK' -Icon 'Warning'); return }
         if (-not $grp) { $grp = 'Programme' }
         $type = switch ($F.cmbNmType.SelectedIndex) { 1 { 'Files' } 2 { 'Reg' } default { 'Folder' } }
-        if ($type -eq 'Reg' -and $path -notmatch '^(HKCU|HKLM)\\.+') { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, 'Registry-Schluessel muss mit HKCU\ oder HKLM\ beginnen.', 'Eigenes Modul', 'OK', 'Warning'); return }
-        if ($type -ne 'Reg' -and $path -notmatch '^(\{[A-Z0-9]+\}|[A-Za-z]:\\)') { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, 'Pfad muss mit einem Platzhalter wie {APPDATA} oder einem Laufwerk (C:\...) beginnen.', 'Eigenes Modul', 'OK', 'Warning'); return }
+        if ($type -eq 'Reg' -and $path -notmatch '^(HKCU|HKLM)\\.+') { [void](Show-HMDialogBox -Owner $script:SetDlg.Win -Text 'Registry-Schluessel muss mit HKCU\ oder HKLM\ beginnen.' -Title 'Eigenes Modul' -Mode 'OK' -Icon 'Warning'); return }
+        if ($type -ne 'Reg' -and $path -notmatch '^(\{[A-Z0-9]+\}|[A-Za-z]:\\)') { [void](Show-HMDialogBox -Owner $script:SetDlg.Win -Text 'Pfad muss mit einem Platzhalter wie {APPDATA} oder einem Laufwerk (C:\...) beginnen.' -Title 'Eigenes Modul' -Mode 'OK' -Icon 'Warning'); return }
         $flt = @(("$($F.txtNmFilter.Text)" -split '[;,\s]+') | Where-Object { $_ })
-        if ($type -eq 'Files' -and -not $flt.Count) { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "Bei 'Dateien' einen Filter angeben (z.B. *.xml).", 'Eigenes Modul', 'OK', 'Warning'); return }
+        if ($type -eq 'Files' -and -not $flt.Count) { [void](Show-HMDialogBox -Owner $script:SetDlg.Win -Text "Bei 'Dateien' einen Filter angeben (z.B. *.xml)." -Title 'Eigenes Modul' -Mode 'OK' -Icon 'Warning'); return }
         $id = 'Custom_' + (($name -replace '[^A-Za-z0-9]', '')).Substring(0, [Math]::Min(30, ($name -replace '[^A-Za-z0-9]', '').Length))
         if ($id -eq 'Custom_') { $id = 'Custom_' + [guid]::NewGuid().ToString('N').Substring(0, 8) }
         $isUser = ($path -match '^\{(PROFILE|APPDATA|LOCALAPPDATA)\}') -or ($path -match '^HKCU\\')
@@ -318,7 +318,7 @@ function Show-SettingsDialog {
         $mp = Join-Path $script:ConfigDir 'modules.json'
         # beschaedigte modules.json nicht ueberschreiben (eigene Module/Vorlagen gingen verloren)
         $bad = Test-HMJsonBroken $mp
-        if ($bad) { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "modules.json ist fehlerhaft ($bad).`n`nModul nicht angelegt - Datei bleibt unveraendert (bitte mit 'modules.json (Experten)' reparieren).", 'Eigenes Modul', 'OK', 'Warning'); return }
+        if ($bad) { [void](Show-HMDialogBox -Owner $script:SetDlg.Win -Text "modules.json ist fehlerhaft ($bad).`n`nModul nicht angelegt - Datei bleibt unveraendert (bitte mit 'modules.json (Experten)' reparieren)." -Title 'Eigenes Modul' -Mode 'OK' -Icon 'Warning'); return }
         $cur = Read-JsonFile $mp
         $mods = @(); $pre = @()
         if ($cur) { $mods = @($cur.Modules | Where-Object { $_ -and $_.Id -ne $id }); $pre = @($cur.Presets | Where-Object { $_ }) }
@@ -334,12 +334,12 @@ function Show-SettingsDialog {
         $F = $script:SetDlg.F
         $rv = $F.dgModules.SelectedItem
         if (-not $rv) { return }
-        if ($rv.Row.Herkunft -ne 'Eigenes') { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "Standard-Module koennen nicht geloescht werden - 'Anzeigen' abhaken, um sie auszublenden.", 'Module', 'OK', 'Information'); return }
+        if ($rv.Row.Herkunft -ne 'Eigenes') { [void](Show-HMDialogBox -Owner $script:SetDlg.Win -Text "Standard-Module koennen nicht geloescht werden - 'Anzeigen' abhaken, um sie auszublenden." -Title 'Module' -Mode 'OK' -Icon 'Information'); return }
         $id = $rv.Row.Id
-        if ("$([System.Windows.MessageBox]::Show($script:SetDlg.Win, "Eigenes Modul '$($rv.Row.Name)' loeschen?", 'Module', 'YesNo', 'Question'))" -ne 'Yes') { return }
+        if ("$((Show-HMDialogBox -Owner $script:SetDlg.Win -Text ("Eigenes Modul '$($rv.Row.Name)' loeschen?") -Title 'Module' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
         $mp = Join-Path $script:ConfigDir 'modules.json'
         $bad = Test-HMJsonBroken $mp
-        if ($bad) { [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "modules.json ist fehlerhaft ($bad).`n`nModul nicht geloescht - Datei bleibt unveraendert.", 'Module', 'OK', 'Warning'); return }
+        if ($bad) { [void](Show-HMDialogBox -Owner $script:SetDlg.Win -Text "modules.json ist fehlerhaft ($bad).`n`nModul nicht geloescht - Datei bleibt unveraendert." -Title 'Module' -Mode 'OK' -Icon 'Warning'); return }
         $cur = Read-JsonFile $mp
         if ($cur) {
             $cur.Modules = @($cur.Modules | Where-Object { $_.Id -ne $id })
@@ -354,7 +354,7 @@ function Show-SettingsDialog {
         $mp = Join-Path $script:ConfigDir 'modules.json'
         if (-not (Test-Path -LiteralPath $mp)) { Write-JsonFile $mp ([pscustomobject]@{ _Info = 'Eigene Module/Vorlagen. Aufbau wie modules.default.json.'; Modules = @(); Presets = @() }) }
         Start-Process notepad.exe -ArgumentList "`"$mp`""
-        [void][System.Windows.MessageBox]::Show($script:SetDlg.Win, "modules.json wird im Editor geoeffnet.`nAenderungen werden nach dem Speichern beim naechsten Oeffnen der Einstellungen bzw. Neustart von HUMig wirksam.", 'Module', 'OK', 'Information')
+        [void](Show-HMDialogBox -Owner $script:SetDlg.Win -Text "modules.json wird im Editor geoeffnet.`nAenderungen werden nach dem Speichern beim naechsten Oeffnen der Einstellungen bzw. Neustart von HUMig wirksam." -Title 'Module' -Mode 'OK' -Icon 'Information')
     })
 
     # --- Links ---
@@ -412,23 +412,23 @@ function Show-SettingsDialog {
     $f.btnSave.Add_Click({
         $F = $script:SetDlg.F; $W = $script:SetDlg.Win
         $tp0 = ("$($F.txtSignerThumb.Text)" -replace '[^0-9A-Fa-f]', '')
-        if ([bool]$F.chkRequireSig.IsChecked -and $tp0.Length -ne 40) { [void][System.Windows.MessageBox]::Show($W, 'Nur signierte Updates: bitte den Fingerabdruck (Thumbprint, 40 Zeichen) des Signatur-Zertifikats eintragen - sonst wird kein Update mehr angenommen.', 'Einstellungen', 'OK', 'Warning'); $F.tabs.SelectedItem = $F.tabUpdate; return }
-        if ([bool]$F.chkRequireSig.IsChecked -and [bool]$F.chkUseBranch.IsChecked) { [void][System.Windows.MessageBox]::Show($W, "Ein Branch-Stand ist nicht signiert. 'Branch statt Releases laden' geht nur, wenn 'Nur signierte Updates annehmen' ausgeschaltet ist.", 'Einstellungen', 'OK', 'Warning'); $F.tabs.SelectedItem = $F.tabUpdate; return }
+        if ([bool]$F.chkRequireSig.IsChecked -and $tp0.Length -ne 40) { [void](Show-HMDialogBox -Owner $W -Text 'Nur signierte Updates: bitte den Fingerabdruck (Thumbprint, 40 Zeichen) des Signatur-Zertifikats eintragen - sonst wird kein Update mehr angenommen.' -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); $F.tabs.SelectedItem = $F.tabUpdate; return }
+        if ([bool]$F.chkRequireSig.IsChecked -and [bool]$F.chkUseBranch.IsChecked) { [void](Show-HMDialogBox -Owner $W -Text "Ein Branch-Stand ist nicht signiert. 'Branch statt Releases laden' geht nur, wenn 'Nur signierte Updates annehmen' ausgeschaltet ist." -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); $F.tabs.SelectedItem = $F.tabUpdate; return }
         if ($script:SetDlg.ReqWas -and -not [bool]$F.chkRequireSig.IsChecked) {
             $F.tabs.SelectedItem = $F.tabUpdate
-            if ([System.Windows.MessageBox]::Show($W, "Signaturpruefung wirklich ausschalten?`n`nDann werden auch Versionen installiert, die nicht vom Herausgeber signiert sind (z.B. wenn das GitHub-Konto missbraucht wird). Empfohlen: eingeschaltet lassen.", 'Einstellungen', 'YesNo', 'Warning') -ne 'Yes') { return }
+            if ((Show-HMDialogBox -Owner $W -Text "Signaturpruefung wirklich ausschalten?`n`nDann werden auch Versionen installiert, die nicht vom Herausgeber signiert sind (z.B. wenn das GitHub-Konto missbraucht wird). Empfohlen: eingeschaltet lassen." -Title 'Einstellungen' -Mode 'YesNo' -Icon 'Warning') -ne 'Yes') { return }
         }
         $ret = 0
-        if (-not [int]::TryParse("$($F.txtRetention.Text)".Trim(), [ref]$ret) -or $ret -lt 0 -or $ret -gt 3650) { [void][System.Windows.MessageBox]::Show($W, 'Aufbewahrung: Zahl 0 bis 3650', 'Einstellungen', 'OK', 'Warning'); return }
+        if (-not [int]::TryParse("$($F.txtRetention.Text)".Trim(), [ref]$ret) -or $ret -lt 0 -or $ret -gt 3650) { [void](Show-HMDialogBox -Owner $W -Text 'Aufbewahrung: Zahl 0 bis 3650' -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); return }
         $keep = 0
-        if (-not [int]::TryParse("$($F.txtRetentionKeep.Text)".Trim(), [ref]$keep) -or $keep -lt 0 -or $keep -gt 100) { [void][System.Windows.MessageBox]::Show($W, 'Aufbewahrung: Anzahl 0 bis 100', 'Einstellungen', 'OK', 'Warning'); return }
+        if (-not [int]::TryParse("$($F.txtRetentionKeep.Text)".Trim(), [ref]$keep) -or $keep -lt 0 -or $keep -gt 100) { [void](Show-HMDialogBox -Owner $W -Text 'Aufbewahrung: Anzahl 0 bis 100' -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); return }
         $delKeep = 0
-        if (-not [int]::TryParse("$($F.txtDeletedKeep.Text)".Trim(), [ref]$delKeep) -or $delKeep -lt 0 -or $delKeep -gt 3650) { [void][System.Windows.MessageBox]::Show($W, 'Geloeschte Dateien aufheben: Tage 0 bis 3650 (0 = nie entfernen)', 'Einstellungen', 'OK', 'Warning'); return }
+        if (-not [int]::TryParse("$($F.txtDeletedKeep.Text)".Trim(), [ref]$delKeep) -or $delKeep -lt 0 -or $delKeep -gt 3650) { [void](Show-HMDialogBox -Owner $W -Text 'Geloeschte Dateien aufheben: Tage 0 bis 3650 (0 = nie entfernen)' -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); return }
         $delMass = 0
-        if (-not [int]::TryParse("$($F.txtDeletedMass.Text)".Trim(), [ref]$delMass) -or $delMass -lt 0 -or $delMass -gt 100) { [void][System.Windows.MessageBox]::Show($W, 'Warnung bei Massenloeschung: Prozent 0 bis 100 (0 = aus)', 'Einstellungen', 'OK', 'Warning'); return }
+        if (-not [int]::TryParse("$($F.txtDeletedMass.Text)".Trim(), [ref]$delMass) -or $delMass -lt 0 -or $delMass -gt 100) { [void](Show-HMDialogBox -Owner $W -Text 'Warnung bei Massenloeschung: Prozent 0 bis 100 (0 = aus)' -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); return }
         Save-HMSetTeamsCur; Update-HMSetTeamsCombo $script:SetDlg.TeamsCur
         $tWhy = Test-HMNotifyTargets @($script:SetDlg.TeamsList)
-        if ($isAdmin -and $tWhy) { [void][System.Windows.MessageBox]::Show($W, "Teams-Benachrichtigung: $tWhy`n`nAdresse eintragen oder das Ziel entfernen.", 'Einstellungen', 'OK', 'Warning'); return }
+        if ($isAdmin -and $tWhy) { [void](Show-HMDialogBox -Owner $W -Text "Teams-Benachrichtigung: $tWhy`n`nAdresse eintragen oder das Ziel entfernen." -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); return }
         $F.dgSchools.CommitEdit(); $F.dgSchools.CommitEdit()
         $schools = @(foreach ($r in $script:SetDlg.DtS.Rows) {
             if ($r.RowState -eq 'Deleted' -or -not "$($r.Name)".Trim()) { continue }
@@ -436,14 +436,14 @@ function Show-SettingsDialog {
                 SubnetMask = "$($r.SubnetMask)".Trim(); DnsServers = @("$($r.DnsServers)" -split '[,;\s]+' | Where-Object { $_ }); Note = "$($r.Note)".Trim() }
         })
         $dup = @($schools | Group-Object { $_.Name.ToUpperInvariant() } | Where-Object { $_.Count -gt 1 })
-        if ($dup.Count) { [void][System.Windows.MessageBox]::Show($W, "Standort-Name doppelt: $($dup[0].Group[0].Name)", 'Einstellungen', 'OK', 'Warning'); return }
+        if ($dup.Count) { [void](Show-HMDialogBox -Owner $W -Text ("Standort-Name doppelt: $($dup[0].Group[0].Name)") -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); return }
         $root = "$($F.txtRoot.Text)".Trim()
         if ($root -and -not (Test-Path -LiteralPath $root)) {
             # Freigabe selbst nicht erreichbar (gibt es nicht - z. B. keine Admin-Freigabe C$/D$ - oder kein Zugriff): klare Meldung statt "ungueltiges Format"
             $shr = Get-HMShareRoot $root
-            if ($shr -and -not (Test-Path -LiteralPath $shr)) { [void][System.Windows.MessageBox]::Show($W, "Die Freigabe '$shr' ist nicht erreichbar - es gibt sie nicht (z. B. keine Admin-Freigabe C`$/D`$ an diesem PC) oder es fehlt der Zugriff.`n`nPfad pruefen bzw. die Freigabe einrichten - nichts gespeichert.", 'Einstellungen', 'OK', 'Warning'); return }
-            if ("$([System.Windows.MessageBox]::Show($W, "Backup-Ordner '$root' existiert nicht. Anlegen?", 'Einstellungen', 'YesNo', 'Question'))" -ne 'Yes') { return }
-            try { New-Item -ItemType Directory -Path $root -Force -ErrorAction Stop | Out-Null } catch { [void][System.Windows.MessageBox]::Show($W, "Anlegen fehlgeschlagen: $($_.Exception.Message)", 'Einstellungen', 'OK', 'Error'); return }
+            if ($shr -and -not (Test-Path -LiteralPath $shr)) { [void](Show-HMDialogBox -Owner $W -Text "Die Freigabe '$shr' ist nicht erreichbar - es gibt sie nicht (z. B. keine Admin-Freigabe C`$/D`$ an diesem PC) oder es fehlt der Zugriff.`n`nPfad pruefen bzw. die Freigabe einrichten - nichts gespeichert." -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); return }
+            if ("$((Show-HMDialogBox -Owner $W -Text "Backup-Ordner '$root' existiert nicht. Anlegen?" -Title 'Einstellungen' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
+            try { New-Item -ItemType Directory -Path $root -Force -ErrorAction Stop | Out-Null } catch { [void](Show-HMDialogBox -Owner $W -Text ("Anlegen fehlgeschlagen: $($_.Exception.Message)") -Title 'Einstellungen' -Mode 'OK' -Icon 'Error'); return }
         }
         # settings.json: vorhandene (auch unbekannte) Schluessel behalten
         $p = Join-Path $script:ConfigDir 'settings.json'
@@ -451,9 +451,9 @@ function Show-SettingsDialog {
         $bad = Test-HMJsonBroken $p
         if ($bad) {
             $bk = "$p.defekt_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-            if ("$([System.Windows.MessageBox]::Show($W, "settings.json ist fehlerhaft ($bad).`n`nAls $(Split-Path $bk -Leaf) sichern und neu schreiben?`n`nNein = Einstellungen nicht speichern.", 'Einstellungen', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+            if ("$((Show-HMDialogBox -Owner $W -Text ("settings.json ist fehlerhaft ($bad).`n`nAls $(Split-Path $bk -Leaf) sichern und neu schreiben?`n`nNein = Einstellungen nicht speichern.") -Title 'Einstellungen' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
             try { Copy-Item -LiteralPath $p -Destination $bk -Force -ErrorAction Stop }
-            catch { [void][System.Windows.MessageBox]::Show($W, "Sicherung fehlgeschlagen ($($_.Exception.Message)) - nichts gespeichert.", 'Einstellungen', 'OK', 'Error'); return }
+            catch { [void](Show-HMDialogBox -Owner $W -Text ("Sicherung fehlgeschlagen ($($_.Exception.Message)) - nichts gespeichert.") -Title 'Einstellungen' -Mode 'OK' -Icon 'Error'); return }
             Out-Console "settings.json war fehlerhaft - gesichert als $bk (wird mit den Werten dieses Fensters neu geschrieben)." 'Warning'
         }
         $cur = if ($bad) { $null } else { Read-JsonFile $p }
@@ -469,7 +469,7 @@ function Show-SettingsDialog {
         $h.ShowStatusPage = [bool]$F.chkStatusPage.IsChecked
         $h.SplashAnimation = [bool]$F.chkSplashAnim.IsChecked
         $fm = "$($F.txtFeedbackMail.Text)".Trim()
-        if ($fm -and $fm -notmatch '^[^@\s;,]+@[^@\s;,]+\.[^@\s;,]+$') { [void][System.Windows.MessageBox]::Show($W, 'Rueckmeldung: ungueltige E-Mail-Adresse', 'Einstellungen', 'OK', 'Warning'); return }
+        if ($fm -and $fm -notmatch '^[^@\s;,]+@[^@\s;,]+\.[^@\s;,]+$') { [void](Show-HMDialogBox -Owner $W -Text 'Rueckmeldung: ungueltige E-Mail-Adresse' -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); return }
         $h.FeedbackMail = $fm
         $us = "$($F.cmbUiScale.SelectedItem)"
         $h.UiScale = if ($us -match '^(\d+)\s*%$') { [Math]::Round([double]$Matches[1] / 100, 2) } else { 0 }
@@ -491,7 +491,7 @@ function Show-SettingsDialog {
         # Teams: nur speichern, wenn sich an den Zielen etwas geaendert hat
         if ($isAdmin -and (Get-HMTeamsListKey $script:SetDlg.TeamsList) -ne $script:SetDlg.TeamsOrig) {
             try { Set-HMNotifyTargets -Targets @($script:SetDlg.TeamsList); Out-Console "Teams-Benachrichtigung: $($script:SetDlg.TeamsList.Count) Ziel(e) auf diesem PC gespeichert (verschluesselt)." 'Success' }
-            catch { [void][System.Windows.MessageBox]::Show($W, "Teams-Ziele nicht gespeichert: $($_.Exception.Message)", 'Einstellungen', 'OK', 'Error'); return }
+            catch { [void](Show-HMDialogBox -Owner $W -Text ("Teams-Ziele nicht gespeichert: $($_.Exception.Message)") -Title 'Einstellungen' -Mode 'OK' -Icon 'Error'); return }
         }
         # Weitergabe der geplanten Profil-Backups (Aufgabe unter SYSTEM) einrichten bzw. entfernen
         if ($isAdmin) {
@@ -524,7 +524,7 @@ function Show-SettingsDialog {
         # beschaedigte exceptions.json/update.json nicht ueberschreiben (das Fenster zeigt dann nur Standardwerte)
         $exP = Join-Path $script:ConfigDir 'exceptions.json'
         $bad = Test-HMJsonBroken $exP
-        if ($bad) { [void][System.Windows.MessageBox]::Show($W, "exceptions.json ist fehlerhaft ($bad).`n`nAusnahmen nicht gespeichert - Datei bleibt unveraendert. Die uebrigen Einstellungen werden gespeichert.", 'Einstellungen', 'OK', 'Warning') }
+        if ($bad) { [void](Show-HMDialogBox -Owner $W -Text "exceptions.json ist fehlerhaft ($bad).`n`nAusnahmen nicht gespeichert - Datei bleibt unveraendert. Die uebrigen Einstellungen werden gespeichert." -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning') }
         else { Write-JsonFile $exP ([pscustomobject]$ex) }
         # Update-Quelle
         $o = "$($F.txtOwner.Text)".Trim(); $rp = "$($F.txtRepo.Text)".Trim(); $b = "$($F.txtBranch.Text)".Trim()
@@ -532,7 +532,7 @@ function Show-SettingsDialog {
         if ($tp -and $tp -eq (Get-HMDefaultSigner $o $rp)) { $tp = '' }   # eingebauter Fingerabdruck der offiziellen Quelle: nicht festschreiben
         $upP = Join-Path $script:ConfigDir 'update.json'
         $bad = if ($o -and $rp) { Test-HMJsonBroken $upP } else { '' }
-        if ($bad) { [void][System.Windows.MessageBox]::Show($W, "update.json ist fehlerhaft ($bad).`n`nUpdate-Quelle nicht gespeichert - Datei bleibt unveraendert. Die uebrigen Einstellungen werden gespeichert.", 'Einstellungen', 'OK', 'Warning') }
+        if ($bad) { [void](Show-HMDialogBox -Owner $W -Text "update.json ist fehlerhaft ($bad).`n`nUpdate-Quelle nicht gespeichert - Datei bleibt unveraendert. Die uebrigen Einstellungen werden gespeichert." -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning') }
         elseif ($o -and $rp) {
             Write-JsonFile $upP ([pscustomobject][ordered]@{
                 Owner = $o; Repo = $rp; Branch = $(if ($b) { $b } else { 'main' }); UseBranch = [bool]$F.chkUseBranch.IsChecked

@@ -743,7 +743,7 @@ function Set-Status([string]$Text, [string]$Color = '#FFA6E3A1') {
     $ui.lblStatus.Foreground = Get-ConsoleBrush $Color
 }
 function Confirm-Action([string]$Message, [string]$Title = 'HUMig') {
-    return ([System.Windows.MessageBox]::Show($script:Window, $Message, $Title, 'YesNo', 'Warning') -eq 'Yes')
+    return ((Show-HMDialogBox -Owner $script:Window -Text $Message -Title $Title -Mode 'YesNo' -Icon 'Warning') -eq 'Yes')
 }
 $ui.rtbConsole.Add_MouseRightButtonUp({ Clear-ConsoleOutput -Window $script:Window; $_.Handled = $true })
 
@@ -1155,7 +1155,7 @@ $ui.btnBigFiles.Add_Click({
             $n = 0
             foreach ($r in @($rows)) { if (Add-ExcludePath "$($r.Pfad)") { $n++ } }
             Out-Console "$n Pfad(e) ausgeschlossen - die bisher gemessene Groesse ist damit veraltet; 'Groesse ermitteln' (oder die Vorab-Pruefung) misst neu." 'Success'
-            [void][System.Windows.MessageBox]::Show($win, "$n Pfad(e) in 'Pfade ausschliessen' eingetragen.", 'Ausschliessen', 'OK', 'Information')
+            [void](Show-HMDialogBox -Owner $win -Text "$n Pfad(e) in 'Pfade ausschliessen' eingetragen." -Title 'Ausschliessen' -Mode 'OK' -Icon 'Information')
         } })
 })
 
@@ -1977,7 +1977,7 @@ $ui.btnRestore.Add_Click({
         $bad = @(@($b.Manifest.Modules) | Where-Object { "$($_.Status)" -eq 'Error' -and ($mods | Where-Object Id -eq "$($_.Id)") } | ForEach-Object { "$($_.Name)" })
         $wm = "ACHTUNG: Dieses Backup ist $(if ($bst -eq 'Error') { 'mit FEHLERN' } else { 'ABGEBROCHEN' }) beendet worden - es ist nicht vollstaendig.`n" +
             "$(if ($bad.Count) { "Gewaehlte Module mit Fehlern: $($bad -join ', ')`n" })Details: Bericht_Backup.html im Backup-Ordner.`n`nTrotzdem wiederherstellen?"
-        if ("$([System.Windows.MessageBox]::Show($script:Window, $wm, 'Restore aus unvollstaendigem Backup', 'YesNo', 'Warning', 'No'))" -ne 'Yes') { Out-Console 'Restore abgebrochen (Backup unvollstaendig).' 'Warning'; return }
+        if ("$((Show-HMDialogBox -Owner $script:Window -Text $wm -Title 'Restore aus unvollstaendigem Backup' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { Out-Console 'Restore abgebrochen (Backup unvollstaendig).' 'Warning'; return }
         Out-Console "Restore aus unvollstaendigem Backup ($bst) bestaetigt." 'Warning'
     }
     $ctx = New-HMRestoreCtx
@@ -1989,7 +1989,7 @@ $ui.btnRestore.Add_Click({
         if ($ut.Count) {
             $own = @($ut | ForEach-Object { "$($_.Owner)" } | Select-Object -Unique) -join ', '
             $um = "Dieses Backup wurde nicht von einem Administrator angelegt (Besitzer: $own).`n`nFolgende Teile laufen mit Adminrechten:`n$(@($ut | ForEach-Object { "  $($_.Name)" }) -join "`n")`n`nNur uebernehmen, wenn du dem Backup vertraust. Uebernehmen?`n`nNein = diese Teile auslassen, Rest wiederherstellen"
-            if ("$([System.Windows.MessageBox]::Show($script:Window, $um, 'Restore - Backup pruefen', 'YesNo', 'Warning', 'No'))" -ne 'Yes') {
+            if ("$((Show-HMDialogBox -Owner $script:Window -Text $um -Title 'Restore - Backup pruefen' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') {
                 $ctx.SkipUntrustedMachine = @($ut | ForEach-Object { "$($_.Id)" })
                 Out-Console "Ausgelassen (Backup nicht von einem Administrator angelegt, Besitzer: $own): $(@($ut | ForEach-Object { $_.Name }) -join ', ')" 'Warning'
             } else { Out-Console "Backup-Besitzer $own - Uebernahme der Admin-Teile bestaetigt." 'Warning' }
@@ -2588,7 +2588,7 @@ function Show-HMVersionPicker {
                 $v = "$(@($sel)[0].Version)"
                 if (-not $v) { return }
                 if ((Get-HMUpdateConfig $script:ConfigDir).RequireSignature -and "$(@($sel)[0].Signatur)" -ne 'ja') {
-                    [void][System.Windows.MessageBox]::Show($win, "Version $v ist nicht signiert und kann nicht installiert werden (nur signierte Updates - Einstellungen > Update).", 'HUMig', 'OK', 'Warning'); return
+                    [void](Show-HMDialogBox -Owner $win -Text "Version $v ist nicht signiert und kann nicht installiert werden (nur signierte Updates - Einstellungen > Update)." -Title 'HUMig' -Mode 'OK' -Icon 'Warning'); return
                 }
                 try { $win.Close() } catch { }
                 Start-HMPull -Version $v
@@ -2722,7 +2722,7 @@ $miS = New-Object System.Windows.Controls.MenuItem; $miS.Header = 'Update-Einste
 $miT = New-Object System.Windows.Controls.MenuItem; $miT.Header = 'GitHub-Token (nur privates Repo) ...'
 $miT.Add_Click({
     $f = Get-GitHubTokenFile
-    $a = [System.Windows.MessageBox]::Show($script:Window, "Update-Quelle: $($script:UpdateOwner)/$($script:UpdateRepo)`nGespeicherter Token: $(if (Test-Path -LiteralPath $f) { 'vorhanden' } else { 'keiner' })`n`nNur fuer PRIVATE Repos noetig (Fine-grained PAT, nur 'Contents: Read').`n`nJa = Token eingeben`nNein = Token loeschen", 'GitHub-Token', 'YesNoCancel', 'Question')
+    $a = (Show-HMDialogBox -Owner $script:Window -Text ("Update-Quelle: $($script:UpdateOwner)/$($script:UpdateRepo)`nGespeicherter Token: $(if (Test-Path -LiteralPath $f) { 'vorhanden' } else { 'keiner' })`n`nNur fuer PRIVATE Repos noetig (Fine-grained PAT, nur 'Contents: Read').`n`nJa = Token eingeben`nNein = Token loeschen") -Title 'GitHub-Token' -Mode 'YesNoCancel' -Icon 'Question')
     if ($a -eq 'Yes') {
         $c = Get-Credential -UserName 'github' -Message 'GitHub-Token als Kennwort eingeben (wird verschluesselt gespeichert)'
         if ($c) { $c | Export-Clixml -Path $f -Force; Out-Console 'GitHub-Token gespeichert (DPAPI)' 'Success'; Invoke-UpdateCheck -Force }
@@ -2816,7 +2816,7 @@ $script:Window.Add_Closing({
     if ($script:JobRunning -and "$($script:JobTitle)" -like 'Server-Backup*') {
         # wbadmin laeuft als Windows-Dienst weiter, auch wenn HUMig beendet wird
         $m = "Eine Server-Sicherung laeuft noch (Windows Server-Sicherung).`n`nJa = Sicherung STOPPEN (wbadmin stop job) und HUMig beenden`nNein = Sicherung im Hintergrund weiterlaufen lassen und HUMig beenden - HUMig traegt den Lauf dann nicht in Verlauf/Bericht ein; Ergebnis: Versionen auf der Platte bzw. wbadmin.msc`nAbbrechen = HUMig offen lassen"
-        $a = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'HUMig beenden', 'YesNoCancel', 'Warning'))"
+        $a = "$((Show-HMDialogBox -Owner $script:Window -Text $m -Title 'HUMig beenden' -Mode 'YesNoCancel' -Icon 'Warning'))"
         if ($a -eq 'Cancel') { $e.Cancel = $true; return }
         if ($a -eq 'Yes') {
             $cj = $script:CurrentJob

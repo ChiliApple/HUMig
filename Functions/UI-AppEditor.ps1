@@ -504,7 +504,7 @@ function Test-HMAeDirty {
 }
 function Confirm-HMAeDiscard {
     if (-not (Test-HMAeDirty)) { return $true }
-    return ("$([System.Windows.MessageBox]::Show($script:Ae.Win, "Aenderungen an '$($script:Ae.F.tName.Text)' sind nicht gespeichert.`n`nVerwerfen?", 'Katalog', 'YesNo', 'Question'))" -eq 'Yes')
+    return ("$((Show-HMDialogBox -Owner $script:Ae.Win -Text ("Aenderungen an '$($script:Ae.F.tName.Text)' sind nicht gespeichert.`n`nVerwerfen?") -Title 'Katalog' -Mode 'YesNo' -Icon 'Question'))" -eq 'Yes')
 }
 
 # ----------------------------------------------------------------------------
@@ -748,7 +748,7 @@ function Select-HMAeProcesses {
         param($r, $st)
         if (-not $script:Ae) { return }
         $script:Ae.F.bProc.IsEnabled = $true
-        if ($r -is [string]) { [void][System.Windows.MessageBox]::Show($script:Ae.Win, "$r", 'Prozesse', 'OK', 'Warning'); return }
+        if ($r -is [string]) { [void](Show-HMDialogBox -Owner $script:Ae.Win -Text "$r" -Title 'Prozesse' -Mode 'OK' -Icon 'Warning'); return }
         $rows = @(@($r) | Where-Object { $_ -and $_.Name } | Sort-Object Name | ForEach-Object { [pscustomobject]@{ Tag = "$($_.Name)"; Text = "$($_.Name)$(if ($_.Title) { "   - $($_.Title)" })" } })
         $sel = @(Show-HMAePick "Laufende Programme an $($st.Comp) (Benutzersitzungen) - Mehrfachauswahl mit Strg" $rows)
         if ($sel.Count) { Add-HMAeLines $script:Ae.F.tClose $sel }
@@ -766,7 +766,7 @@ function Select-HMAeServices {
         param($r, $st)
         if (-not $script:Ae) { return }
         $script:Ae.F.bSvc.IsEnabled = $true
-        if ($r -is [string]) { [void][System.Windows.MessageBox]::Show($script:Ae.Win, "$r", 'Dienste', 'OK', 'Warning'); return }
+        if ($r -is [string]) { [void](Show-HMDialogBox -Owner $script:Ae.Win -Text "$r" -Title 'Dienste' -Mode 'OK' -Icon 'Warning'); return }
         $rows = @(@($r) | Where-Object { $_ -and $_.Name } | Sort-Object Display | ForEach-Object { [pscustomobject]@{ Tag = "$($_.Name)"; Text = "$($_.Display)   ($($_.Name), $(if ($_.Status -eq 'Running') { 'laeuft' } else { $_.Status }))" } })
         $sel = @(Show-HMAePick "Dienste an $($st.Comp) - Mehrfachauswahl mit Strg" $rows)
         if ($sel.Count) { Add-HMAeLines $script:Ae.F.tSvc $sel }
@@ -792,12 +792,12 @@ function Save-HMAeEntry {
     if ($script:Ae.ReadOnly -or -not $script:Ae.Cur) { return }
     $e = Get-HMAeForm
     $err = @(Test-HMAeEntry $e $script:Ae.IsNew)
-    if ($err.Count) { [void][System.Windows.MessageBox]::Show($script:Ae.Win, "Bitte korrigieren:`n`n- $($err -join "`n- ")", 'Katalog', 'OK', 'Warning'); return }
+    if ($err.Count) { [void](Show-HMDialogBox -Owner $script:Ae.Win -Text ("Bitte korrigieren:`n`n- $($err -join "`n- ")") -Title 'Katalog' -Mode 'OK' -Icon 'Warning'); return }
     # Unveraenderter Standard-Eintrag: nichts speichern
     if (-not $script:Ae.IsNew -and $script:Ae.CurKind -eq 'Standard' -and (Get-HMAeJson $e) -eq $script:Ae.Snapshot) { $script:Ae.F.lState.Text = 'Keine Aenderung.'; return }
     $obj = ConvertFrom-HMAeEntry $e
     $list = @($script:Ae.Local | Where-Object { "$($_.Id)" -ne $e.Id }) + @($obj)
-    try { Write-HMAeLocal $list } catch { [void][System.Windows.MessageBox]::Show($script:Ae.Win, "Speichern fehlgeschlagen: $($_.Exception.Message)", 'Katalog', 'OK', 'Error'); return }
+    try { Write-HMAeLocal $list } catch { [void](Show-HMDialogBox -Owner $script:Ae.Win -Text ("Speichern fehlgeschlagen: $($_.Exception.Message)") -Title 'Katalog' -Mode 'OK' -Icon 'Error'); return }
     $script:Ae.F.lState.Text = "Gespeichert: $($e.Name) ($(Get-Date -Format 'HH:mm:ss')) - Config\apps.json (Sicherung apps.json.bak)"
     Out-Console "Programm-Katalog: '$($e.Name)' gespeichert (Config\apps.json)" 'Success'
     Import-HMAeData
@@ -819,8 +819,8 @@ function New-HMAeEntry {
 function Reset-HMAeEntry {
     if ($script:Ae.ReadOnly -or $script:Ae.CurKind -ne 'geaendert') { return }
     $id = "$($script:Ae.Cur.Id)"
-    if ("$([System.Windows.MessageBox]::Show($script:Ae.Win, "Eigene Aenderungen an '$($script:Ae.Cur.Name)' entfernen und den Standard-Eintrag verwenden?", 'Katalog', 'YesNo', 'Question'))" -ne 'Yes') { return }
-    try { Write-HMAeLocal @($script:Ae.Local | Where-Object { "$($_.Id)" -ne $id }) } catch { [void][System.Windows.MessageBox]::Show($script:Ae.Win, "Speichern fehlgeschlagen: $($_.Exception.Message)", 'Katalog', 'OK', 'Error'); return }
+    if ("$((Show-HMDialogBox -Owner $script:Ae.Win -Text ("Eigene Aenderungen an '$($script:Ae.Cur.Name)' entfernen und den Standard-Eintrag verwenden?") -Title 'Katalog' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
+    try { Write-HMAeLocal @($script:Ae.Local | Where-Object { "$($_.Id)" -ne $id }) } catch { [void](Show-HMDialogBox -Owner $script:Ae.Win -Text ("Speichern fehlgeschlagen: $($_.Exception.Message)") -Title 'Katalog' -Mode 'OK' -Icon 'Error'); return }
     Out-Console "Programm-Katalog: '$id' auf Standard zurueckgesetzt" 'Info'
     Import-HMAeData
     $script:Ae.Cur = $null
@@ -833,8 +833,8 @@ function Remove-HMAeEntry {
     if ($script:Ae.IsNew) { $script:Ae.Cur = $null; $script:Ae.IsNew = $false; Update-HMAeList; if ($script:Ae.F.lApps.Items.Count) { $script:Ae.F.lApps.SelectedIndex = 0 }; return }
     if ($script:Ae.CurKind -ne 'eigen') { return }
     $id = "$($script:Ae.Cur.Id)"
-    if ("$([System.Windows.MessageBox]::Show($script:Ae.Win, "Eigenen Eintrag '$($script:Ae.Cur.Name)' loeschen?`n(Vorhandene Backups bleiben unveraendert.)", 'Katalog', 'YesNo', 'Warning'))" -ne 'Yes') { return }
-    try { Write-HMAeLocal @($script:Ae.Local | Where-Object { "$($_.Id)" -ne $id }) } catch { [void][System.Windows.MessageBox]::Show($script:Ae.Win, "Speichern fehlgeschlagen: $($_.Exception.Message)", 'Katalog', 'OK', 'Error'); return }
+    if ("$((Show-HMDialogBox -Owner $script:Ae.Win -Text ("Eigenen Eintrag '$($script:Ae.Cur.Name)' loeschen?`n(Vorhandene Backups bleiben unveraendert.)") -Title 'Katalog' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
+    try { Write-HMAeLocal @($script:Ae.Local | Where-Object { "$($_.Id)" -ne $id }) } catch { [void](Show-HMDialogBox -Owner $script:Ae.Win -Text ("Speichern fehlgeschlagen: $($_.Exception.Message)") -Title 'Katalog' -Mode 'OK' -Icon 'Error'); return }
     Out-Console "Programm-Katalog: '$id' geloescht" 'Info'
     Import-HMAeData
     $script:Ae.Cur = $null
@@ -850,7 +850,7 @@ function Export-HMAeEntry {
     try {
         [System.IO.File]::WriteAllText($d.FileName, ((ConvertFrom-HMAeEntry $e) | ConvertTo-Json -Depth 12), (New-Object System.Text.UTF8Encoding $false))
         $script:Ae.F.lState.Text = "Exportiert: $($d.FileName)"
-    } catch { [void][System.Windows.MessageBox]::Show($script:Ae.Win, "Export fehlgeschlagen: $($_.Exception.Message)", 'Katalog', 'OK', 'Error') }
+    } catch { [void](Show-HMDialogBox -Owner $script:Ae.Win -Text ("Export fehlgeschlagen: $($_.Exception.Message)") -Title 'Katalog' -Mode 'OK' -Icon 'Error') }
 }
 function Import-HMAeEntry {
     if ($script:Ae.ReadOnly -or -not (Confirm-HMAeDiscard)) { return }
@@ -861,7 +861,7 @@ function Import-HMAeEntry {
         $o = Get-Content -LiteralPath $d.FileName -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($o.Apps) { $arr = @($o.Apps); $o = $arr[0] }   # auch apps.json-Aufbau: erster Eintrag
         if (-not $o -or -not "$($o.Id)") { throw 'keine Id im Eintrag' }
-    } catch { [void][System.Windows.MessageBox]::Show($script:Ae.Win, "Datei nicht lesbar: $($_.Exception.Message)", 'Katalog', 'OK', 'Error'); return }
+    } catch { [void](Show-HMDialogBox -Owner $script:Ae.Win -Text ("Datei nicht lesbar: $($_.Exception.Message)") -Title 'Katalog' -Mode 'OK' -Icon 'Error'); return }
     $k = @($script:Ae.All | Where-Object { $_.Id -eq "$($o.Id)" })[0]
     $script:Ae.Loading = $true; $script:Ae.F.lApps.SelectedItem = $null; $script:Ae.Loading = $false
     if ($k) { Set-HMAeForm (ConvertTo-HMAeEntry $k.Obj) $k.Kind $false; Select-HMAeListItem $k.Id }

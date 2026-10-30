@@ -98,7 +98,7 @@ function Show-HMWizard {
     else { $script:WizState = New-HMWizState; Save-HMWizState }
     $f.bClose.Add_Click({ $script:Wiz.Win.Close() })
     $f.bNew.Add_Click({
-        if ("$([System.Windows.MessageBox]::Show($script:Wiz.Win, 'Begonnenen Umzug verwerfen und neu beginnen? (Backups bleiben erhalten)', 'Umzugs-Assistent', 'YesNo', 'Question'))" -ne 'Yes') { return }
+        if ("$((Show-HMDialogBox -Owner $script:Wiz.Win -Text 'Begonnenen Umzug verwerfen und neu beginnen? (Backups bleiben erhalten)' -Title 'Umzugs-Assistent' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
         $script:WizState = New-HMWizState; Save-HMWizState; Update-HMWizard
     })
     $f.bBack.Add_Click({ if ($script:WizState.Step -gt 1) { $script:WizState.Step--; Save-HMWizState; Update-HMWizard } })
@@ -158,16 +158,16 @@ function Test-HMWizSelection($Expect, [string]$What) {
     if (-not $Expect -or -not $sel) { return $true }
     if ($sel.Computer -eq $Expect.Computer -and ($sel.Folder -eq $Expect.Folder -or $sel.Account -eq $Expect.Account)) { return $true }
     $m = "Im Hauptfenster ist gerade $(Format-HMWizSel $sel) gewaehlt, fuer diesen Schritt gehoert aber der $What dazu: $(Format-HMWizSel $Expect).`n`nTrotzdem fortfahren?"
-    return ("$([System.Windows.MessageBox]::Show($script:Wiz.Win, $m, 'Umzugs-Assistent', 'YesNo', 'Warning', 'No'))" -eq 'Yes')
+    return ("$((Show-HMDialogBox -Owner $script:Wiz.Win -Text $m -Title 'Umzugs-Assistent' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -eq 'Yes')
 }
 
 function Invoke-HMWizardAction {
     $s = $script:WizState
-    if ($script:JobRunning) { [void][System.Windows.MessageBox]::Show($script:Wiz.Win, 'Es laeuft gerade ein Vorgang - bitte warten, bis er fertig ist.', 'Umzugs-Assistent', 'OK', 'Information'); return }
+    if ($script:JobRunning) { [void](Show-HMDialogBox -Owner $script:Wiz.Win -Text 'Es laeuft gerade ein Vorgang - bitte warten, bis er fertig ist.' -Title 'Umzugs-Assistent' -Mode 'OK' -Icon 'Information'); return }
     switch ($s.Step) {
         1 {
             $sel = Get-HMWizSelection
-            if (-not $sel -or $sel.NoProfile) { [void][System.Windows.MessageBox]::Show($script:Wiz.Win, 'Bitte im Hauptfenster einen PC verbinden und einen Benutzer MIT Profil waehlen.', 'Umzugs-Assistent', 'OK', 'Information'); return }
+            if (-not $sel -or $sel.NoProfile) { [void](Show-HMDialogBox -Owner $script:Wiz.Win -Text 'Bitte im Hauptfenster einen PC verbinden und einen Benutzer MIT Profil waehlen.' -Title 'Umzugs-Assistent' -Mode 'OK' -Icon 'Information'); return }
             $s.Source = $sel; Set-HMWizDone 1; $s.Step = 2
             Out-Console "Umzugs-Assistent: alter PC $(Format-HMWizSel $sel)" 'Info'
         }
@@ -181,19 +181,19 @@ function Invoke-HMWizardAction {
         }
         4 {
             $sel = Get-HMWizSelection
-            if (-not $sel) { [void][System.Windows.MessageBox]::Show($script:Wiz.Win, 'Bitte im Hauptfenster den neuen PC verbinden und den Zielbenutzer waehlen (oder DOMAENE\Benutzer eintragen).', 'Umzugs-Assistent', 'OK', 'Information'); return }
-            if ($s.Source -and $sel.Computer -eq $s.Source.Computer -and "$([System.Windows.MessageBox]::Show($script:Wiz.Win, "Der gewaehlte PC ist derselbe wie der alte ($($sel.Computer)). Richtig (z.B. nach Neuinstallation)?", 'Umzugs-Assistent', 'YesNo', 'Question'))" -ne 'Yes') { return }
+            if (-not $sel) { [void](Show-HMDialogBox -Owner $script:Wiz.Win -Text 'Bitte im Hauptfenster den neuen PC verbinden und den Zielbenutzer waehlen (oder DOMAENE\Benutzer eintragen).' -Title 'Umzugs-Assistent' -Mode 'OK' -Icon 'Information'); return }
+            if ($s.Source -and $sel.Computer -eq $s.Source.Computer -and "$((Show-HMDialogBox -Owner $script:Wiz.Win -Text ("Der gewaehlte PC ist derselbe wie der alte ($($sel.Computer)). Richtig (z.B. nach Neuinstallation)?") -Title 'Umzugs-Assistent' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
             $s.Target = $sel; Set-HMWizDone 4; $s.Step = 5
             Out-Console "Umzugs-Assistent: neuer PC $(Format-HMWizSel $sel)" 'Info'
         }
         5 {
-            if (-not $s.BackupPath -or -not (Test-Path -LiteralPath "$($s.BackupPath)")) { [void][System.Windows.MessageBox]::Show($script:Wiz.Win, "Das Backup aus Schritt 3 ist nicht erreichbar:`n$($s.BackupPath)`n`nBackup-Ordner (USB/Freigabe) verbinden oder Schritt 3 wiederholen.", 'Umzugs-Assistent', 'OK', 'Warning'); return }
+            if (-not $s.BackupPath -or -not (Test-Path -LiteralPath "$($s.BackupPath)")) { [void](Show-HMDialogBox -Owner $script:Wiz.Win -Text ("Das Backup aus Schritt 3 ist nicht erreichbar:`n$($s.BackupPath)`n`nBackup-Ordner (USB/Freigabe) verbinden oder Schritt 3 wiederholen.") -Title 'Umzugs-Assistent' -Mode 'OK' -Icon 'Warning'); return }
             if (-not (Test-HMWizSelection $s.Target 'neue PC')) { return }
             Select-HMMainTab 'Restore'
             # Backup in der Liste markieren (Backup-Ordner ggf. vorher neu einlesen)
             $row = @(@($ui.dgBackups.ItemsSource) | Where-Object { $_ -and $_.Info -and "$($_.Info.Path)".TrimEnd('\') -ieq "$($s.BackupPath)".TrimEnd('\') })[0]
             if (-not $row) { try { Update-BackupList } catch { }; $row = @(@($ui.dgBackups.ItemsSource) | Where-Object { $_ -and $_.Info -and "$($_.Info.Path)".TrimEnd('\') -ieq "$($s.BackupPath)".TrimEnd('\') })[0] }
-            if (-not $row) { [void][System.Windows.MessageBox]::Show($script:Wiz.Win, "Das Backup steht nicht in der Liste des Backup-Ordners ($(Get-BackupRoot)).`nOben den Backup-Ordner waehlen, in dem $(Split-Path "$($s.BackupPath)" -Leaf) liegt.", 'Umzugs-Assistent', 'OK', 'Warning'); return }
+            if (-not $row) { [void](Show-HMDialogBox -Owner $script:Wiz.Win -Text ("Das Backup steht nicht in der Liste des Backup-Ordners ($(Get-BackupRoot)).`nOben den Backup-Ordner waehlen, in dem $(Split-Path "$($s.BackupPath)" -Leaf) liegt.") -Title 'Umzugs-Assistent' -Mode 'OK' -Icon 'Warning'); return }
             $ui.dgBackups.SelectedItem = $row; $ui.dgBackups.ScrollIntoView($row)
             $script:WizWaitFor = 'Restore'
             $script:Window.Dispatcher.BeginInvoke([action]{ Invoke-HMMainButton $ui.btnRestore }, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null

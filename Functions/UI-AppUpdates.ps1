@@ -398,10 +398,10 @@ function Show-HMAuScheduleDialog([string]$Where) {
     $st = @{ W = $w; Res = $null }
     $w.FindName('ok').Add_Click({
             $t = "$($w.FindName('time').Text)".Trim()
-            if ($t -notmatch '^([01]?\d|2[0-3]):[0-5]\d$') { [void][System.Windows.MessageBox]::Show($w, 'Uhrzeit als HH:mm, z.B. 12:30', 'Zeitplan', 'OK', 'Information'); return }
+            if ($t -notmatch '^([01]?\d|2[0-3]):[0-5]\d$') { [void](Show-HMDialogBox -Owner $w -Text 'Uhrzeit als HH:mm, z.B. 12:30' -Title 'Zeitplan' -Mode 'OK' -Icon 'Information'); return }
             $wk = [bool]$w.FindName('rWeekly').IsChecked
             $ds = @($boxes | Where-Object { $_.IsChecked } | ForEach-Object { "$($_.Tag)" })
-            if ($wk -and -not $ds.Count) { [void][System.Windows.MessageBox]::Show($w, 'Mindestens einen Wochentag anhaken.', 'Zeitplan', 'OK', 'Information'); return }
+            if ($wk -and -not $ds.Count) { [void](Show-HMDialogBox -Owner $w -Text 'Mindestens einen Wochentag anhaken.' -Title 'Zeitplan' -Mode 'OK' -Icon 'Information'); return }
             $st.Res = @{ Action = 'Set'; Mode = $(if ($wk) { 'Weekly' } else { 'Daily' }); Days = $ds; Time = ('{0:D2}:{1}' -f [int]($t.Split(':')[0]), $t.Split(':')[1]); Wake = [bool]$w.FindName('wake').IsChecked }
             $w.DialogResult = $true
         }.GetNewClosure())

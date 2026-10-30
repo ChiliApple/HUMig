@@ -149,9 +149,9 @@ function Show-HMOldProfiles {
                 @{ Text = 'Markierte Profile loeschen'; Color = '#FFF38BA8'; Handler = {
                     param($rows, $win, $ctx)
                     $sel = @($rows | Where-Object { "$($_.Angemeldet)" -ne 'JA' })
-                    if (-not $sel.Count) { [void][System.Windows.MessageBox]::Show($win, 'Angemeldete Profile koennen nicht geloescht werden.', 'Profile', 'OK', 'Information'); return }
+                    if (-not $sel.Count) { [void](Show-HMDialogBox -Owner $win -Text 'Angemeldete Profile koennen nicht geloescht werden.' -Title 'Profile' -Mode 'OK' -Icon 'Information'); return }
                     $txt = ($sel | Select-Object -First 15 | ForEach-Object { "$($_.Konto)  ($($_.Pfad))" }) -join "`n"
-                    if ("$([System.Windows.MessageBox]::Show($win, "$($sel.Count) Profil(e) an $($ctx.Computer) ENDGUELTIG loeschen (Ordner + Registry)?`n`n$txt`n`nTipp: vorher sichern (Backup) oder 'Profil erneuern' verwenden, wenn es nur um einen Test geht.", 'Profile loeschen', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+                    if ("$((Show-HMDialogBox -Owner $win -Text ("$($sel.Count) Profil(e) an $($ctx.Computer) ENDGUELTIG loeschen (Ordner + Registry)?`n`n$txt`n`nTipp: vorher sichern (Backup) oder 'Profil erneuern' verwenden, wenn es nur um einen Test geht.") -Title 'Profile loeschen' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
                     $sids = @($sel | ForEach-Object { "$($_.SID)" })
                     $win.Close()
                     Invoke-HMTool -Title 'Profile loeschen' -Computer $ctx.Computer -TimeoutSec 1800 -ArgumentList @(, $sids) -Script {
@@ -348,7 +348,7 @@ function Start-HMHUPilot([switch]$Choose) {
     $dir = if ($Choose) { Select-HMHUPilotDir } else { Get-HMHUPilotDir }
     if (-not $dir -and -not $Choose) {
         $q = "HUPilot-Setup ist auf diesem PC noch nicht eingetragen.`n`nHUPilot ist ein eigenes Werkzeug: Windows Autopilot per USB-Stick (Hash mit Gruppentag hochladen, Geraet ohne Hersteller-Programme zuruecksetzen).`n`nJa = HUPilot-Setup.cmd suchen und merken`nNein = Anleitung oeffnen (Download und Einrichtung)"
-        $a = "$([System.Windows.MessageBox]::Show($script:Window, $q, 'HUPilot', 'YesNoCancel', 'Question'))"
+        $a = "$((Show-HMDialogBox -Owner $script:Window -Text $q -Title 'HUPilot' -Mode 'YesNoCancel' -Icon 'Question'))"
         if ($a -eq 'No') { try { Open-HMUrl $script:HUPilotDoc } catch { Start-Process $script:HUPilotDoc }; return }
         if ($a -ne 'Yes') { return }
         $dir = Select-HMHUPilotDir
@@ -469,7 +469,7 @@ function Start-HMFileSearch {
                     foreach ($d in $dirs) { if (-not $ui.lstExtra.Items.Contains($d)) { [void]$ui.lstExtra.Items.Add($d); $n++ } }
                     if ($n -and $script:BackupChecks.ContainsKey('ExtraFolders')) { $script:BackupChecks['ExtraFolders'].IsChecked = $true }
                     Out-Console "$n Ordner in 'Zusaetzliche Ordner' aufgenommen (Modul angehakt)." 'Success'
-                    [void][System.Windows.MessageBox]::Show($win, "$n Ordner aufgenommen - Reiter Backup, 'Zusaetzliche Ordner'.", 'Dateien suchen', 'OK', 'Information')
+                    [void](Show-HMDialogBox -Owner $win -Text "$n Ordner aufgenommen - Reiter Backup, 'Zusaetzliche Ordner'." -Title 'Dateien suchen' -Mode 'OK' -Icon 'Information')
                 } }
             )
     }
@@ -576,7 +576,7 @@ function Start-HMDbSearch {
                 foreach ($d in $dirs) { if (-not $ui.lstExtra.Items.Contains($d)) { [void]$ui.lstExtra.Items.Add($d); $n++ } }
                 if ($n -and $script:BackupChecks.ContainsKey('ExtraFolders')) { $script:BackupChecks['ExtraFolders'].IsChecked = $true }
                 Out-Console "$n Ordner in 'Zusaetzliche Ordner' aufgenommen - Programme vorher schliessen (geoeffnete Datenbanken werden nicht vollstaendig kopiert)." 'Success'
-                [void][System.Windows.MessageBox]::Show($win, "$n Ordner aufgenommen (Reiter Backup, 'Zusaetzliche Ordner').`n`nWichtig: das zugehoerige Programm vor dem Backup schliessen. Bequemer: 'Als Katalog-Eintrag anlegen' - dann schliesst HUMig das Programm selbst.", 'Datenbanken', 'OK', 'Information')
+                [void](Show-HMDialogBox -Owner $win -Text "$n Ordner aufgenommen (Reiter Backup, 'Zusaetzliche Ordner').`n`nWichtig: das zugehoerige Programm vor dem Backup schliessen. Bequemer: 'Als Katalog-Eintrag anlegen' - dann schliesst HUMig das Programm selbst." -Title 'Datenbanken' -Mode 'OK' -Icon 'Information')
             } }
         )
         if (-not $script:UserMode) {
@@ -649,7 +649,7 @@ function Restore-HMSearchHitsToOrigin($Rows, $Backup, $Win) {
         if ($srcProf -and $prof -and $prof.LocalPath -and ($o -ieq $srcProf -or $o.StartsWith($srcProf + '\', [StringComparison]::OrdinalIgnoreCase))) { $o = "$($prof.LocalPath)".TrimEnd('\') + $o.Substring($srcProf.Length) }
         $plan += [pscustomobject]@{ Src = (Join-Path $Backup.Path "$($x.Pfad)"); Dst = $o }
     }
-    if (-not $plan.Count) { [void][System.Windows.MessageBox]::Show($Win, 'Fuer die markierten Dateien ist kein Originalort bekannt (z. B. Registry-Export oder Backup der Vorgaengerversion). "Markierte kopieren nach ..." verwenden.', 'An Originalort zurueck', 'OK', 'Information'); return }
+    if (-not $plan.Count) { [void](Show-HMDialogBox -Owner $Win -Text 'Fuer die markierten Dateien ist kein Originalort bekannt (z. B. Registry-Export oder Backup der Vorgaengerversion). "Markierte kopieren nach ..." verwenden.' -Title 'An Originalort zurueck' -Mode 'OK' -Icon 'Information'); return }
     # Ziele unter Windows/Programme/ProgramData kennzeichnen (Kopie laeuft mit Adminrechten)
     $sysHits = @($plan | Where-Object { Get-HMProtectedTargetRoot $_.Dst $null '' })
     $sysFirst = @($sysHits | Select-Object -First 12)
@@ -657,7 +657,7 @@ function Restore-HMSearchHitsToOrigin($Rows, $Backup, $Win) {
     $list = (@($show | ForEach-Object { if ($sysHits -contains $_) { "ACHTUNG Systemordner: $($_.Dst)" } else { $_.Dst } }) -join "`n") + $(if ($plan.Count -gt 12) { "`n..." } else { '' })
     $sysTxt = if ($sysHits.Count) { "ACHTUNG: $($sysHits.Count) Datei(en) liegen unter Windows, Programme oder ProgramData - nur zurueckkopieren, wenn du dem Backup vertraust.`n`n" } else { '' }
     $q = "$sysTxt$($plan.Count) Datei(en) an den Originalort auf $comp zurueckkopieren?`n`n$list`n`nVorhandene Dateien werden NICHT ueberschrieben - dann entsteht '<Name> (wiederhergestellt $(Get-Date -Format 'yyyy-MM-dd'))'.$(if ($noMap) { "`n$noMap Datei(en) ohne bekannten Originalort werden ausgelassen." })"
-    if ("$([System.Windows.MessageBox]::Show($Win, $q, 'An Originalort zurueck', 'YesNo', 'Question'))" -ne 'Yes') { return }
+    if ("$((Show-HMDialogBox -Owner $Win -Text $q -Title 'An Originalort zurueck' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
     $ok = 0; $bad = 0; $ren = 0
     foreach ($p in $plan) {
         try {

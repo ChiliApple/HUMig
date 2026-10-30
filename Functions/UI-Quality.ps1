@@ -80,7 +80,7 @@ function Show-HMNewLocalAccountDialog([string]$Name, [string]$Computer) {
     $pw1 = $w.FindName('pw1'); $pw2 = $w.FindName('pw2'); $chk = $w.FindName('chkAdmin')
     $res = @{ V = $null }
     $w.FindName('ok').Add_Click({
-        if ($pw1.SecurePassword.Length -lt 1) { [void][System.Windows.MessageBox]::Show($w, 'Bitte ein Kennwort eingeben (ein leeres Kennwort legt HUMig nicht an).', 'Lokales Konto', 'OK', 'Warning'); return }
+        if ($pw1.SecurePassword.Length -lt 1) { [void](Show-HMDialogBox -Owner $w -Text 'Bitte ein Kennwort eingeben (ein leeres Kennwort legt HUMig nicht an).' -Title 'Lokales Konto' -Mode 'OK' -Icon 'Warning'); return }
         $b1 = [IntPtr]::Zero; $b2 = [IntPtr]::Zero; $same = $false
         try {
             $b1 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($pw1.SecurePassword); $b2 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($pw2.SecurePassword)
@@ -88,7 +88,7 @@ function Show-HMNewLocalAccountDialog([string]$Name, [string]$Computer) {
             $l1 = [Runtime.InteropServices.Marshal]::ReadInt32($b1, -4); $l2 = [Runtime.InteropServices.Marshal]::ReadInt32($b2, -4); $same = ($l1 -eq $l2)
             for ($k = 0; $same -and $k -lt $l1; $k += 2) { if ([Runtime.InteropServices.Marshal]::ReadInt16($b1, $k) -ne [Runtime.InteropServices.Marshal]::ReadInt16($b2, $k)) { $same = $false } }
         } finally { if ($b1 -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b1) }; if ($b2 -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b2) } }
-        if (-not $same) { [void][System.Windows.MessageBox]::Show($w, 'Die Kennwoerter stimmen nicht ueberein.', 'Lokales Konto', 'OK', 'Warning'); return }
+        if (-not $same) { [void](Show-HMDialogBox -Owner $w -Text 'Die Kennwoerter stimmen nicht ueberein.' -Title 'Lokales Konto' -Mode 'OK' -Icon 'Warning'); return }
         $sp = $pw1.SecurePassword.Copy(); $sp.MakeReadOnly()
         $res.V = @{ Password = $sp; Admin = [bool]$chk.IsChecked }
         $w.DialogResult = $true
@@ -112,7 +112,7 @@ function Invoke-HMRestoreAccountCheck($Backup, $Target, [object[]]$Modules, [str
     $sel = $Target
     if ($pl.Differs -and $pl.Kind -ne 'Entra') {
         $m = "Im Backup ist das Konto $($Backup.Account) - oben gewaehlt ist $(if ($Target.Account) { $Target.Account } else { $Target.Folder }) (anderer Benutzer).`n`nJa = Ziel auf $($pl.Suggest) setzen$(if (-not $pl.Hit) { ' (hat am Ziel noch kein Profil)' })`nNein = trotzdem nach $(if ($Target.Account) { $Target.Account } else { $Target.Folder }) zurueckspielen`nAbbrechen = nichts tun"
-        $a = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'Restore - Ziel-Benutzer', 'YesNoCancel', 'Question', 'Yes'))"
+        $a = "$((Show-HMDialogBox -Owner $script:Window -Text $m -Title 'Restore - Ziel-Benutzer' -Mode 'YesNoCancel' -Icon 'Question' -Default 'Yes'))"
         if ($a -eq 'Cancel') { return $false }
         if ($a -eq 'Yes') {
             if ($pl.Hit) { $ui.cmbUser.SelectedIndex = [array]::IndexOf(@($script:Profiles), $pl.Hit) }
@@ -136,7 +136,7 @@ function Invoke-HMRestoreAccountCheck($Backup, $Target, [object[]]$Modules, [str
     if ($have -eq $true) { return $true }
     if ($null -eq $have) { Out-Console "Lokale Konten an $Computer nicht pruefbar - ist '$name' dort nicht vorhanden, legt USMT kein Profil an (Code 14)." 'Warning'; return $true }
     $m = "Das lokale Konto '$name' gibt es an $tpc noch nicht.`n`nUSMT legt fehlende lokale Konten nicht an (dafuer muesste das Kennwort im Klartext auf der Befehlszeile stehen, und Programm-Einstellungen wuerden nicht uebertragen).`n`nJa = Konto jetzt anlegen (Kennwort eingeben)`nNein = nicht anlegen (nur Computer-Module, Benutzer-Module werden uebersprungen)`nAbbrechen = nichts tun"
-    $a = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'Restore - lokales Konto', 'YesNoCancel', 'Question', 'Yes'))"
+    $a = "$((Show-HMDialogBox -Owner $script:Window -Text $m -Title 'Restore - lokales Konto' -Mode 'YesNoCancel' -Icon 'Question' -Default 'Yes'))"
     if ($a -eq 'Cancel') { return $false }
     if ($a -ne 'Yes') { return $true }
     $d = Show-HMNewLocalAccountDialog $name $tpc
@@ -414,7 +414,7 @@ function Remove-HMBackupFolders($Win, [string]$Root, [string[]]$Names) {
     }
     $last = @($newest.Values | Where-Object { $Names -contains "$($_.Name)" } | ForEach-Object { "$($_.Name)" })
     if ($last.Count) { $list += "`n`nACHTUNG - das ist das NEUESTE brauchbare Backup dieses PCs/Benutzers:`n$($last -join "`n")" }
-    if ("$([System.Windows.MessageBox]::Show($Win, "$($Names.Count) Backup(s) endgueltig loeschen?`n`n$list", 'Backups loeschen', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+    if ("$((Show-HMDialogBox -Owner $Win -Text ("$($Names.Count) Backup(s) endgueltig loeschen?`n`n$list") -Title 'Backups loeschen' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
     $Win.Close()
     $paths = @($Names | ForEach-Object { Join-Path $Root $_ })
     Out-Console "Loesche $($paths.Count) Backup(s) ..." 'Warning'

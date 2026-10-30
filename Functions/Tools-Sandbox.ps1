@@ -117,12 +117,12 @@ function Show-HMSandboxSetup {
     $ed = Get-HMSandboxEdition
     if (-not $ed.Supported) {
         $msg = "Die Testinstallation laeuft in der Windows Sandbox - die gibt es nicht in '$($ed.Caption)'.`n`nNoetig ist Windows 10/11 Pro, Education oder Enterprise."
-        if ($own) { [void][System.Windows.MessageBox]::Show($own, $msg, 'Windows Sandbox', 'OK', 'Warning') } else { [void][System.Windows.MessageBox]::Show($msg, 'Windows Sandbox', 'OK', 'Warning') }
+        if ($own) { [void](Show-HMDialogBox -Owner $own -Text $msg -Title 'Windows Sandbox' -Mode 'OK' -Icon 'Warning') } else { [void](Show-HMDialogBox -Text $msg -Title 'Windows Sandbox' -Mode 'OK' -Icon 'Warning') }
         return
     }
     if (Test-HMSandboxAvailable) {
         $msg = 'Die Windows Sandbox ist bereits eingerichtet.'
-        if ($own) { [void][System.Windows.MessageBox]::Show($own, $msg, 'Windows Sandbox', 'OK', 'Information') } else { [void][System.Windows.MessageBox]::Show($msg, 'Windows Sandbox', 'OK', 'Information') }
+        if ($own) { [void](Show-HMDialogBox -Owner $own -Text $msg -Title 'Windows Sandbox' -Mode 'OK' -Icon 'Information') } else { [void](Show-HMDialogBox -Text $msg -Title 'Windows Sandbox' -Mode 'OK' -Icon 'Information') }
         return
     }
     $virt = Get-HMSandboxVirtualization
