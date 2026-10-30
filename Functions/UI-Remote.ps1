@@ -90,7 +90,7 @@ function Show-HMRemoteMsg([string]$Text, [string]$Level = 'Warning', [switch]$Qu
     if (-not $Quiet) {
         $own = if ($Owner) { $Owner } else { $script:Window }
         $ic = switch ($Level) { 'Error' { 'Error' } 'Success' { 'Information' } 'Info' { 'Information' } default { 'Warning' } }
-        [void][System.Windows.MessageBox]::Show($own, $Text, 'Handy-Fernbedienung', 'OK', $ic)
+        [void](Show-HMDialogBox -Owner $own -Text $Text -Title 'Handy-Fernbedienung' -Mode 'OK' -Icon $ic)
     }
 }
 
@@ -1026,28 +1026,28 @@ function Initialize-HMRemoteSettingsTab($F) {
         $F2 = $script:SetDlg.F; $W2 = $script:SetDlg.Win
         $acc2 = "$($F2.txtRemoteUser.Text)".Trim()
         $p2 = 0
-        if (-not [int]::TryParse("$($F2.txtRemotePort.Text)".Trim(), [ref]$p2) -or $p2 -lt 1025 -or $p2 -gt 65535) { [void][System.Windows.MessageBox]::Show($W2, 'Port: Zahl von 1025 bis 65535', 'Handy', 'OK', 'Warning'); return }
-        if (-not $acc2) { [void][System.Windows.MessageBox]::Show($W2, 'Benutzerkonto eintragen (z.B. SCHULE\max), das HUMig ohne Adminrechte startet.', 'Handy', 'OK', 'Warning'); return }
+        if (-not [int]::TryParse("$($F2.txtRemotePort.Text)".Trim(), [ref]$p2) -or $p2 -lt 1025 -or $p2 -gt 65535) { [void](Show-HMDialogBox -Owner $W2 -Text 'Port: Zahl von 1025 bis 65535' -Title 'Handy' -Mode 'OK' -Icon 'Warning'); return }
+        if (-not $acc2) { [void](Show-HMDialogBox -Owner $W2 -Text 'Benutzerkonto eintragen (z.B. SCHULE\max), das HUMig ohne Adminrechte startet.' -Title 'Handy' -Mode 'OK' -Icon 'Warning'); return }
         $m = "Fernbedienung fuer den Benutzer-Modus einrichten?`n`nKonto: $acc2`nPort: $p2`n`nDauerhaft angelegt werden: Firewall-Regel (nur Domaenen-/private Netze, lokales Subnetz + eingetragene Netze), HTTPS-Bindung mit dem Zertifikat dieses PCs und die Port-Freigabe fuer dieses Konto. Sie bleiben, auch wenn HUMig geschlossen ist (dann antwortet auf dem Port niemand)."
-        if ("$([System.Windows.MessageBox]::Show($W2, $m, 'Handy', 'YesNo', 'Question'))" -ne 'Yes') { return }
-        try { Install-HMRemoteUserSetup $acc2 $p2 @(ConvertFrom-HMLines $F2.txtRemoteNets.Text) } catch { [void][System.Windows.MessageBox]::Show($W2, "Nicht eingerichtet: $($_.Exception.Message)", 'Handy', 'OK', 'Error') }
+        if ("$((Show-HMDialogBox -Owner $W2 -Text $m -Title 'Handy' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
+        try { Install-HMRemoteUserSetup $acc2 $p2 @(ConvertFrom-HMLines $F2.txtRemoteNets.Text) } catch { [void](Show-HMDialogBox -Owner $W2 -Text ("Nicht eingerichtet: $($_.Exception.Message)") -Title 'Handy' -Mode 'OK' -Icon 'Error') }
         $F2.lblRemoteSetup.Text = Get-HMRemoteSetupText
     })
     $F.btnRemoteUnsetup.Add_Click({
         $F2 = $script:SetDlg.F; $W2 = $script:SetDlg.Win
-        if (-not (Read-HMRemoteSetup)) { [void][System.Windows.MessageBox]::Show($W2, 'Es ist nichts eingerichtet.', 'Handy', 'OK', 'Information'); return }
-        if ("$([System.Windows.MessageBox]::Show($W2, 'Einrichtung fuer den Benutzer-Modus entfernen (Firewall-Regel, HTTPS-Bindung, Port-Freigabe)?', 'Handy', 'YesNo', 'Question'))" -ne 'Yes') { return }
-        try { Uninstall-HMRemoteUserSetup } catch { [void][System.Windows.MessageBox]::Show($W2, "Fehler: $($_.Exception.Message)", 'Handy', 'OK', 'Error') }
+        if (-not (Read-HMRemoteSetup)) { [void](Show-HMDialogBox -Owner $W2 -Text 'Es ist nichts eingerichtet.' -Title 'Handy' -Mode 'OK' -Icon 'Information'); return }
+        if ("$((Show-HMDialogBox -Owner $W2 -Text 'Einrichtung fuer den Benutzer-Modus entfernen (Firewall-Regel, HTTPS-Bindung, Port-Freigabe)?' -Title 'Handy' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
+        try { Uninstall-HMRemoteUserSetup } catch { [void](Show-HMDialogBox -Owner $W2 -Text ("Fehler: $($_.Exception.Message)") -Title 'Handy' -Mode 'OK' -Icon 'Error') }
         $F2.lblRemoteSetup.Text = Get-HMRemoteSetupText
     })
 }
 # Werte aus dem Reiter. Rueckgabe: Hashtable fuer settings.json (Remote) oder $null bei ungueltiger Eingabe
 function Get-HMRemoteSettingsFromTab($F, $W) {
     $p = 0
-    if (-not [int]::TryParse("$($F.txtRemotePort.Text)".Trim(), [ref]$p) -or $p -lt 1025 -or $p -gt 65535) { [void][System.Windows.MessageBox]::Show($W, 'Handy-Fernbedienung: Port von 1025 bis 65535', 'Einstellungen', 'OK', 'Warning'); return $null }
+    if (-not [int]::TryParse("$($F.txtRemotePort.Text)".Trim(), [ref]$p) -or $p -lt 1025 -or $p -gt 65535) { [void](Show-HMDialogBox -Owner $W -Text 'Handy-Fernbedienung: Port von 1025 bis 65535' -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); return $null }
     $nets = @(ConvertFrom-HMLines $F.txtRemoteNets.Text)
     $bad = @($nets | Where-Object { @(Get-HMRemoteFirewallRemote @($_)).Count -lt 2 })
-    if ($bad.Count) { [void][System.Windows.MessageBox]::Show($W, "Handy-Fernbedienung: Netz ungueltig: $($bad[0]) (Schreibweise 10.20.0.0/16 oder einzelne Adresse)", 'Einstellungen', 'OK', 'Warning'); return $null }
+    if ($bad.Count) { [void](Show-HMDialogBox -Owner $W -Text ("Handy-Fernbedienung: Netz ungueltig: $($bad[0]) (Schreibweise 10.20.0.0/16 oder einzelne Adresse)") -Title 'Einstellungen' -Mode 'OK' -Icon 'Warning'); return $null }
     $i = $F.cmbRemoteTime.SelectedIndex
     $min = 0
     if ($i -ge 0 -and $i -lt $script:HMRemoteTimes.Count) { $min = $script:HMRemoteTimes[$i][0] }
@@ -1136,15 +1136,15 @@ function Show-HMRemoteDialog {
     $d.btnOff.Add_Click({ Stop-HMRemote 'von Hand'; Update-HMRemoteDialog })
     $d.btnNewCode.Add_Click({ if ($script:HMRemote) { Open-HMRemotePairing $script:HMRemote.S | Out-Null; $script:HMRemoteDlg.LastKey = ''; Update-HMRemoteDialog } })
     $d.cmbIp.Add_SelectionChanged({ if (-not $script:HMRemoteDlg.Loading) { $script:HMRemoteDlg.LastKey = ''; Update-HMRemoteDialog } })
-    $d.btnLog.Add_Click({ $lf = Get-HMRemoteLogFile; if ($lf -and (Test-Path -LiteralPath $lf)) { Start-Process notepad.exe -ArgumentList "`"$lf`"" } else { [void][System.Windows.MessageBox]::Show($script:HMRemoteDlg.W, 'Noch kein Zugriffsprotokoll vorhanden.', 'Handy', 'OK', 'Information') } })
+    $d.btnLog.Add_Click({ $lf = Get-HMRemoteLogFile; if ($lf -and (Test-Path -LiteralPath $lf)) { Start-Process notepad.exe -ArgumentList "`"$lf`"" } else { [void](Show-HMDialogBox -Owner $script:HMRemoteDlg.W -Text 'Noch kein Zugriffsprotokoll vorhanden.' -Title 'Handy' -Mode 'OK' -Icon 'Information') } })
     $d.btnDel.Add_Click({
         $D2 = $script:HMRemoteDlg
         $i = $D2.lstDev.SelectedIndex
-        if ($i -lt 0 -or $i -ge $D2.DevKeys.Count) { [void][System.Windows.MessageBox]::Show($D2.W, 'Bitte ein Handy in der Liste waehlen.', 'Handy', 'OK', 'Information'); return }
+        if ($i -lt 0 -or $i -ge $D2.DevKeys.Count) { [void](Show-HMDialogBox -Owner $D2.W -Text 'Bitte ein Handy in der Liste waehlen.' -Title 'Handy' -Mode 'OK' -Icon 'Information'); return }
         $k = $D2.DevKeys[$i]
         $devs = if ($script:HMRemote) { $script:HMRemote.S.Devices } else { Read-HMRemoteDevices }
         $nm = if ($devs[$k]) { $devs[$k].Name } else { '' }
-        if ("$([System.Windows.MessageBox]::Show($D2.W, "Handy '$nm' entfernen? Es hat danach sofort keinen Zugriff mehr.", 'Handy', 'YesNo', 'Question'))" -ne 'Yes') { return }
+        if ("$((Show-HMDialogBox -Owner $D2.W -Text "Handy '$nm' entfernen? Es hat danach sofort keinen Zugriff mehr." -Title 'Handy' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
         $devs.Remove($k)
         try { Save-HMRemoteDevices $devs } catch { }
         Out-Console "Fernbedienung: Handy '$nm' entfernt" 'Info'

@@ -207,7 +207,7 @@ function Start-HMAppFeedback([object[]]$Rows = @(), [ValidateSet('', 'Detected',
     $how = 'GitHub'
     if ($mail) {
         $m = "Rueckmeldung zu $($apps.Count) Programm(en) senden:`n`nJa = E-Mail an $mail (Mailprogramm, ohne Konto)`nNein = GitHub-Issue im Browser (GitHub-Konto noetig)`nAbbrechen = nichts tun`n`nDer Text ist vorausgefuellt - vor dem Senden ergaenzen. Es wird nichts automatisch gesendet."
-        $r = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'HUMig - Rueckmeldung', 'YesNoCancel', 'Question', 'Yes'))"
+        $r = "$((Show-HMDialogBox -Owner $script:Window -Text $m -Title 'HUMig - Rueckmeldung' -Mode 'YesNoCancel' -Icon 'Question' -Default 'Yes'))"
         if ($r -eq 'Cancel') { return }
         $how = if ($r -eq 'Yes') { 'Mail' } else { 'GitHub' }
     }
@@ -430,11 +430,12 @@ function Start-HMReinstallQueue($Win, [string]$Computer, [string[]]$PackageIds, 
     $wgs = @($all | Where-Object { "$_".StartsWith('winget:') -and $script:ReinstallWinget.ContainsKey("$_") } | ForEach-Object { $script:ReinstallWinget["$_"] })
     $ids = @($all | Where-Object { -not "$_".StartsWith('winget:') -and $script:ReinstallPackages.ContainsKey("$_") })
     $own = if ($Win) { $Win } else { $script:Window }
-    if (-not ($ids.Count + $wgs.Count)) { [void][System.Windows.MessageBox]::Show($own, 'Keine Zeile mit Paket markiert.', 'Installieren', 'OK', 'Information'); return $false }
-    if (($script:SwQueue -and $script:SwQueue.Count) -or $script:SwQueueThen) { [void][System.Windows.MessageBox]::Show($own, 'Es laeuft bereits eine Installations-Warteschlange.', 'Installieren', 'OK', 'Information'); return $false }
-    if ($wgs.Count -and $script:JobRunning) { [void][System.Windows.MessageBox]::Show($own, 'Es laeuft bereits ein Vorgang - WinGet-Installation danach erneut starten.', 'Installieren', 'OK', 'Information'); return $false }
+    if (-not ($ids.Count + $wgs.Count)) { [void](Show-HMDialogBox -Owner $own -Text 'Keine Zeile mit Paket markiert.' -Title 'Installieren' -Mode 'OK' -Icon 'Information'); return $false }
+    if (($script:SwQueue -and $script:SwQueue.Count) -or $script:SwQueueThen) { [void](Show-HMDialogBox -Owner $own -Text 'Es laeuft bereits eine Installations-Warteschlange.' -Title 'Installieren' -Mode 'OK' -Icon 'Information'); return $false }
+    if ($wgs.Count -and $script:JobRunning) { [void](Show-HMDialogBox -Owner $own -Text 'Es laeuft bereits ein Vorgang - WinGet-Installation danach erneut starten.' -Title 'Installieren' -Mode 'OK' -Icon 'Information'); return $false }
     $names = @($ids | ForEach-Object { "$($script:ReinstallPackages[$_].Settings.Name)" }) + @($wgs | ForEach-Object { "$($_.Name) (WinGet $($_.Id))" })
-    if (-not $NoConfirm -and "$([System.Windows.MessageBox]::Show($own, "$($names.Count) Programm(e) nacheinander an $Computer installieren?$(if ($wgs.Count) { "`nWinGet: aktuelle Version fuer alle Benutzer, nach den Paketen der Softwareverteilung." })`n`n$(($names | Select-Object -First 20) -join "`n")", 'Programme installieren', 'YesNo', 'Question'))" -ne 'Yes') { return $false }
+    $cfTxt = "$($names.Count) Programm(e) nacheinander an $Computer installieren?$(if ($wgs.Count) { "`nWinGet: aktuelle Version fuer alle Benutzer, nach den Paketen der Softwareverteilung." })`n`n$(($names | Select-Object -First 20) -join "`n")"
+    if (-not $NoConfirm -and (Show-HMDialogBox -Owner $own -Text $cfTxt -Title 'Programme installieren' -Mode 'YesNo' -Icon 'Question') -ne 'Yes') { return $false }
     $script:SwQueueThen = $null
     if ($wgs.Count) { $script:SwQueueThen = @{ Computer = $Computer; Items = @($wgs) } }
     if (-not $ids.Count) { $t = $script:SwQueueThen; $script:SwQueueThen = $null; Start-HMAuInstall $t.Computer $t.Items; return $true }
@@ -496,7 +497,7 @@ function Start-HMRestorePrep([hashtable]$Ctx) {
             $msg = "An $($c.Computer) fehlen $miss Programm(e) zu den angehakten Modulen, $($plan.Installable) davon installierbar (Softwareverteilung/WinGet):`n`n$(($names | Select-Object -First 15) -join "`n")$(if ($names.Count -gt 15) { "`n  ..." })`n`n" +
                 "Microsoft empfiehlt, Programme VOR dem Zurueckspielen der Einstellungen zu installieren.`n`n" +
                 "Ja = zuerst installieren, danach startet der Restore automatisch`nNein = nur Restore (Programm-Module fehlender Programme werden ausgelassen)`nAbbrechen = nichts tun"
-            $a = "$([System.Windows.MessageBox]::Show($script:Window, $msg, 'Restore - fehlende Programme', 'YesNoCancel', 'Question', 'Yes'))"
+            $a = "$((Show-HMDialogBox -Owner $script:Window -Text $msg -Title 'Restore - fehlende Programme' -Mode 'YesNoCancel' -Icon 'Question' -Default 'Yes'))"
             if ($a -eq 'Cancel') { Out-Console 'Restore abgebrochen.' 'Warning'; return }
             if ($a -eq 'Yes') {
                 $script:RestoreAfterInstall = $c

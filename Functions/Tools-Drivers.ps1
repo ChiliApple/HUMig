@@ -595,8 +595,8 @@ function Show-DriverLocks([string]$Computer, [string]$Remove = '') {
             -Actions @(@{ Text = 'Sperre aufheben (markierte, nur HUMig)'; Color = '#FFFAB387'; Handler = {
                 param($rows, $win, $ctx)
                 $sel = @(@($rows) | Where-Object { "$($_.Von)" -eq 'HUMig' } | ForEach-Object { "$($_.'Hardware-ID')" })
-                if (-not $sel.Count) { [void][System.Windows.MessageBox]::Show($win, "Nur von HUMig gesetzte Sperren koennen hier aufgehoben werden.`n`nAndere kommen aus einer Richtlinie (GPO/Intune) oder wurden von Hand gesetzt.", 'Geraete-Sperre', 'OK', 'Information'); return }
-                if ("$([System.Windows.MessageBox]::Show($win, "Sperre fuer $($sel.Count) Hardware-ID(s) an $($ctx.Computer) aufheben?`n`nDanach kann Windows Update den Treiber wieder ersetzen.", 'Geraete-Sperre', 'YesNo', 'Question'))" -ne 'Yes') { return }
+                if (-not $sel.Count) { [void](Show-HMDialogBox -Owner $win -Text "Nur von HUMig gesetzte Sperren koennen hier aufgehoben werden.`n`nAndere kommen aus einer Richtlinie (GPO/Intune) oder wurden von Hand gesetzt." -Title 'Geraete-Sperre' -Mode 'OK' -Icon 'Information'); return }
+                if ("$((Show-HMDialogBox -Owner $win -Text ("Sperre fuer $($sel.Count) Hardware-ID(s) an $($ctx.Computer) aufheben?`n`nDanach kann Windows Update den Treiber wieder ersetzen.") -Title 'Geraete-Sperre' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
                 $win.Close()
                 Show-DriverLocks -Computer $ctx.Computer -Remove ($sel -join '|')
             } })
@@ -770,7 +770,7 @@ function Start-DriverDeploy {
                 -Actions @(@{ Text = 'Erneut installieren (markierte)'; Color = '#FFFAB387'; Handler = {
                     param($rows, $win, $ctx)
                     $h = @(@($rows) | ForEach-Object { "$($_.Computer)" })
-                    if ("$([System.Windows.MessageBox]::Show($win, "Treiber '$($ctx.Package.Settings.Name)' erneut auf $($h.Count) PC(s) installieren?", 'Treiberverteilung', 'YesNo', 'Question'))" -ne 'Yes') { return }
+                    if ("$((Show-HMDialogBox -Owner $win -Text ("Treiber '$($ctx.Package.Settings.Name)' erneut auf $($h.Count) PC(s) installieren?") -Title 'Treiberverteilung' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
                     Start-DriverDeploy -Hosts $h -Package $ctx.Package -Force ([bool]$ctx.Force) -Label 'Wiederholung'
                 } })
         }
@@ -937,15 +937,15 @@ function Save-DrvForm {
     $i = $dw.Lst.SelectedIndex
     if ($i -lt 0 -or $i -ge $dw.Pkgs.Count) { return $null }
     $p = $dw.Pkgs[$i]
-    try { $set = Get-DrvFormSettings } catch { [void][System.Windows.MessageBox]::Show($dw.Win, "$($_.Exception.Message)", 'Treiberverteilung', 'OK', 'Warning'); return $null }
+    try { $set = Get-DrvFormSettings } catch { [void](Show-HMDialogBox -Owner $dw.Win -Text ("$($_.Exception.Message)") -Title 'Treiberverteilung' -Mode 'OK' -Icon 'Warning'); return $null }
     if ($set.Mode -eq 'Setup' -and -not $set.Arguments) {
-        if ("$([System.Windows.MessageBox]::Show($dw.Win, "Keine Parameter fuer das Setup angegeben.`n`nOhne Silent-Parameter kann das Setup am Client unsichtbar auf eine Eingabe warten (bis zum Timeout).`n`nTrotzdem speichern?", 'Treiberverteilung', 'YesNo', 'Warning'))" -ne 'Yes') { return $null }
+        if ("$((Show-HMDialogBox -Owner $dw.Win -Text "Keine Parameter fuer das Setup angegeben.`n`nOhne Silent-Parameter kann das Setup am Client unsichtbar auf eine Eingabe warten (bis zum Timeout).`n`nTrotzdem speichern?" -Title 'Treiberverteilung' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return $null }
     }
     if ($set.Mode -eq 'Inf' -and $set.ForceDriver -and -not [bool]$p.Settings.ForceDriver) {
-        if ("$([System.Windows.MessageBox]::Show($dw.Win, "Treiber erzwingen: Diese Version wird auf passende Geraete installiert, auch wenn Windows einen neueren oder besser bewerteten Treiber hat.`n`nNur verwenden, wenn genau diese Version gewuenscht ist. Weiter?", 'Treiberverteilung', 'YesNo', 'Warning'))" -ne 'Yes') { return $null }
+        if ("$((Show-HMDialogBox -Owner $dw.Win -Text "Treiber erzwingen: Diese Version wird auf passende Geraete installiert, auch wenn Windows einen neueren oder besser bewerteten Treiber hat.`n`nNur verwenden, wenn genau diese Version gewuenscht ist. Weiter?" -Title 'Treiberverteilung' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return $null }
     }
     if ($set.ProtectDriver -and -not [bool]$p.Settings.ProtectDriver) {
-        if ("$([System.Windows.MessageBox]::Show($dw.Win, "Vor Treiber-Updates schuetzen:`n`nNach der Installation setzt HUMig am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die betroffenen Geraete. Windows Update (und jede andere Treiber-Installation) aendert den Treiber dieser Geraete dann nicht mehr.`n`n- Nur Windows Pro, Education und Enterprise (bei Home wird nichts gesetzt).`n- Eine GPO/Intune-Richtlinie zur Geraeteinstallation ueberschreibt die lokale Einstellung.`n- Neue Treiber aus HUMig: die Sperre wird dafuer automatisch kurz aufgehoben.`n- Aufheben: 'Sperren am PC ...'.`n`nWeiter?", 'Treiberverteilung', 'YesNo', 'Question'))" -ne 'Yes') { return $null }
+        if ("$((Show-HMDialogBox -Owner $dw.Win -Text "Vor Treiber-Updates schuetzen:`n`nNach der Installation setzt HUMig am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die betroffenen Geraete. Windows Update (und jede andere Treiber-Installation) aendert den Treiber dieser Geraete dann nicht mehr.`n`n- Nur Windows Pro, Education und Enterprise (bei Home wird nichts gesetzt).`n- Eine GPO/Intune-Richtlinie zur Geraeteinstallation ueberschreibt die lokale Einstellung.`n- Neue Treiber aus HUMig: die Sperre wird dafuer automatisch kurz aufgehoben.`n- Aufheben: 'Sperren am PC ...'.`n`nWeiter?" -Title 'Treiberverteilung' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return $null }
     }
     if (-not (Save-DrvSettings $p $set)) { return $null }
     Out-Console "Treiberverteilung: Einstellungen fuer '$($set.Name)' gespeichert" 'Success'
@@ -1066,7 +1066,7 @@ function Show-DriverWindow {
             if ($rel -notmatch '\\') { Out-Console "Treiberverteilung: '$rel' liegt schon im Treiber-Ordner - ist bereits ein Paket" 'Info'; Update-DrvWindowList "$rel\"; return }
             $pkgName = ($rel -split '\\')[0]
             $leaf = Split-Path -Leaf $src
-            $ans = "$([System.Windows.MessageBox]::Show($script:DrvUi.Win, "Der Ordner liegt innerhalb des Pakets '$pkgName':`n`n$src`n`nJa = als eigenes Paket '$leaf' direkt in den Treiber-Ordner VERSCHIEBEN (dann nicht mehr Teil von '$pkgName')`nNein = abbrechen (im Paket '$pkgName' kann die Art 'INF (pnputil)' gewaehlt werden - die INF-Dateien werden dort auch gefunden)", 'Treiberverteilung', 'YesNo', 'Question'))"
+            $ans = "$((Show-HMDialogBox -Owner $script:DrvUi.Win -Text "Der Ordner liegt innerhalb des Pakets '$pkgName':`n`n$src`n`nJa = als eigenes Paket '$leaf' direkt in den Treiber-Ordner VERSCHIEBEN (dann nicht mehr Teil von '$pkgName')`nNein = abbrechen (im Paket '$pkgName' kann die Art 'INF (pnputil)' gewaehlt werden - die INF-Dateien werden dort auch gefunden)" -Title 'Treiberverteilung' -Mode 'YesNo' -Icon 'Question'))"
             if ($ans -ne 'Yes') { return }
             $dstName = Get-DrvFreeName $leaf
             try {
@@ -1078,7 +1078,7 @@ function Show-DriverWindow {
         }
         $n = @(Get-ChildItem -LiteralPath $src -Recurse -File -Filter *.inf -ErrorAction SilentlyContinue | Select-Object -First 1).Count
         $e = @(Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe', '.msi' } | Select-Object -First 1).Count
-        if (-not $n -and -not $e) { [void][System.Windows.MessageBox]::Show($script:DrvUi.Win, "Im Ordner sind weder INF-Dateien noch ein Setup (EXE/MSI).`n`n$src", 'Treiberverteilung', 'OK', 'Warning'); return }
+        if (-not $n -and -not $e) { [void](Show-HMDialogBox -Owner $script:DrvUi.Win -Text "Im Ordner sind weder INF-Dateien noch ein Setup (EXE/MSI).`n`n$src" -Title 'Treiberverteilung' -Mode 'OK' -Icon 'Warning'); return }
         Add-DrvPackage -Source $src -Kind 'Folder'
     })
     $w.FindName('btnAddFile').Add_Click({

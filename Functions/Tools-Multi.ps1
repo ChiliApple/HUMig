@@ -227,7 +227,7 @@ function Show-HMMultiDialogCore {
         $s = $script:MultiDlg
         $s.Dg.CommitEdit(); $s.Dg.CommitEdit()
         $hosts = @($s.Dt.Rows | Where-Object { $_.Sel -eq $true } | ForEach-Object { "$($_.Name)" })
-        if (-not $hosts.Count) { [void][System.Windows.MessageBox]::Show($s.W, 'Bitte PCs anhaken (Spalte X, Leertaste fuer markierte Zeilen).', 'Aktion', 'OK', 'Information'); return }
+        if (-not $hosts.Count) { [void](Show-HMDialogBox -Owner $s.W -Text 'Bitte PCs anhaken (Spalte X, Leertaste fuer markierte Zeilen).' -Title 'Aktion' -Mode 'OK' -Icon 'Information'); return }
         if ($script:MultiPick) {
             $script:MultiHosts = $hosts
             $on = $script:MultiPick.On; $script:MultiPick = $null
@@ -235,7 +235,7 @@ function Show-HMMultiDialogCore {
             & $on $hosts
             return
         }
-        if ($s.Lst.SelectedIndex -lt 0) { [void][System.Windows.MessageBox]::Show($s.W, 'Bitte rechts eine Aktion waehlen.', 'Aktion', 'OK', 'Information'); return }
+        if ($s.Lst.SelectedIndex -lt 0) { [void](Show-HMDialogBox -Owner $s.W -Text 'Bitte rechts eine Aktion waehlen.' -Title 'Aktion' -Mode 'OK' -Icon 'Information'); return }
         $script:MultiHosts = $hosts
         $act = $script:HMMultiActions[$s.Lst.SelectedIndex]
         Invoke-HMMultiAction $hosts $act.Key $act.Text $s.W
@@ -385,7 +385,7 @@ function Invoke-HMMultiRemote {
 # Auswahl im Geraete-Dialog auf diese PCs setzen (nur diese angehakt); Dialog geschlossen -> wieder oeffnen mit genau dieser Auswahl
 function Set-HMMultiSelection([string[]]$Names, [string]$What = '') {
     $names = @($Names | ForEach-Object { "$_".Trim() } | Where-Object { $_ } | Select-Object -Unique)
-    if (-not $names.Count) { [void][System.Windows.MessageBox]::Show($script:Window, "Keine PCs zum Uebernehmen$(if ($What) { " ($What)" }).", 'Geraete', 'OK', 'Information'); return }
+    if (-not $names.Count) { [void](Show-HMDialogBox -Owner $script:Window -Text ("Keine PCs zum Uebernehmen$(if ($What) { " ($What)" }).") -Title 'Geraete' -Mode 'OK' -Icon 'Information'); return }
     $script:MultiHosts = $names
     $s = $script:MultiDlg
     if (-not ($s -and $s.W -and $s.W.IsLoaded)) { Show-HMMultiDialog; return }
@@ -607,7 +607,7 @@ function New-HMSharesOnTarget($Win, [string]$Computer, [string[]]$Names, [bool]$
     $lines = @(foreach ($x in $sel) { $w = & $warnOf $x; "$(if ($w) { "ACHTUNG ($w): " })$($x.Name)  ->  $($x.Path)" })
     $nWarn = @($lines | Where-Object { $_ -like 'ACHTUNG*' }).Count
     $q = "$(if ($nWarn) { "ACHTUNG: $nWarn Freigabe(n) mit Systemordner oder Vollzugriff fuer Jeder/Benutzer - nur anlegen, wenn du dem Backup vertraust.`n`n" })$($sel.Count) Freigabe(n) an $Computer anlegen?$(if ($Ntfs) { "`n`nNTFS-Rechte werden auf die Ordner GESETZT (ersetzt die vorhandenen). Konten, die am Ziel unbekannt sind (lokale Konten des alten PCs), fallen weg." })`n`n$($lines -join "`n")"
-    if ("$([System.Windows.MessageBox]::Show($Win, $q, 'Freigaben uebernehmen', 'YesNo', 'Question'))" -ne 'Yes') { return }
+    if ("$((Show-HMDialogBox -Owner $Win -Text $q -Title 'Freigaben uebernehmen' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
     $json = ConvertTo-Json -InputObject @($sel) -Depth 5 -Compress
     Invoke-HMTool -Title 'Freigaben anlegen' -Computer $Computer -ArgumentList @($json, $Ntfs) -Script $script:HMShareCreateScript
 }

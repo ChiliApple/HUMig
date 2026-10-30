@@ -180,7 +180,7 @@ function Show-HMAwPickProgram([object[]]$Software, [hashtable]$St) {
     $row = @($rows | Where-Object { $_.Tag -eq $sel[0] })[0]
     $hit = @($script:AppCatalog | Where-Object { "$($_.Detect)" -and $(try { $row.Tag -match "$($_.Detect)" } catch { $false }) } | Select-Object -First 1)
     if ($hit.Count) {
-        $a = "$([System.Windows.MessageBox]::Show($owner, "'$($row.Tag)' ist schon im Katalog: $($hit[0].Name)`n`nJa = diesen Eintrag im Editor bearbeiten`nNein = trotzdem einen neuen Eintrag anlegen", 'Programm hinzufuegen', 'YesNoCancel', 'Question'))"
+        $a = "$((Show-HMDialogBox -Owner $owner -Text ("'$($row.Tag)' ist schon im Katalog: $($hit[0].Name)`n`nJa = diesen Eintrag im Editor bearbeiten`nNein = trotzdem einen neuen Eintrag anlegen") -Title 'Programm hinzufuegen' -Mode 'YesNoCancel' -Icon 'Question'))"
         if ($a -eq 'Cancel') { return }
         if ($a -eq 'Yes') {
             if ($St.ForEditor -and $script:Ae) { if (Confirm-HMAeDiscard) { Select-HMAeListItem "$($hit[0].Id)" } } else { Show-HMAppEditor -SelectId "$($hit[0].Id)" }
@@ -339,11 +339,11 @@ function Complete-HMAw([string]$Mode) {
         while (@($script:Ae.All | Where-Object { $_.Id -ieq $obj.Id }).Count) { $obj.Id = "$base$c"; $c++ }
         $err = @(Test-HMAeEntry (ConvertTo-HMAeEntry $obj) $true)
         if (-not @($obj.Items).Count) { $err = @('Nichts angehakt - mindestens einen Ordner oder Registry-Schluessel waehlen (oder Erweitert).') + $err }
-        if ($err.Count) { [void][System.Windows.MessageBox]::Show($aw.Win, "Bitte korrigieren:`n`n- $($err -join "`n- ")", 'Programm hinzufuegen', 'OK', 'Warning'); return }
+        if ($err.Count) { [void](Show-HMDialogBox -Owner $aw.Win -Text ("Bitte korrigieren:`n`n- $($err -join "`n- ")") -Title 'Programm hinzufuegen' -Mode 'OK' -Icon 'Warning'); return }
         $obj = ConvertFrom-HMAeEntry (ConvertTo-HMAeEntry $obj)   # gleiche Form wie aus dem Editor
         Write-HMAeLocal (@($script:Ae.Local) + @($obj))
     } catch {
-        [void][System.Windows.MessageBox]::Show($aw.Win, "Speichern fehlgeschlagen: $($_.Exception.Message)", 'Programm hinzufuegen', 'OK', 'Error'); return
+        [void](Show-HMDialogBox -Owner $aw.Win -Text ("Speichern fehlgeschlagen: $($_.Exception.Message)") -Title 'Programm hinzufuegen' -Mode 'OK' -Icon 'Error'); return
     } finally { $script:Ae = $null }
     Out-Console "Programm-Katalog: '$($obj.Name)' hinzugefuegt ($(@($obj.Items).Count) Eintraege$(if ($obj.CloseProcess) { ", schliesst $(@($obj.CloseProcess) -join ', ')" })) - Config\apps.json" 'Success'
     $aw.Result = @{ Mode = 'Saved'; Obj = $obj }

@@ -132,26 +132,26 @@ function Show-HMBsDialog([string]$Info, [string]$DefaultName, [string]$EjectInfo
     $res = @{ V = $null }
     $w.FindName('ok').Add_Click({
         $name = "$($txtName.Text)".Trim()
-        if (-not $name -or $name -match '[\\/:*?"<>|]') { [void][System.Windows.MessageBox]::Show($w, 'Bitte einen Namen ohne \ / : * ? " < > | eingeben.', 'Zeitplan', 'OK', 'Warning'); return }
+        if (-not $name -or $name -match '[\\/:*?"<>|]') { [void](Show-HMDialogBox -Owner $w -Text 'Bitte einen Namen ohne \ / : * ? " < > | eingeben.' -Title 'Zeitplan' -Mode 'OK' -Icon 'Warning'); return }
         $mode = if ($rbLogon.IsChecked) { 'Logon' } elseif ($rbWeekly.IsChecked) { 'Weekly' } else { 'Daily' }
         $t = [datetime]::MinValue; $delay = 0; $sel = @()
         if ($mode -ne 'Logon') {
             if (-not [datetime]::TryParseExact("$($txtTime.Text)".Trim(), 'H:mm', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$t)) {
-                [void][System.Windows.MessageBox]::Show($w, 'Uhrzeit bitte als HH:MM eingeben (z.B. 12:30).', 'Zeitplan', 'OK', 'Warning'); return
+                [void](Show-HMDialogBox -Owner $w -Text 'Uhrzeit bitte als HH:MM eingeben (z.B. 12:30).' -Title 'Zeitplan' -Mode 'OK' -Icon 'Warning'); return
             }
         } elseif (-not [int]::TryParse("$($txtDelay.Text)".Trim(), [ref]$delay) -or $delay -lt 0 -or $delay -gt 240) {
-            [void][System.Windows.MessageBox]::Show($w, 'Verzoegerung bitte als Minuten 0-240 eingeben.', 'Zeitplan', 'OK', 'Warning'); return
+            [void](Show-HMDialogBox -Owner $w -Text 'Verzoegerung bitte als Minuten 0-240 eingeben.' -Title 'Zeitplan' -Mode 'OK' -Icon 'Warning'); return
         }
         if ($mode -eq 'Weekly') {
             $sel = @($pnl.Children | Where-Object { $_.IsChecked } | ForEach-Object { "$($_.Tag)" })
-            if (-not $sel.Count) { [void][System.Windows.MessageBox]::Show($w, 'Mindestens einen Wochentag waehlen.', 'Zeitplan', 'OK', 'Warning'); return }
+            if (-not $sel.Count) { [void](Show-HMDialogBox -Owner $w -Text 'Mindestens einen Wochentag waehlen.' -Title 'Zeitplan' -Mode 'OK' -Icon 'Warning'); return }
         }
         $keep = 0
         if ($chkRet.IsChecked -and (-not [int]::TryParse("$($txtKeep.Text)".Trim(), [ref]$keep) -or $keep -lt 1 -or $keep -gt 999)) {
-            [void][System.Windows.MessageBox]::Show($w, 'Anzahl der Backups, die bleiben sollen: 1-999.', 'Zeitplan', 'OK', 'Warning'); return
+            [void](Show-HMDialogBox -Owner $w -Text 'Anzahl der Backups, die bleiben sollen: 1-999.' -Title 'Zeitplan' -Mode 'OK' -Icon 'Warning'); return
         }
         if ($rbLogon.IsChecked -and $chkClose.IsChecked) {
-            if ("$([System.Windows.MessageBox]::Show($w, "Bei Anmeldung laeuft das Backup kurz nach dem Anmelden - dann werden Outlook und Browser mitten in der Arbeit geschlossen (Browser notfalls beendet).`n`nTrotzdem so planen?", 'Zeitplan', 'YesNo', 'Warning', 'No'))" -ne 'Yes') { return }
+            if ("$((Show-HMDialogBox -Owner $w -Text "Bei Anmeldung laeuft das Backup kurz nach dem Anmelden - dann werden Outlook und Browser mitten in der Arbeit geschlossen (Browser notfalls beendet).`n`nTrotzdem so planen?" -Title 'Zeitplan' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { return }
         }
         $res.V = @{ Name = $name; Kind = $(if ($rbUpdate.IsChecked) { 'Update' } else { 'New' }); Mode = $mode; Time = $(if ($mode -ne 'Logon') { $t.ToString('HH:mm') } else { '' })
             Days = $sel; Delay = $delay; RetEnabled = [bool]$chkRet.IsChecked; Keep = $(if ($chkRet.IsChecked) { $keep } else { 3 }); NotifyAlways = [bool]$chkNotify.IsChecked; EjectAfter = ([bool]$chkEject.IsChecked -and [bool]$chkEject.IsEnabled); CloseApps = [bool]$chkClose.IsChecked }

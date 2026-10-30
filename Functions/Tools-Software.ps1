@@ -685,7 +685,7 @@ function Start-SoftwareDeploy {
                 -Actions @(@{ Text = 'Erneut installieren (markierte)'; Color = '#FFFAB387'; Handler = {
                     param($rows, $win, $ctx)
                     $h = @(@($rows) | ForEach-Object { "$($_.Computer)" })
-                    if ("$([System.Windows.MessageBox]::Show($win, "Paket '$($ctx.Package.Settings.Name)' erneut auf $($h.Count) PC(s) installieren?", 'Softwareverteilung', 'YesNo', 'Question'))" -ne 'Yes') { return }
+                    if ("$((Show-HMDialogBox -Owner $win -Text ("Paket '$($ctx.Package.Settings.Name)' erneut auf $($h.Count) PC(s) installieren?") -Title 'Softwareverteilung' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
                     Start-SoftwareDeploy -Hosts $h -Package $ctx.Package -Force ([bool]$ctx.Force) -Label 'Wiederholung'
                 } })
         }
@@ -1015,9 +1015,9 @@ function Save-SwForm {
     $i = $sw.Lst.SelectedIndex
     if ($i -lt 0 -or $i -ge $sw.Pkgs.Count) { return $null }
     $p = $sw.Pkgs[$i]
-    try { $set = Get-SwFormSettings } catch { [void][System.Windows.MessageBox]::Show($sw.Win, "$($_.Exception.Message)", 'Softwareverteilung', 'OK', 'Warning'); return $null }
+    try { $set = Get-SwFormSettings } catch { [void](Show-HMDialogBox -Owner $sw.Win -Text ("$($_.Exception.Message)") -Title 'Softwareverteilung' -Mode 'OK' -Icon 'Warning'); return $null }
     if ($p.Type -eq 'EXE' -and -not $set.Arguments) {
-        if ("$([System.Windows.MessageBox]::Show($sw.Win, "Keine Parameter fuer die EXE angegeben.`n`nOhne Silent-Parameter kann der Installer am Client unsichtbar auf eine Eingabe warten (bis zum Timeout).`n`nTrotzdem speichern?", 'Softwareverteilung', 'YesNo', 'Warning'))" -ne 'Yes') { return $null }
+        if ("$((Show-HMDialogBox -Owner $sw.Win -Text "Keine Parameter fuer die EXE angegeben.`n`nOhne Silent-Parameter kann der Installer am Client unsichtbar auf eine Eingabe warten (bis zum Timeout).`n`nTrotzdem speichern?" -Title 'Softwareverteilung' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return $null }
     }
     # Sandbox-Ergebnis bleibt erhalten (Signatur entscheidet, ob es noch gilt)
     $set.Sandbox = $p.Settings.Sandbox
@@ -1082,7 +1082,7 @@ function Select-SwDependencies {
     if ($i -lt 0 -or $i -ge $sw.Pkgs.Count) { return }
     $p = $sw.Pkgs[$i]
     $cand = @($sw.Pkgs | Where-Object { $_.Id -ne $p.Id -and -not (Test-SwDependsOn $_ $p.Id $sw.Pkgs) })
-    if (-not $cand.Count) { [void][System.Windows.MessageBox]::Show($sw.Win, 'Keine weiteren Pakete im Ordner Softwareverteilung (oder alle haengen von diesem Paket ab).', 'Abhaengigkeiten', 'OK', 'Information'); return }
+    if (-not $cand.Count) { [void](Show-HMDialogBox -Owner $sw.Win -Text 'Keine weiteren Pakete im Ordner Softwareverteilung (oder alle haengen von diesem Paket ab).' -Title 'Abhaengigkeiten' -Mode 'OK' -Icon 'Information'); return }
     $items = @($cand | ForEach-Object { [pscustomobject]@{ Title = "$($_.Settings.Name)"; Sub = "$($_.Id)   [$($_.Type)]"; Id = "$($_.Id)" } })
     $sel = Show-SwPickList -Title 'Abhaengigkeiten' -Multi -Owner $sw.Win -Items $items -Selected @($sw.Deps) `
         -Hint "Diese Pakete werden vorher auf denselben PCs installiert (bereits vorhandene werden uebersprungen). Anklicken = auswaehlen/abwaehlen. Danach 'Speichern'."
@@ -1116,10 +1116,10 @@ function Start-SwSandboxRecheck([int]$Seconds = 10) {
 
 function Start-SwSandboxTest {
     $sw = $script:SwUi; if (-not $sw) { return }
-    if ($script:SwSb) { [void][System.Windows.MessageBox]::Show($sw.Win, 'Es laeuft bereits eine Testinstallation.', 'Sandbox', 'OK', 'Information'); return }
-    if ($script:SwWg) { [void][System.Windows.MessageBox]::Show($sw.Win, 'WinGet arbeitet noch - bitte warten.', 'Sandbox', 'OK', 'Information'); return }
+    if ($script:SwSb) { [void](Show-HMDialogBox -Owner $sw.Win -Text 'Es laeuft bereits eine Testinstallation.' -Title 'Sandbox' -Mode 'OK' -Icon 'Information'); return }
+    if ($script:SwWg) { [void](Show-HMDialogBox -Owner $sw.Win -Text 'WinGet arbeitet noch - bitte warten.' -Title 'Sandbox' -Mode 'OK' -Icon 'Information'); return }
     foreach ($fn in 'Test-HMSandboxAvailable', 'Show-HMSandboxSetup', 'Test-HMSandboxBusy', 'Start-HMSandboxTest', 'Get-HMSandboxProgress', 'Get-HMSandboxSummary') {
-        if (-not (Get-Command $fn -ErrorAction SilentlyContinue)) { [void][System.Windows.MessageBox]::Show($sw.Win, "Sandbox-Funktion fehlt ($fn) - HUMig unvollstaendig?", 'Sandbox', 'OK', 'Warning'); return }
+        if (-not (Get-Command $fn -ErrorAction SilentlyContinue)) { [void](Show-HMDialogBox -Owner $sw.Win -Text "Sandbox-Funktion fehlt ($fn) - HUMig unvollstaendig?" -Title 'Sandbox' -Mode 'OK' -Icon 'Warning'); return }
     }
     # Inno-Setup: fuer alle Benutzer installieren (sonst landet das Programm im Benutzerprofil des ausfuehrenden Kontos)
     $i0 = $sw.Lst.SelectedIndex
@@ -1134,7 +1134,7 @@ function Start-SwSandboxTest {
     }
     $p = Save-SwForm; if (-not $p) { return }
     if (-not (Test-HMSandboxAvailable)) { Show-HMSandboxSetup -Owner $sw.Win; return }
-    if (Test-HMSandboxBusy) { [void][System.Windows.MessageBox]::Show($sw.Win, 'Es laeuft bereits eine Windows Sandbox - bitte zuerst schliessen.', 'Sandbox', 'OK', 'Information'); Update-SwSandboxButton; return }
+    if (Test-HMSandboxBusy) { [void](Show-HMDialogBox -Owner $sw.Win -Text 'Es laeuft bereits eine Windows Sandbox - bitte zuerst schliessen.' -Title 'Sandbox' -Mode 'OK' -Icon 'Information'); Update-SwSandboxButton; return }
     $testUn = [bool]$sw.ChkSbUninst.IsChecked; $keep = [bool]$sw.ChkSbKeep.IsChecked
     $sig = Get-SwPackageSignature -Package $p
     $script:SwSb = @{ Job = $null; Phase = 'Copy'; Package = $p; Id = $p.Id; Name = "$($p.Settings.Name)"; Signature = $sig; TestUn = $testUn; KeepOpen = $keep; Started = (Get-Date); Sync = $null; LastLog = (Get-Date) }
@@ -1279,7 +1279,7 @@ function Complete-SwSandboxTest($Watch, $Result) {
         $msg = "Testinstallation '$($pk.Settings.Name)': $lvl`n`nVorschlag:`n  $(@($changes | ForEach-Object { $_.Text }) -join "`n  ")"
         if ($warn.Count) { $msg += "`n`nACHTUNG:`n  $($warn -join "`n  ")" }
         $msg += "`n`nIns Paket uebernehmen und speichern?"
-        if ("$([System.Windows.MessageBox]::Show($own, $msg, 'Testinstallation', 'YesNo', 'Question'))" -eq 'Yes') {
+        if ("$((Show-HMDialogBox -Owner $own -Text $msg -Title 'Testinstallation' -Mode 'YesNo' -Icon 'Question'))" -eq 'Yes') {
             foreach ($c in $changes) { $set[$c.Field] = $c.Value }
             $taken = $true
         }
@@ -1313,7 +1313,7 @@ function Invoke-SwTargetAction([string]$Kind, [bool]$Multi) {
     $sw = $script:SwUi; if (-not $sw) { return }
     $p = Save-SwForm; if (-not $p) { return }
     if ($Kind -eq 'Uninstall' -and -not (Get-SwUninstallItem $p)) {
-        [void][System.Windows.MessageBox]::Show($sw.Win, "Fuer '$($p.Settings.Name)' ist kein Deinstallationsbefehl hinterlegt.`n`nFeld 'Deinstallation' ausfuellen (z.B. `"C:\Program Files\X\uninstall.exe`" /S) - oder die Testinstallation in der Sandbox mit 'Deinstallation mittesten' ermittelt ihn.", 'Deinstallation', 'OK', 'Information')
+        [void](Show-HMDialogBox -Owner $sw.Win -Text ("Fuer '$($p.Settings.Name)' ist kein Deinstallationsbefehl hinterlegt.`n`nFeld 'Deinstallation' ausfuellen (z.B. `"C:\Program Files\X\uninstall.exe`" /S) - oder die Testinstallation in der Sandbox mit 'Deinstallation mittesten' ermittelt ihn.") -Title 'Deinstallation' -Mode 'OK' -Icon 'Information')
         return
     }
     if (-not $Multi) {
@@ -1345,7 +1345,7 @@ function Invoke-SwAddItems([string[]]$Paths) {
     $r = Add-SwItems -Paths $Paths -Dest (Get-SwFolder)
     foreach ($a in $r.Added) { Out-Console "Softwareverteilung: $a hinzugefuegt" 'Success' }
     foreach ($x in $r.Skipped) { Out-Console "Softwareverteilung: nicht uebernommen - $x" 'Warning' }
-    if ($r.Skipped.Count -and $script:SwUi) { [void][System.Windows.MessageBox]::Show($script:SwUi.Win, "Nicht uebernommen:`n  $($r.Skipped -join "`n  ")", 'Softwareverteilung', 'OK', 'Information') }
+    if ($r.Skipped.Count -and $script:SwUi) { [void](Show-HMDialogBox -Owner $script:SwUi.Win -Text ("Nicht uebernommen:`n  $($r.Skipped -join "`n  ")") -Title 'Softwareverteilung' -Mode 'OK' -Icon 'Information') }
     Update-SwWindowList $(if ($r.Added.Count) { $r.Added[0] } else { '' })
 }
 
@@ -1365,10 +1365,10 @@ function Get-SwWingetSeconds { if ($script:SwWg) { return [int]((Get-Date) - $sc
 function Update-SwFromWinget {
     $sw = $script:SwUi; if (-not $sw) { return }
     foreach ($fn in 'Get-HMWingetLatest', 'Save-HMWingetInstaller', 'Find-HMWingetId', 'Invoke-HMWingetAsync', 'ConvertTo-HMAsyncResult') {
-        if (-not (Get-Command $fn -ErrorAction SilentlyContinue)) { [void][System.Windows.MessageBox]::Show($sw.Win, "WinGet-Funktion fehlt ($fn) - HUMig unvollstaendig?", 'WinGet', 'OK', 'Warning'); return }
+        if (-not (Get-Command $fn -ErrorAction SilentlyContinue)) { [void](Show-HMDialogBox -Owner $sw.Win -Text "WinGet-Funktion fehlt ($fn) - HUMig unvollstaendig?" -Title 'WinGet' -Mode 'OK' -Icon 'Warning'); return }
     }
-    if ($script:SwWg) { [void][System.Windows.MessageBox]::Show($sw.Win, "WinGet arbeitet noch ($($script:SwWg.Text)) - bitte warten.", 'WinGet', 'OK', 'Information'); return }
-    if ($script:SwSb -and "$($script:SwSb.Phase)" -eq 'Copy') { [void][System.Windows.MessageBox]::Show($sw.Win, 'Das Paket wird gerade fuer die Sandbox kopiert - bitte warten.', 'WinGet', 'OK', 'Information'); return }
+    if ($script:SwWg) { [void](Show-HMDialogBox -Owner $sw.Win -Text ("WinGet arbeitet noch ($($script:SwWg.Text)) - bitte warten.") -Title 'WinGet' -Mode 'OK' -Icon 'Information'); return }
+    if ($script:SwSb -and "$($script:SwSb.Phase)" -eq 'Copy') { [void](Show-HMDialogBox -Owner $sw.Win -Text 'Das Paket wird gerade fuer die Sandbox kopiert - bitte warten.' -Title 'WinGet' -Mode 'OK' -Icon 'Information'); return }
     $p = Save-SwForm; if (-not $p) { return }
     $own = $sw.Win
     $id = "$($p.Settings.WingetId)".Trim()
@@ -1387,10 +1387,10 @@ function Complete-SwWingetFind($Result, $State) {
     Set-SwWingetWork ''
     $r = ConvertTo-HMAsyncResult $Result
     $own = if ($script:SwUi) { $script:SwUi.Win } else { $script:Window }
-    if (-not $r.Ok) { Out-Console "WinGet-Suche fehlgeschlagen ($secs s): $($r.Error)" 'Error'; [void][System.Windows.MessageBox]::Show($own, "WinGet-Suche fehlgeschlagen:`n$($r.Error)", 'WinGet', 'OK', 'Warning'); return }
+    if (-not $r.Ok) { Out-Console "WinGet-Suche fehlgeschlagen ($secs s): $($r.Error)" 'Error'; [void](Show-HMDialogBox -Owner $own -Text ("WinGet-Suche fehlgeschlagen:`n$($r.Error)") -Title 'WinGet' -Mode 'OK' -Icon 'Warning'); return }
     $hits = @($r.Value | Where-Object { $_ -and "$($_.Id)" })
     Out-Console "WinGet: $($hits.Count) Treffer fuer '$($State.Query)' ($secs s)" 'Info'
-    if (-not $hits.Count) { [void][System.Windows.MessageBox]::Show($own, "Im WinGet-Katalog nichts gefunden fuer '$($State.Query)'.", 'WinGet', 'OK', 'Information'); return }
+    if (-not $hits.Count) { [void](Show-HMDialogBox -Owner $own -Text ("Im WinGet-Katalog nichts gefunden fuer '$($State.Query)'.") -Title 'WinGet' -Mode 'OK' -Icon 'Information'); return }
     $sel = Show-SwPickList -Title 'WinGet-Paket waehlen' -Owner $own -Hint 'Passendes Paket waehlen (Doppelklick oder OK). Die ID wird im Paket gespeichert.' `
         -Items @($hits | ForEach-Object { [pscustomobject]@{ Title = "$($_.Name)"; Sub = "$($_.Id)   $($_.Version)"; Id = "$($_.Id)" } })
     if (-not $sel -or -not @($sel).Count) { return }
@@ -1420,17 +1420,17 @@ function Complete-SwWingetLatest($Result, $State) {
     $r = ConvertTo-HMAsyncResult $Result
     $own = if ($script:SwUi) { $script:SwUi.Win } else { $script:Window }
     $p = $State.Package; $id = $State.Id
-    if (-not $r.Ok) { Out-Console "WinGet ($secs s): $($r.Error)" 'Error'; [void][System.Windows.MessageBox]::Show($own, "WinGet: $($r.Error)", 'WinGet', 'OK', 'Warning'); return }
+    if (-not $r.Ok) { Out-Console "WinGet ($secs s): $($r.Error)" 'Error'; [void](Show-HMDialogBox -Owner $own -Text ("WinGet: $($r.Error)") -Title 'WinGet' -Mode 'OK' -Icon 'Warning'); return }
     $lat = @($r.Value) | Select-Object -First 1
     $lv = "$($lat.Version)".Trim()
-    if (-not $lv) { [void][System.Windows.MessageBox]::Show($own, "WinGet: keine Version fuer '$id' gefunden.", 'WinGet', 'OK', 'Information'); return }
+    if (-not $lv) { [void](Show-HMDialogBox -Owner $own -Text "WinGet: keine Version fuer '$id' gefunden." -Title 'WinGet' -Mode 'OK' -Icon 'Information'); return }
     $cv = "$($p.Info.Version)".Trim(); if (-not $cv -and "$($p.Settings.Name)" -match '\d+(\.\d+)+') { $cv = $Matches[0] }
     $cmp = Compare-SwVersion $lv $cv
     $q = if ($null -ne $cmp -and $cmp -le 0) { "WinGet '$id': aktuell $lv - das Paket hat bereits $cv.`n`nTrotzdem herunterladen?" } else { "WinGet '$id': neue Version $lv (Paket: $(if ($cv) { $cv } else { 'unbekannt' })).`n`nHerunterladen und ins Paket uebernehmen?" }
-    if ("$([System.Windows.MessageBox]::Show($own, $q, 'WinGet', 'YesNo', 'Question'))" -ne 'Yes') { return }
+    if ("$((Show-HMDialogBox -Owner $own -Text $q -Title 'WinGet' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
     $mode = 'dir'
     if (-not $p.IsDir) {
-        $a = "$([System.Windows.MessageBox]::Show($own, "Einzeldatei-Paket '$($p.Id)' - wohin mit der neuen Version?`n`nJa = als neue Datei in den Ordner Softwareverteilung (das alte Paket bleibt)`nNein = in einen neuen Unterordner (Ordner-Paket)`nAbbrechen = nichts tun", 'WinGet', 'YesNoCancel', 'Question'))"
+        $a = "$((Show-HMDialogBox -Owner $own -Text ("Einzeldatei-Paket '$($p.Id)' - wohin mit der neuen Version?`n`nJa = als neue Datei in den Ordner Softwareverteilung (das alte Paket bleibt)`nNein = in einen neuen Unterordner (Ordner-Paket)`nAbbrechen = nichts tun") -Title 'WinGet' -Mode 'YesNoCancel' -Icon 'Question'))"
         if ($a -eq 'Yes') { $mode = 'file' } elseif ($a -eq 'No') { $mode = 'sub' } else { return }
     }
     # MSI-Paket: wieder ein MSI holen (sonst wechselt die Erkennung per ProductCode ins Leere)
@@ -1504,7 +1504,7 @@ function Complete-SwWingetDownload($Result, $State) {
             'file' {
                 $dest = Join-Path $root $fn; $cfgPath = "$dest.hu.json"; $newId = $fn
                 if ((Test-Path -LiteralPath $dest) -and $dest -ine $p.SrcPath) {
-                    if ("$([System.Windows.MessageBox]::Show($own, "'$fn' gibt es schon in der Softwareverteilung. Ueberschreiben?", 'WinGet', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+                    if ("$((Show-HMDialogBox -Owner $own -Text "'$fn' gibt es schon in der Softwareverteilung. Ueberschreiben?" -Title 'WinGet' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
                 }
             }
             'sub' {
@@ -1529,7 +1529,7 @@ function Complete-SwWingetDownload($Result, $State) {
         Set-SwBusy $false
         if ($mode -eq 'dir' -and $oldInst -and $oldInst -ine $fn) {
             $old = Join-Path $p.SrcPath $oldInst
-            if ((Test-Path -LiteralPath $old) -and "$([System.Windows.MessageBox]::Show($own, "Alten Installer '$oldInst' aus dem Paketordner loeschen?`n(Sonst wird er weiterhin mit auf die PCs kopiert.)", 'WinGet', 'YesNo', 'Question'))" -eq 'Yes') {
+            if ((Test-Path -LiteralPath $old) -and "$((Show-HMDialogBox -Owner $own -Text "Alten Installer '$oldInst' aus dem Paketordner loeschen?`n(Sonst wird er weiterhin mit auf die PCs kopiert.)" -Title 'WinGet' -Mode 'YesNo' -Icon 'Question'))" -eq 'Yes') {
                 try { Remove-Item -LiteralPath $old -Force -ErrorAction Stop; Out-Console "WinGet: alter Installer $oldInst geloescht" 'Info' } catch { Out-Console "Nicht geloescht: $($_.Exception.Message)" 'Warning' }
             }
         }
@@ -1538,7 +1538,7 @@ function Complete-SwWingetDownload($Result, $State) {
     } catch {
         Set-SwBusy $false
         Out-Console "WinGet: $($_.Exception.Message)" 'Error'
-        [void][System.Windows.MessageBox]::Show($own, "WinGet: $($_.Exception.Message)", 'WinGet', 'OK', 'Warning')
+        [void](Show-HMDialogBox -Owner $own -Text ("WinGet: $($_.Exception.Message)") -Title 'WinGet' -Mode 'OK' -Icon 'Warning')
     } finally {
         Set-SwBusy $false
         Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
@@ -1926,7 +1926,7 @@ function Start-SoftwareUninstall {
         }
         $items.Add([pscustomobject]@{ Name = $e.Name; Key = $e.Key; Method = $e.Method; Args = $argsX; Cmd = $e.Cmd })
     }
-    if ($noCmd.Count) { [void][System.Windows.MessageBox]::Show($Win, "Ohne Deinstallationsbefehl (werden uebersprungen):`n  " + ($noCmd -join "`n  "), 'Deinstallation', 'OK', 'Information') }
+    if ($noCmd.Count) { [void](Show-HMDialogBox -Owner $Win -Text ("Ohne Deinstallationsbefehl (werden uebersprungen):`n  " + ($noCmd -join "`n  ")) -Title 'Deinstallation' -Mode 'OK' -Icon 'Information') }
     if ($items.Count -eq 0) { return }
     $lines = foreach ($i in $items) {
         $c = switch ($i.Method) { 'MSI' { 'msiexec /x (still)' } 'EXE' { "$($i.Cmd) $($i.Args)".Trim() } default { "$($i.Cmd)" } }
@@ -1934,7 +1934,7 @@ function Start-SoftwareUninstall {
         "  - $($i.Name)`n      $c"
     }
     $msg = "Auf $h deinstallieren ($($items.Count)):`n`n$($lines -join "`n")`n`nNacheinander, still, ohne automatischen Neustart. Fortfahren?"
-    if ("$([System.Windows.MessageBox]::Show($Win, $msg, 'Software deinstallieren', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+    if ("$((Show-HMDialogBox -Owner $Win -Text $msg -Title 'Software deinstallieren' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
 
     $json = ConvertTo-Json -InputObject @($items | Select-Object Name, Key, Method, Args) -Compress
     $tmo = 10

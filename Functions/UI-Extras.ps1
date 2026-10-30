@@ -221,9 +221,9 @@ function Show-RecoveryKeyDialog([string]$Letter, [string]$Id, [string]$Key) {
         $d.Filter = 'Textdatei (*.txt)|*.txt'
         $d.FileName = "BitLocker-Wiederherstellung_$($Letter)_$($Id.Trim('{}').Split('-')[0]).txt"
         if ($d.ShowDialog() -eq $true) {
-            if ($d.FileName.Substring(0, 1) -ieq $Letter) { [void][System.Windows.MessageBox]::Show($w, 'Nicht auf dem verschluesselten Laufwerk speichern!', 'BitLocker', 'OK', 'Warning'); return }
+            if ($d.FileName.Substring(0, 1) -ieq $Letter) { [void](Show-HMDialogBox -Owner $w -Text 'Nicht auf dem verschluesselten Laufwerk speichern!' -Title 'BitLocker' -Mode 'OK' -Icon 'Warning'); return }
             [System.IO.File]::WriteAllText($d.FileName, $txt, [System.Text.Encoding]::UTF8)
-            [void][System.Windows.MessageBox]::Show($w, "Gespeichert: $($d.FileName)", 'BitLocker', 'OK', 'Information')
+            [void](Show-HMDialogBox -Owner $w -Text ("Gespeichert: $($d.FileName)") -Title 'BitLocker' -Mode 'OK' -Icon 'Information')
         }
     }.GetNewClosure())
     [void]$w.ShowDialog()

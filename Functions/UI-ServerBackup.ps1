@@ -219,7 +219,7 @@ function Edit-HMSbProfile {
         if (-not [int]::TryParse("$i".Trim(), [ref]$ai) -or $ai -lt 1 -or $ai -gt 365) { Out-Console "Ungueltige Tage '$i' (1-365)" 'Error'; return }
     }
     $rbq = "Geplante Sicherung, wenn am Server ein Neustart aussteht (z. B. nach Windows Update)?`n`nJa = NICHT sichern, nur melden (Teams/Verlauf) - sinnvoll, wenn Windows den Server sonst mitten in der Sicherung neu startet`nNein = trotzdem sichern und warnen (Standard)`n`nAktuell: $(if ($p.RebootPendingSkip) { 'nicht sichern' } else { 'trotzdem sichern' })"
-    $rba = "$([System.Windows.MessageBox]::Show($script:Window, $rbq, 'Profil bearbeiten', 'YesNoCancel', 'Question', $(if ($p.RebootPendingSkip) { 'Yes' } else { 'No' })))"
+    $rba = "$((Show-HMDialogBox -Owner $script:Window -Text $rbq -Title 'Profil bearbeiten' -Mode 'YesNoCancel' -Icon 'Question' -Default ($(if ($p.RebootPendingSkip) { 'Yes' } else { 'No' }))))"
     if ($rba -eq 'Cancel') { return }
     $rbs = ($rba -eq 'Yes')
     foreach ($x in $cfg.Profiles) { if ($x.Name -eq $p.Name) { $x.Name = $n; $x.DiskPrefix = $pre; $x.Disks = $cnt; $x.WarnDays = $wd; $x.ArchiveDisks = $ad; $x.ArchiveDays = $ai; $x | Add-Member -NotePropertyName RebootPendingSkip -NotePropertyValue $rbs -Force } }
@@ -535,7 +535,7 @@ function Remove-HMSbRuns([string[]]$Keys, $Owner = $null) {
     $Keys = @($Keys | Where-Object { $_ } | Select-Object -Unique)
     if (-not $Keys.Count) { return }
     $o = if ($Owner) { $Owner } else { $script:Window }
-    if ("$([System.Windows.MessageBox]::Show($o, "$($Keys.Count) Lauf/Laeufe aus dem Verlauf entfernen?`n`n  " + (@($Keys | Select-Object -First 10 | ForEach-Object { $_ -replace '\|', '  ' }) -join "`n  ") + $(if ($Keys.Count -gt 10) { "`n  ..." }) + "`n`nEntfernt wird nur der Eintrag im Verlauf (Tool-Ordner und angesteckte Platten). Die Sicherung selbst und der Berichtsordner auf der Platte bleiben unveraendert.", 'Server-Backup - Verlauf', 'YesNo', 'Question'))" -ne 'Yes') { return }
+    if ("$((Show-HMDialogBox -Owner $o -Text ("$($Keys.Count) Lauf/Laeufe aus dem Verlauf entfernen?`n`n  " + (@($Keys | Select-Object -First 10 | ForEach-Object { $_ -replace '\|', '  ' }) -join "`n  ") + $(if ($Keys.Count -gt 10) { "`n  ..." }) + "`n`nEntfernt wird nur der Eintrag im Verlauf (Tool-Ordner und angesteckte Platten). Die Sicherung selbst und der Berichtsordner auf der Platte bleiben unveraendert.") -Title 'Server-Backup - Verlauf' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
     $n = 0
     try { $n += Remove-HMSbHistory $script:SbHistFile $Keys } catch { Out-Console "Verlauf im Tool-Ordner nicht geaendert: $($_.Exception.Message)" 'Error' }
     foreach ($d in @($script:SbDrives)) {
@@ -847,7 +847,7 @@ function Start-HMSbBackup {
     if (-not $bgWhy) {
         $m2 = $msg + "`n`nWo soll die Sicherung laufen?`nJa = im Hintergrund als SYSTEM - du kannst dich danach abmelden (Fortschritt: Verlauf, Teams, Logs\ServerBackup\Aufgabe_*.log)`nNein = hier in HUMig (Fenster offen und angemeldet lassen)`nAbbrechen = nicht starten"
         if ($bgNote.Count) { $m2 += "`n`n" + ($bgNote -join "`n") }
-        $a = "$([System.Windows.MessageBox]::Show($script:Window, $m2, 'Server-Backup', 'YesNoCancel', 'Question', 'No'))"
+        $a = "$((Show-HMDialogBox -Owner $script:Window -Text $m2 -Title 'Server-Backup' -Mode 'YesNoCancel' -Icon 'Question' -Default 'No'))"
         if ($a -eq 'Cancel') { return }
         $bg = ($a -eq 'Yes')
     } else {
@@ -863,7 +863,7 @@ function Start-HMSbBackup {
     $busy = @(Get-HMSbBusy)
     if ($busy.Count) {
         $bm = "Am Host laeuft bereits eine Sicherung oder Wiederherstellung - die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig:`n`n  " + ($busy -join "`n  ") + "`n`nJa = HUMig wartet, bis der andere Vorgang fertig ist, und startet dann automatisch (hoechstens 8 h, Abbrechen jederzeit moeglich)`nNein = jetzt nicht starten"
-        if ("$([System.Windows.MessageBox]::Show($script:Window, $bm, 'Server-Backup', 'YesNo', 'Warning'))" -ne 'Yes') { Out-Console 'Server-Backup nicht gestartet - am Host laeuft bereits eine Sicherung/Wiederherstellung.' 'Warning'; return }
+        if ("$((Show-HMDialogBox -Owner $script:Window -Text $bm -Title 'Server-Backup' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { Out-Console 'Server-Backup nicht gestartet - am Host laeuft bereits eine Sicherung/Wiederherstellung.' 'Warning'; return }
     }
     if ($p) { Save-HMSbLastProfile $p.Name }
     $script:SbArchiveRun = $(if ($p -and (Test-HMSbArchiveLabel $d.Label $p.DiskPrefix)) { "$($d.Label)" } else { '' })
@@ -947,11 +947,13 @@ function Start-HMSbBackgroundRun($p, $d, [string[]]$vms, [string[]]$vols, [bool]
         return
     }
     Out-Console "Server-Backup '$($p.Name)' im Hintergrund gestartet (Aufgabe \HUMig\$name, als SYSTEM, Platte $($d.Label)) - HUMig prueft bis zu 60 s, ob die Sicherung anlaeuft ..." 'Success'
-    Watch-HMSbBackgroundRun $p.Name $name $now
+    # Wartefenster: erst wenn die Sicherung nachweislich laeuft, wird "abmelden" freigegeben (sonst sieht man es nur spaet in der Konsole)
+    $box = Show-HMWaitBox 'Server-Backup im Hintergrund' "Server-Backup '$($p.Name)' wurde als Aufgabe gestartet (als SYSTEM, Platte $($d.Label)).`n`nHUMig prueft bis zu 60 Sekunden, ob die Sicherung wirklich anlaeuft - bitte noch nicht abmelden."
+    Watch-HMSbBackgroundRun $p.Name $name $now $box
     Update-HMSbSchedules
 }
 # Rueckmeldung: laeuft die Sicherung wirklich an (Laufend-Markierung) oder endet die Aufgabe vorher (keine Platte, Neustart-Sperre, Fehler)?
-function Watch-HMSbBackgroundRun([string]$ProfileName, [string]$TaskName, [datetime]$Since) {
+function Watch-HMSbBackgroundRun([string]$ProfileName, [string]$TaskName, [datetime]$Since, $Box = $null) {
     $dir = Split-Path $script:SbHistFile -Parent
     $flt = "$($script:SbRunMarkerPrefix)$(ConvertTo-HMSbSafeName $ProfileName)_*.json"
     $logPat = 'Aufgabe_*_{0}.log' -f ($ProfileName -replace '[^\w\-]', '_')
@@ -978,15 +980,19 @@ function Watch-HMSbBackgroundRun([string]$ProfileName, [string]$TaskName, [datet
             Start-Sleep -Seconds 3
         }
         return [pscustomobject]@{ State = 'Unknown'; TaskState = $st; Result = $res }
-    } -ArgumentList @($script:SbTaskPath, $TaskName, $dir, $flt, $ProfileName, $Since, $script:SbReportDir, $logPat) -TimeoutSec 90 -State @{ P = $ProfileName; T = $TaskName } -OnComplete {
+    } -ArgumentList @($script:SbTaskPath, $TaskName, $dir, $flt, $ProfileName, $Since, $script:SbReportDir, $logPat) -TimeoutSec 90 -State @{ P = $ProfileName; T = $TaskName; Box = $Box } -OnComplete {
         param($r, $s)
-        if (-not $r -or $r -is [string]) { Out-Console "Server-Backup im Hintergrund: Rueckmeldung nicht moeglich ($r) - Stand im Verlauf bzw. in Logs\ServerBackup\Aufgabe_*.log ansehen." 'Warning'; return }
+        if (-not $r -or $r -is [string]) { Out-Console "Server-Backup im Hintergrund: Rueckmeldung nicht moeglich ($r) - Stand im Verlauf bzw. in Logs\ServerBackup\Aufgabe_*.log ansehen." 'Warning'; Update-HMWaitBox $s.Box "Rueckmeldung nicht moeglich ($r).`n`nStand im Verlauf bzw. in Logs\ServerBackup\Aufgabe_*.log ansehen." 'Warning' 'Unklar'; return }
         switch ("$($r.State)") {
-            'Running' { Out-Console "Server-Backup '$($s.P)' laeuft im Hintergrund (SYSTEM, Platte $($r.Disk)) - du kannst dich jetzt abmelden. Ergebnis: Verlauf, Teams (falls eingerichtet), Logs\ServerBackup\Aufgabe_*.log" 'Success' }
+            'Running' {
+                Out-Console "Server-Backup '$($s.P)' laeuft im Hintergrund (SYSTEM, Platte $($r.Disk)) - du kannst dich jetzt abmelden. Ergebnis: Verlauf, Teams (falls eingerichtet), Logs\ServerBackup\Aufgabe_*.log" 'Success'
+                Update-HMWaitBox $s.Box "Server-Backup '$($s.P)' laeuft im Hintergrund (als SYSTEM, Platte $($r.Disk)).`n`nDu kannst dich jetzt abmelden - HUMig darf geschlossen werden.`nErgebnis: Verlauf, Teams (falls eingerichtet), Logs\ServerBackup\Aufgabe_*.log" 'Success' 'Sicherung laeuft'
+            }
             'Ended' {
                 $rt = switch ([int64]$r.Result) { 0 { 'OK' } 1 { 'Warnung' } 2 { 'Fehler' } default { '0x{0:X}' -f [int64]$r.Result } }
-                if ([int64]$r.Result -in @(0, 1)) { Out-Console "Server-Backup '$($s.P)' im Hintergrund ist bereits fertig ($rt) - siehe Verlauf." 'Success' }
+                if ([int64]$r.Result -in @(0, 1)) { Out-Console "Server-Backup '$($s.P)' im Hintergrund ist bereits fertig ($rt) - siehe Verlauf." 'Success'; Update-HMWaitBox $s.Box "Server-Backup '$($s.P)' ist bereits fertig ($rt) - siehe Verlauf." 'Success' 'Fertig' }
                 else {
+                    Update-HMWaitBox $s.Box "Server-Backup '$($s.P)' ist sofort beendet ($rt) - die Sicherung lief NICHT.`n`n$(@($r.Lines | Where-Object { "$_".Trim() } | Select-Object -Last 4) -join "`n")$(if ($r.Log) { "`n`nProtokoll: $($r.Log)" })" 'Error' 'Nicht gelaufen'
                     Out-Console "Server-Backup '$($s.P)' im Hintergrund ist sofort beendet ($rt) - die Sicherung lief NICHT:" 'Error'
                     foreach ($ln in @($r.Lines)) { if ("$ln".Trim()) { Out-Console "   $ln" 'Info' } }
                     if ($r.Log) { Out-Console "   Protokoll: $($r.Log)" 'Info' }
@@ -994,8 +1000,8 @@ function Watch-HMSbBackgroundRun([string]$ProfileName, [string]$TaskName, [datet
                 try { if ($script:SbInit) { Update-HMSbHistory } } catch { }
             }
             default {
-                if ("$($r.TaskState)" -in @('Running', 'Queued')) { Out-Console "Server-Backup '$($s.P)': die Aufgabe laeuft, die Sicherung hat aber nach 60 s noch nicht begonnen (wartet z.B. auf einen anderen Sicherungsvorgang). Fortschritt: Logs\ServerBackup\Aufgabe_*.log" 'Warning' }
-                else { Out-Console "Server-Backup '$($s.P)' im Hintergrund: Stand unklar (Aufgabe: $($r.TaskState)) - Aufgabenplanung \HUMig\$($s.T) und Verlauf pruefen." 'Warning' }
+                if ("$($r.TaskState)" -in @('Running', 'Queued')) { Out-Console "Server-Backup '$($s.P)': die Aufgabe laeuft, die Sicherung hat aber nach 60 s noch nicht begonnen (wartet z.B. auf einen anderen Sicherungsvorgang). Fortschritt: Logs\ServerBackup\Aufgabe_*.log" 'Warning'; Update-HMWaitBox $s.Box "Die Aufgabe laeuft, die Sicherung hat aber nach 60 s noch nicht begonnen (wartet z. B. auf einen anderen Sicherungsvorgang).`n`nSie laeuft als SYSTEM weiter - Abmelden ist moeglich. Fortschritt: Logs\ServerBackup\Aufgabe_*.log" 'Warning' 'Aufgabe laeuft' }
+                else { Out-Console "Server-Backup '$($s.P)' im Hintergrund: Stand unklar (Aufgabe: $($r.TaskState)) - Aufgabenplanung \HUMig\$($s.T) und Verlauf pruefen." 'Warning'; Update-HMWaitBox $s.Box "Stand unklar (Aufgabe: $($r.TaskState)).`n`nAufgabenplanung \HUMig\$($s.T) und Verlauf pruefen." 'Warning' 'Unklar' }
             }
         }
         try { Update-HMSbSchedules } catch { }
@@ -1073,13 +1079,13 @@ function Show-HMSbExportDialog($Prof, $Drive) {
     $collect = {
         param($act)
         $k = 0
-        if (-not [int]::TryParse("$($c.txtKeep.Text)".Trim(), [ref]$k) -or $k -lt 1 -or $k -gt 10) { [void][System.Windows.MessageBox]::Show($w, 'Anzahl der Exporte je VM: 1 bis 10.', 'VMs exportieren', 'OK', 'Warning'); return }
+        if (-not [int]::TryParse("$($c.txtKeep.Text)".Trim(), [ref]$k) -or $k -lt 1 -or $k -gt 10) { [void](Show-HMDialogBox -Owner $w -Text 'Anzahl der Exporte je VM: 1 bis 10.' -Title 'VMs exportieren' -Mode 'OK' -Icon 'Warning'); return }
         $vms = @($c.pnlVms.Children | Where-Object { $_.IsChecked } | ForEach-Object { "$($_.Tag)" })
         $fo = "$($c.txtFolder.Text)".Trim().TrimEnd('\')
-        if ($act -eq 'Export' -and -not $vms.Count) { [void][System.Windows.MessageBox]::Show($w, 'Mindestens eine VM waehlen.', 'VMs exportieren', 'OK', 'Warning'); return }
-        if ($act -eq 'Save' -and [bool]$c.chkAfter.IsChecked -and -not $vms.Count) { [void][System.Windows.MessageBox]::Show($w, 'Fuer den Export nach jeder Sicherung mindestens eine VM waehlen.', 'VMs exportieren', 'OK', 'Warning'); return }
-        if ($fo -and ($fo -notmatch '^([A-Za-z]:\\|\\\\[^\\]+\\[^\\]+)' -or $fo.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0 -or $fo.Substring(2).Contains(':') -or $fo -match '[*?"<>|]')) { [void][System.Windows.MessageBox]::Show($w, 'Ziel bitte als vollstaendigen Pfad angeben (z.B. E:\VM-Export oder \\server\freigabe\ordner) - oder leer lassen fuer die Platte.', 'VMs exportieren', 'OK', 'Warning'); return }
-        if ($act -eq 'Export' -and -not $fo -and -not $dl) { [void][System.Windows.MessageBox]::Show($w, 'Keine Platte gewaehlt - Platte anstecken oder einen Ordner eintragen.', 'VMs exportieren', 'OK', 'Warning'); return }
+        if ($act -eq 'Export' -and -not $vms.Count) { [void](Show-HMDialogBox -Owner $w -Text 'Mindestens eine VM waehlen.' -Title 'VMs exportieren' -Mode 'OK' -Icon 'Warning'); return }
+        if ($act -eq 'Save' -and [bool]$c.chkAfter.IsChecked -and -not $vms.Count) { [void](Show-HMDialogBox -Owner $w -Text 'Fuer den Export nach jeder Sicherung mindestens eine VM waehlen.' -Title 'VMs exportieren' -Mode 'OK' -Icon 'Warning'); return }
+        if ($fo -and ($fo -notmatch '^([A-Za-z]:\\|\\\\[^\\]+\\[^\\]+)' -or $fo.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0 -or $fo.Substring(2).Contains(':') -or $fo -match '[*?"<>|]')) { [void](Show-HMDialogBox -Owner $w -Text 'Ziel bitte als vollstaendigen Pfad angeben (z.B. E:\VM-Export oder \\server\freigabe\ordner) - oder leer lassen fuer die Platte.' -Title 'VMs exportieren' -Mode 'OK' -Icon 'Warning'); return }
+        if ($act -eq 'Export' -and -not $fo -and -not $dl) { [void](Show-HMDialogBox -Owner $w -Text 'Keine Platte gewaehlt - Platte anstecken oder einen Ordner eintragen.' -Title 'VMs exportieren' -Mode 'OK' -Icon 'Warning'); return }
         $res.V = @{ Action = $act; VMs = $vms; Folder = $fo; Keep = $k; After = [bool]$c.chkAfter.IsChecked }
         $w.DialogResult = $true
     }.GetNewClosure()
@@ -1129,7 +1135,7 @@ function Start-HMSbExportUi {
     if ($free -ge 0 -and $free -lt ($need + 1GB)) {
         if ($old) {
             $q = "Am Ziel ist zu wenig Platz ($(Format-HMSize $free) frei, noetig ca. $(Format-HMSize $need)).`n`nJa = aeltere Exporte dieser VMs vorher loeschen, soweit noetig (waehrend des Exports gibt es dann evtl. keinen fertigen Export)`nNein = abbrechen"
-            if ("$([System.Windows.MessageBox]::Show($script:Window, $q, 'VM-Export', 'YesNo', 'Warning'))" -ne 'Yes') { return }
+            if ("$((Show-HMDialogBox -Owner $script:Window -Text $q -Title 'VM-Export' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
             $pre = $true
         } else { Out-Console ("VM-Export: zu wenig Platz am Ziel ({0} frei, noetig ca. {1})." -f (Format-HMSize $free), (Format-HMSize $need)) 'Error'; return }
     }
@@ -1189,7 +1195,7 @@ function Invoke-HMSbDiskSetup($Sel, $Win) {
     $label = Show-TextInputDialog -Title 'Platte einrichten' -Label "Bezeichnung fuer Datentraeger $num ($($row.Modell), $($row.Groesse)):" -Text (Get-HMSbNextLabel $p) -Owner $Win
     if ($null -eq $label) { return }
     $label = "$label".Trim().ToUpper()
-    if ($label -notmatch '^[A-Z0-9_\-]{1,32}$') { [void][System.Windows.MessageBox]::Show($Win, "Ungueltige Bezeichnung '$label' (max. 32 Zeichen: A-Z, 0-9, - und _)", 'Platte einrichten', 'OK', 'Warning'); return }
+    if ($label -notmatch '^[A-Z0-9_\-]{1,32}$') { [void](Show-HMDialogBox -Owner $Win -Text "Ungueltige Bezeichnung '$label' (max. 32 Zeichen: A-Z, 0-9, - und _)" -Title 'Platte einrichten' -Mode 'OK' -Icon 'Warning'); return }
     $chk = Show-TextInputDialog -Title 'Sicherheitsabfrage' -Label "ALLE DATEN auf Datentraeger $num werden geloescht:`n$($row.Modell), SN $($row.Seriennummer), $($row.Groesse)`nVolumes: $($row.Volumes)`n`nZum Bestaetigen die Nummer des Datentraegers ($num) eingeben:" -Owner $Win
     if ("$chk".Trim() -ne "$num") { Out-Console 'Platte einrichten abgebrochen (Bestaetigung falsch).' 'Warning'; return }
     try { $Win.Close() } catch { }
@@ -1213,14 +1219,14 @@ function Invoke-HMSbDiskAdopt($Sel, $Win) {
     Invoke-AsyncCommand -ScriptBlock { param($eng, $n) . $eng; Get-HMSbDiskVolumeInfo $n } -ArgumentList @($script:SbEngine, $num) -TimeoutSec 120 -BusyTag 'Sb' -BusyText 'Platte wird gelesen ...' -OnComplete {
         param($r)
         $a = $script:SbAdopt
-        if ($r -is [string]) { [void][System.Windows.MessageBox]::Show($a.Win, "Uebernehmen nicht moeglich:`n$r", 'Platte uebernehmen', 'OK', 'Warning'); return }
+        if ($r -is [string]) { [void](Show-HMDialogBox -Owner $a.Win -Text "Uebernehmen nicht moeglich:`n$r" -Title 'Platte uebernehmen' -Mode 'OK' -Icon 'Warning'); return }
         $p = Get-HMSbProfile
         $label = Show-TextInputDialog -Title 'Platte uebernehmen' -Label "Neue Bezeichnung fuer $($r.Letter): '$($r.Label)' (Datentraeger $($a.Num), $($r.Model)):" -Text (Get-HMSbNextLabel $p) -Owner $a.Win
         if ($null -eq $label) { return }
         $label = "$label".Trim().ToUpper()
-        if ($label -notmatch '^[A-Z0-9_\-]{1,32}$') { [void][System.Windows.MessageBox]::Show($a.Win, "Ungueltige Bezeichnung '$label' (max. 32 Zeichen: A-Z, 0-9, - und _)", 'Platte uebernehmen', 'OK', 'Warning'); return }
+        if ($label -notmatch '^[A-Z0-9_\-]{1,32}$') { [void](Show-HMDialogBox -Owner $a.Win -Text "Ungueltige Bezeichnung '$label' (max. 32 Zeichen: A-Z, 0-9, - und _)" -Title 'Platte uebernehmen' -Mode 'OK' -Icon 'Warning'); return }
         $dup = @($script:SbDrives | Where-Object { "$($_.Label)" -ieq $label -and "$($_.Letter)" -ine "$($r.Letter)" } | ForEach-Object { "$($_.Letter):" })
-        if ($dup.Count) { [void][System.Windows.MessageBox]::Show($a.Win, "Die Bezeichnung '$label' hat schon $($dup -join ', ') - bitte eine andere waehlen.", 'Platte uebernehmen', 'OK', 'Warning'); return }
+        if ($dup.Count) { [void](Show-HMDialogBox -Owner $a.Win -Text ("Die Bezeichnung '$label' hat schon $($dup -join ', ') - bitte eine andere waehlen.") -Title 'Platte uebernehmen' -Mode 'OK' -Icon 'Warning'); return }
         $fold = @($r.Folders)
         $fl = if ($fold.Count) { (@($fold | Select-Object -First 15) -join ', ') + $(if ($fold.Count -gt 15) { " ... (+$($fold.Count - 15))" } else { '' }) } else { '(keine)' }
         $used = [long]$r.SizeBytes - [long]$r.FreeBytes
@@ -1236,7 +1242,7 @@ function Invoke-HMSbDiskAdopt($Sel, $Win) {
             "- Eine andere Sicherung auf diese Platte darf nicht gleichzeitig laufen."
         if ($r.PrevLabel -and $r.PrevLabel -ine $label) { $msg += "`n`nHINWEIS: Die Platte war schon von HUMig als '$($r.PrevLabel)' eingerichtet$(if ($r.PrevProfile) { " (Profil $($r.PrevProfile))" })$(if ($r.PrevHost) { " am Host $($r.PrevHost)" }) - der Verlauf dort laeuft unter dem alten Namen." }
         if ([int]$r.OtherVolumes -gt 0) { $msg += "`n`nHinweis: die Platte hat $($r.OtherVolumes) weitere(s) Volume(s) - genutzt wird nur $($r.Letter):." }
-        if ("$([System.Windows.MessageBox]::Show($a.Win, $msg, 'Platte uebernehmen (umbenennen)', 'YesNo', 'Warning', 'No'))" -ne 'Yes') { Out-Console 'Platte uebernehmen abgebrochen.' 'Info'; return }
+        if ("$((Show-HMDialogBox -Owner $a.Win -Text $msg -Title 'Platte uebernehmen (umbenennen)' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { Out-Console 'Platte uebernehmen abgebrochen.' 'Info'; return }
         # gleicher Ordnername: Windows-Sicherung dieses Hosts liegt schon auf der Platte (z.B. von einer anderen Person/einem anderen Programm eingerichtet)
         if ($r.WbThisHost) {
             $w2 = "VORSICHT - auf $($r.Letter): gibt es schon eine Windows Server-Sicherung DIESES Hosts:`n$($r.Letter):\WindowsImageBackup\$($r.Host)`n`n" +
@@ -1245,7 +1251,7 @@ function Invoke-HMSbDiskAdopt($Sel, $Win) {
                 "- wird der Platz knapp, loescht Windows die AELTESTEN Versionen - auch die der anderen Sicherung`n" +
                 "- laeuft die andere Sicherung weiter, mischen sich beide Zeitplaene`n`n" +
                 "Nur fortfahren, wenn das mit dem Besitzer der vorhandenen Sicherung abgestimmt ist (oder sie nicht mehr gebraucht wird).`n`nTrotzdem uebernehmen?"
-            if ("$([System.Windows.MessageBox]::Show($a.Win, $w2, 'Platte uebernehmen - vorhandene Sicherung', 'YesNo', 'Warning', 'No'))" -ne 'Yes') { Out-Console "Platte uebernehmen abgebrochen (vorhandene Windows-Sicherung von $($r.Host) auf $($r.Letter):)." 'Warning'; return }
+            if ("$((Show-HMDialogBox -Owner $a.Win -Text $w2 -Title 'Platte uebernehmen - vorhandene Sicherung' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { Out-Console "Platte uebernehmen abgebrochen (vorhandene Windows-Sicherung von $($r.Host) auf $($r.Letter):)." 'Warning'; return }
         } elseif (@($r.WbHosts).Count) {
             Out-Console "Hinweis: auf $($r.Letter): liegen Windows-Sicherungen anderer Rechner ($(@($r.WbHosts) -join ', ')) - getrennte Ordner, bleiben unberuehrt." 'Info'
         }
@@ -1364,7 +1370,7 @@ function Show-HMSbRestoreHelp {
         "6. 'Am urspruenglichen Speicherort' (ueberschreibt die vorhandene VM!) oder 'An anderem Speicherort'.`n`n" +
         "Hinweis: Ein aelterer MS-Artikel (KB 958662, Server 2008) nennt Einschraenkungen bei VMs mit 2 oder mehr Pruefpunkten - fuer aktuelle Server nicht belegt. Wiederherstellung einmal testen (z.B. an anderem Speicherort).`n`n" +
         'Windows Server-Sicherung jetzt oeffnen?'
-    if ([System.Windows.MessageBox]::Show($script:Window, $txt, 'Server-Backup - Wiederherstellen', 'YesNo', 'Information') -eq 'Yes') {
+    if ((Show-HMDialogBox -Owner $script:Window -Text $txt -Title 'Server-Backup - Wiederherstellen' -Mode 'YesNo' -Icon 'Information') -eq 'Yes') {
         try { Start-Process 'wbadmin.msc' } catch { Out-Console "wbadmin.msc: $($_.Exception.Message) - Feature 'Windows Server-Sicherung' installiert?" 'Error' }
     }
 }
@@ -1550,7 +1556,7 @@ function Show-HMSbScheduleDialog([string]$Info) {
     $w.FindName('ok').Add_Click({
         $t = [datetime]::MinValue
         if (-not [datetime]::TryParseExact("$($txtTime.Text)".Trim(), 'H:mm', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$t)) {
-            [void][System.Windows.MessageBox]::Show($w, 'Uhrzeit bitte als HH:MM eingeben (z.B. 22:00).', 'Zeitplan', 'OK', 'Warning'); return
+            [void](Show-HMDialogBox -Owner $w -Text 'Uhrzeit bitte als HH:MM eingeben (z.B. 22:00).' -Title 'Zeitplan' -Mode 'OK' -Icon 'Warning'); return
         }
         $mode = if ($rbDaily.IsChecked) { 'Daily' } elseif ($rbWeekly.IsChecked) { 'Weekly' } else { 'Once' }
         $at = (Get-Date).Date.AddHours($t.Hour).AddMinutes($t.Minute)
@@ -1558,13 +1564,13 @@ function Show-HMSbScheduleDialog([string]$Info) {
         if ($mode -eq 'Once') {
             $dd = [datetime]::MinValue
             if (-not [datetime]::TryParseExact("$($txtDate.Text)".Trim(), 'd.M.yyyy', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$dd)) {
-                [void][System.Windows.MessageBox]::Show($w, 'Datum bitte als TT.MM.JJJJ eingeben.', 'Zeitplan', 'OK', 'Warning'); return
+                [void](Show-HMDialogBox -Owner $w -Text 'Datum bitte als TT.MM.JJJJ eingeben.' -Title 'Zeitplan' -Mode 'OK' -Icon 'Warning'); return
             }
             $at = $dd.Date.AddHours($t.Hour).AddMinutes($t.Minute)
-            if ($at -le (Get-Date)) { [void][System.Windows.MessageBox]::Show($w, 'Der Zeitpunkt liegt in der Vergangenheit.', 'Zeitplan', 'OK', 'Warning'); return }
+            if ($at -le (Get-Date)) { [void](Show-HMDialogBox -Owner $w -Text 'Der Zeitpunkt liegt in der Vergangenheit.' -Title 'Zeitplan' -Mode 'OK' -Icon 'Warning'); return }
         } elseif ($mode -eq 'Weekly') {
             $sel = @($pnl.Children | Where-Object { $_.IsChecked } | ForEach-Object { "$($_.Tag)" })
-            if (-not $sel.Count) { [void][System.Windows.MessageBox]::Show($w, 'Mindestens einen Wochentag waehlen.', 'Zeitplan', 'OK', 'Warning'); return }
+            if (-not $sel.Count) { [void](Show-HMDialogBox -Owner $w -Text 'Mindestens einen Wochentag waehlen.' -Title 'Zeitplan' -Mode 'OK' -Icon 'Warning'); return }
         }
         $res.V = @{ Mode = $mode; At = $at; Days = $sel }
         $w.DialogResult = $true
@@ -1717,7 +1723,7 @@ function New-HMSbSchedule {
         $hit = @(@($cf) | Where-Object { "$($_.Ueberschneidung)" -like 'JA*' })
         if ($hit.Count) {
             $m = "Diese Aufgaben laufen zur selben Zeit wie der geplante Lauf (angenommene Dauer $(Format-HMDuration $avg)) - die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig:`n`n" + (@($hit | Select-Object -First 10 | ForEach-Object { "  $($_.Aufgabe)  [$($_.Ausloeser)]  -> $($_.Ueberschneidung)" }) -join "`n") + $(if ($hit.Count -gt 10) { "`n  ..." }) + "`n`nHUMig wartet zwar, bis der andere Vorgang fertig ist (hoechstens 8 h), besser ist aber eine andere Uhrzeit.`n`nJa = trotzdem planen`nNein = nicht planen (Uhrzeit aendern)`nAbbrechen = Liste aller gefundenen Aufgaben anzeigen"
-            $ans = "$([System.Windows.MessageBox]::Show($script:Window, $m, 'Server-Backup planen', 'YesNoCancel', 'Warning'))"
+            $ans = "$((Show-HMDialogBox -Owner $script:Window -Text $m -Title 'Server-Backup planen' -Mode 'YesNoCancel' -Icon 'Warning'))"
             if ($ans -eq 'Cancel') { Show-HMSbConflicts $r $own $avg; return }
             if ($ans -ne 'Yes') { return }
         }

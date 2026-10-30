@@ -3460,3 +3460,33 @@ Describe '2.1.16: Online-Check uebernehmen' {
         (Get-Content (Join-Path $script:Root 'Functions\AppUpdates-Target.ps1') -Raw) | Should -Match 'schon beendet \(mit dem Dienst\)'
     }
 }
+
+Describe '2.1.18: Meldungen im HUMig-Design, Wartefenster Server-Backup' {
+    It 'keine Windows-MessageBox mehr nach dem Start (nur Rueckfall in Show-HMDialogBox und Startphase in HUMig.ps1)' {
+        $c = Get-Content (Join-Path $script:Root 'Functions\UI-Common.ps1') -Raw
+        $c | Should -Match 'function Show-HMDialogBox'
+        $c | Should -Match 'function Show-HMWaitBox'
+        $c | Should -Match 'function Update-HMWaitBox'
+        foreach ($f in @(Get-ChildItem (Join-Path $script:Root 'Functions') -Filter '*.ps1')) {
+            $n = ([regex]::Matches((Get-Content $f.FullName -Raw), '\[System\.Windows\.MessageBox\]::Show\(')).Count
+            $max = $(if ($f.Name -eq 'UI-Common.ps1') { 4 } else { 0 })
+            $n | Should -BeLessOrEqual $max -Because "$($f.Name) soll Show-HMDialogBox verwenden"
+        }
+        # HUMig.ps1: nur vor dem Laden der Funktionsdateien (Zeile 558) und beim XAML-Fehler
+        $lines = Get-Content (Join-Path $script:Root 'HUMig.ps1')
+        $late = @(for ($i = 0; $i -lt $lines.Count; $i++) { if ($i -ge 720 -and $lines[$i] -match '\[System\.Windows\.MessageBox\]::Show\(') { $i + 1 } })
+        $late | Should -BeNullOrEmpty
+    }
+    It 'Show-HMDialogBox liefert Texte wie MessageBoxResult und kennt alle Modi' {
+        $c = Get-Content (Join-Path $script:Root 'Functions\UI-Common.ps1') -Raw
+        foreach ($m in @("'YesNo'", "'YesNoCancel'", "'OKCancel'")) { $c | Should -Match ([regex]::Escape($m)) }
+        $c | Should -Match "if \(-not \`$o\) \{ return \(& \`$fallback\) \}"
+        $c | Should -Match "\`$cancelKey = "
+    }
+    It 'Server-Backup im Hintergrund: Wartefenster wird gesetzt und auf Ergebnis gestellt' {
+        $c = Get-Content (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1') -Raw
+        $c | Should -Match "Show-HMWaitBox 'Server-Backup im Hintergrund'"
+        ([regex]::Matches($c, 'Update-HMWaitBox \$s\.Box')).Count | Should -BeGreaterOrEqual 5
+        $c | Should -Match 'du kannst dich jetzt abmelden'
+    }
+}

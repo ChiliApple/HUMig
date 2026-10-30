@@ -8,6 +8,188 @@
 #>
 
 # ----------------------------------------------------------------------------
+# Meldungen und Rueckfragen im HUMig-Stil (ersetzt die Windows-MessageBox ueberall nach dem Start)
+# Mode: OK | OKCancel | YesNo | YesNoCancel.  Icon: Information | Warning | Error | Question.
+# Rueckgabe als Text: 'OK' | 'Cancel' | 'Yes' | 'No' (wie MessageBoxResult, Vergleiche mit -eq 'Yes' bleiben gueltig).
+# Schliessen (X, Esc): OK -> 'OK', OKCancel/YesNoCancel -> 'Cancel', YesNo -> 'No'.
+# -Default bestimmt den Enter-Knopf; ohne Angabe: Warnung mit Ja/Nein -> Nein (sicher), sonst erster Knopf.
+# Rueckfall auf die Windows-MessageBox, wenn das Hauptfenster noch nicht steht oder das Fenster nicht aufgebaut werden kann.
+# ----------------------------------------------------------------------------
+function Show-HMDialogBox {
+    param([object]$Owner = $null, [string]$Text = '', [string]$Title = 'HUMig', [string]$Mode = 'OK', [string]$Icon = 'Information', [string]$Default = '')
+    $Mode = switch ("$Mode") { 'YesNo' { 'YesNo' } 'YesNoCancel' { 'YesNoCancel' } 'OKCancel' { 'OKCancel' } default { 'OK' } }
+    $Icon = switch ("$Icon") { 'Warning' { 'Warning' } 'Exclamation' { 'Warning' } 'Error' { 'Error' } 'Stop' { 'Error' } 'Hand' { 'Error' } 'Question' { 'Question' } default { 'Information' } }
+    $o = $null
+    try { if ($Owner -is [System.Windows.Window] -and $Owner.IsLoaded) { $o = $Owner } elseif ($script:Window -and $script:Window.IsLoaded) { $o = $script:Window } } catch { $o = $null }
+    $fallback = {
+        $img = $(if ($Icon -eq 'Information') { 'Information' } else { $Icon })
+        $def = $(if ($Default) { $Default } elseif ($Mode -eq 'YesNo' -and $Icon -eq 'Warning') { 'No' } elseif ($Mode -in @('YesNoCancel', 'OKCancel') -and $Icon -eq 'Warning') { 'Cancel' } else { '' })
+        $r = if ($o -and $def) { [System.Windows.MessageBox]::Show($o, $Text, $Title, $Mode, $img, $def) }
+        elseif ($o) { [System.Windows.MessageBox]::Show($o, $Text, $Title, $Mode, $img) }
+        elseif ($def) { [System.Windows.MessageBox]::Show($Text, $Title, $Mode, $img, $def) }
+        else { [System.Windows.MessageBox]::Show($Text, $Title, $Mode, $img) }
+        return "$r"
+    }
+    if (-not $o) { return (& $fallback) }
+    try {
+        $x = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        SizeToContent="WidthAndHeight" MinWidth="420" MinHeight="150" WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        ShowInTaskbar="False" Background="#FF1E1E2E" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+  <DockPanel>
+    <Border DockPanel.Dock="Bottom" Background="#FF181825" BorderBrush="#FF313244" BorderThickness="0,1,0,0" Padding="14,9">
+      <StackPanel x:Name="pnlButtons" Orientation="Horizontal" HorizontalAlignment="Right"/>
+    </Border>
+    <Grid Margin="18,18,22,16">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <Grid x:Name="icoBox" Width="34" Height="34" VerticalAlignment="Top" Margin="0,0,16,0">
+        <Ellipse x:Name="icoCircle"/>
+        <TextBlock x:Name="icoGlyph" Foreground="#FF1E1E2E" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
+      </Grid>
+      <ScrollViewer x:Name="scroll" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" VerticalAlignment="Center">
+        <TextBox x:Name="txt" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" Foreground="#FFCDD6F4"
+                 FontSize="13" Padding="0" Cursor="Arrow" IsTabStop="False" MinWidth="300"/>
+      </ScrollViewer>
+    </Grid>
+  </DockPanel>
+</Window>
+'@
+        $w = [System.Windows.Markup.XamlReader]::Parse($x)
+        $w.Title = "$Title"
+        if ($script:AppIcon) { try { $w.Icon = $script:AppIcon } catch { } }
+        try { $w.Owner = $o } catch { $w.WindowStartupLocation = 'CenterScreen'; $w.ShowInTaskbar = $true }
+        $txt = "$Text".TrimEnd()
+        $tb = $w.FindName('txt'); $tb.Text = $txt
+        $len = $txt.Length; $lines = @($txt -split "`n").Count
+        $tb.MaxWidth = $(if ($len -gt 1200 -or $lines -gt 24) { 760 } elseif ($len -gt 400) { 620 } else { 520 })
+        $wa = [System.Windows.SystemParameters]::WorkArea
+        $w.FindName('scroll').MaxHeight = [Math]::Max(240, $wa.Height * 0.65)
+        $bc = [System.Windows.Media.BrushConverter]::new()
+        $ic = switch ($Icon) { 'Warning' { @('#FFF9E2AF', '!') } 'Error' { @('#FFF38BA8', [string][char]0x2715) } 'Question' { @('#FFCBA6F7', '?') } default { @('#FF89B4FA', 'i') } }
+        $w.FindName('icoCircle').Fill = $bc.ConvertFrom($ic[0])
+        $g = $w.FindName('icoGlyph'); $g.Text = $ic[1]
+        if ($Icon -eq 'Error') { $g.FontSize = 16; $g.Margin = [System.Windows.Thickness]::new(0) }
+        $kind = switch ($Icon) { 'Warning' { 'Warnung' } 'Error' { 'Fehler' } 'Question' { 'Frage' } default { 'Hinweis' } }
+        $ap = [System.Windows.Automation.AutomationProperties]
+        $short = $(if ($txt.Length -gt 400) { $txt.Substring(0, 400) + ' ...' } else { $txt })
+        $ap::SetName($w, "${kind}: $Title"); $ap::SetName($w.FindName('icoBox'), $kind); $ap::SetName($tb, $short)
+        # Knoepfe: Blau = Standardaktion, Rot = Ja bei Warnung (etwas Riskantes), Grau = Nein/Abbrechen
+        $yesCol = $(if ($Icon -in @('Warning', 'Error')) { '#FFF38BA8' } else { '#FF89B4FA' })
+        $defs = @(switch ($Mode) {
+            'YesNo' { @(@('Yes', 'Ja', $yesCol, '#FF1E1E2E'), @('No', 'Nein', '#FF45475A', '#FFCDD6F4')) }
+            'YesNoCancel' { @(@('Yes', 'Ja', $yesCol, '#FF1E1E2E'), @('No', 'Nein', '#FF45475A', '#FFCDD6F4'), @('Cancel', 'Abbrechen', '#FF45475A', '#FFCDD6F4')) }
+            'OKCancel' { @(@('OK', 'OK', $yesCol, '#FF1E1E2E'), @('Cancel', 'Abbrechen', '#FF45475A', '#FFCDD6F4')) }
+            default { , @('OK', 'OK', '#FF89B4FA', '#FF1E1E2E') }
+        })
+        $keys = @($defs | ForEach-Object { $_[0] })
+        $cancelKey = $(switch ($Mode) { 'YesNo' { 'No' } 'YesNoCancel' { 'Cancel' } 'OKCancel' { 'Cancel' } default { 'OK' } })
+        $defaultKey = $(if ($Default -and $keys -contains "$Default") { "$Default" } elseif ($Mode -eq 'YesNo' -and $Icon -eq 'Warning') { 'No' } elseif ($Mode -in @('YesNoCancel', 'OKCancel') -and $Icon -eq 'Warning') { $cancelKey } else { $keys[0] })
+        $st = @{ R = $cancelKey; First = $null }
+        $w.Tag = $st
+        foreach ($b in $defs) {
+            $btn = New-Object System.Windows.Controls.Button
+            $btn.Content = $b[1]; $btn.Tag = $b[0]; $btn.MinWidth = 96; $btn.Height = 28; $btn.FontWeight = [System.Windows.FontWeights]::SemiBold
+            $btn.Padding = [System.Windows.Thickness]::new(12, 0, 12, 0); $btn.Cursor = [System.Windows.Input.Cursors]::Hand
+            $btn.Background = $bc.ConvertFrom($b[2]); $btn.Foreground = $bc.ConvertFrom($b[3]); $btn.BorderThickness = [System.Windows.Thickness]::new(0)
+            $ap::SetName($btn, $(if ($b[0] -eq $defaultKey -and $defs.Count -gt 1) { "$($b[1]) (Enter)" } else { "$($b[1])" }))
+            $ap::SetHelpText($btn, $short)
+            if ($b[0] -eq $defaultKey) { $btn.IsDefault = $true; $st.First = $btn }
+            if ($b[0] -eq $cancelKey) { $btn.IsCancel = $true }
+            $btn.Add_Click({ param($sd, $e) $win = [System.Windows.Window]::GetWindow($sd); $win.Tag.R = "$($sd.Tag)"; $win.Close() })
+            if ($b[0] -eq $defaultKey -and $defs.Count -gt 1) {
+                # vorgewaehlter Knopf (Enter) mit hellem Rahmen
+                $fr = New-Object System.Windows.Controls.Border
+                $fr.BorderBrush = $bc.ConvertFrom('#FFCDD6F4'); $fr.BorderThickness = [System.Windows.Thickness]::new(2)
+                $fr.CornerRadius = [System.Windows.CornerRadius]::new(4); $fr.Padding = [System.Windows.Thickness]::new(1); $fr.Margin = [System.Windows.Thickness]::new(8, 0, 0, 0)
+                $fr.ToolTip = 'Enter'; $fr.Child = $btn
+                [void]$w.FindName('pnlButtons').Children.Add($fr)
+            } else { $btn.Margin = [System.Windows.Thickness]::new(8, 0, 0, 0); [void]$w.FindName('pnlButtons').Children.Add($btn) }
+        }
+        $w.Add_KeyDown({
+            param($sd, $e)
+            if ($e.Key -eq 'C' -and ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Control)) {
+                $t = $sd.FindName('txt'); if ($t.SelectionLength) { return }
+                try { [System.Windows.Clipboard]::SetText("$($sd.Title)`r`n`r`n$($t.Text)") } catch { }
+                $e.Handled = $true
+            }
+        })
+        $w.Add_ContentRendered({ param($sd, $e) if ($sd.Tag.First) { [void]$sd.Tag.First.Focus() } })
+        Set-HMWindowScale $w
+        [void]$w.ShowDialog()
+        return "$($st.R)"
+    } catch {
+        try { Out-Console "Meldungsfenster: $($_.Exception.Message) - Windows-Meldung verwendet" 'Warning' } catch { }
+        return (& $fallback)
+    }
+}
+
+# Wartefenster (nicht modal): zeigt "bitte warten", wird spaeter mit Update-HMWaitBox auf Ergebnis gestellt und freigegeben.
+# Rueckgabe: Fenster (oder $null, wenn das Hauptfenster noch nicht steht).
+function Show-HMWaitBox([string]$Title, [string]$Text, [object]$Owner = $null) {
+    $o = $null
+    try { if ($Owner -is [System.Windows.Window] -and $Owner.IsLoaded) { $o = $Owner } elseif ($script:Window -and $script:Window.IsLoaded) { $o = $script:Window } } catch { $o = $null }
+    if (-not $o) { return $null }
+    try {
+        $x = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        SizeToContent="WidthAndHeight" MinWidth="440" WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+        Background="#FF1E1E2E" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+  <DockPanel>
+    <Border DockPanel.Dock="Bottom" Background="#FF181825" BorderBrush="#FF313244" BorderThickness="0,1,0,0" Padding="14,9">
+      <DockPanel>
+        <TextBlock x:Name="lblState" Foreground="#FFA6ADC8" VerticalAlignment="Center" FontSize="12"/>
+        <Button x:Name="btnOk" Content="OK" MinWidth="96" Height="28" HorizontalAlignment="Right" FontWeight="SemiBold" Background="#FF89B4FA" Foreground="#FF1E1E2E" BorderThickness="0" IsEnabled="False" Cursor="Hand"/>
+      </DockPanel>
+    </Border>
+    <Grid Margin="18,18,22,16">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <Grid Width="34" Height="34" VerticalAlignment="Top" Margin="0,0,16,0">
+        <Ellipse x:Name="icoCircle" Fill="#FF89B4FA"/>
+        <TextBlock x:Name="icoGlyph" Text="…" Foreground="#FF1E1E2E" FontSize="19" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-6,0,0"/>
+      </Grid>
+      <StackPanel Grid.Column="1" VerticalAlignment="Center">
+        <TextBlock x:Name="txt" Foreground="#FFCDD6F4" FontSize="13" TextWrapping="Wrap" MaxWidth="560"/>
+        <ProgressBar x:Name="bar" IsIndeterminate="True" Height="6" Margin="0,12,0,0" Background="#FF313244" Foreground="#FF89B4FA" BorderThickness="0"/>
+      </StackPanel>
+    </Grid>
+  </DockPanel>
+</Window>
+'@
+        $w = [System.Windows.Markup.XamlReader]::Parse($x)
+        $w.Title = "$Title"
+        if ($script:AppIcon) { try { $w.Icon = $script:AppIcon } catch { } }
+        try { $w.Owner = $o } catch { }
+        $w.FindName('txt').Text = "$Text"
+        $w.FindName('lblState').Text = 'Bitte warten ...'
+        $w.Tag = @{ Done = $false }
+        $w.FindName('btnOk').Add_Click({ param($sd, $e) [System.Windows.Window]::GetWindow($sd).Close() })
+        # solange nicht fertig: Schliessen (X, Alt+F4) nur ausblenden, nicht moeglich - Ergebnis soll ankommen
+        $w.Add_Closing({ param($sd, $e) if (-not $sd.Tag.Done) { $e.Cancel = $true } })
+        Set-HMWindowScale $w
+        $w.Show()
+        return $w
+    } catch { return $null }
+}
+# Wartefenster auf Ergebnis stellen: Icon Information | Success | Warning | Error, Text, OK-Knopf frei (Enter/Esc schliessen)
+function Update-HMWaitBox($W, [string]$Text, [string]$Icon = 'Success', [string]$State = 'Fertig') {
+    if (-not $W) { return }
+    try {
+        if (-not $W.IsLoaded) { return }
+        $bc = [System.Windows.Media.BrushConverter]::new()
+        $ic = switch ($Icon) { 'Success' { @('#FFA6E3A1', [string][char]0x2713) } 'Warning' { @('#FFF9E2AF', '!') } 'Error' { @('#FFF38BA8', [string][char]0x2715) } default { @('#FF89B4FA', 'i') } }
+        $W.FindName('icoCircle').Fill = $bc.ConvertFrom($ic[0])
+        $g = $W.FindName('icoGlyph'); $g.Text = $ic[1]; $g.Margin = [System.Windows.Thickness]::new(0, -2, 0, 0)
+        $W.FindName('txt').Text = "$Text"
+        $W.FindName('bar').Visibility = 'Collapsed'
+        $W.FindName('lblState').Text = "$State"
+        $W.Tag.Done = $true
+        $b = $W.FindName('btnOk'); $b.IsEnabled = $true; $b.IsDefault = $true; $b.IsCancel = $true
+        $b.Background = $bc.ConvertFrom($ic[0])
+        try { $W.Activate() | Out-Null; [void]$b.Focus() } catch { }
+    } catch { }
+}
+
+# ----------------------------------------------------------------------------
 # Tabellenfenster (nicht modal)
 # ----------------------------------------------------------------------------
 function Show-DataGridWindow {
@@ -136,7 +318,7 @@ function Show-DataGridWindow {
                 $size = New-Object System.Windows.Size $pd.PrintableAreaWidth, $pd.PrintableAreaHeight
                 $dg.Measure($size); $dg.Arrange((New-Object System.Windows.Rect $size))
                 $pd.PrintVisual($dg, $printTitle)
-            } catch { [void][System.Windows.MessageBox]::Show("Druck fehlgeschlagen: $_", 'Drucken', 'OK', 'Error') }
+            } catch { [void](Show-HMDialogBox -Text "Druck fehlgeschlagen: $_" -Title 'Drucken' -Mode 'OK' -Icon 'Error') }
             finally { $dg.InvalidateMeasure() }
         }
     }.GetNewClosure())
@@ -153,8 +335,8 @@ function Show-DataGridWindow {
                     [pscustomobject]$o
                 }
                 @($out) | Export-Csv -Path $sfd.FileName -NoTypeInformation -Encoding UTF8 -Delimiter ';' -Force
-                [void][System.Windows.MessageBox]::Show("Exportiert: $($sfd.FileName)", 'CSV-Export', 'OK', 'Information')
-            } catch { [void][System.Windows.MessageBox]::Show("CSV-Export fehlgeschlagen: $_", 'Export', 'OK', 'Error') }
+                [void](Show-HMDialogBox -Text ("Exportiert: $($sfd.FileName)") -Title 'CSV-Export' -Mode 'OK' -Icon 'Information')
+            } catch { [void](Show-HMDialogBox -Text "CSV-Export fehlgeschlagen: $_" -Title 'Export' -Mode 'OK' -Icon 'Error') }
         }
     }.GetNewClosure())
 
@@ -183,11 +365,11 @@ function Show-DataGridWindow {
                 [pscustomobject]$o
             })
             if (-not $t.Act.NoSelection -and $selRows.Count -eq 0) {
-                [void][System.Windows.MessageBox]::Show($t.Win, 'Bitte zuerst eine oder mehrere Zeilen markieren.', "$($t.Act.Text)", 'OK', 'Information')
+                [void](Show-HMDialogBox -Owner $t.Win -Text 'Bitte zuerst eine oder mehrere Zeilen markieren.' -Title ("$($t.Act.Text)") -Mode 'OK' -Icon 'Information')
                 return
             }
             try { & $t.Act.Handler $selRows $t.Win $t.Ctx }
-            catch { [void][System.Windows.MessageBox]::Show($t.Win, "Fehler: $($_.Exception.Message)", "$($t.Act.Text)", 'OK', 'Error') }
+            catch { [void](Show-HMDialogBox -Owner $t.Win -Text ("Fehler: $($_.Exception.Message)") -Title ("$($t.Act.Text)") -Mode 'OK' -Icon 'Error') }
         })
         [void]$pnl.Children.Add($b)
     }
