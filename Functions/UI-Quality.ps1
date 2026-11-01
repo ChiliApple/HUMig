@@ -168,13 +168,22 @@ function Show-HMExtraTargetsDialog {
     }
     $refresh = {
         param($s, $row)
-        $rows = if ($row) { @($row) } else { @($s.Dt.Rows) }
+        $rows = @($s.Dt.Rows)   # immer alle: Hinweise wie 'gleiches Ziel wie ...' haengen von den anderen Zeilen ab
         $s.Busy = $true
         try {
             foreach ($r in $rows) {
                 $h = Get-HMExtraTargetHint "$($r.Orig)" "$($r.Target)" ([bool]($r.Sel -eq $true)) $s.Comp $s.Cache
                 $r.Hint = $h
                 $r.Level = $(if ($h -eq 'wird nicht zurueckgespielt') { 'off' } elseif ($h -like 'Achtung:*' -or $h -like 'Laufwerk*gibt es*' -or $h -like 'bitte Ziel*') { 'bad' } elseif ($h -like 'Systemordner*' -or $h -like '*nicht pruefbar*') { 'warn' } elseif ($h -like 'neues Ziel*') { 'new' } else { 'ok' })
+            }
+            # gleiches Ziel fuer mehrere Ordner (Inhalte werden zusammengefuehrt), Ziel im Backup-Ordner (nur lokal pruefbar) - Codepruefung B13
+            $sel = @($s.Dt.Rows | Where-Object { $_.Sel -eq $true -and "$($_.Target)".Trim() -and $_.Level -ne 'bad' })
+            foreach ($g in @($sel | Group-Object { ConvertTo-HMExtraKey "$($_.Target)" } | Where-Object { $_.Count -gt 1 })) {
+                foreach ($r in $g.Group) { $r.Hint = "gleiches Ziel wie $(@($g.Group | Where-Object { $_ -ne $r } | ForEach-Object { $_.Orig }) -join ', ') - Inhalte werden zusammengefuehrt"; $r.Level = 'warn' }
+            }
+            if (Test-HMIsLocal $s.Comp) {
+                $broot = ''; try { $broot = ConvertTo-HMExtraKey (Get-BackupRoot) } catch { }
+                if ($broot) { foreach ($r in $sel) { $k = ConvertTo-HMExtraKey "$($r.Target)"; if ($k -eq $broot -or $k.StartsWith($broot + '\')) { $r.Hint = 'Ziel liegt im Backup-Ordner - bitte anderes Ziel waehlen'; $r.Level = 'bad' } } }
             }
             $n = @($s.Dt.Rows | Where-Object { $_.Sel -eq $true -and "$($_.Hint)" -like 'neues Ziel*' }).Count
             $o = @($s.Dt.Rows | Where-Object { $_.Sel -ne $true }).Count

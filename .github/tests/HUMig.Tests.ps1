@@ -3622,11 +3622,11 @@ Describe '2.1.19: Server-Backup - Sperrzeit, andere Sicherungen, fremde Schatten
         @((ConvertFrom-HMSbBlockText '').Windows).Count | Should -Be 0
         Format-HMSbBlockWindow $r.Windows[0] | Should -Be 'Sa 23:45 - So 18:00 (iPACK-Sicherung)'
     }
-    It 'erkennt Ueberschneidung mit der Sperrzeit (Praxisfall R770: Do 08:26 + 41 h)' {
+    It 'erkennt Ueberschneidung mit der Sperrzeit (Praxisfall R770: Fr 30.10. 08:26 + 44 h)' {
         $w = (ConvertFrom-HMSbBlockText 'Sa 23:45 - So 18:00').Windows
-        $start = [datetime]'2026-10-29T08:26:00'   # Donnerstag
+        $start = [datetime]'2026-10-30T08:26:00'   # Freitag
         Get-HMSbBlockOverlap $w $start $start.AddHours(24) | Should -BeNullOrEmpty
-        $ov = Get-HMSbBlockOverlap $w $start $start.AddHours(70)
+        $ov = Get-HMSbBlockOverlap $w $start $start.AddMinutes(2638)
         $ov.From | Should -Be ([datetime]'2026-10-31T23:45:00')
         $ov.To | Should -Be ([datetime]'2026-11-01T18:00:00')
         # Start mitten in der Sperrzeit
@@ -3636,11 +3636,15 @@ Describe '2.1.19: Server-Backup - Sperrzeit, andere Sicherungen, fremde Schatten
         (Get-HMSbBlockOverlap $d ([datetime]'2026-11-03T05:00:00') ([datetime]'2026-11-03T05:30:00')).From | Should -Be ([datetime]'2026-11-02T22:00:00')
         Get-HMSbBlockOverlap $d ([datetime]'2026-11-03T07:00:00') ([datetime]'2026-11-03T21:00:00') | Should -BeNullOrEmpty
     }
-    It 'schaetzt die Dauer vorsichtig aus den letzten erfolgreichen Laeufen' {
+    It 'schaetzt die Dauer vorsichtig (letzte Laeufe inkl. Fehllaeufe, langsamstes Tempo)' {
         $h = @([pscustomobject]@{ Profile = 'GYM'; Status = 'OK'; Minutes = 372; Date = '2026-09-29 11:48' }, [pscustomobject]@{ Profile = 'GYM'; Status = 'OK'; Minutes = 1476; Date = '2026-10-15 08:10' },
             [pscustomobject]@{ Profile = 'GYM'; Status = 'Error'; Minutes = 2638; Date = '2026-10-30 08:26' }, [pscustomobject]@{ Profile = 'EUGym'; Status = 'OK'; Minutes = 5000; Date = '2026-10-29 17:03' })
-        Get-HMSbEstimateMinutes $h 'GYM' | Should -Be 1476
-        Get-HMSbEstimateMinutes @() 'GYM' (300GB) | Should -Be ([Math]::Round(300GB / 50MB / 60, 0))
+        # Fehllauf (2638 min) zaehlt als Untergrenze mit - sonst warnt der R770-Fall nicht (Codepruefung B1)
+        Get-HMSbEstimateMinutes $h 'GYM' | Should -Be 2638
+        # langsamstes gemessenes Tempo der letzten Laeufe: 2,15 TB mit 15 MB/s
+        $h2 = @([pscustomobject]@{ Profile = 'GYM'; Status = 'OK'; Minutes = 372; MBs = 97; Date = '2026-09-29 11:48' }, [pscustomobject]@{ Profile = 'GYM'; Status = 'Error'; Minutes = 100; MBs = 15; Date = '2026-10-30 08:26' })
+        Get-HMSbEstimateMinutes $h2 'GYM' (2150GB) | Should -Be ([Math]::Round(2150GB / 1MB / 15 / 60, 0))
+        Get-HMSbEstimateMinutes @() 'GYM' (300GB) | Should -Be ([Math]::Round(300GB / 1MB / 30 / 60, 0))
         Get-HMSbEstimateMinutes @() 'GYM' | Should -Be 360
     }
     It 'Quelllaufwerke aus den VM-Pfaden, ohne Ziel' {
@@ -3683,6 +3687,80 @@ Describe '2.1.19: Server-Backup - Sperrzeit, andere Sicherungen, fremde Schatten
         $e | Should -Match 'Der Lauf ueberschnitt die Sperrzeit'
         $e | Should -Match 'Waehrend des Laufs startete die geplante Aufgabe'
         $e | Should -Match 'Die Sperrzeit .* hat begonnen'
+    }
+}
+
+Describe '2.1.19: Codepruefung 029 (B1-B13)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        if (-not (Get-Command Write-HMLog -ErrorAction SilentlyContinue)) { function global:Write-HMLog($Job, $Msg, $Lvl) { } }
+    }
+    It 'B1: Start Fr 30.10. 08:26 mit echtem R770-Verlauf warnt vor der Sperrzeit Sa 23:45 (Vorab-Pruefung end-to-end)' {
+        Mock Find-HMSbForeignBackups { @() }
+        Mock Get-HMSbShadowRisks { @() }
+        $h = @([pscustomobject]@{ Profile = 'GYM-Leoben'; Status = 'OK'; Minutes = 372; MBs = 97; Date = '2026-09-29 11:48' }, [pscustomobject]@{ Profile = 'GYM-Leoben'; Status = 'OK'; Minutes = 1476; MBs = 24; Date = '2026-10-15 08:10' }, [pscustomobject]@{ Profile = 'GYM-Leoben'; Status = 'Error'; Minutes = 2638; MBs = 15; Date = '2026-10-30 08:26' })
+        $est = Get-HMSbEstimateMinutes $h 'GYM-Leoben' (2150GB)
+        $pf = @(Get-HMSbPreflight ([pscustomobject]@{ BlockText = 'Sa 23:45 - So 18:00 iPACK' }) @() @() 'G:' ([datetime]'2026-10-30T08:26:00') $est)
+        @($pf | Where-Object { $_.Kind -eq 'Block' -and $_.Lvl -eq 'Warning' }).Count | Should -Be 1
+        $pf[0].Text | Should -Match 'Sa 31\.10\. 23:45'
+    }
+    It 'B2: Wochentag ohne Bis-Tag und Bis vor Von = naechster Tag' {
+        $w = (ConvertFrom-HMSbBlockText 'Sa 22:00 - 06:00').Windows
+        $w[0].ToDay | Should -Be 0
+        Get-HMSbBlockOverlap $w ([datetime]'2026-11-04T10:00:00') ([datetime]'2026-11-04T11:00:00') | Should -BeNullOrEmpty   # Mittwoch frei
+        (Get-HMSbBlockOverlap $w ([datetime]'2026-11-08T05:00:00') ([datetime]'2026-11-08T05:10:00')).From | Should -Be ([datetime]'2026-11-07T22:00:00')
+        # So -> Mo ueber den Wochenwechsel
+        $sm = (ConvertFrom-HMSbBlockText 'So 22:00 - Mo 06:00').Windows
+        (Get-HMSbBlockOverlap $sm ([datetime]'2026-11-09T05:59:00') ([datetime]'2026-11-09T06:30:00')).From | Should -Be ([datetime]'2026-11-08T22:00:00')
+        Get-HMSbBlockOverlap $sm ([datetime]'2026-11-09T06:00:00') ([datetime]'2026-11-09T07:00:00') | Should -BeNullOrEmpty
+    }
+    It 'B3: gesichert zaehlt erst nach Erfolg, Abbruch/Neustart = nicht gesichert' {
+        $e = Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1') -Raw
+        $e | Should -Match '\$vmsSaved = @\(\); \$vmsFailed = @\(\); \$vmsUnknown = @\(\)'
+        $e | Should -Match "VMs = ''; VmsFailed = `"\`$\(\`$m\.VMs\)`""
+        $e | Should -Match 'if \(\$vms\.Count -and -not @\(\$vmsSaved\)\.Count'
+    }
+    It 'B4: Fortschritt und "0 Fehler" werten keine VM; nicht gefundene sind unklar, nicht fehlgeschlagen' {
+        $l = @('Die Dateien fuer "VM-A (Online)" werden kopiert... 9% abgeschlossen.', '"VM-A (Online)": 0 Fehler', '"VM-A (Online)" wurde erfolgreich gesichert.', 'Failed to back up "VM-B (Online)".')
+        $r = Get-HMSbVmResults $l @('VM-A', 'VM-B', 'VM-C')
+        @($r.Ok) | Should -Be @('VM-A')
+        @($r.Failed) | Should -Be @('VM-B')
+        @($r.Unknown) | Should -Be @('VM-C')
+        (Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1') -Raw) | Should -Match 'Ergebnis unklar: VMs:'
+    }
+    It 'B5: Fehler der Pruefungen werden als "nicht pruefbar" gemeldet' {
+        Mock Find-HMSbForeignBackups { throw 'Zugriff verweigert' }
+        Mock Get-HMSbShadowRisks { throw 'CIM nicht erreichbar' }
+        $pf = @(Get-HMSbPreflight $null @() @() 'G:' (Get-Date) 60)
+        @($pf | Where-Object { $_.Kind -eq 'NotChecked' }).Count | Should -Be 2
+        ($pf.Text -join ' ') | Should -Match 'nicht pruefbar: Zugriff verweigert'
+    }
+    It 'B5: Schattenkopie-Pruefung meldet unbekannte Platte als "nicht pruefbar"' {
+        $r = @(Get-HMSbShadowRisks @('D') @([pscustomobject]@{ DriveLetter = 'D:'; DeviceID = 'd' }, [pscustomobject]@{ DriveLetter = 'W:'; DeviceID = 'w' }) @() @([pscustomobject]@{ Volume = [pscustomobject]@{ DeviceID = 'd' }; DiffVolume = [pscustomobject]@{ DeviceID = 'w' } }) { param($L) $null })
+        $r[0].Kind | Should -Be 'NotChecked'
+    }
+    It 'B6: Ausloeser mit Wochenabstand und Wiederholung, Suchwoerter woertlich' {
+        $cls = { param($n) [pscustomobject]@{ CimClassName = $n } }
+        $w2 = [pscustomobject]@{ Triggers = @([pscustomobject]@{ Enabled = $true; StartBoundary = '2026-10-31T23:45:00'; DaysOfWeek = 64; WeeksInterval = 2; CimClass = (& $cls 'MSFT_TaskWeeklyTrigger') }) }
+        @(Get-HMSbTaskStarts $w2 ([datetime]'2026-11-01') ([datetime]'2026-11-22')) | Should -Be @([datetime]'2026-11-14T23:45:00')
+        $rp = [pscustomobject]@{ Triggers = @([pscustomobject]@{ Enabled = $true; StartBoundary = '2026-11-01T00:00:00'; DaysInterval = 1; Repetition = [pscustomobject]@{ Interval = 'PT4H'; Duration = 'P1D' }; CimClass = (& $cls 'MSFT_TaskDailyTrigger') }) }
+        @(Get-HMSbTaskStarts $rp ([datetime]'2026-11-02T09:00:00') ([datetime]'2026-11-02T13:00:00')) | Should -Be @([datetime]'2026-11-02T12:00:00')
+        $t = [pscustomobject]@{ TaskPath = '\'; TaskName = 'Backup [Monat]'; State = 'Ready'; Description = ''; Actions = @(); Triggers = @([pscustomobject]@{ Enabled = $true; StartBoundary = '2026-01-01T02:00:00'; CimClass = (& $cls 'MSFT_TaskMonthlyTrigger') }) }
+        $f = @(Find-HMSbForeignBackups (Get-Date) (Get-Date).AddDays(2) @('backup [monat]') @($t))
+        $f.Count | Should -Be 1
+        $f[0].Unknown | Should -BeTrue
+    }
+    It 'B9d: Wochentage deutsch, unabhaengig von der Sprache' {
+        Format-HMSbWhen ([datetime]'2026-10-31T23:45:00') | Should -Be 'Sa 31.10. 23:45'
+    }
+    It 'B11: Host-System zaehlt das Systemlaufwerk als Quelle' {
+        $env:SystemDrive = $(if ($env:SystemDrive) { $env:SystemDrive } else { 'C:' })
+        @(Get-HMSbSourceLetters @() @() 'G:' -HostSystem) | Should -Contain ($env:SystemDrive.Substring(0, 1).ToUpper())
+    }
+    It 'B13: reservierte Namen und Punkt/Leerzeichen am Ende werden abgelehnt' {
+        Test-HMExtraTargetPath 'E:\Daten\CON' | Should -Match 'reserviert'
+        Test-HMExtraTargetPath 'E:\Daten\x.' | Should -Match 'Punkt'
+        Test-HMExtraTargetPath 'E:\Daten\Projekte' | Should -BeNullOrEmpty
     }
 }
 

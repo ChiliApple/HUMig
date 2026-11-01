@@ -2278,6 +2278,10 @@ function Test-HMExtraTargetPath([string]$Path) {
     if ($p -match '[\*\?"<>\|]' -or $p.Substring(2) -match ':') { return 'ungueltige Zeichen im Pfad' }
     if ($p.TrimEnd('\') -match '^[A-Za-z]:$') { return 'bitte einen Ordner angeben, nicht das ganze Laufwerk' }
     if ($p -match '\\\.\.(\\|$)') { return '".." ist im Pfad nicht erlaubt' }
+    foreach ($seg in @($p.Substring(3).TrimEnd('\\') -split '\\')) {
+        if ($seg -match '(?i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.[^.]*)?$') { return "'$seg' ist ein reservierter Name unter Windows" }
+        if ($seg -match '[\. ]$') { return "Ordnername '$seg' darf nicht mit Punkt oder Leerzeichen enden" }
+    }
     return ''
 }
 
@@ -4251,6 +4255,7 @@ function Restore-HMBuiltin {
                     if ($bad) { $lines += "$($e.Path) - nicht zurueckgeschrieben: gewaehltes Ziel $chosen ungueltig ($bad). Die Daten liegen im Backup: $($e.Src)"; if ($worst -eq 'OK') { $worst = 'Warning' }; continue }
                     $dest = $chosen.TrimEnd('\'); $leaf = Split-Path $dest -Leaf
                     if ((ConvertTo-HMExtraKey $dest) -ne (ConvertTo-HMExtraKey $e.Path)) { $info = " -> neues Ziel $dest" }
+                    if ($usersRoot -and (& $under $dest $usersRoot) -and -not ($Ctx.ProfilePath -and (& $under $dest $Ctx.ProfilePath))) { $info += ' (im Profil eines anderen Benutzers - so gewaehlt)' }
                 }
                 # Pfad im Profil des Quell-Benutzers -> ins Profil des Zielbenutzers umschreiben (anderer Profilname/Benutzer)
                 $srcProf = "$($Ctx.Backup.ProfilePath)".TrimEnd('\')

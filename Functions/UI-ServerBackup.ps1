@@ -839,7 +839,8 @@ function Start-HMSbBackup {
         $vi = @($vms | ForEach-Object { $n = $_; @($script:SbVms | Where-Object { $_.Name -eq $n })[0] } | Where-Object { $_ })
         $sz = [long]0; foreach ($v in $vi) { $sz += [long]$v.SizeBytes }
         $ahx = Get-HMSbAllHistory; $est = Get-HMSbEstimateMinutes $ahx $pName $sz
-        $pf = @(Get-HMSbPreflight $p $vi $vols "$($d.Letter):" (Get-Date) $est @(Get-HMSbConflictWords))
+        [System.Windows.Input.Mouse]::OverrideCursor = [System.Windows.Input.Cursors]::Wait
+        try { $pf = @(Get-HMSbPreflight $p $vi $vols "$($d.Letter):" (Get-Date) $est @(Get-HMSbConflictWords) -HostSystem:$hs) } finally { [System.Windows.Input.Mouse]::OverrideCursor = $null }
         $pw = @($pf | Where-Object { $_.Lvl -ne 'Info' }); $pi = @($pf | Where-Object { $_.Lvl -eq 'Info' })
         if ($pw.Count) { $msg += "`n`nACHTUNG - Stoerung moeglich (erwartete Dauer ca. $(Format-HMDuration $est)):`n" + (@($pw | ForEach-Object { "  - $($_.Text)" }) -join "`n") }
         if ($pi.Count) { $msg += "`n`nHinweis:`n" + (@($pi | ForEach-Object { "  - $($_.Text)" }) -join "`n") }
@@ -1542,7 +1543,6 @@ function Open-HMSbReport($Entry) {
 # ----------------------------------------------------------------------------
 # Zeitplan: geplante Aufgabe (SYSTEM) startet Functions\ServerBackup-Task.ps1
 # ----------------------------------------------------------------------------
-$script:SbTaskPath = '\HUMig\'
 function Show-HMSbScheduleDialog([string]$Info) {
     $x = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -1606,7 +1606,6 @@ function Show-HMSbScheduleDialog([string]$Info) {
 # Andere Sicherungsaufgaben in der Aufgabenplanung, die sich mit HUMig ueberschneiden koennen
 #   Suchwoerter frei (serverbackup.json ConflictWords), "-Wort" = ausschliessen
 # ----------------------------------------------------------------------------
-$script:SbConflictDefault = @('backup', 'sicherung', 'wbadmin', 'veeam', 'acronis', '-RegIdleBackup')
 function Get-HMSbConflictWords {
     $w = (Get-HMSbConfig).ConflictWords
     if ($null -eq $w -or -not @($w).Count) { return $script:SbConflictDefault }
@@ -1701,12 +1700,13 @@ function New-HMSbSchedule {
     # andere Sicherungsaufgaben, die sich ueberschneiden (naechste 14 Tage)
     try {
         $own = 'Server-Backup - {0} - ' -f (ConvertTo-HMSbTaskPart $p.Name)
-        $avg = 360.0
-        try { $ah = Get-HMSbAllHistory; $okr = @(@($ah) | Where-Object { "$($_.Profile)" -eq $p.Name -and "$($_.Status)" -ne 'Error' -and [double]$_.Minutes -gt 0 }); if ($okr.Count) { $avg = [double](@($okr | ForEach-Object { [double]$_.Minutes }) | Measure-Object -Maximum).Maximum } } catch { }
+        # erwartete Dauer wie beim Start (auch Fehllaeufe, langsamstes Tempo) - Codepruefung B7
+        $szp = [long]0; foreach ($vn in $vms) { $vv = @($script:SbVms | Where-Object { $_.Name -eq $vn })[0]; if ($vv) { $szp += [long]$vv.SizeBytes } }
+        $ah = Get-HMSbAllHistory; $avg = Get-HMSbEstimateMinutes $ah $p.Name $szp
         if ("$($p.BlockText)".Trim()) {
             $bwp = ConvertFrom-HMSbBlockText "$($p.BlockText)"
             if (-not $bwp.Error) {
-                $bh = @(); foreach ($ps in @(Get-HMSbPlanStarts $r (Get-Date) (Get-Date).AddDays(14))) { $ovp = Get-HMSbBlockOverlap $bwp.Windows $ps $ps.AddMinutes($avg); if ($ovp) { $bh += "  Start $($ps.ToString('ddd dd.MM. HH:mm')) -> Sperrzeit $(Format-HMSbBlockWindow $ovp.Window) ab $($ovp.From.ToString('ddd dd.MM. HH:mm'))" } }
+                $bh = @(); foreach ($ps in @(Get-HMSbPlanStarts $r (Get-Date) (Get-Date).AddDays(14))) { $ovp = Get-HMSbBlockOverlap $bwp.Windows $ps $ps.AddMinutes($avg); if ($ovp) { $bh += "  Start $(Format-HMSbWhen $ps) -> Sperrzeit $(Format-HMSbBlockWindow $ovp.Window) ab $(Format-HMSbWhen $ovp.From)" } }
                 if ($bh.Count) {
                     $mb = "Dieser Zeitplan ragt (angenommene Dauer $(Format-HMDuration $avg)) in die Sperrzeit des Profils:`n`n$(@($bh | Select-Object -First 8) -join "`n")$(if ($bh.Count -gt 8) { "`n  ..." })`n`nTrotzdem so planen?"
                     if ("$(Show-HMDialogBox -Owner $script:Window -Text $mb -Title 'Server-Backup planen' -Mode 'YesNo' -Icon 'Warning')" -ne 'Yes') { return }

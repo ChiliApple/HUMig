@@ -12,6 +12,12 @@
 - **Andere geplante Sicherungen im Laufzeitraum:** auch beim sofortigen Start (Oberflaeche/Hintergrund) und im Zeitplan-Lauf - Warnung, wenn eine andere Sicherungsaufgabe (Suchwoerter der Zeitplan-Pruefung) waehrend des erwarteten Laufs startet; nach einem Fehler nennt der Bericht die Aufgabe, die waehrenddessen gestartet ist
 - **Fremde Schattenkopie / Schattenkopie-Speicher auf USB:** Warnung, wenn eine Schattenkopie eines Quelllaufwerks gerade eingebunden ist (andere Sicherung liest daraus), Hinweis, wenn der Schattenkopie-Speicher eines Quelllaufwerks auf einer USB-/Wechselplatte liegt (Praxisfall R770: D: -> W: der Wochenendsicherung) - HUMig aendert diese Zuordnung nie
 - Restore-Dialog: markierte Zeile bleibt dunkel lesbar
+- Laufzeit-Schaetzung fuer Sperrzeit und Zeitplan-Pruefung vorsichtiger und einheitlich: laengster der letzten 5 Laeufe (auch abgebrochene) bzw. Groesse / langsamstes gemessenes Tempo, ohne Verlauf 6 h - der R770-Fall (Start Fr 08:26, 44 h) wird jetzt vorher gewarnt
+- "Sa 22:00 - 06:00" (Bis vor Von, ohne Bis-Tag) gilt bis zum naechsten Morgen; Zeitplaene mit Wiederholung, Wochenabstand und Ablaufdatum werden richtig vorausberechnet, nicht auswertbare Ausloeser als "nicht pruefbar" gemeldet
+- Kann eine Pruefung nicht laufen (Aufgabenplanung/Schattenkopien nicht lesbar), steht "nicht pruefbar" in der Rueckfrage statt stillem "alles frei"; am Host zaehlt auch das Systemlaufwerk als Quelle
+- VMs ohne eindeutiges Ergebnis in der wbadmin-Ausgabe stehen als "Ergebnis unklar" (Teams/Mail/Bericht) statt als fehlgeschlagen; bei Abbruch/Neustart gilt keine VM als gesichert
+- Zeitangaben in Warnungen immer mit deutschem Wochentag (z. B. "Sa 31.10. 23:45"); Vorab-Pruefung mit Warte-Cursor
+- Restore-Ziele: reservierte Namen (CON, NUL, COM1 ...) und Punkt/Leerzeichen am Ende abgelehnt, gleiches Ziel fuer mehrere Ordner und Ziel im Backup-Ordner gewarnt, Ziel im Profil eines anderen Benutzers im Protokoll vermerkt
 ### Doku
 - Einstieg: neue Situation *Grosse Datenmengen umziehen* mit Ablaufgrafik; Anleitung: Abschnitt *Zusaetzliche Ordner an einen anderen Ort zurueckspielen*
 
