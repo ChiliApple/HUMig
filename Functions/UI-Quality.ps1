@@ -126,7 +126,7 @@ function Show-HMExtraTargetsDialog {
     <DataGrid x:Name="dg" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column" SelectionMode="Single" SelectionUnit="FullRow"
               Background="#FF313244" Foreground="#FFCDD6F4" RowBackground="#FF313244" AlternatingRowBackground="#FF3B3D52" GridLinesVisibility="None" BorderBrush="#FF585B70" RowHeight="30">
       <DataGrid.ColumnHeaderStyle><Style TargetType="DataGridColumnHeader"><Setter Property="Background" Value="#FF181825"/><Setter Property="Foreground" Value="#FFCDD6F4"/><Setter Property="Padding" Value="6,4"/></Style></DataGrid.ColumnHeaderStyle>
-      <DataGrid.CellStyle><Style TargetType="DataGridCell"><Setter Property="BorderThickness" Value="0"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style></DataGrid.CellStyle>
+      <DataGrid.CellStyle><Style TargetType="DataGridCell"><Setter Property="BorderThickness" Value="0"/><Setter Property="VerticalContentAlignment" Value="Center"/><Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#FF45475A"/><Setter Property="Foreground" Value="#FFCDD6F4"/></Trigger></Style.Triggers></Style></DataGrid.CellStyle>
       <DataGrid.Columns>
         <DataGridTemplateColumn Header="Zurueck" Width="62"><DataGridTemplateColumn.CellTemplate><DataTemplate><CheckBox IsChecked="{Binding Sel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center" VerticalAlignment="Center" ToolTip="Haken weg = nicht zurueckspielen"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
         <DataGridTextColumn Header="Gesichert von" Binding="{Binding Orig}" IsReadOnly="True" Width="260"/>

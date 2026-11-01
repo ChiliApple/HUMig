@@ -4,6 +4,11 @@
 ### Restore
 - **Zusaetzliche Ordner an einen anderen Ort zurueckspielen:** neuer Knopf *Ziele der Zusaetzlichen Ordner ...* im Reiter Restore (nur bei Backups mit Zusaetzlichen Ordnern, mit Statuszeile) - je Ordner Originalpfad, neues Ziel (eintippen oder Ordnerauswahl am Ziel-PC, neuer Ordner moeglich) oder auslassen; Hinweise in Farbe (Laufwerk fehlt, Pfad ungueltig, Systemordner); die Rueckfrage beim Start nennt die geaenderten Ziele, das Protokoll "-> neues Ziel" bzw. "ausgelassen". Kopiert wird wie bisher (Robocopy mit Threads, Kontrolle auf fehlende Dateien); die Schutzregeln (Systemordner, OneDrive) gelten auch fuer gewaehlte Ziele
 - Ordnerauswahl startet beim bisherigen Ziel (naechster vorhandener Ordner darueber)
+### Server-Backup
+- **Fehlgeschlagene VMs werden genannt** (Praxisfall R770, wbadmin Exitcode -4): gesichert/nicht gesichert wird je VM aus der wbadmin-Zusammenfassung gelesen - Teams/Mail zeigen "NICHT gesichert: VMs: ...", Verlauf und Bericht zaehlen nur wirklich gesicherte VMs (bisher standen alle gewaehlten VMs unter "Gesichert"); der Bericht hat eine eigene Zeile fuer nicht gesicherte VMs
+- Gruende aus dem Fehlerprotokoll der Windows Server-Sicherung (Backup_Error-*.log) stehen direkt im Protokoll und im Bericht-Hinweis
+- "ca. ... GB auf die Platte geschrieben" in der Lebenszeichen-Zeile zaehlt nur noch Zunahmen - verwirft Windows waehrend des Laufs aeltere Versionen, sprang der Wert bisher zurueck bzw. verschwand
+- Restore-Dialog: markierte Zeile bleibt dunkel lesbar
 ### Doku
 - Einstieg: neue Situation *Grosse Datenmengen umziehen* mit Ablaufgrafik; Anleitung: Abschnitt *Zusaetzliche Ordner an einen anderen Ort zurueckspielen*
 

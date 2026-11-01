@@ -428,6 +428,42 @@ function Format-HMSbAliveLine {
     return $t
 }
 
+# Ergebnis je VM aus der wbadmin-Ausgabe (Zusammenfassung am Ende): Ok = gesichert, Failed = Fehler, Unknown = nicht gefunden.
+# Zeilen z.B. '"VM-iPData (Online)" wurde erfolgreich gesichert.' / 'Fehler beim Sichern von "VM-iPWeb (Online)".' (englisch analog).
+function Get-HMSbVmResults([string[]]$Lines, [string[]]$Vms) {
+    $state = @{}
+    foreach ($l in @($Lines)) {
+        foreach ($m in [regex]::Matches("$l", '"([^"]+?)"')) {
+            $n = ($m.Groups[1].Value -replace '\s*\((Online|Offline)\)\s*$', '').Trim()
+            $hit = @($Vms | Where-Object { "$_" -ieq $n })
+            if (-not $hit.Count) { continue }
+            $n = "$($hit[0])"
+            if ("$l" -match '(?i)fehler|failed|error|nicht erfolgreich|not successful') { $state[$n] = 'Failed' }
+            elseif ("$l" -match '(?i)erfolgreich|successfully|succeeded') { $state[$n] = 'Ok' }
+        }
+    }
+    $ok = @($Vms | Where-Object { $state["$_"] -eq 'Ok' })
+    $bad = @($Vms | Where-Object { $state["$_"] -eq 'Failed' })
+    $unk = @($Vms | Where-Object { -not $state.ContainsKey("$_") })
+    return [pscustomobject]@{ Ok = $ok; Failed = $bad; Unknown = $unk }
+}
+# Grund aus dem Fehlerprotokoll der Windows Server-Sicherung (Backup_Error-*.log): erste aussagekraeftige Zeilen
+function Get-HMSbErrorLogReasons([string[]]$Files, [int]$Max = 6) {
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($f in @($Files | Where-Object { $_ -and (Split-Path $_ -Leaf) -match '(?i)error' })) {
+        if (-not (Test-Path -LiteralPath $f)) { continue }
+        $ls = @(); try { $ls = @(Get-Content -LiteralPath $f -ErrorAction Stop) } catch { continue }
+        foreach ($l in $ls) {
+            $t = "$l".Trim() -replace '\s+', ' '
+            if (-not $t -or $t.Length -lt 8 -or $out.Contains($t)) { continue }
+            if ($t.Length -gt 300) { $t = $t.Substring(0, 300) + ' ...' }
+            $out.Add($t)
+            if ($out.Count -ge $Max) { return $out.ToArray() }
+        }
+    }
+    return $out.ToArray()
+}
+
 # wbadmin ausfuehren (stdout+stderr), Fortschritt in $Job, Zeilen ins Log
 function Invoke-HMSbWbadmin {
     param([string]$Arguments, [string]$Phase = '', [double]$PBase = 0, [double]$PSpan = 100, [string]$LogFile = '', [switch]$Quiet)
@@ -446,13 +482,18 @@ function Invoke-HMSbWbadmin {
     # lange Laeufe (grosse VMs): alle 30 min eine Logzeile 'laeuft noch', auch wenn wbadmin lange nichts ausgibt
     $tgt = if ($Arguments -match '(?i)-backupTarget:([A-Za-z]:)') { $Matches[1] } else { '' }
     $used0 = if ($tgt -and -not $Quiet) { Get-HMSbDriveUsedBytes $tgt } else { $null }
+    # geschriebene Menge = Summe der Zunahmen des belegten Platzes (verwirft Windows waehrenddessen aeltere Versionen,
+    # sinkt der belegte Platz - das zaehlt nicht als "weniger geschrieben")
+    $usedPrev = $used0; $written = [long]0
     $t0 = Get-Date; $lastLog = $t0; $lastPctTxt = ''
     while ($true) {
         $rl = $p.StandardOutput.ReadLineAsync()
         while (-not $rl.Wait(5000)) {
             if (-not $Quiet -and ((Get-Date) - $lastLog).TotalMinutes -ge $script:HMSbAliveMinutes) {
                 $lastLog = Get-Date
-                Write-HMSbLog ('  ' + (Format-HMSbAliveLine -Phase $Phase -Elapsed ((Get-Date) - $t0) -PctText $lastPctTxt -UsedStart $used0 -UsedNow $(if ($tgt) { Get-HMSbDriveUsedBytes $tgt } else { $null })))
+                $uNow = if ($tgt -and $null -ne $usedPrev) { Get-HMSbDriveUsedBytes $tgt } else { $null }
+                if ($null -ne $uNow) { if ([long]$uNow -gt [long]$usedPrev) { $written += ([long]$uNow - [long]$usedPrev) }; $usedPrev = $uNow }
+                Write-HMSbLog ('  ' + (Format-HMSbAliveLine -Phase $Phase -Elapsed ((Get-Date) - $t0) -PctText $lastPctTxt -UsedStart $(if ($null -ne $used0) { [long]0 } else { $null }) -UsedNow $(if ($null -ne $used0) { $written } else { $null })))
             }
         }
         $line = $rl.Result
@@ -773,6 +814,7 @@ function New-HMSbNotifyMessage {
         if ("$($Result.HostSystem)") { $what += "Host-System: $($Result.HostSystem)" }
         if ("$($Result.Export)" -and $expSt -eq 'OK') { $what += "VM-Export: $($Result.Export)" }
         if ($what.Count) { $lines.Add("Gesichert: $($what -join ' | ')") }
+        if ("$($Result.VmsFailed)") { $lines.Add("NICHT gesichert: VMs: $($Result.VmsFailed)") }
         $dl = @()
         if ([double]"0$($Result.Minutes)" -gt 0) { $dl += "Dauer $(Format-HMDuration $Result.Minutes)" }
         if ([long]"0$($Result.SizeBytes)" -gt 0) { $dl += ("Datenmenge ca. {0:N1} GB" -f ([long]$Result.SizeBytes / 1GB)) }
@@ -1535,7 +1577,8 @@ function Write-HMSbReport {
     $rows = @(
         @('Datum', $Entry.Date), @('Profil', $Entry.Profile), @('Hyper-V-Host', $Entry.Host),
         @('Platte', "$($Entry.Disk)$(if ($Entry.DiskSerial) { "  (Seriennummer $($Entry.DiskSerial))" })"),
-        @('Virtuelle Computer', $(if ($Entry.VMs) { $Entry.VMs } else { '-' })),
+        @('Virtuelle Computer (gesichert)', $(if ($Entry.VMs) { $Entry.VMs } else { '-' })),
+        @('Virtuelle Computer NICHT gesichert', $(if ("$($Entry.VmsFailed)") { "$($Entry.VmsFailed)" } else { '-' })),
         @('Laufwerke dieses Servers', $(if ($Entry.Volumes) { "$($Entry.Volumes)$(if ($Entry.VolVersionId) { " - Version $($Entry.VolVersionId) (UTC)" })" } else { '-' })),
         @('Dauer', (Format-HMDuration $Entry.Minutes)), @('Gesicherte Datenmenge', "ca. $($Entry.SizeGB) GB (virtuelle Festplatten der VMs + belegter Platz der Laufwerke)"),
         @('Schreibtempo', $(if ([double]"0$($Entry.MBs)" -gt 0) { "ca. $([math]::Round([double]$Entry.MBs)) MB/s (Datenmenge / Dauer des ganzen Laufs)" } else { '-' })),
@@ -1944,7 +1987,7 @@ function Start-HMServerBackup {
     $vms = @($Ctx.VMs | Where-Object { "$_".Trim() })
     $vols = @($Ctx.Volumes | Where-Object { "$_".Trim() } | ForEach-Object { ("$_".Trim().TrimEnd('\', ':')).ToUpper() + ':' } | Select-Object -Unique)
     $res = [ordered]@{ Status = 'Error'; SizeBytes = [long]0; Report = ''; VersionId = ''; HostVersionId = ''; VolVersionId = ''; Notes = @(); Health = ''; HealthText = ''
-        Minutes = 0; FreeBytes = [long]0; TotalBytes = [long]0; LowSpace = $false; VersionCount = 0; OldestVersion = ''; NewestVersion = ''; VMs = ''; Volumes = ''; HostSystem = ''
+        Minutes = 0; FreeBytes = [long]0; TotalBytes = [long]0; LowSpace = $false; VersionCount = 0; OldestVersion = ''; NewestVersion = ''; VMs = ''; VmsFailed = ''; Volumes = ''; HostSystem = ''
         Export = ''; ExportStatus = ''; MBs = 0; ShadowStorage = '' }
     $Job.Result = [pscustomobject]$res
 
@@ -2033,6 +2076,7 @@ function Start-HMServerBackup {
         $pb = 2
         # --- VMs sichern
         $verId = ''
+        $vmsSaved = @($vms); $vmsFailed = @()
         if ($vms.Count) {
             $Job.Status = 'VMs: Schattenkopie wird erstellt ...'
             Write-HMSbLog "wbadmin: VMs sichern -> $target (Online-Sicherung ueber VSS, VMs laufen weiter)" 'Header'
@@ -2046,8 +2090,20 @@ function Start-HMServerBackup {
                 throw 'Abgebrochen'
             }
             foreach ($lf in @($r.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
-            if ($r.ExitCode -ne 0 -and $r.Busy) { $status = 'Error'; $notes += 'VM-Sicherung: anderer Sicherungsvorgang lief'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die VM-Sicherung wurde nicht ausgefuehrt: am Host lief bereits eine andere Sicherung/Wiederherstellung.'; Fix = $script:HMSbBusyFix }; Write-HMSbLog 'VM-Sicherung NICHT ausgefuehrt - am Host lief bereits eine andere Sicherung/Wiederherstellung (spaeter erneut starten)' 'Error' }
-            elseif ($r.ExitCode -ne 0) { $status = 'Error'; $notes += "VM-Sicherung Exitcode $($r.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die VM-Sicherung ist fehlgeschlagen (wbadmin Exitcode $($r.ExitCode))."; Fix = 'Ursache steht in wbadmin-VMs.log und im Backup-/Fehlerprotokoll der Windows Server-Sicherung (Links unten). Haeufig: Platte voll, VM gesperrt, VSS-Fehler im Gast.' }; Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - Details: wbadmin-VMs.log im Berichtsordner" 'Error' }
+            if ($r.ExitCode -ne 0 -and $r.Busy) { $status = 'Error'; $vmsSaved = @(); $vmsFailed = @($vms); $notes += 'VM-Sicherung: anderer Sicherungsvorgang lief'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die VM-Sicherung wurde nicht ausgefuehrt: am Host lief bereits eine andere Sicherung/Wiederherstellung.'; Fix = $script:HMSbBusyFix }; Write-HMSbLog 'VM-Sicherung NICHT ausgefuehrt - am Host lief bereits eine andere Sicherung/Wiederherstellung (spaeter erneut starten)' 'Error' }
+            elseif ($r.ExitCode -ne 0) {
+                $status = 'Error'
+                # welche VMs sind trotzdem gesichert? (wbadmin meldet je VM) - nur die zaehlen als "gesichert"
+                $vr = Get-HMSbVmResults $r.Lines $vms
+                $vmsFailed = @(@($vr.Failed) + @($vr.Unknown))
+                $vmsSaved = @($vr.Ok)
+                $why = @(Get-HMSbErrorLogReasons @($r.LogFiles | ForEach-Object { Join-Path $rep (Split-Path $_ -Leaf) }))
+                $failTxt = if ($vmsSaved.Count) { "nicht gesichert: $($vmsFailed -join ', ') (gesichert: $($vmsSaved -join ', '))" } else { "keine VM gesichert" }
+                $notes += "VM-Sicherung fehlgeschlagen - $failTxt, wbadmin Exitcode $($r.ExitCode)"
+                $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die VM-Sicherung ist fehlgeschlagen (wbadmin Exitcode $($r.ExitCode)) - $failTxt.$(if ($why.Count) { ' Grund laut Windows Server-Sicherung: ' + ($why -join ' / ') })"; Fix = 'Ursache steht in wbadmin-VMs.log und im Fehlerprotokoll der Windows Server-Sicherung (Links unten). Haeufig: Schattenkopie waehrend eines sehr langen Laufs verworfen (Platte zu langsam, z.B. USB 2.0; Speicher fuer Versionen zu klein), Platte voll, VM gesperrt, VSS-Fehler im Gast.' }
+                Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - $failTxt - Details: wbadmin-VMs.log im Berichtsordner" 'Error'
+                foreach ($w in $why) { Write-HMSbLog "  Fehlerprotokoll: $w" 'Error' }
+            }
             else {
                 $offVms = @($r.Lines | Where-Object { $_ -match '"(.+?) \(Offline\)"' } | ForEach-Object { if ($_ -match '"(.+?) \(Offline\)"') { $Matches[1] } } | Select-Object -Unique)
                 if ($offVms.Count) {
@@ -2231,7 +2287,7 @@ function Start-HMServerBackup {
     if (-not $vms.Count -and -not $vols.Count -and -not $Ctx.HostSystem -and -not $hostCfgOk -and -not ("$($res.ExportStatus)" -in @('OK', 'Warning'))) { $status = 'Error' }
     $entry = [pscustomobject][ordered]@{
         Date = $t0.ToString('yyyy-MM-dd HH:mm'); Profile = "$($Ctx.Profile)"; Host = $env:COMPUTERNAME; Disk = "$($Ctx.DiskLabel)"; DiskSerial = "$($Ctx.DiskSerial)"
-        VMs = ($vms -join ', '); Volumes = ($vols -join ', '); VolVersionId = "$($res.VolVersionId)"; Status = $status; Minutes = $dur; SizeGB = [math]::Round($res.SizeBytes / 1GB, 1); VersionId = $verId
+        VMs = ($vmsSaved -join ', '); VmsFailed = ($vmsFailed -join ', '); Volumes = ($vols -join ', '); VolVersionId = "$($res.VolVersionId)"; Status = $status; Minutes = $dur; SizeGB = [math]::Round($res.SizeBytes / 1GB, 1); VersionId = $verId
         HostConfig = $hostCfgOk; HostSystem = $hostSysOk; HostVersionId = "$($res.HostVersionId)"; Note = ($notes -join '; '); Tool = "HUMig $($Ctx.Version)"; Report = (Split-Path $rep -Leaf)
         Health = $healthLvl; HealthText = $healthTxt; Export = "$($res.Export)"; ExportStatus = "$($res.ExportStatus)"
         MBs = $rate; ShadowStorage = "$($res.ShadowStorage)"; TaskLog = "$($Ctx.TaskLog)"; Versions = $(if ($null -ne $vaNow) { @($vaNow).Count } else { -1 })
@@ -2249,7 +2305,7 @@ function Start-HMServerBackup {
         }
     } catch { Write-HMSbLog "Bericht: $($_.Exception.Message)" 'Warning' }
     # Stand der Platte fuer Meldungen: freier Platz, Versionen (vor dem Auswerfen/Offline-Schalten)
-    $res.Minutes = $dur; $res.VMs = ($vms -join ', '); $res.Volumes = ($vols -join ', ')
+    $res.Minutes = $dur; $res.VMs = ($vmsSaved -join ', '); $res.VmsFailed = ($vmsFailed -join ', '); $res.Volumes = ($vols -join ', ')
     $res.HostSystem = if ($Ctx.HostSystem) { if ($hostSysOk) { 'ja' } else { 'FEHLER' } } else { '' }
     try {
         $vol2 = Get-Volume -DriveLetter $L -ErrorAction Stop

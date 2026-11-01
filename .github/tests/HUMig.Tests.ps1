@@ -3565,3 +3565,37 @@ Describe '2.1.19: Restore - Ziele der Zusaetzlichen Ordner' {
     }
 }
 
+Describe '2.1.19: Server-Backup - Ergebnis je VM, Fehlerprotokoll, geschriebene Menge' {
+    It 'erkennt gesicherte und fehlgeschlagene VMs aus der wbadmin-Zusammenfassung (Praxis R770)' {
+        $lines = @('Die Dateien fuer "VM-iPData (Online)" werden kopiert... 9% abgeschlossen.', '"VM-iPData (Online)" wurde erfolgreich gesichert.',
+            '"VM-iPLFS (Online)" wurde erfolgreich gesichert.', 'Fehler beim Sichern von "VM-iPWeb (Online)".', 'Fehler beim Sichern von "VM-Uniflow (Online)".',
+            'Die Anwendungssicherung wurde mit Fehlern abgeschlossen.')
+        $r = Get-HMSbVmResults $lines @('VM-iPData', 'VM-iPLFS', 'VM-iPWeb', 'VM-Uniflow', 'VM-Fehlt')
+        @($r.Ok) | Should -Be @('VM-iPData', 'VM-iPLFS')
+        @($r.Failed) | Should -Be @('VM-iPWeb', 'VM-Uniflow')
+        @($r.Unknown) | Should -Be @('VM-Fehlt')
+    }
+    It 'Offline gesicherte VM zaehlt als gesichert, Name ohne Gross-/Kleinschreibung' {
+        $r = Get-HMSbVmResults @('"vm-a (Offline)" wurde erfolgreich gesichert.') @('VM-A')
+        @($r.Ok) | Should -Be @('VM-A')
+    }
+    It 'liest Gruende aus dem Fehlerprotokoll (nur *Error*-Dateien, ohne Dubletten, gekuerzt)' {
+        $d = Join-Path $TestDrive 'wsb'; New-Item -ItemType Directory -Path $d -Force | Out-Null
+        $ef = Join-Path $d 'Backup_Error-30-10-2026_07-28-50.log'; $of = Join-Path $d 'Backup-30-10-2026_07-28-50.log'
+        Set-Content -LiteralPath $ef -Value @('', 'Fehler beim Sichern von VM-iPWeb: Schattenkopie wurde geloescht (0x80042306)', 'Fehler beim Sichern von VM-iPWeb: Schattenkopie wurde geloescht (0x80042306)', ('x' * 400)) -Encoding Unicode
+        Set-Content -LiteralPath $of -Value 'Datei gesichert: C:\a.vhdx' -Encoding Unicode
+        $w = @(Get-HMSbErrorLogReasons @($ef, $of))
+        $w.Count | Should -Be 2
+        $w[0] | Should -Match '0x80042306'
+        $w[1].Length | Should -BeLessOrEqual 304
+    }
+    It 'Meldung nennt nicht gesicherte VMs; Verlauf zaehlt nur gesicherte' {
+        $c = Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1') -Raw
+        $c | Should -Match 'NICHT gesichert: VMs:'
+        $c | Should -Match 'VMs = \(\$vmsSaved -join'
+        $c | Should -Match "VmsFailed = ''"
+        $c | Should -Match 'Virtuelle Computer NICHT gesichert'
+        $c | Should -Match '\$written \+= '
+    }
+}
+
