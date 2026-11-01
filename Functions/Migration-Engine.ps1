@@ -2243,6 +2243,44 @@ function Backup-HMRegItem {
 }
 
 # Zusaetzliche Ordner: feste Nummer je Pfad (FOLDER<n>), damit ein herausgenommener Ordner nicht den Platz eines anderen bekommt.
+# Zusaetzliche Ordner eines Backups fuer den Restore: Liste (Src = Ordner im Backup, Path = Originalpfad am Quell-PC, Key = FOLDER<n>)
+# Gemeinsam fuer Engine (Restore) und Oberflaeche (Ziele aendern). Altes Format: FOLDER1/2 + FOLDER<n>.txt direkt im Backup.
+function Get-HMExtraFolderEntries([string]$BackupPath, [bool]$Legacy = $false) {
+    $entries = New-Object System.Collections.Generic.List[object]
+    if (-not $BackupPath) { return @() }
+    if ($Legacy) {
+        foreach ($i in 1, 2) {
+            $sp = Join-Path $BackupPath "FOLDER$i"; $tf = Join-Path $BackupPath "FOLDER$i.txt"
+            if ((Test-Path -LiteralPath $sp) -and (Test-Path -LiteralPath $tf)) {
+                $pl = @(Get-Content -LiteralPath $tf | Where-Object { "$_".Trim() })
+                if ($pl.Count) { $entries.Add([pscustomobject]@{ Src = $sp; Path = "$($pl[-1])".Trim(); Key = '' }) }
+            }
+        }
+        return $entries.ToArray()
+    }
+    $dir = Join-Path $BackupPath 'ExtraFolders'
+    $jf = Join-Path $dir 'folders.json'
+    if (-not (Test-Path -LiteralPath $jf)) { return @() }
+    try {
+        # erst zuweisen, dann durchlaufen: PS 5.1 gibt ein JSON-Array aus ConvertFrom-Json als EIN Objekt aus
+        $fj = Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($e in @(@($fj) | Where-Object { $_ -and [int]$_.Index -gt 0 -and "$($_.Path)" })) { $entries.Add([pscustomobject]@{ Src = (Join-Path $dir "FOLDER$($e.Index)"); Path = "$($e.Path)"; Key = "FOLDER$($e.Index)" }) }
+    } catch { }
+    return $entries.ToArray()
+}
+# Schluessel fuer die beim Restore gewaehlten Ziele ($Ctx.ExtraTargets): Originalpfad ohne Gross-/Kleinschreibung und abschliessenden \
+function ConvertTo-HMExtraKey([string]$Path) { return "$Path".Trim().TrimEnd('\').ToUpperInvariant() }
+# Ziel fuer einen Zusaetzlichen Ordner pruefen (Eingabe im Restore): Rueckgabe '' = in Ordnung, sonst Grund (Text)
+function Test-HMExtraTargetPath([string]$Path) {
+    $p = "$Path".Trim()
+    if (-not $p) { return '' }
+    if ($p -notmatch '^[A-Za-z]:\\') { return 'bitte vollstaendigen Pfad mit Laufwerk angeben (z.B. E:\Daten\Projekte)' }
+    if ($p -match '[\*\?"<>\|]' -or $p.Substring(2) -match ':') { return 'ungueltige Zeichen im Pfad' }
+    if ($p.TrimEnd('\') -match '^[A-Za-z]:$') { return 'bitte einen Ordner angeben, nicht das ganze Laufwerk' }
+    if ($p -match '\\\.\.(\\|$)') { return '".." ist im Pfad nicht erlaubt' }
+    return ''
+}
+
 # Grundlage: ExtraFolders\folders.json (aktuelle) und folders-alt.json (herausgenommene, Nummer wird nie wieder vergeben).
 # Rueckgabe: Map (Index, Path) fuer $Paths, Removed (bisher gesicherte, jetzt nicht mehr gewaehlte), Alt (bisherige Liste herausgenommener)
 function Get-HMExtraFolderMap([string]$BackupPath, [string[]]$Paths) {
@@ -4193,20 +4231,7 @@ function Restore-HMBuiltin {
         }
 
         'ExtraFolders' {
-            $entries = @()
-            if ($Ctx.Backup.Legacy) {
-                foreach ($i in 1, 2) {
-                    $sp = Join-Path $Ctx.Backup.Path "FOLDER$i"; $tf = Join-Path $Ctx.Backup.Path "FOLDER$i.txt"
-                    if ((Test-Path -LiteralPath $sp) -and (Test-Path -LiteralPath $tf)) { $entries += [pscustomobject]@{ Src = $sp; Path = ((Get-Content -LiteralPath $tf | Where-Object { $_ })[-1]).Trim(); Key = '' } }
-                }
-            } else {
-                $jf = Join-Path $dir 'folders.json'
-                if (Test-Path -LiteralPath $jf) {
-                    # erst zuweisen, dann durchlaufen: PS 5.1 gibt ein JSON-Array aus ConvertFrom-Json als EIN Objekt aus
-                    $fj = Get-Content -LiteralPath $jf -Raw -Encoding UTF8 | ConvertFrom-Json
-                    foreach ($e in @(@($fj) | Where-Object { $_ -and [int]$_.Index -gt 0 -and "$($_.Path)" })) { $entries += [pscustomobject]@{ Src = (Join-Path $dir "FOLDER$($e.Index)"); Path = $e.Path; Key = "FOLDER$($e.Index)" } }
-                }
-            }
+            $entries = @(Get-HMExtraFolderEntries $Ctx.Backup.Path ([bool]$Ctx.Backup.Legacy))
             if (-not $entries.Count) { return (& $res 'Skip' 'keine Ordner im Backup') }
             $worst = 'OK'; $lines = @()
             # Sync-Ordner (OneDrive/SharePoint) des ZIELbenutzers am Ziel-PC - dorthin nie direkt schreiben
@@ -4214,11 +4239,23 @@ function Restore-HMBuiltin {
             try { $tRoots = @(Get-HMSyncRoots $Ctx $Ctx.UserSid $Ctx.ProfilePath | Where-Object { $_ }) } catch { Write-HMLog $Job "   OneDrive-Ordner am Ziel nicht ermittelbar: $($_.Exception.Message)" 'Debug' }
             $under = { param($p, $root) $r0 = "$root".TrimEnd('\'); return ($r0 -and ("$p".TrimEnd('\') -ieq $r0 -or "$p".StartsWith($r0 + '\', [StringComparison]::OrdinalIgnoreCase))) }
             $usersRoot = if ($Ctx.ProfilePath) { Split-Path "$($Ctx.ProfilePath)".TrimEnd('\') -Parent } else { '' }
+            $skipped = 0
             foreach ($e in $entries) {
-                $dest = "$($e.Path)".TrimEnd('\'); $note = ''; $leaf = Split-Path $dest -Leaf
+                $dest = "$($e.Path)".TrimEnd('\'); $note = ''; $leaf = Split-Path $dest -Leaf; $info = ''
+                # beim Restore gewaehltes Ziel (Knopf "Ziele der Zusaetzlichen Ordner"): leer = diesen Ordner auslassen
+                $chosen = $null
+                if ($Ctx.ExtraTargets -and $Ctx.ExtraTargets.Count) { $ck = ConvertTo-HMExtraKey $e.Path; if ($Ctx.ExtraTargets.ContainsKey($ck)) { $chosen = "$($Ctx.ExtraTargets[$ck])".Trim() } }
+                if ($null -ne $chosen -and -not $chosen) { $skipped++; $lines += "$($e.Path) - ausgelassen (beim Restore abgewaehlt)"; continue }
+                if ($chosen) {
+                    $bad = Test-HMExtraTargetPath $chosen
+                    if ($bad) { $lines += "$($e.Path) - nicht zurueckgeschrieben: gewaehltes Ziel $chosen ungueltig ($bad). Die Daten liegen im Backup: $($e.Src)"; if ($worst -eq 'OK') { $worst = 'Warning' }; continue }
+                    $dest = $chosen.TrimEnd('\'); $leaf = Split-Path $dest -Leaf
+                    if ((ConvertTo-HMExtraKey $dest) -ne (ConvertTo-HMExtraKey $e.Path)) { $info = " -> neues Ziel $dest" }
+                }
                 # Pfad im Profil des Quell-Benutzers -> ins Profil des Zielbenutzers umschreiben (anderer Profilname/Benutzer)
                 $srcProf = "$($Ctx.Backup.ProfilePath)".TrimEnd('\')
-                if ($srcProf -and $Ctx.ProfilePath -and (& $under $dest $srcProf)) { $dest = "$($Ctx.ProfilePath)".TrimEnd('\') + $dest.Substring($srcProf.Length) }
+                if ($chosen) { }
+                elseif ($srcProf -and $Ctx.ProfilePath -and (& $under $dest $srcProf)) { $dest = "$($Ctx.ProfilePath)".TrimEnd('\') + $dest.Substring($srcProf.Length) }
                 # liegt sonst im Profil EINES ANDEREN Benutzers -> nicht dorthin, sondern in das Profil des Zielbenutzers
                 elseif ($usersRoot -and (& $under $dest $usersRoot) -and -not (& $under $dest $Ctx.ProfilePath)) {
                     $dest = Join-Path $Ctx.ProfilePath (Join-Path 'Zusaetzliche Ordner' $leaf)
@@ -4245,10 +4282,11 @@ function Restore-HMBuiltin {
                 $fake = [pscustomobject]@{ Name = $(if ($e.Key) { $e.Key } else { $leaf }); Type = 'Folder'; Path = $dest }
                 $r = Restore-HMFolderItem $Ctx $Job $Module $fake $TEnv -SourceOverride $e.Src -DestOverride $dest
                 if ($note -and $r.Status -eq 'OK') { $r.Status = 'Warning' }
-                $lines += "$($e.Path) - $($r.Msg)$note"
+                $lines += "$($e.Path)$info - $($r.Msg)$note"
                 if ($r.Status -in @('Error', 'Cancel')) { $worst = $r.Status } elseif ($r.Status -ne 'OK' -and $worst -eq 'OK') { $worst = $r.Status }
             }
-            return (& $res $worst ("$($entries.Count) Ordner`n" + ($lines -join "`n")))
+            if ($skipped -ge $entries.Count) { return (& $res 'Skip' ("alle $($entries.Count) Ordner beim Restore abgewaehlt`n" + ($lines -join "`n"))) }
+            return (& $res $worst ("$($entries.Count) Ordner$(if ($skipped) { ", $skipped ausgelassen" })`n" + ($lines -join "`n")))
         }
 
         'Wlan' {

@@ -723,7 +723,7 @@ foreach ($n in @('btnWizard', 'btnRemote', 'brdMonBackup', 'brdMonRestore', 'brd
     'btnExtraDel', 'chkMinProfileExc', 'chkNoProfileFileExc', 'chkMinSystemExc', 'chkNoSystemFileExc', 'btnEditExceptions', 'cmbThreads', 'btnPrecheck',
     'btnProfileSize', 'btnBackup', 'btnCancel', 'btnRefreshBackups', 'btnOpenBackup', 'btnDeleteBackup', 'btnCleanupBackups', 'btnEmptyDeleted', 'btnArchiveBackup', 'dgBackups', 'lblRestoreInfo',
     'pnlRestoreModules', 'lblRestoreTarget', 'chkGpUpdate', 'chkWUDrivers', 'chkNumLock', 'chkFavorites', 'chkFastBoot', 'txtPostScript', 'btnPostScript',
-    'btnRestore', 'btnCancelRestore', 'btnToolCredWiz', 'btnToolCredList', 'btnToolUserAppData', 'btnToolUserStartup', 'btnToolProfileFolder', 'pnlSysTools',
+    'btnRestore', 'btnCancelRestore', 'btnExtraTargets', 'lblExtraTargets', 'btnToolCredWiz', 'btnToolCredList', 'btnToolUserAppData', 'btnToolUserStartup', 'btnToolProfileFolder', 'pnlSysTools',
     'pnlLinks', 'rtbConsole', 'pbMain', 'lblStatus', 'lblElapsed', 'rowConsole', 'btnToolSoftDeploy', 'btnToolDrvDeploy', 'btnToolSoftList', 'lblSizeTotal', 'lstExclude',
     'btnExclAdd', 'btnExclDel', 'btnBigFiles', 'chkIncremental', 'lblIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport',
     'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag',
@@ -1105,15 +1105,25 @@ $ui.cmbThreads.Add_SelectionChanged({ if ($ui.cmbThreads.SelectedItem -and -not 
 # Ordner am QUELL-PC waehlen: startet im Profil des gewaehlten Benutzers, Baum ab "Dieser PC" - nicht die eigenen
 # Ordner (Desktop, Downloads ...) des Kontos, unter dem HUMig laeuft (z.B. Admin-Konto). Remote: ueber \\PC\C$,
 # Rueckgabe immer als Pfad am Quell-PC (C:\...). $null = abgebrochen
-function Select-HMSourceFolder([string]$Description) {
+function Select-HMSourceFolder([string]$Description, [string]$Start = '', [switch]$AllowNew) {
     $comp = Get-TargetComputer
     $remote = -not (Test-HMIsLocal $comp)
     $p = Get-SelectedProfile
     $start = if ($p -and "$($p.LocalPath)") { "$($p.LocalPath)" } else { "$env:SystemDrive\" }
+    # vorgegebener Startordner (z.B. bisheriges Ziel): den naechsten vorhandenen Ordner darueber nehmen
+    if ($Start -match '^[A-Za-z]:\\') {
+        $c = $Start.TrimEnd('\')
+        while ($c -and $c -match '^[A-Za-z]:') {
+            $t = if ($remote -and $c -match '^([A-Za-z]):(.*)$') { "\\$comp\$($Matches[1])`$$($Matches[2])" } else { $c }
+            if (Test-Path -LiteralPath "$t\") { $start = $c; break }
+            $up = Split-Path $c -Parent; if (-not $up -or $up -eq $c) { break }; $c = $up.TrimEnd('\')
+        }
+        if ($start -match '^[A-Za-z]:$') { $start += '\' }
+    }
     if ($remote -and $start -match '^([A-Za-z]):(.*)$') { $start = "\\$comp\$($Matches[1])`$$($Matches[2])" }
     $d = New-Object System.Windows.Forms.FolderBrowserDialog
     $d.Description = $Description + $(if ($p -and -not $remote) { "  -  Profil von $($p.Folder): $($p.LocalPath)" } elseif ($remote) { "  -  $comp ueber Admin-Freigabe" } else { '' })
-    $d.ShowNewFolderButton = $false
+    $d.ShowNewFolderButton = [bool]$AllowNew
     if (-not $remote) { $d.RootFolder = [System.Environment+SpecialFolder]::MyComputer }
     if (Test-Path -LiteralPath $start) { $d.SelectedPath = $start }
     if ($d.ShowDialog() -ne 'OK' -or -not $d.SelectedPath) { return $null }
@@ -1767,10 +1777,11 @@ $ui.dgBackups.Add_SelectionChanged({
         $script:SelectedBackup = $null
         $ui.lblRestoreInfo.Text = "$(@($ui.dgBackups.SelectedItems).Count) Backups markiert - 'Loeschen' gilt fuer alle markierten; Restore, Protokoll, Pruefen usw. brauchen genau ein markiertes Backup"
         Update-RestoreTargetLabel
+        Update-HMExtraTargetsUi
         return
     }
     $row = $ui.dgBackups.SelectedItem
-    if (-not $row) { $script:SelectedBackup = $null; $ui.btnArchiveBackup.Content = 'Als Archiv'; return }
+    if (-not $row) { $script:SelectedBackup = $null; $ui.btnArchiveBackup.Content = 'Als Archiv'; Update-HMExtraTargetsUi; return }
     $b = $row.Info
     $script:SelectedBackup = $b
     $ui.btnArchiveBackup.Content = $(if ($b.Archived) { 'Archiv aufheben' } else { 'Als Archiv' })
@@ -1795,6 +1806,7 @@ $ui.dgBackups.Add_SelectionChanged({
     if ($b.Manifest -and $b.Manifest.MassDeleteAlert) { $txt += "  |  ACHTUNG: Massenloeschung an der Quelle erkannt (typisches Zeichen fuer einen Verschluesselungstrojaner) - Stand pruefen" }
     $ui.lblRestoreInfo.Text = $txt
     Update-RestoreTargetLabel
+    Update-HMExtraTargetsUi
 })
 $ui.btnRefreshBackups.Add_Click({ Update-BackupList; Update-BackupRootInfo })
 # markiertes Backup oeffnen, sonst den Backup-Ordner
@@ -1979,6 +1991,7 @@ $ui.btnRestore.Add_Click({
     }
     $msg = "Restore von`n  $($b.Name)`nnach`n  $comp \ $($p.Folder)`n`nModule: $(($mods | ForEach-Object { $_.Name }) -join ', ')"
     if ($b.User -and $b.User -ne $p.Folder) { $msg += "`n`nACHTUNG: anderer Benutzer als im Backup ($($b.User))!" }
+    $xt = Get-HMExtraTargetsText $b; if ($xt -and @($mods | Where-Object { $_.Id -eq 'ExtraFolders' }).Count) { $msg += "`n`nZusaetzliche Ordner:`n$xt" }
     if ($p.Loaded) { $msg += "`n`nDer Benutzer ist angemeldet: offene Programme schliessen, Einstellungen wirken nach Neuanmeldung." }
     if (-not (Confirm-Action ($msg + "`n`nStarten?") 'Restore')) { return }
     # Backup mit Fehlern (nicht alles gesichert) oder abgebrochen: ausdruecklich bestaetigen
@@ -2032,6 +2045,7 @@ function Start-RestoreJob([hashtable]$Ctx) {
     }
 }
 $ui.btnRestorePreview.Add_Click({ if (-not $script:JobRunning) { Start-HMRestorePreviewUi } })
+$ui.btnExtraTargets.Add_Click({ if (-not $script:JobRunning) { Show-HMExtraTargetsDialog } })
 $ui.btnChecklist.Add_Click({ Show-HMChecklist })
 $ui.btnVerifyBackup.Add_Click({ if (-not $script:JobRunning) { Start-HMVerifyBackup $false } })
 $ui.btnVerifyBackup.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; if (-not $script:JobRunning) { Start-HMVerifyBackup $true } })

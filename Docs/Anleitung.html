@@ -386,6 +386,22 @@ footer{color:var(--sub);font-size:12px;text-align:center;padding:10px}
     <tr><td>Nacharbeiten</td><td>gpupdate /force · Treiber über Windows Update aus · NumLock beim Start an · Explorer-Favoriten einblenden · Schnellstart aus</td></tr>
     <tr><td>Nach-Skript</td><td>Eigenes PowerShell-Skript am Ende des Restores (läuft am Ziel-PC mit den Rechten von HUMig, also als Administrator). Es wird nur ausgeführt, wenn die Skriptdatei <b>nicht</b> von Nicht-Administratoren verändert werden kann – sonst Fehler im Protokoll.</td></tr>
   </table>
+  <h3 id="ordner-ziele">Zusätzliche Ordner an einen anderen Ort zurückspielen</h3>
+  <p>Enthält das markierte Backup <i>Zusätzliche Ordner</i>, erscheint bei den Optionen <span class="ui b">Ziele der Zusaetzlichen Ordner …</span> mit einer Statuszeile darunter (z. B. <i>3 Zusätzliche Ordner im Backup – 1 neues Ziel, 1 ausgelassen</i>). Damit lassen sich große Datenmengen auch gezielt umziehen – siehe <a href="Einstieg.html#daten-umziehen">Beispiel im Einstieg</a>.</p>
+  <table>
+    <tr><th style="width:190px">Spalte / Knopf</th><th>Wirkung</th></tr>
+    <tr><td>Zurück (Haken)</td><td>Haken weg = dieser Ordner wird nicht zurückgespielt (im Protokoll: <i>ausgelassen</i>)</td></tr>
+    <tr><td>Gesichert von</td><td>Originalpfad am Quell-PC</td></tr>
+    <tr><td>Zurück nach</td><td>Ziel am Ziel-PC – eintippen oder <span class="ui">…</span> (Ordnerauswahl am Ziel-PC, auch neuen Ordner anlegen); <span class="ui">↺</span> = Originalpfad. Fehlende Ordner legt der Restore an.</td></tr>
+    <tr><td>Hinweis</td><td>grün <i>wie gesichert</i> · blau <i>neues Ziel</i> · gelb (z. B. Laufwerk am Remote-PC nicht prüfbar, Systemordner) · rot (Pfad ungültig, Laufwerk fehlt) – mit rotem Hinweis lässt sich nicht übernehmen</td></tr>
+    <tr><td><span class="ui">Alle wie gesichert</span></td><td>alle Ordner zurück an den Originalpfad, alle angehakt</td></tr>
+  </table>
+  <ul>
+    <li>Kopiert wird genauso wie sonst: Robocopy mit den eingestellten Threads, Protokoll, Kontrolle auf fehlende Dateien. Die Rückfrage bei <span class="ui g">Restore starten</span> listet die geänderten Ziele.</li>
+    <li>Die Wahl gilt für das markierte Backup, bis HUMig geschlossen wird. Ohne Änderung kommt alles wie bisher an denselben Pfad (Pfade im Profil des Quell-Benutzers landen im Profil des Zielbenutzers).</li>
+    <li>Auch ein gewähltes Ziel durchläuft die Schutzregeln: nie in Windows-, Programm- oder Tool-Ordner (dann ins Profil des Zielbenutzers unter <code>Zusaetzliche Ordner</code>), nie direkt in einen OneDrive-Ordner (dann <code>OneDrive-Wiederherstellung</code>).</li>
+    <li>Nur Pfade mit Laufwerksbuchstaben (z. B. <code>E:\Daten\Projekte</code>) – keine Netzwerkpfade, kein ganzes Laufwerk.</li>
+  </ul>
   <h3>Vorschau, Programme, Checkliste</h3>
   <ul>
     <li><span class="ui">Vorschau: was wird ueberschrieben?</span> – je Datei: <i>neu</i>, <i>überschreibt ältere Zieldatei</i>, <i>überschreibt neuere Zieldatei</i>, <i>gleich</i>. Nach dem Restore als Kontrolle: alles „gleich“ = vollständig. Als CSV exportierbar.</li>

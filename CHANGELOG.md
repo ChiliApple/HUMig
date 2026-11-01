@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## v2.1.19 - 2026-11-01
+### Restore
+- **Zusaetzliche Ordner an einen anderen Ort zurueckspielen:** neuer Knopf *Ziele der Zusaetzlichen Ordner ...* im Reiter Restore (nur bei Backups mit Zusaetzlichen Ordnern, mit Statuszeile) - je Ordner Originalpfad, neues Ziel (eintippen oder Ordnerauswahl am Ziel-PC, neuer Ordner moeglich) oder auslassen; Hinweise in Farbe (Laufwerk fehlt, Pfad ungueltig, Systemordner); die Rueckfrage beim Start nennt die geaenderten Ziele, das Protokoll "-> neues Ziel" bzw. "ausgelassen". Kopiert wird wie bisher (Robocopy mit Threads, Kontrolle auf fehlende Dateien); die Schutzregeln (Systemordner, OneDrive) gelten auch fuer gewaehlte Ziele
+- Ordnerauswahl startet beim bisherigen Ziel (naechster vorhandener Ordner darueber)
+### Doku
+- Einstieg: neue Situation *Grosse Datenmengen umziehen* mit Ablaufgrafik; Anleitung: Abschnitt *Zusaetzliche Ordner an einen anderen Ort zurueckspielen*
+
 ## v2.1.18 - 2026-10-30
 ### Allgemein
 - **Meldungen und Rueckfragen im HUMig-Design:** alle Hinweis-, Fehler- und Ja/Nein-Fenster (ueber 190 Stellen) erscheinen jetzt dunkel wie das Hauptfenster statt als Windows-Standardbox - Enter loest den hell umrandeten Knopf aus (bei Warnungen mit Ja/Nein immer *Nein*), Esc schliesst wie Nein/Abbrechen, Strg+C kopiert Titel und Text, lange Texte bekommen einen Scrollbalken; Rueckfall auf die Windows-Box nur vor dem Aufbau des Hauptfensters; die Ordnerrechte-Rueckfragen und die beiden Pfad-Eingaben (Zusaetzlicher Ordner, Pfad ausschliessen per Rechtsklick) ebenfalls im HUMig-Design

@@ -3490,3 +3490,78 @@ Describe '2.1.18: Meldungen im HUMig-Design, Wartefenster Server-Backup' {
         $c | Should -Match 'du kannst dich jetzt abmelden'
     }
 }
+
+Describe '2.1.19: Restore - Ziele der Zusaetzlichen Ordner' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        if (-not (Get-Command Write-HMLog -ErrorAction SilentlyContinue)) { function global:Write-HMLog($Job, $Msg, $Lvl) { } }
+        $script:XB = Join-Path $TestDrive 'XB'
+        $xd = Join-Path $script:XB 'ExtraFolders'
+        foreach ($n in 1, 2, 3) { New-Item -ItemType Directory -Path (Join-Path $xd "FOLDER$n") -Force | Out-Null }
+        ConvertTo-Json -InputObject @(@{ Index = 1; Path = 'D:\Projekte' }, @{ Index = 2; Path = 'D:\Alt' }, @{ Index = 3; Path = 'E:\Fotos\' }) | Set-Content -LiteralPath (Join-Path $xd 'folders.json') -Encoding UTF8
+    }
+    It 'liest die Ordnerliste des Backups (gemeinsam fuer Engine und Oberflaeche)' {
+        $e = @(Get-HMExtraFolderEntries $script:XB $false)
+        $e.Count | Should -Be 3
+        $e[0].Path | Should -Be 'D:\Projekte'
+        $e[0].Key | Should -Be 'FOLDER1'
+        @(Get-HMExtraFolderEntries (Join-Path $TestDrive 'gibtsnicht') $false).Count | Should -Be 0
+    }
+    It 'Schluessel ignoriert Gross-/Kleinschreibung und abschliessenden Backslash' {
+        ConvertTo-HMExtraKey 'e:\fotos\' | Should -Be (ConvertTo-HMExtraKey 'E:\Fotos')
+    }
+    It 'prueft eingegebene Ziele' {
+        Test-HMExtraTargetPath 'E:\Daten\Projekte' | Should -BeNullOrEmpty
+        Test-HMExtraTargetPath 'Daten\Projekte' | Should -Not -BeNullOrEmpty
+        Test-HMExtraTargetPath '\\server\freigabe' | Should -Not -BeNullOrEmpty
+        Test-HMExtraTargetPath 'E:\' | Should -Not -BeNullOrEmpty
+        Test-HMExtraTargetPath 'E:\a\..\Windows' | Should -Not -BeNullOrEmpty
+        Test-HMExtraTargetPath 'E:\a*b' | Should -Not -BeNullOrEmpty
+    }
+    It 'Restore: neues Ziel wird verwendet, abgewaehlter Ordner ausgelassen, Rest wie gesichert' {
+        Mock Get-HMRestoreSource { Join-Path $script:XB 'ExtraFolders' }
+        Mock Get-HMSyncRoots { @() }
+        Mock Get-HMProtectedTargetRoot { $null }
+        $script:XDest = New-Object System.Collections.Generic.List[string]
+        Mock Restore-HMFolderItem { $script:XDest.Add("$DestOverride"); [pscustomobject]@{ Name = 'x'; Status = 'OK'; Msg = 'kopiert' } }
+        $ctx = @{ Backup = [pscustomobject]@{ Path = $script:XB; Legacy = $false; ProfilePath = 'C:\Users\max' }; ProfilePath = 'C:\Users\max'; UserSid = 'S-1-5-21-1'; IsRemote = $false; ToolRoot = ''
+            ExtraTargets = @{ (ConvertTo-HMExtraKey 'D:\Projekte') = 'E:\Daten\Projekte'; (ConvertTo-HMExtraKey 'D:\Alt') = '' } }
+        $r = Restore-HMBuiltin $ctx $null ([pscustomobject]@{ Id = 'ExtraFolders' }) ([pscustomobject]@{ Handler = 'ExtraFolders' }) @{}
+        @($script:XDest) | Should -Be @('E:\Daten\Projekte', 'E:\Fotos')
+        $r.Status | Should -Be 'OK'
+        $r.Msg | Should -Match '1 ausgelassen'
+        $r.Msg | Should -Match ([regex]::Escape('D:\Projekte -> neues Ziel E:\Daten\Projekte'))
+        $r.Msg | Should -Match ([regex]::Escape('D:\Alt - ausgelassen'))
+    }
+    It 'Restore: ungueltiges Ziel aus dem Kontext wird nicht verwendet (Warnung, Daten bleiben im Backup)' {
+        Mock Get-HMRestoreSource { Join-Path $script:XB 'ExtraFolders' }
+        Mock Get-HMSyncRoots { @() }
+        Mock Get-HMProtectedTargetRoot { $null }
+        $script:XDest = New-Object System.Collections.Generic.List[string]
+        Mock Restore-HMFolderItem { $script:XDest.Add("$DestOverride"); [pscustomobject]@{ Name = 'x'; Status = 'OK'; Msg = 'kopiert' } }
+        $ctx = @{ Backup = [pscustomobject]@{ Path = $script:XB; Legacy = $false; ProfilePath = '' }; ProfilePath = ''; IsRemote = $false; ToolRoot = ''
+            ExtraTargets = @{ (ConvertTo-HMExtraKey 'D:\Projekte') = 'relativ\pfad' } }
+        $r = Restore-HMBuiltin $ctx $null ([pscustomobject]@{ Id = 'ExtraFolders' }) ([pscustomobject]@{ Handler = 'ExtraFolders' }) @{}
+        @($script:XDest) | Should -Not -Contain 'relativ\pfad'
+        $r.Status | Should -Be 'Warning'
+    }
+    It 'Restore: alle abgewaehlt = uebersprungen' {
+        Mock Get-HMRestoreSource { Join-Path $script:XB 'ExtraFolders' }
+        Mock Get-HMSyncRoots { @() }
+        Mock Restore-HMFolderItem { throw 'darf nicht kopieren' }
+        $all = @{}; foreach ($p in 'D:\Projekte', 'D:\Alt', 'E:\Fotos') { $all[(ConvertTo-HMExtraKey $p)] = '' }
+        $ctx = @{ Backup = [pscustomobject]@{ Path = $script:XB; Legacy = $false; ProfilePath = '' }; ProfilePath = ''; IsRemote = $false; ToolRoot = ''; ExtraTargets = $all }
+        (Restore-HMBuiltin $ctx $null ([pscustomobject]@{ Id = 'ExtraFolders' }) ([pscustomobject]@{ Handler = 'ExtraFolders' }) @{}).Status | Should -Be 'Skip'
+    }
+    It 'Oberflaeche: Knopf, Dialog und Uebergabe an den Restore vorhanden' {
+        $q = Get-Content (Join-Path $script:Root 'Functions\UI-Quality.ps1') -Raw
+        $q | Should -Match 'function Show-HMExtraTargetsDialog'
+        $q | Should -Match '\$ctx\.ExtraTargets = Get-HMExtraTargetsFor \$b'
+        $x = Get-Content (Join-Path $script:Root 'XAML\MainWindow.xaml') -Raw
+        $x | Should -Match 'x:Name="btnExtraTargets"'
+        $h = Get-Content (Join-Path $script:Root 'HUMig.ps1') -Raw
+        $h | Should -Match "'btnExtraTargets', 'lblExtraTargets'"
+        $h | Should -Match 'btnExtraTargets\.Add_Click'
+    }
+}
+
