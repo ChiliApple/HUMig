@@ -56,6 +56,7 @@ function ConvertTo-HMSbProfile($p) {
         ExportKeep = $(if ($ek -ge 1 -and $ek -le 10) { $ek } else { 1 })
         ExportAfter = ($p.ExportAfter -eq $true)
         RebootPendingSkip = ($p.RebootPendingSkip -eq $true)
+        BlockText = "$($p.BlockText)".Trim()
     }
 }
 function Get-HMSbConfig {
@@ -222,7 +223,18 @@ function Edit-HMSbProfile {
     $rba = "$((Show-HMDialogBox -Owner $script:Window -Text $rbq -Title 'Profil bearbeiten' -Mode 'YesNoCancel' -Icon 'Question' -Default ($(if ($p.RebootPendingSkip) { 'Yes' } else { 'No' }))))"
     if ($rba -eq 'Cancel') { return }
     $rbs = ($rba -eq 'Yes')
-    foreach ($x in $cfg.Profiles) { if ($x.Name -eq $p.Name) { $x.Name = $n; $x.DiskPrefix = $pre; $x.Disks = $cnt; $x.WarnDays = $wd; $x.ArchiveDisks = $ad; $x.ArchiveDays = $ai; $x | Add-Member -NotePropertyName RebootPendingSkip -NotePropertyValue $rbs -Force } }
+    # Sperrzeit: Zeitraum, in dem eine andere Sicherung laeuft (z.B. iPACK am Wochenende) - HUMig warnt, wenn ein Lauf hineinragt
+    $bt = $null
+    while ($true) {
+        $bt = Show-TextInputDialog -Title 'Sperrzeit (optional)' -Label "Zeitraum, in dem dieses Server-Backup NICHT laufen soll - z.B. weil dann eine andere Sicherung laeuft.`nHUMig warnt beim Start und beim Planen, wenn ein Lauf nach den bisherigen Laufzeiten hineinragen wuerde, und nennt es im Bericht.`n`nBeispiele:  Sa 23:45 - So 18:00 iPACK-Sicherung     taeglich 22:00 - 06:00     mehrere mit ; trennen`nLeer = keine Sperrzeit" -Text "$($p.BlockText)"
+        if ($null -eq $bt) { return }
+        $bt = "$bt".Trim()
+        if (-not $bt) { break }
+        $chk = ConvertFrom-HMSbBlockText $bt
+        if (-not $chk.Error) { break }
+        [void](Show-HMDialogBox -Owner $script:Window -Text "Sperrzeit nicht verstanden:`n$($chk.Error)" -Title 'Sperrzeit' -Mode 'OK' -Icon 'Warning')
+    }
+    foreach ($x in $cfg.Profiles) { if ($x.Name -eq $p.Name) { $x.Name = $n; $x.DiskPrefix = $pre; $x.Disks = $cnt; $x.WarnDays = $wd; $x.ArchiveDisks = $ad; $x.ArchiveDays = $ai; $x | Add-Member -NotePropertyName RebootPendingSkip -NotePropertyValue $rbs -Force; $x | Add-Member -NotePropertyName BlockText -NotePropertyValue $bt -Force } }
     if ($n -ne $p.Name) { $cfg.Renames = @(@($cfg.Renames) | Where-Object { $_.Old -ne $n }) + @([pscustomobject]@{ Old = $p.Name; New = $n }) }
     if ($cfg.LastProfile -eq $p.Name) { $cfg.LastProfile = $n }
     Save-HMSbConfig $cfg
@@ -235,7 +247,7 @@ function Edit-HMSbProfile {
         Out-Console "Profil '$($p.Name)' umbenannt in '$n' - $cnt2 Verlaufseintrag/-eintraege angepasst (Tool-Ordner und angesteckte Platten; nicht angesteckte Platten beim naechsten Backup)" 'Success'
         try { $tn = Rename-HMNotifySbProfile $p.Name $n; if ($tn) { Out-Console "Teams-Benachrichtigung: Profil bei $tn Ziel(en) umbenannt" 'Info' } } catch { Out-Console "Teams-Ziele: Profil nicht umbenannt ($($_.Exception.Message)) - in Einstellungen > Teams pruefen" 'Warning' }
     }
-    Out-Console "Profil '$n': Platten $pre-1 bis $pre-$cnt$(if ($ad) { ", Archiv $pre-A1 bis $pre-A$ad (faellig nach $ai Tagen)" }), Warnung nach $wd Tagen" 'Success'
+    Out-Console "Profil '$n': Platten $pre-1 bis $pre-$cnt$(if ($ad) { ", Archiv $pre-A1 bis $pre-A$ad (faellig nach $ai Tagen)" }), Warnung nach $wd Tagen$(if ($bt) { ", Sperrzeit $(@((ConvertFrom-HMSbBlockText $bt).Windows | ForEach-Object { Format-HMSbBlockWindow $_ }) -join '; ')" })" 'Success'
     Update-HMSbProfileList $n
 }
 function Remove-HMSbProfile {
@@ -822,6 +834,17 @@ function Start-HMSbBackup {
     if ($exp) { $msg += "`n`nNach der Sicherung: VM-Export $(@($exp.VMs) -join ', ') -> $(Get-HMSbExportBase $exp.Folder $d.Letter) (behalten je VM: $($exp.Keep))" }
     $pend = ''; try { $pend = Format-HMSbPendingReboot @(Get-HMSbPendingReboot) (Get-HMSbActiveHours) } catch { }
     if ($pend) { $msg += "`n`nACHTUNG - $pend" }
+    # Sperrzeit, andere geplante Sicherungen im erwarteten Laufzeitraum, fremde Schattenkopien der Quelllaufwerke
+    try {
+        $vi = @($vms | ForEach-Object { $n = $_; @($script:SbVms | Where-Object { $_.Name -eq $n })[0] } | Where-Object { $_ })
+        $sz = [long]0; foreach ($v in $vi) { $sz += [long]$v.SizeBytes }
+        $ahx = Get-HMSbAllHistory; $est = Get-HMSbEstimateMinutes $ahx $pName $sz
+        $pf = @(Get-HMSbPreflight $p $vi $vols "$($d.Letter):" (Get-Date) $est @(Get-HMSbConflictWords))
+        $pw = @($pf | Where-Object { $_.Lvl -ne 'Info' }); $pi = @($pf | Where-Object { $_.Lvl -eq 'Info' })
+        if ($pw.Count) { $msg += "`n`nACHTUNG - Stoerung moeglich (erwartete Dauer ca. $(Format-HMDuration $est)):`n" + (@($pw | ForEach-Object { "  - $($_.Text)" }) -join "`n") }
+        if ($pi.Count) { $msg += "`n`nHinweis:`n" + (@($pi | ForEach-Object { "  - $($_.Text)" }) -join "`n") }
+        foreach ($x in $pf) { Out-Console "Server-Backup Vorab-Pruefung: $($x.Text)" $(if ($x.Lvl -eq 'Info') { 'Info' } else { 'Warning' }) }
+    } catch { Out-Console "Server-Backup Vorab-Pruefung nicht moeglich: $($_.Exception.Message)" 'Warning' }
     if (-not $p) { $msg += "`n`nHinweis: kein Profil gewaehlt - Verlauf unter '(ohne Profil)'." }
     elseif (-not (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { $msg += "`n`nACHTUNG: Die Platte '$($d.Label)' gehoert laut Bezeichnung NICHT zum Profil ($($p.DiskPrefix)-...)." }
     if ($p) {
@@ -871,7 +894,7 @@ function Start-HMSbBackup {
         Profile = $pName; DiskPrefix = $(if ($p) { $p.DiskPrefix } else { '' }); Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
         VMs = $vms; Volumes = $vols; HostConfig = $hc; HostSystem = $hs; Verify = [bool]$ui.chkSbVerify.IsChecked
         LocalHistory = $script:SbHistFile; LocalHealth = $script:SbHealthFile; LocalReportDir = $script:SbReportDir; Version = $script:Version
-        ProfileData = $(if ($p) { $p } else { $null }); After = $after; Export = $exp
+        ProfileData = $(if ($p) { $p } else { $null }); After = $after; Export = $exp; ConflictWords = @(Get-HMSbConflictWords)
     }
     $script:SbAfterRun = $after
     $script:SbRunProfile = $pName
@@ -1599,45 +1622,6 @@ function Get-HMSbPlanStarts($Plan, [datetime]$From, [datetime]$To) {
     }
     return $out
 }
-function Get-HMSbTaskStarts($Task, [datetime]$From, [datetime]$To) {
-    $out = @()
-    foreach ($t in @($Task.Triggers)) {
-        if (-not $t) { continue }
-        if ($t.PSObject.Properties['Enabled'] -and $t.Enabled -eq $false) { continue }
-        $sb = $null; try { if ("$($t.StartBoundary)") { $sb = [datetime]"$($t.StartBoundary)" } } catch { }
-        if (-not $sb) { continue }
-        $cls = "$($t.CimClass.CimClassName)"
-        if ($cls -like '*DailyTrigger') {
-            $iv = 1; try { $iv = [Math]::Max(1, [int]$t.DaysInterval) } catch { }
-            $d = $sb; $n = 0
-            while ($d -lt $From -and $n -lt 100000) { $d = $d.AddDays($iv); $n++ }
-            while ($d -le $To) { $out += $d; $d = $d.AddDays($iv) }
-        } elseif ($cls -like '*WeeklyTrigger') {
-            $mask = 0; try { $mask = [int]$t.DaysOfWeek } catch { }
-            for ($d = $From.Date; $d -le $To; $d = $d.AddDays(1)) {
-                if ($mask -band (1 -shl [int]$d.DayOfWeek)) { $x = $d.Add($sb.TimeOfDay); if ($x -ge $From -and $x -le $To -and $x -ge $sb) { $out += $x } }
-            }
-        } elseif ($cls -like '*TimeTrigger') { if ($sb -ge $From -and $sb -le $To) { $out += $sb } }
-    }
-    return $out
-}
-function Get-HMSbTriggerText($Task) {
-    $days = @('So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa')
-    $parts = foreach ($t in @($Task.Triggers)) {
-        if (-not $t) { continue }
-        $cls = "$($t.CimClass.CimClassName)"
-        $tm = ''; try { $tm = ([datetime]"$($t.StartBoundary)").ToString('HH:mm') } catch { }
-        if ($cls -like '*DailyTrigger') { "taeglich $tm" }
-        elseif ($cls -like '*WeeklyTrigger') { $m = 0; try { $m = [int]$t.DaysOfWeek } catch { }; "$((@(0..6 | Where-Object { $m -band (1 -shl $_) } | ForEach-Object { $days[$_] })) -join ',') $tm" }
-        elseif ($cls -like '*TimeTrigger') { "einmalig $(try { ([datetime]"$($t.StartBoundary)").ToString('dd.MM.yyyy HH:mm') } catch { '' })" }
-        elseif ($cls -like '*LogonTrigger') { 'bei Anmeldung' }
-        elseif ($cls -like '*BootTrigger') { 'beim Start' }
-        elseif ($cls -like '*IdleTrigger') { 'im Leerlauf' }
-        else { ($cls -replace '^MSFT_Task', '' -replace 'Trigger$', '') }
-    }
-    return (@($parts) -join ' | ')
-}
-# Passende Aufgaben (ohne die Zeitplaene des eigenen Profils). $Plan (optional): geplanter Lauf -> Ueberschneidung pruefen
 function Get-HMSbConflicts($Plan = $null, [string]$OwnPrefix = '', [double]$OwnMinutes = 360) {
     $words = @(Get-HMSbConflictWords)
     $inc = @($words | Where-Object { $_ -notlike '-*' })
@@ -1719,6 +1703,16 @@ function New-HMSbSchedule {
         $own = 'Server-Backup - {0} - ' -f (ConvertTo-HMSbTaskPart $p.Name)
         $avg = 360.0
         try { $ah = Get-HMSbAllHistory; $okr = @(@($ah) | Where-Object { "$($_.Profile)" -eq $p.Name -and "$($_.Status)" -ne 'Error' -and [double]$_.Minutes -gt 0 }); if ($okr.Count) { $avg = [double](@($okr | ForEach-Object { [double]$_.Minutes }) | Measure-Object -Maximum).Maximum } } catch { }
+        if ("$($p.BlockText)".Trim()) {
+            $bwp = ConvertFrom-HMSbBlockText "$($p.BlockText)"
+            if (-not $bwp.Error) {
+                $bh = @(); foreach ($ps in @(Get-HMSbPlanStarts $r (Get-Date) (Get-Date).AddDays(14))) { $ovp = Get-HMSbBlockOverlap $bwp.Windows $ps $ps.AddMinutes($avg); if ($ovp) { $bh += "  Start $($ps.ToString('ddd dd.MM. HH:mm')) -> Sperrzeit $(Format-HMSbBlockWindow $ovp.Window) ab $($ovp.From.ToString('ddd dd.MM. HH:mm'))" } }
+                if ($bh.Count) {
+                    $mb = "Dieser Zeitplan ragt (angenommene Dauer $(Format-HMDuration $avg)) in die Sperrzeit des Profils:`n`n$(@($bh | Select-Object -First 8) -join "`n")$(if ($bh.Count -gt 8) { "`n  ..." })`n`nTrotzdem so planen?"
+                    if ("$(Show-HMDialogBox -Owner $script:Window -Text $mb -Title 'Server-Backup planen' -Mode 'YesNo' -Icon 'Warning')" -ne 'Yes') { return }
+                }
+            }
+        }
         $cf = Get-HMSbConflicts $r $own $avg
         $hit = @(@($cf) | Where-Object { "$($_.Ueberschneidung)" -like 'JA*' })
         if ($hit.Count) {

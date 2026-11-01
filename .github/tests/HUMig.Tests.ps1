@@ -3608,3 +3608,81 @@ Describe '2.1.19: Server-Backup - Ergebnis je VM, Fehlerprotokoll, geschriebene 
     }
 }
 
+Describe '2.1.19: Server-Backup - Sperrzeit, andere Sicherungen, fremde Schattenkopien' {
+    It 'liest Sperrzeiten (Wochentag, taeglich, mehrere, Fehler)' {
+        $r = ConvertFrom-HMSbBlockText 'Sa 23:45 - So 18:00 iPACK-Sicherung; taeglich 22:00 - 06:00'
+        $r.Error | Should -BeNullOrEmpty
+        @($r.Windows).Count | Should -Be 2
+        $r.Windows[0].FromDay | Should -Be 6
+        $r.Windows[0].ToDay | Should -Be 0
+        $r.Windows[0].Note | Should -Be 'iPACK-Sicherung'
+        $r.Windows[1].FromDay | Should -Be -1
+        (ConvertFrom-HMSbBlockText 'Samstag abends').Error | Should -Not -BeNullOrEmpty
+        (ConvertFrom-HMSbBlockText 'Sa 25:00 - So 01:00').Error | Should -Not -BeNullOrEmpty
+        @((ConvertFrom-HMSbBlockText '').Windows).Count | Should -Be 0
+        Format-HMSbBlockWindow $r.Windows[0] | Should -Be 'Sa 23:45 - So 18:00 (iPACK-Sicherung)'
+    }
+    It 'erkennt Ueberschneidung mit der Sperrzeit (Praxisfall R770: Do 08:26 + 41 h)' {
+        $w = (ConvertFrom-HMSbBlockText 'Sa 23:45 - So 18:00').Windows
+        $start = [datetime]'2026-10-29T08:26:00'   # Donnerstag
+        Get-HMSbBlockOverlap $w $start $start.AddHours(24) | Should -BeNullOrEmpty
+        $ov = Get-HMSbBlockOverlap $w $start $start.AddHours(70)
+        $ov.From | Should -Be ([datetime]'2026-10-31T23:45:00')
+        $ov.To | Should -Be ([datetime]'2026-11-01T18:00:00')
+        # Start mitten in der Sperrzeit
+        (Get-HMSbBlockOverlap $w ([datetime]'2026-11-01T02:00:00') ([datetime]'2026-11-01T03:00:00')).From | Should -Be ([datetime]'2026-10-31T23:45:00')
+        # taeglich ueber Mitternacht
+        $d = (ConvertFrom-HMSbBlockText 'taeglich 22:00 - 06:00').Windows
+        (Get-HMSbBlockOverlap $d ([datetime]'2026-11-03T05:00:00') ([datetime]'2026-11-03T05:30:00')).From | Should -Be ([datetime]'2026-11-02T22:00:00')
+        Get-HMSbBlockOverlap $d ([datetime]'2026-11-03T07:00:00') ([datetime]'2026-11-03T21:00:00') | Should -BeNullOrEmpty
+    }
+    It 'schaetzt die Dauer vorsichtig aus den letzten erfolgreichen Laeufen' {
+        $h = @([pscustomobject]@{ Profile = 'GYM'; Status = 'OK'; Minutes = 372; Date = '2026-09-29 11:48' }, [pscustomobject]@{ Profile = 'GYM'; Status = 'OK'; Minutes = 1476; Date = '2026-10-15 08:10' },
+            [pscustomobject]@{ Profile = 'GYM'; Status = 'Error'; Minutes = 2638; Date = '2026-10-30 08:26' }, [pscustomobject]@{ Profile = 'EUGym'; Status = 'OK'; Minutes = 5000; Date = '2026-10-29 17:03' })
+        Get-HMSbEstimateMinutes $h 'GYM' | Should -Be 1476
+        Get-HMSbEstimateMinutes @() 'GYM' (300GB) | Should -Be ([Math]::Round(300GB / 50MB / 60, 0))
+        Get-HMSbEstimateMinutes @() 'GYM' | Should -Be 360
+    }
+    It 'Quelllaufwerke aus den VM-Pfaden, ohne Ziel' {
+        $vi = @([pscustomobject]@{ Paths = @('D:\ipack\VM-iPWeb\Virtual Hard Disks\a.vhdx', 'E:\x.vhdx'); VmPath = 'C:\ProgramData\Microsoft\Windows\Hyper-V'; ConfigPath = '' })
+        @(Get-HMSbSourceLetters $vi @('F:') 'E:') | Should -Be @('D', 'C', 'F')
+    }
+    It 'findet eingebundene fremde Schattenkopie und Schattenkopie-Speicher auf USB (Praxisfall R770: D: -> W:)' {
+        $vols = @([pscustomobject]@{ DriveLetter = 'D:'; DeviceID = '\\?\Volume{d}\' }, [pscustomobject]@{ DriveLetter = 'W:'; DeviceID = '\\?\Volume{w}\' })
+        $copies = @([pscustomobject]@{ VolumeName = '\\?\Volume{d}\'; ExposedName = 'S:\'; InstallDate = [datetime]'2026-10-31T23:45:00' }, [pscustomobject]@{ VolumeName = '\\?\Volume{d}\'; ExposedName = ''; InstallDate = $null })
+        $stor = @([pscustomobject]@{ Volume = [pscustomobject]@{ DeviceID = '\\?\Volume{d}\' }; DiffVolume = [pscustomobject]@{ DeviceID = '\\?\Volume{w}\' } })
+        $r = @(Get-HMSbShadowRisks @('D') $vols $copies $stor { param($L) [pscustomobject]@{ Bus = 'USB'; Removable = $false; Label = 'M5_Backup_Weekend'; Name = 'ST4000LM' } })
+        $r.Count | Should -Be 2
+        $r[0].Kind | Should -Be 'Exposed'
+        $r[0].Text | Should -Match 'als S: eingebunden'
+        $r[1].Kind | Should -Be 'UsbDiff'
+        $r[1].Text | Should -Match 'W:.*M5_Backup_Weekend'
+        # interner Speicher: kein Hinweis
+        @(Get-HMSbShadowRisks @('D') $vols @() $stor { param($L) [pscustomobject]@{ Bus = 'RAID'; Removable = $false; Label = ''; Name = '' } }).Count | Should -Be 0
+    }
+    It 'findet andere geplante Sicherungen im Laufzeitraum (ohne HUMig-Aufgaben, ohne deaktivierte)' {
+        $mk = { param($path, $name, $state, $exe, $days)
+            [pscustomobject]@{ TaskPath = $path; TaskName = $name; State = $state; Description = ''; Actions = @([pscustomobject]@{ Execute = $exe; Arguments = 'sweekly - w:' })
+                Triggers = @([pscustomobject]@{ Enabled = $true; StartBoundary = '2009-07-05T23:45:00'; DaysOfWeek = $days; CimClass = [pscustomobject]@{ CimClassName = 'MSFT_TaskWeeklyTrigger' } }) } }
+        $tasks = @((& $mk '\' 'Backup der Server-VHDs (So)' 'Ready' 'D:\Backup\iPBackup.exe' 64), (& $mk '\' 'Backup der Server-VHDs (Di,Do)' 'Disabled' 'D:\Backup\iPBackup.exe' 20),
+            (& $mk '\HUMig\' 'Server-Backup - EUGym - Sa 23-00' 'Ready' 'powershell.exe' 64), (& $mk '\' 'Defrag' 'Ready' 'defrag.exe' 64))
+        $f = @(Find-HMSbForeignBackups ([datetime]'2026-10-29T08:26:00') ([datetime]'2026-11-01T04:25:00') $null $tasks)
+        $f.Count | Should -Be 1
+        $f[0].Task | Should -Be '\Backup der Server-VHDs (So)'
+        $f[0].Start | Should -Be ([datetime]'2026-10-31T23:45:00')
+    }
+    It 'Profil, Start, Planen, Zeitplan-Task und Lauf verwenden die Pruefungen' {
+        $u = Get-Content (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1') -Raw
+        $u | Should -Match 'BlockText = "\$\(\$p\.BlockText\)"\.Trim\(\)'
+        $u | Should -Match "Show-TextInputDialog -Title 'Sperrzeit \(optional\)'"
+        $u | Should -Match 'Get-HMSbPreflight \$p \$vi \$vols'
+        $u | Should -Match 'in die Sperrzeit des Profils'
+        (Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Task.ps1') -Raw) | Should -Match 'ConflictWords = '
+        $e = Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1') -Raw
+        $e | Should -Match 'Vorab-Pruefung: '
+        $e | Should -Match 'Der Lauf ueberschnitt die Sperrzeit'
+        $e | Should -Match 'Waehrend des Laufs startete die geplante Aufgabe'
+        $e | Should -Match 'Die Sperrzeit .* hat begonnen'
+    }
+}
+
