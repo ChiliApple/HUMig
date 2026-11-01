@@ -31,6 +31,39 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  author:
+    name: Autor-Pruefung (nur ChiliApple)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Autor, Committer und Nachricht pruefen
+        shell: bash
+        env:
+          EV: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # Jeder Commit (auch Merge/Squash ueber GitHub) muss Autor ChiliApple haben; Committer ChiliApple oder GitHub;
+          # keine Co-Authored-By-/Claude-Session-Zeilen. Faellt die Pruefung durch, wird auch kein Release angelegt.
+          case "$EV" in
+            pull_request) range="$BASE..$HEAD" ;;
+            push) if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then range="-1 HEAD"; else range="$BEFORE..HEAD"; fi ;;
+            *) echo "nichts zu pruefen ($EV)"; exit 0 ;;
+          esac
+          bad=$(git log --format='%h|%an|%cn|%s' $range | awk -F'|' '$2!="ChiliApple" || ($3!="ChiliApple" && $3!="GitHub")')
+          msg=$(git log --format='%h %B' $range | grep -iE '^[0-9a-f]* ?(co-authored-by|claude-session):' || true)
+          if [ -n "$bad" ] || [ -n "$msg" ]; then
+            { echo '### Autor-Pruefung FEHLGESCHLAGEN'; echo 'Nur ChiliApple als Autor erlaubt, keine Co-Authored-By-Zeilen.'
+              echo 'Bei Merge ueber GitHub: Profilname muss ChiliApple sein (Settings > Public profile > Name).'
+              echo '```'; echo "$bad"; echo "$msg"; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Autor-Pruefung ok ($range)" | tee -a "$GITHUB_STEP_SUMMARY"
+
   test:
     name: Pruefungen (Windows PowerShell 5.1)
     runs-on: windows-latest
@@ -53,7 +86,7 @@ jobs:
   release:
     name: Release + Pruefsummen-Datei
     if: github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    needs: test
+    needs: [author, test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
