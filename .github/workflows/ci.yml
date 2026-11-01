@@ -48,14 +48,14 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           # Jeder Commit (auch Merge/Squash ueber GitHub) muss Autor ChiliApple haben; Committer ChiliApple oder GitHub;
-          # keine Co-Authored-By-/Claude-Session-Zeilen. Faellt die Pruefung durch, wird auch kein Release angelegt.
+          # keine Co-Authored-By-Zeilen und keine Sitzungs-Zeilen (<Name>-Session:). Faellt die Pruefung durch, wird auch kein Release angelegt.
           case "$EV" in
             pull_request) range="$BASE..$HEAD" ;;
             push) if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then range="-1 HEAD"; else range="$BEFORE..HEAD"; fi ;;
             *) echo "nichts zu pruefen ($EV)"; exit 0 ;;
           esac
           bad=$(git log --format='%h|%an|%cn|%s' $range | awk -F'|' '$2!="ChiliApple" || ($3!="ChiliApple" && $3!="GitHub")')
-          msg=$(git log --format='%h %B' $range | grep -iE '^[0-9a-f]* ?(co-authored-by|claude-session):' || true)
+          msg=$(git log --format='%h %B' $range | grep -iE '^[0-9a-f]* ?(co-authored-by|[a-z-]+-session):' || true)
           if [ -n "$bad" ] || [ -n "$msg" ]; then
             { echo '### Autor-Pruefung FEHLGESCHLAGEN'; echo 'Nur ChiliApple als Autor erlaubt, keine Co-Authored-By-Zeilen.'
               echo 'Bei Merge ueber GitHub: Profilname muss ChiliApple sein (Settings > Public profile > Name).'
