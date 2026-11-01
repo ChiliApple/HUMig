@@ -1,5 +1,26 @@
 ﻿# Changelog
 
+## v2.1.19 - 2026-11-01
+### Restore
+- **Zusaetzliche Ordner an einen anderen Ort zurueckspielen:** neuer Knopf *Ziele der Zusaetzlichen Ordner ...* im Reiter Restore (nur bei Backups mit Zusaetzlichen Ordnern, mit Statuszeile) - je Ordner Originalpfad, neues Ziel (eintippen oder Ordnerauswahl am Ziel-PC, neuer Ordner moeglich) oder auslassen; Hinweise in Farbe (Laufwerk fehlt, Pfad ungueltig, Systemordner); die Rueckfrage beim Start nennt die geaenderten Ziele, das Protokoll "-> neues Ziel" bzw. "ausgelassen". Kopiert wird wie bisher (Robocopy mit Threads, Kontrolle auf fehlende Dateien); die Schutzregeln (Systemordner, OneDrive) gelten auch fuer gewaehlte Ziele
+- Ordnerauswahl startet beim bisherigen Ziel (naechster vorhandener Ordner darueber)
+### Server-Backup
+- **Fehlgeschlagene VMs werden genannt** (Praxisfall R770, wbadmin Exitcode -4): gesichert/nicht gesichert wird je VM aus der wbadmin-Zusammenfassung gelesen - Teams/Mail zeigen "NICHT gesichert: VMs: ...", Verlauf und Bericht zaehlen nur wirklich gesicherte VMs (bisher standen alle gewaehlten VMs unter "Gesichert"); der Bericht hat eine eigene Zeile fuer nicht gesicherte VMs
+- Gruende aus dem Fehlerprotokoll der Windows Server-Sicherung (Backup_Error-*.log) stehen direkt im Protokoll und im Bericht-Hinweis (nur die aussagekraeftigen Zeilen); typische Codes fuer "Quelllaufwerk/Schattenkopie waehrend des Laufs verloren" (0x80070015, 0x800701B1 ...) werden gedeutet
+- "ca. ... GB auf die Platte geschrieben" in der Lebenszeichen-Zeile zaehlt nur noch Zunahmen - verwirft Windows waehrend des Laufs aeltere Versionen, sprang der Wert bisher zurueck bzw. verschwand
+- **Sperrzeit im Profil** (Bearbeiten ...): z.B. "Sa 23:45 - So 18:00 iPACK-Sicherung" oder "taeglich 22:00 - 06:00" - Warnung beim Start und beim Planen, wenn ein Lauf nach den bisherigen Laufzeiten hineinragt; Protokollzeile, wenn die Sperrzeit waehrend eines Laufs beginnt; Bericht nennt sie nach einem Fehler als wahrscheinliche Ursache
+- **Andere geplante Sicherungen im Laufzeitraum:** auch beim sofortigen Start (Oberflaeche/Hintergrund) und im Zeitplan-Lauf - Warnung, wenn eine andere Sicherungsaufgabe (Suchwoerter der Zeitplan-Pruefung) waehrend des erwarteten Laufs startet; nach einem Fehler nennt der Bericht die Aufgabe, die waehrenddessen gestartet ist
+- **Fremde Schattenkopie / Schattenkopie-Speicher auf USB:** Warnung, wenn eine Schattenkopie eines Quelllaufwerks gerade eingebunden ist (andere Sicherung liest daraus), Hinweis, wenn der Schattenkopie-Speicher eines Quelllaufwerks auf einer USB-/Wechselplatte liegt (Praxisfall R770: D: -> W: der Wochenendsicherung) - HUMig aendert diese Zuordnung nie
+- Restore-Dialog: markierte Zeile bleibt dunkel lesbar
+- Laufzeit-Schaetzung fuer Sperrzeit und Zeitplan-Pruefung vorsichtiger und einheitlich: laengster der letzten 5 Laeufe (auch abgebrochene) bzw. Groesse / langsamstes gemessenes Tempo, ohne Verlauf 6 h - der R770-Fall (Start Fr 08:26, 44 h) wird jetzt vorher gewarnt
+- "Sa 22:00 - 06:00" (Bis vor Von, ohne Bis-Tag) gilt bis zum naechsten Morgen; Zeitplaene mit Wiederholung, Wochenabstand und Ablaufdatum werden richtig vorausberechnet, nicht auswertbare Ausloeser als "nicht pruefbar" gemeldet
+- Kann eine Pruefung nicht laufen (Aufgabenplanung/Schattenkopien nicht lesbar), steht "nicht pruefbar" in der Rueckfrage statt stillem "alles frei"; am Host zaehlt auch das Systemlaufwerk als Quelle
+- VMs ohne eindeutiges Ergebnis in der wbadmin-Ausgabe stehen als "Ergebnis unklar" (Teams/Mail/Bericht) statt als fehlgeschlagen; bei Abbruch/Neustart gilt keine VM als gesichert
+- Zeitangaben in Warnungen immer mit deutschem Wochentag (z. B. "Sa 31.10. 23:45"); Vorab-Pruefung mit Warte-Cursor
+- Restore-Ziele: reservierte Namen (CON, NUL, COM1 ...) und Punkt/Leerzeichen am Ende abgelehnt, gleiches Ziel fuer mehrere Ordner und Ziel im Backup-Ordner gewarnt, Ziel im Profil eines anderen Benutzers im Protokoll vermerkt
+### Doku
+- Einstieg: neue Situation *Grosse Datenmengen umziehen* mit Ablaufgrafik; Anleitung: Abschnitt *Zusaetzliche Ordner an einen anderen Ort zurueckspielen*
+
 ## v2.1.18 - 2026-10-30
 ### Allgemein
 - **Meldungen und Rueckfragen im HUMig-Design:** alle Hinweis-, Fehler- und Ja/Nein-Fenster (ueber 190 Stellen) erscheinen jetzt dunkel wie das Hauptfenster statt als Windows-Standardbox - Enter loest den hell umrandeten Knopf aus (bei Warnungen mit Ja/Nein immer *Nein*), Esc schliesst wie Nein/Abbrechen, Strg+C kopiert Titel und Text, lange Texte bekommen einen Scrollbalken; Rueckfall auf die Windows-Box nur vor dem Aufbau des Hauptfensters; die Ordnerrechte-Rueckfragen und die beiden Pfad-Eingaben (Zusaetzlicher Ordner, Pfad ausschliessen per Rechtsklick) ebenfalls im HUMig-Design

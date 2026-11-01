@@ -428,6 +428,272 @@ function Format-HMSbAliveLine {
     return $t
 }
 
+function Get-HMSbTaskStarts($Task, [datetime]$From, [datetime]$To) {
+    $out = @()
+    foreach ($t in @($Task.Triggers)) {
+        if (-not $t) { continue }
+        if ($t.PSObject.Properties['Enabled'] -and $t.Enabled -eq $false) { continue }
+        $sb = $null; try { if ("$($t.StartBoundary)") { $sb = [datetime]"$($t.StartBoundary)" } } catch { }
+        if (-not $sb) { continue }
+        $eb = $null; try { if ($t.PSObject.Properties['EndBoundary'] -and "$($t.EndBoundary)") { $eb = [datetime]"$($t.EndBoundary)" } } catch { }
+        # Wiederholung (z.B. alle 4 h fuer 1 Tag): Starts innerhalb der Dauer mitzaehlen (Codepruefung B6)
+        $rep = $null; $repDur = $null
+        try {
+            if ($t.PSObject.Properties['Repetition'] -and $t.Repetition -and "$($t.Repetition.Interval)") {
+                $rep = [System.Xml.XmlConvert]::ToTimeSpan("$($t.Repetition.Interval)")
+                $repDur = if ("$($t.Repetition.Duration)") { [System.Xml.XmlConvert]::ToTimeSpan("$($t.Repetition.Duration)") } else { [TimeSpan]::FromDays(1) }
+            }
+        } catch { $rep = $null }
+        # Lauf, der vor From startet, aber mit Wiederholungen hineinreicht, beruecksichtigen
+        $from0 = if ($rep) { $From - $repDur } else { $From }
+        $base = @()
+        $cls = "$($t.CimClass.CimClassName)"
+        if ($cls -like '*DailyTrigger') {
+            $iv = 1; try { $iv = [Math]::Max(1, [int]$t.DaysInterval) } catch { }
+            $d = $sb; $n = 0
+            while ($d -lt $from0 -and $n -lt 100000) { $d = $d.AddDays($iv); $n++ }
+            while ($d -le $To) { $base += $d; $d = $d.AddDays($iv) }
+        } elseif ($cls -like '*WeeklyTrigger') {
+            $mask = 0; try { $mask = [int]$t.DaysOfWeek } catch { }
+            $wi = 1; try { if ($t.PSObject.Properties['WeeksInterval']) { $wi = [Math]::Max(1, [int]$t.WeeksInterval) } } catch { }
+            $wk0 = $sb.Date.AddDays(-(([int]$sb.DayOfWeek + 6) % 7))   # Montag der Startwoche
+            for ($d = $from0.Date; $d -le $To; $d = $d.AddDays(1)) {
+                if (-not ($mask -band (1 -shl [int]$d.DayOfWeek))) { continue }
+                $wk = $d.AddDays(-(([int]$d.DayOfWeek + 6) % 7))
+                if ($wi -gt 1 -and ([int][Math]::Floor(($wk - $wk0).TotalDays / 7) % $wi) -ne 0) { continue }
+                $x = $d.Add($sb.TimeOfDay); if ($x -ge $sb) { $base += $x }
+            }
+        } elseif ($cls -like '*TimeTrigger') { $base += $sb }
+        foreach ($b in $base) {
+            $times = @($b)
+            if ($rep -and $rep.TotalMinutes -ge 1) { $k = $b.Add($rep); while ($k -lt $b.Add($repDur) -and $times.Count -lt 1000) { $times += $k; $k = $k.Add($rep) } }
+            foreach ($x in $times) { if ($x -ge $From -and $x -le $To -and (-not $eb -or $x -le $eb)) { $out += $x } }
+        }
+    }
+    return $out
+}
+function Get-HMSbTriggerText($Task) {
+    $days = @('So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa')
+    $parts = foreach ($t in @($Task.Triggers)) {
+        if (-not $t) { continue }
+        $cls = "$($t.CimClass.CimClassName)"
+        $tm = ''; try { $tm = ([datetime]"$($t.StartBoundary)").ToString('HH:mm') } catch { }
+        if ($cls -like '*DailyTrigger') { "taeglich $tm" }
+        elseif ($cls -like '*WeeklyTrigger') { $m = 0; try { $m = [int]$t.DaysOfWeek } catch { }; "$((@(0..6 | Where-Object { $m -band (1 -shl $_) } | ForEach-Object { $days[$_] })) -join ',') $tm" }
+        elseif ($cls -like '*TimeTrigger') { "einmalig $(try { ([datetime]"$($t.StartBoundary)").ToString('dd.MM.yyyy HH:mm') } catch { '' })" }
+        elseif ($cls -like '*LogonTrigger') { 'bei Anmeldung' }
+        elseif ($cls -like '*BootTrigger') { 'beim Start' }
+        elseif ($cls -like '*IdleTrigger') { 'im Leerlauf' }
+        else { ($cls -replace '^MSFT_Task', '' -replace 'Trigger$', '') }
+    }
+    return (@($parts) -join ' | ')
+}
+# Passende Aufgaben (ohne die Zeitplaene des eigenen Profils). $Plan (optional): geplanter Lauf -> Ueberschneidung pruefen
+# ----------------------------------------------------------------------------
+# Vorab-Pruefungen gegen Stoerungen von aussen (Praxis R770: iPACK-Wochenendsicherung mit eigener Schattenkopie von D:)
+#   Sperrzeit im Profil, andere geplante Sicherungen im erwarteten Laufzeitraum, eingebundene fremde Schattenkopien,
+#   Schattenkopie-Speicher eines Quelllaufwerks auf einer USB-/Wechselplatte
+# ----------------------------------------------------------------------------
+if (-not $script:SbTaskPath) { $script:SbTaskPath = '\HUMig\' }
+if (-not $script:SbConflictDefault) { $script:SbConflictDefault = @('backup', 'sicherung', 'wbadmin', 'veeam', 'acronis', '-RegIdleBackup') }
+$script:SbDayMap = @{ 'MO' = 1; 'DI' = 2; 'MI' = 3; 'DO' = 4; 'FR' = 5; 'SA' = 6; 'SO' = 0 }
+$script:SbDayName = @('So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa')
+# Sperrzeit-Text -> Fenster. Format je Fenster: "Sa 23:45 - So 18:00 Notiz" oder "taeglich 22:00 - 06:00 Notiz"; mehrere mit ; trennen
+# Rueckgabe: Windows (Liste mit FromDay/FromMin/ToDay/ToMin/Note/Text; Day = DayOfWeek 0=So, -1 = taeglich), Error (Text oder '')
+function ConvertFrom-HMSbBlockText([string]$Text) {
+    $win = New-Object System.Collections.Generic.List[object]
+    foreach ($part in @("$Text" -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+        $m = [regex]::Match($part, '^(?i)(mo|di|mi|do|fr|sa|so|taeglich|t(?:ä)glich|tgl\.?)\s+(\d{1,2}):(\d{2})\s*-\s*(?:(mo|di|mi|do|fr|sa|so)\s+)?(\d{1,2}):(\d{2})\s*(.*)$')
+        if (-not $m.Success) { return [pscustomobject]@{ Windows = @(); Error = "'$part' nicht verstanden - Beispiel: Sa 23:45 - So 18:00 iPACK-Sicherung (oder: taeglich 22:00 - 06:00)" } }
+        $h1 = [int]$m.Groups[2].Value; $n1 = [int]$m.Groups[3].Value; $h2 = [int]$m.Groups[5].Value; $n2 = [int]$m.Groups[6].Value
+        if ($h1 -gt 23 -or $h2 -gt 24 -or $n1 -gt 59 -or $n2 -gt 59 -or ($h2 -eq 24 -and $n2 -ne 0)) { return [pscustomobject]@{ Windows = @(); Error = "'$part': ungueltige Uhrzeit" } }
+        $d1 = $m.Groups[1].Value.ToUpper()
+        $daily = ($d1 -notin @('MO', 'DI', 'MI', 'DO', 'FR', 'SA', 'SO'))
+        if ($daily -and $m.Groups[4].Success) { return [pscustomobject]@{ Windows = @(); Error = "'$part': bei taeglich nur Uhrzeiten angeben (z.B. taeglich 22:00 - 06:00)" } }
+        $fd = if ($daily) { -1 } else { $script:SbDayMap[$d1] }
+        $td = if ($daily) { -1 } elseif ($m.Groups[4].Success) { $script:SbDayMap[$m.Groups[4].Value.ToUpper()] } elseif (($h2 * 60 + $n2) -le ($h1 * 60 + $n1)) { ($fd + 1) % 7 } else { $fd }   # "Sa 22:00 - 06:00" = bis So 06:00 (Codepruefung B2)
+        $win.Add([pscustomobject]@{ FromDay = $fd; FromMin = $h1 * 60 + $n1; ToDay = $td; ToMin = $h2 * 60 + $n2; Note = $m.Groups[7].Value.Trim(); Text = $part })
+    }
+    return [pscustomobject]@{ Windows = $win.ToArray(); Error = '' }
+}
+# Zeitpunkt fuer Meldungen, Wochentag deutsch unabhaengig von der Sprache des Kontos (SYSTEM kann en-US sein)
+function Format-HMSbWhen([datetime]$T) { return "$($script:SbDayName[[int]$T.DayOfWeek]) $($T.ToString('dd.MM. HH:mm'))" }
+# Text eines Fensters fuer Meldungen
+function Format-HMSbBlockWindow($W) {
+    if (-not $W) { return '' }
+    $t = { param($m) '{0:00}:{1:00}' -f [Math]::Floor($m / 60), ($m % 60) }
+    $s = if ($W.FromDay -lt 0) { "taeglich $(& $t $W.FromMin) - $(& $t $W.ToMin)" } else { "$($script:SbDayName[$W.FromDay]) $(& $t $W.FromMin) - $($script:SbDayName[$W.ToDay]) $(& $t $W.ToMin)" }
+    return "$s$(if ($W.Note) { " ($($W.Note))" })"
+}
+# Erstes Sperrfenster, das sich mit [Start, End] ueberschneidet: @{ From; To; Window } oder $null
+function Get-HMSbBlockOverlap($Windows, [datetime]$Start, [datetime]$End) {
+    $best = $null
+    foreach ($w in @($Windows | Where-Object { $_ })) {
+        for ($d = $Start.Date.AddDays(-7); $d -le $End.Date.AddDays(1); $d = $d.AddDays(1)) {
+            if ($w.FromDay -ge 0 -and [int]$d.DayOfWeek -ne [int]$w.FromDay) { continue }
+            $f = $d.AddMinutes($w.FromMin)
+            if ($w.FromDay -lt 0) { $len = ($w.ToMin - $w.FromMin); if ($len -le 0) { $len += 1440 } }
+            else { $len = (([int]$w.ToDay - [int]$w.FromDay + 7) % 7) * 1440 + $w.ToMin - $w.FromMin; if ($len -le 0) { $len += 7 * 1440 } }
+            $t = $f.AddMinutes($len)
+            if ($f -lt $End -and $t -gt $Start -and (-not $best -or $f -lt $best.From)) { $best = [pscustomobject]@{ From = $f; To = $t; Window = $w } }
+        }
+    }
+    return $best
+}
+# Erwartete Dauer (Minuten), vorsichtig (Codepruefung B1/B7): groesster Wert aus
+#   - Dauer der letzten 5 Laeufe des Profils, AUCH fehlgeschlagener (ein abgebrochener 41-h-Lauf zeigt, wie lange es dauern kann)
+#   - Groesse / langsamstes gemessenes Tempo der letzten 5 Laeufe (neue Platte = Vollsicherung)
+# ohne Verlauf: Groesse / 30 MB/s, ohne Groesse: 6 h
+function Get-HMSbEstimateMinutes($History, [string]$ProfileName, [long]$SizeBytes = 0) {
+    $runs = @(@($History) | Where-Object { $_ -and "$($_.Profile)" -eq $ProfileName -and [double]"0$($_.Minutes)" -gt 0 } | Sort-Object { "$($_.Date)" } | Select-Object -Last 5)
+    $cand = @()
+    if ($runs.Count) { $cand += [double](@($runs | ForEach-Object { [double]$_.Minutes } | Measure-Object -Maximum).Maximum) }
+    $rates = @($runs | ForEach-Object { [double]"0$($_.MBs)" } | Where-Object { $_ -gt 0 })
+    if ($SizeBytes -gt 0) {
+        $mbs = if ($rates.Count) { [double](@($rates | Measure-Object -Minimum).Minimum) } else { 30.0 }
+        $cand += [Math]::Round($SizeBytes / 1MB / $mbs / 60, 0)
+    }
+    if (-not $cand.Count) { return 360.0 }
+    return [Math]::Max(30.0, [double](@($cand | Measure-Object -Maximum).Maximum))
+}
+# Laufwerksbuchstaben der Quellen: Dateien/Ordner der VMs + gewaehlte Laufwerke (ohne Ziel)
+function Get-HMSbSourceLetters($VmInfos, [string[]]$Volumes, [string]$Target = '', [switch]$HostSystem) {
+    $l = New-Object System.Collections.Generic.List[string]
+    foreach ($v in @($VmInfos | Where-Object { $_ })) { foreach ($p in @(@($v.Paths) + @($v.VmPath) + @($v.ConfigPath))) { if ("$p" -match '^([A-Za-z]):') { $x = $Matches[1].ToUpper(); if (-not $l.Contains($x)) { $l.Add($x) } } } }
+    foreach ($p in @($Volumes)) { if ("$p" -match '^([A-Za-z])') { $x = $Matches[1].ToUpper(); if (-not $l.Contains($x)) { $l.Add($x) } } }
+    if ($HostSystem -and "$env:SystemDrive" -match '^([A-Za-z])') { $x = $Matches[1].ToUpper(); if (-not $l.Contains($x)) { $l.Add($x) } }
+    $tg = "$Target".TrimEnd(':', '\').ToUpper()
+    return @($l | Where-Object { $_ -ne $tg })
+}
+# Schattenkopien der Quelllaufwerke: (a) als Laufwerk/Ordner eingebunden = eine andere Sicherung liest gerade daraus,
+# (b) Schattenkopie-Speicher auf einer USB-/Wechselplatte = faellt die Platte weg oder ist sie ueberlastet, verschwindet die Schattenkopie
+# Daten fuer Tests uebergebbar (sonst vom System gelesen). Rueckgabe: Liste @{ Kind = 'Exposed'|'UsbDiff'; Letter; Text }
+function Get-HMSbShadowRisks([string[]]$Letters, $Volumes = $null, $Copies = $null, $Storages = $null, [scriptblock]$DiskInfo = $null) {
+    $out = New-Object System.Collections.Generic.List[object]
+    if (-not @($Letters).Count) { return @() }
+    try {
+        if ($null -eq $Volumes) { $Volumes = @(Get-CimInstance Win32_Volume -ErrorAction Stop | Where-Object { $_.DriveLetter }) }
+        if ($null -eq $Copies) { $Copies = @(Get-CimInstance Win32_ShadowCopy -ErrorAction Stop) }
+        if ($null -eq $Storages) { $Storages = @(Get-CimInstance Win32_ShadowStorage -ErrorAction Stop) }
+    } catch { return @([pscustomobject]@{ Kind = 'NotChecked'; Letter = ''; Text = "Schattenkopien der Quelllaufwerke nicht pruefbar: $($_.Exception.Message)" }) }
+    if (-not $DiskInfo) { $DiskInfo = { param($L) try { $dk = Get-Partition -DriveLetter $L -ErrorAction Stop | Get-Disk -ErrorAction Stop; $vo = Get-Volume -DriveLetter $L -ErrorAction SilentlyContinue; [pscustomobject]@{ Bus = "$($dk.BusType)"; Removable = ("$($vo.DriveType)" -eq 'Removable'); Label = "$($vo.FileSystemLabel)"; Name = "$($dk.FriendlyName)" } } catch { $null } } }
+    $byId = @{}; foreach ($v in @($Volumes)) { if ($v.DeviceID) { $byId["$($v.DeviceID)"] = "$($v.DriveLetter)".TrimEnd(':').ToUpper() } }
+    foreach ($L in @($Letters | ForEach-Object { "$_".TrimEnd(':', '\').ToUpper() } | Select-Object -Unique)) {
+        $vol = @($Volumes | Where-Object { "$($_.DriveLetter)".TrimEnd(':').ToUpper() -eq $L })[0]
+        if (-not $vol) { continue }
+        foreach ($c in @($Copies | Where-Object { "$($_.VolumeName)" -eq "$($vol.DeviceID)" -and ("$($_.ExposedName)".Trim() -or "$($_.ExposedPath)".Trim()) })) {
+            $ct = ''; try { if ($c.InstallDate) { $ct = ([datetime]$c.InstallDate).ToString('dd.MM. HH:mm') } } catch { }
+            $out.Add([pscustomobject]@{ Kind = 'Exposed'; Letter = $L; Text = "Eine Schattenkopie von ${L}: ist als $(("$($c.ExposedName)".Trim(), "$($c.ExposedPath)".Trim() | Where-Object { $_ } | Select-Object -First 1).TrimEnd('\')) eingebunden$(if ($ct) { " (erstellt $ct)" }) - vermutlich liest gerade eine andere Sicherung daraus. Laufen beide gleichzeitig, kann eine die Schattenkopie der anderen verwerfen (Fehler 'Geraet nicht bereit')." })
+        }
+        foreach ($s in @($Storages | Where-Object { "$($_.Volume.DeviceID)" -eq "$($vol.DeviceID)" })) {
+            $dl = $byId["$($s.DiffVolume.DeviceID)"]
+            if (-not $dl -or $dl -eq $L) { continue }
+            $di = & $DiskInfo $dl
+            if (-not $di) { $out.Add([pscustomobject]@{ Kind = 'NotChecked'; Letter = $L; Text = "Der Schattenkopie-Speicher von ${L}: liegt auf ${dl}: - Art der Platte nicht feststellbar." }); continue }
+            if ($di -and ("$($di.Bus)" -eq 'USB' -or $di.Removable)) {
+                $out.Add([pscustomobject]@{ Kind = 'UsbDiff'; Letter = $L; Text = "Der Schattenkopie-Speicher von ${L}: liegt auf ${dl}: - einer USB-/Wechselplatte$(if ($di.Label) { " ('$($di.Label)')" }). Waehrend der Sicherung muss jede Aenderung auf ${L}: dorthin geschrieben werden; ist die Platte langsam, ueberlastet (z.B. von einer anderen Sicherung beschrieben) oder kurz weg, verschwindet die Schattenkopie und die Sicherung bricht ab. Diese Zuordnung hat ein anderes Programm angelegt - nur nach Ruecksprache aendern." })
+            }
+        }
+    }
+    return $out.ToArray()
+}
+# Andere geplante Sicherungsaufgaben (Suchwoerter wie Zeitplan-Pruefung), die im Zeitraum [From, To] starten - ohne HUMig-Aufgaben
+function Find-HMSbForeignBackups([datetime]$From, [datetime]$To, [string[]]$Words = $null, $Tasks = $null) {
+    if (-not $Words -or -not @($Words).Count) { $Words = $script:SbConflictDefault }
+    $inc = @($Words | Where-Object { $_ -notlike '-*' }); $exc = @($Words | Where-Object { $_ -like '-*' } | ForEach-Object { $_.Substring(1) } | Where-Object { $_ })
+    if ($null -eq $Tasks) { $Tasks = @(Get-ScheduledTask -ErrorAction Stop) }   # Fehler -> Aufrufer meldet "nicht pruefbar" (Codepruefung B5)
+    $out = @()
+    foreach ($t in @($Tasks | Where-Object { $_ })) {
+        if ("$($t.TaskPath)" -eq $script:SbTaskPath) { continue }
+        if ("$($t.State)" -eq 'Disabled') { continue }
+        $acts = (@($t.Actions) | ForEach-Object { "$($_.Execute) $($_.Arguments)".Trim() }) -join ' ; '
+        $txt = "$($t.TaskPath)$($t.TaskName) $($t.Description) $acts"
+        $esc = { param($w) [System.Management.Automation.WildcardPattern]::Escape("$w") }
+        if (-not @($inc | Where-Object { $txt -like "*$(& $esc $_)*" }).Count -or @($exc | Where-Object { $txt -like "*$(& $esc $_)*" }).Count) { continue }
+        $st = @(Get-HMSbTaskStarts $t $From $To | Sort-Object)
+        if ($st.Count) { $out += [pscustomobject]@{ Task = "$($t.TaskPath)$($t.TaskName)"; Start = $st[0]; Trigger = (Get-HMSbTriggerText $t); Action = $acts; Unknown = $false } }
+        elseif (@($t.Triggers | Where-Object { $_ -and "$($_.CimClass.CimClassName)" -notmatch 'Daily|Weekly|TimeTrigger' -and -not ($_.PSObject.Properties['Enabled'] -and $_.Enabled -eq $false) }).Count) {
+            $out += [pscustomobject]@{ Task = "$($t.TaskPath)$($t.TaskName)"; Start = $null; Trigger = (Get-HMSbTriggerText $t); Action = $acts; Unknown = $true }
+        }
+    }
+    return @(@($out | Where-Object { -not $_.Unknown } | Sort-Object Start) + @($out | Where-Object { $_.Unknown }))
+}
+# Alle Vorab-Hinweise fuer einen Lauf ab $Start: Liste @{ Lvl; Kind; Text; Fix }
+function Get-HMSbPreflight($ProfileData, $VmInfos, [string[]]$Volumes, [string]$Target, [datetime]$Start, [double]$Minutes, [string[]]$Words = $null, [switch]$HostSystem) {
+    $out = New-Object System.Collections.Generic.List[object]
+    $end = $Start.AddMinutes([Math]::Max(30, $Minutes))
+    $endTxt = (Format-HMSbWhen $end)
+    if ($ProfileData -and "$($ProfileData.BlockText)".Trim()) {
+        $bw = ConvertFrom-HMSbBlockText "$($ProfileData.BlockText)"
+        if ($bw.Error) { $out.Add([pscustomobject]@{ Lvl = 'Warning'; Kind = 'Block'; Text = "Sperrzeit im Profil nicht lesbar: $($bw.Error)"; Fix = 'Profil > Bearbeiten ... > Sperrzeit korrigieren' }) }
+        else {
+            $ov = Get-HMSbBlockOverlap $bw.Windows $Start $end
+            if ($ov) {
+                $inNow = ($ov.From -le $Start)
+                $out.Add([pscustomobject]@{ Lvl = 'Warning'; Kind = 'Block'; Text = $(if ($inNow) { "Der Start liegt IN der Sperrzeit $(Format-HMSbBlockWindow $ov.Window) (bis $((Format-HMSbWhen $ov.To)))." } else { "Der Lauf ragt voraussichtlich in die Sperrzeit $(Format-HMSbBlockWindow $ov.Window): Beginn $((Format-HMSbWhen $ov.From)), erwartetes Ende des Laufs $endTxt (Dauer nach bisherigen Laeufen ca. $(Format-HMDuration $Minutes))." }); Fix = 'Spaeter bzw. frueher starten, so dass der Lauf vor der Sperrzeit fertig ist - oder die Platte schneller anschliessen (USB 3), damit der Lauf kuerzer wird.' })
+            }
+        }
+    }
+    try {
+        foreach ($f in @(Find-HMSbForeignBackups $Start $end $Words)) {
+            if ($f.Unknown) { $out.Add([pscustomobject]@{ Lvl = 'Info'; Kind = 'Task'; Text = "Die Aufgabe '$($f.Task)' ($($f.Trigger)) sieht nach einer Sicherung aus, ihr Zeitpunkt ist aber nicht auswertbar."; Fix = 'Ausloeser in der Aufgabenplanung pruefen.' }); continue }
+            $out.Add([pscustomobject]@{ Lvl = 'Warning'; Kind = 'Task'; Text = "Die geplante Aufgabe '$($f.Task)' ($($f.Trigger)) startet $(Format-HMSbWhen $f.Start) - waehrend dieses Laufs (erwartetes Ende $endTxt). Zwei Sicherungen gleichzeitig bremsen sich und koennen sich gegenseitig die Schattenkopie verwerfen."; Fix = "Lauf so legen, dass er vor dem Start der anderen Sicherung fertig ist (Sperrzeit im Profil eintragen), oder die andere Sicherung verschieben. Aufruf: $($f.Action)" })
+        }
+    } catch { $out.Add([pscustomobject]@{ Lvl = 'Info'; Kind = 'NotChecked'; Text = "Andere geplante Sicherungen nicht pruefbar: $($_.Exception.Message)"; Fix = 'Zeitplan-Pruefung von Hand ansehen.' }) }
+    try {
+        foreach ($r in @(Get-HMSbShadowRisks (Get-HMSbSourceLetters $VmInfos $Volumes $Target -HostSystem:$HostSystem))) {
+            $lv = switch ($r.Kind) { 'Exposed' { 'Warning' } default { 'Info' } }
+            $fx = switch ($r.Kind) { 'Exposed' { 'Warten, bis die andere Sicherung fertig ist, dann starten.' } 'UsbDiff' { 'Sicherung nicht gleichzeitig mit Laeufen auf diese Platte legen (Sperrzeit im Profil). Zuordnung pruefen: vssadmin list shadowstorage.' } default { 'Von Hand pruefen: vssadmin list shadowstorage / vssadmin list shadows' } }
+            $out.Add([pscustomobject]@{ Lvl = $lv; Kind = $r.Kind; Text = $r.Text; Fix = $fx })
+        }
+    } catch { $out.Add([pscustomobject]@{ Lvl = 'Info'; Kind = 'NotChecked'; Text = "Schattenkopien der Quelllaufwerke nicht pruefbar: $($_.Exception.Message)"; Fix = 'vssadmin list shadowstorage von Hand pruefen.' }) }
+    return $out.ToArray()
+}
+
+# Ergebnis je VM aus der wbadmin-Ausgabe (Zusammenfassung am Ende): Ok = gesichert, Failed = Fehler, Unknown = nicht gefunden.
+# Zeilen z.B. '"VM-iPData (Online)" wurde erfolgreich gesichert.' / 'Fehler beim Sichern von "VM-iPWeb (Online)".' (englisch analog).
+function Get-HMSbVmResults([string[]]$Lines, [string[]]$Vms) {
+    # nur eindeutige Ergebniszeilen der Zusammenfassung (Fortschritt "werden kopiert ... %" zaehlt nicht); deutsch und englisch
+    $okPat = '(?i)wurde erfolgreich gesichert|erfolgreich gesichert\.|successfully backed up|backup of .+ (completed|succeeded) successfully|was backed up successfully'
+    $badPat = '(?i)fehler beim sichern von|konnte nicht gesichert werden|sicherung .+ fehlgeschlagen|failed to back up|backup of .+ failed|could not be backed up|error backing up'
+    $state = @{}
+    foreach ($l in @($Lines)) {
+        $t = "$l"
+        if ($t -match '(?i)\d+\s?%') { continue }
+        $isBad = ($t -match $badPat); $isOk = (-not $isBad -and $t -match $okPat)
+        if (-not $isBad -and -not $isOk) { continue }
+        foreach ($m in [regex]::Matches($t, '"([^"]+?)"')) {
+            $n = ($m.Groups[1].Value -replace '\s*\((Online|Offline)\)\s*$', '').Trim()
+            $hit = @($Vms | Where-Object { "$_" -ieq $n })
+            if (-not $hit.Count) { continue }
+            $state["$($hit[0])"] = $(if ($isBad) { 'Failed' } else { 'Ok' })
+        }
+    }
+    $ok = @($Vms | Where-Object { $state["$_"] -eq 'Ok' })
+    $bad = @($Vms | Where-Object { $state["$_"] -eq 'Failed' })
+    $unk = @($Vms | Where-Object { -not $state.ContainsKey("$_") })
+    return [pscustomobject]@{ Ok = $ok; Failed = $bad; Unknown = $unk }
+}
+# Grund aus dem Fehlerprotokoll der Windows Server-Sicherung (Backup_Error-*.log): erste aussagekraeftige Zeilen
+function Get-HMSbErrorLogReasons([string[]]$Files, [int]$Max = 6) {
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($f in @($Files | Where-Object { $_ -and (Split-Path $_ -Leaf) -match '(?i)error' })) {
+        if (-not (Test-Path -LiteralPath $f)) { continue }
+        $ls = @(); try { $ls = @(Get-Content -LiteralPath $f -ErrorAction Stop) } catch { continue }
+        foreach ($l in $ls) {
+            $t = "$l".Trim() -replace '\s+', ' '
+            if (-not $t -or $t.Length -lt 8 -or $out.Contains($t)) { continue }
+            # nur aussagekraeftige Zeilen: Fehlerzeilen, Beschreibung (VM) und Fehlermeldung des Writers - keine IDs, Rahmen, (null)
+            if ($t -notmatch '(?i)^(fehler|error|failed)\b|^(beschreibung|description|fehlermeldung|error message)\s*:' -or $t -match '\(null\)\s*$' -or $t -match '(?i)^(fehler|error)\s*:\s*(0x)?[0-9a-f]+$') { continue }
+            $t = $t -replace '^(?i)(beschreibung|description)\s*:\s*', 'VM ' -replace '^(?i)(fehlermeldung|error message)\s*:\s*', '  -> '
+            if ($t.Length -gt 300) { $t = $t.Substring(0, 300) + ' ...' }
+            $out.Add($t)
+            if ($out.Count -ge $Max) { return $out.ToArray() }
+        }
+    }
+    return $out.ToArray()
+}
+
 # wbadmin ausfuehren (stdout+stderr), Fortschritt in $Job, Zeilen ins Log
 function Invoke-HMSbWbadmin {
     param([string]$Arguments, [string]$Phase = '', [double]$PBase = 0, [double]$PSpan = 100, [string]$LogFile = '', [switch]$Quiet)
@@ -446,13 +712,19 @@ function Invoke-HMSbWbadmin {
     # lange Laeufe (grosse VMs): alle 30 min eine Logzeile 'laeuft noch', auch wenn wbadmin lange nichts ausgibt
     $tgt = if ($Arguments -match '(?i)-backupTarget:([A-Za-z]:)') { $Matches[1] } else { '' }
     $used0 = if ($tgt -and -not $Quiet) { Get-HMSbDriveUsedBytes $tgt } else { $null }
+    # geschriebene Menge = Summe der Zunahmen des belegten Platzes (verwirft Windows waehrenddessen aeltere Versionen,
+    # sinkt der belegte Platz - das zaehlt nicht als "weniger geschrieben")
+    $usedPrev = $used0; $written = [long]0
     $t0 = Get-Date; $lastLog = $t0; $lastPctTxt = ''
     while ($true) {
         $rl = $p.StandardOutput.ReadLineAsync()
         while (-not $rl.Wait(5000)) {
             if (-not $Quiet -and ((Get-Date) - $lastLog).TotalMinutes -ge $script:HMSbAliveMinutes) {
                 $lastLog = Get-Date
-                Write-HMSbLog ('  ' + (Format-HMSbAliveLine -Phase $Phase -Elapsed ((Get-Date) - $t0) -PctText $lastPctTxt -UsedStart $used0 -UsedNow $(if ($tgt) { Get-HMSbDriveUsedBytes $tgt } else { $null })))
+                $uNow = if ($tgt -and $null -ne $usedPrev) { Get-HMSbDriveUsedBytes $tgt } else { $null }
+                if ($null -ne $uNow) { if ([long]$uNow -gt [long]$usedPrev) { $written += ([long]$uNow - [long]$usedPrev) }; $usedPrev = $uNow }
+                if ($script:SbBlockWindows -and -not $script:SbBlockWarned) { try { $nowB = Get-Date; $ovB = Get-HMSbBlockOverlap $script:SbBlockWindows $nowB $nowB.AddMinutes(1); if ($ovB) { $script:SbBlockWarned = $true; Write-HMSbLog "  ACHTUNG: Die Sperrzeit $(Format-HMSbBlockWindow $ovB.Window) hat begonnen - die Sicherung laeuft noch" 'Warning' } } catch { } }
+                Write-HMSbLog ('  ' + (Format-HMSbAliveLine -Phase $Phase -Elapsed ((Get-Date) - $t0) -PctText $lastPctTxt -UsedStart $(if ($null -ne $used0) { [long]0 } else { $null }) -UsedNow $(if ($null -ne $used0) { $written } else { $null })))
             }
         }
         $line = $rl.Result
@@ -773,6 +1045,8 @@ function New-HMSbNotifyMessage {
         if ("$($Result.HostSystem)") { $what += "Host-System: $($Result.HostSystem)" }
         if ("$($Result.Export)" -and $expSt -eq 'OK') { $what += "VM-Export: $($Result.Export)" }
         if ($what.Count) { $lines.Add("Gesichert: $($what -join ' | ')") }
+        if ("$($Result.VmsFailed)") { $lines.Add("NICHT gesichert: VMs: $($Result.VmsFailed)") }
+        if ("$($Result.VmsUnknown)") { $lines.Add("Ergebnis unklar: VMs: $($Result.VmsUnknown) (wbadmin-VMs.log pruefen)") }
         $dl = @()
         if ([double]"0$($Result.Minutes)" -gt 0) { $dl += "Dauer $(Format-HMDuration $Result.Minutes)" }
         if ([long]"0$($Result.SizeBytes)" -gt 0) { $dl += ("Datenmenge ca. {0:N1} GB" -f ([long]$Result.SizeBytes / 1GB)) }
@@ -1119,7 +1393,7 @@ function Resolve-HMSbAbortedRuns([string]$LocalHistory, [string]$Version = '', [
         $note = "ABGEBROCHEN: $why"
         $entry = [pscustomobject][ordered]@{
             Date = $st.ToString('yyyy-MM-dd HH:mm'); Profile = "$($m.Profile)"; Host = "$($m.Host)"; Disk = "$($m.Disk)"; DiskSerial = "$($m.DiskSerial)"
-            VMs = "$($m.VMs)"; Volumes = "$($m.Volumes)"; VolVersionId = ''; Status = 'Error'; Minutes = [math]::Round(((Get-Date) - $st).TotalMinutes, 1); SizeGB = 0; VersionId = ''
+            VMs = ''; VmsFailed = "$($m.VMs)"; Volumes = "$($m.Volumes)"; VolVersionId = ''; Status = 'Error'; Minutes = [math]::Round(((Get-Date) - $st).TotalMinutes, 1); SizeGB = 0; VersionId = ''
             HostConfig = $false; HostSystem = $false; HostVersionId = ''; Note = $note; Tool = "HUMig $(if ($m.Version) { $m.Version } else { $Version })"
             Report = $(if ("$($m.Report)") { Split-Path "$($m.Report)" -Leaf } else { '' }); Health = ''; HealthText = ''; Export = ''; ExportStatus = ''; Aborted = $true
         }
@@ -1535,7 +1809,9 @@ function Write-HMSbReport {
     $rows = @(
         @('Datum', $Entry.Date), @('Profil', $Entry.Profile), @('Hyper-V-Host', $Entry.Host),
         @('Platte', "$($Entry.Disk)$(if ($Entry.DiskSerial) { "  (Seriennummer $($Entry.DiskSerial))" })"),
-        @('Virtuelle Computer', $(if ($Entry.VMs) { $Entry.VMs } else { '-' })),
+        @('Virtuelle Computer (gesichert)', $(if ($Entry.VMs) { $Entry.VMs } else { '-' })),
+        @('Virtuelle Computer NICHT gesichert', $(if ("$($Entry.VmsFailed)") { "$($Entry.VmsFailed)" } else { '-' })),
+        @('Virtuelle Computer Ergebnis unklar', $(if ("$($Entry.VmsUnknown)") { "$($Entry.VmsUnknown) (in der wbadmin-Ausgabe nicht gefunden)" } else { '-' })),
         @('Laufwerke dieses Servers', $(if ($Entry.Volumes) { "$($Entry.Volumes)$(if ($Entry.VolVersionId) { " - Version $($Entry.VolVersionId) (UTC)" })" } else { '-' })),
         @('Dauer', (Format-HMDuration $Entry.Minutes)), @('Gesicherte Datenmenge', "ca. $($Entry.SizeGB) GB (virtuelle Festplatten der VMs + belegter Platz der Laufwerke)"),
         @('Schreibtempo', $(if ([double]"0$($Entry.MBs)" -gt 0) { "ca. $([math]::Round([double]$Entry.MBs)) MB/s (Datenmenge / Dauer des ganzen Laufs)" } else { '-' })),
@@ -1944,7 +2220,7 @@ function Start-HMServerBackup {
     $vms = @($Ctx.VMs | Where-Object { "$_".Trim() })
     $vols = @($Ctx.Volumes | Where-Object { "$_".Trim() } | ForEach-Object { ("$_".Trim().TrimEnd('\', ':')).ToUpper() + ':' } | Select-Object -Unique)
     $res = [ordered]@{ Status = 'Error'; SizeBytes = [long]0; Report = ''; VersionId = ''; HostVersionId = ''; VolVersionId = ''; Notes = @(); Health = ''; HealthText = ''
-        Minutes = 0; FreeBytes = [long]0; TotalBytes = [long]0; LowSpace = $false; VersionCount = 0; OldestVersion = ''; NewestVersion = ''; VMs = ''; Volumes = ''; HostSystem = ''
+        Minutes = 0; FreeBytes = [long]0; TotalBytes = [long]0; LowSpace = $false; VersionCount = 0; OldestVersion = ''; NewestVersion = ''; VMs = ''; VmsFailed = ''; VmsUnknown = ''; Volumes = ''; HostSystem = ''
         Export = ''; ExportStatus = ''; MBs = 0; ShadowStorage = '' }
     $Job.Result = [pscustomobject]$res
 
@@ -2009,6 +2285,19 @@ function Start-HMServerBackup {
             $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = $pr; Fix = 'Server nach der Sicherung (oder vor der naechsten) neu starten. Dauerhaft: automatischen Neustart von Windows Update abschalten (Anleitung > Server-Backup > Neustart durch Windows Update).' }
         }
     } catch { }
+    # Vorab-Pruefung gegen Stoerungen von aussen: Sperrzeit, andere geplante Sicherungen, fremde Schattenkopien
+    $script:SbBlockWindows = $null; $script:SbBlockWarned = $false
+    try {
+        $hist0 = @(); if ($Ctx.LocalHistory) { try { $hist0 = Read-HMSbHistory "$($Ctx.LocalHistory)" } catch { } }
+        $estMin = Get-HMSbEstimateMinutes $hist0 "$($Ctx.Profile)" ([long]$res.SizeBytes)
+        if ($Ctx.ProfileData -and "$($Ctx.ProfileData.BlockText)".Trim()) { $bwx = ConvertFrom-HMSbBlockText "$($Ctx.ProfileData.BlockText)"; if (-not $bwx.Error) { $script:SbBlockWindows = @($bwx.Windows) } }
+        if ($script:SbBlockWindows -and (Get-HMSbBlockOverlap $script:SbBlockWindows $t0 $t0.AddMinutes(1))) { $script:SbBlockWarned = $true }   # Start schon in der Sperrzeit: Warnung kommt vorab, nicht nochmal im Lauf (B9a)
+        foreach ($pf in @(Get-HMSbPreflight $Ctx.ProfileData $info $vols $target $t0 $estMin @($Ctx.ConflictWords) -HostSystem:([bool]$Ctx.HostSystem))) {
+            Write-HMSbLog "Vorab-Pruefung: $($pf.Text)" $(if ($pf.Lvl -eq 'Info') { 'Info' } else { 'Warning' })
+            $hints += [pscustomobject]@{ Lvl = $pf.Lvl; Text = $pf.Text; Fix = $pf.Fix }
+            if ($pf.Lvl -ne 'Info') { $notes += "Hinweis: $(switch ($pf.Kind) { 'Block' { 'Sperrzeit' } 'Task' { 'andere Sicherung im Laufzeitraum' } 'Exposed' { 'fremde Schattenkopie eingebunden' } default { 'Vorab-Pruefung' } })" }
+        }
+    } catch { Write-HMSbLog "Vorab-Pruefung (Sperrzeit, andere Sicherungen): $($_.Exception.Message)" 'Warning' }
     $hostCfgOk = $false; $verId = ''; $volOk = $false; $hostSysOk = $false
     try {
         # --- Host-Konfiguration
@@ -2033,6 +2322,7 @@ function Start-HMServerBackup {
         $pb = 2
         # --- VMs sichern
         $verId = ''
+        $vmsSaved = @(); $vmsFailed = @(); $vmsUnknown = @()
         if ($vms.Count) {
             $Job.Status = 'VMs: Schattenkopie wird erstellt ...'
             Write-HMSbLog "wbadmin: VMs sichern -> $target (Online-Sicherung ueber VSS, VMs laufen weiter)" 'Header'
@@ -2046,9 +2336,26 @@ function Start-HMServerBackup {
                 throw 'Abgebrochen'
             }
             foreach ($lf in @($r.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
-            if ($r.ExitCode -ne 0 -and $r.Busy) { $status = 'Error'; $notes += 'VM-Sicherung: anderer Sicherungsvorgang lief'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die VM-Sicherung wurde nicht ausgefuehrt: am Host lief bereits eine andere Sicherung/Wiederherstellung.'; Fix = $script:HMSbBusyFix }; Write-HMSbLog 'VM-Sicherung NICHT ausgefuehrt - am Host lief bereits eine andere Sicherung/Wiederherstellung (spaeter erneut starten)' 'Error' }
-            elseif ($r.ExitCode -ne 0) { $status = 'Error'; $notes += "VM-Sicherung Exitcode $($r.ExitCode)"; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die VM-Sicherung ist fehlgeschlagen (wbadmin Exitcode $($r.ExitCode))."; Fix = 'Ursache steht in wbadmin-VMs.log und im Backup-/Fehlerprotokoll der Windows Server-Sicherung (Links unten). Haeufig: Platte voll, VM gesperrt, VSS-Fehler im Gast.' }; Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - Details: wbadmin-VMs.log im Berichtsordner" 'Error' }
+            if ($r.ExitCode -ne 0 -and $r.Busy) { $status = 'Error'; $vmsSaved = @(); $vmsFailed = @($vms); $notes += 'VM-Sicherung: anderer Sicherungsvorgang lief'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die VM-Sicherung wurde nicht ausgefuehrt: am Host lief bereits eine andere Sicherung/Wiederherstellung.'; Fix = $script:HMSbBusyFix }; Write-HMSbLog 'VM-Sicherung NICHT ausgefuehrt - am Host lief bereits eine andere Sicherung/Wiederherstellung (spaeter erneut starten)' 'Error' }
+            elseif ($r.ExitCode -ne 0) {
+                $status = 'Error'
+                # welche VMs sind trotzdem gesichert? (wbadmin meldet je VM) - nur die zaehlen als "gesichert"
+                $vr = Get-HMSbVmResults $r.Lines $vms
+                $vmsFailed = @($vr.Failed); $vmsUnknown = @($vr.Unknown)
+                $vmsSaved = @($vr.Ok)
+                $why = @(Get-HMSbErrorLogReasons @($r.LogFiles | ForEach-Object { Join-Path $rep (Split-Path $_ -Leaf) }))
+                $fp = @(); if ($vmsFailed.Count) { $fp += "nicht gesichert: $($vmsFailed -join ', ')" }; if ($vmsUnknown.Count) { $fp += "Ergebnis unklar (nicht in der wbadmin-Ausgabe): $($vmsUnknown -join ', ')" }; if ($vmsSaved.Count) { $fp += "gesichert: $($vmsSaved -join ', ')" }
+                $failTxt = if ($fp.Count) { $fp -join '; ' } else { 'keine VM gesichert' }
+                $notes += "VM-Sicherung fehlgeschlagen - $failTxt, wbadmin Exitcode $($r.ExitCode)"
+                # Quelle waehrend des Laufs nicht mehr lesbar (Schattenkopie des Quelllaufwerks verworfen): typische Codes deuten
+                $srcLost = [bool](@($why | Where-Object { $_ -match '(?i)0x80070015|0x800701b1|0x80042306|0x8004231f|0x80042317' }).Count)
+                if ($srcLost) { $why += 'Deutung: Das Quelllaufwerk bzw. seine Schattenkopie war mitten im Lauf nicht mehr lesbar ("Geraet nicht bereit"/"nicht vorhandenes Geraet"). Typisch, wenn Windows die Schattenkopie des Quelllaufwerks bei einem sehr langen Lauf verwirft - Lauf beschleunigen (Platte direkt an USB 3) und Speicher fuer Schattenkopien am Quelllaufwerk pruefen (vssadmin list shadowstorage).'; Write-HMSbLog '  Quelllaufwerk/Schattenkopie waehrend des Laufs verloren - langer Lauf (langsame Platte?) und Schattenkopie-Speicher des Quelllaufwerks pruefen' 'Warning' }
+                $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die VM-Sicherung ist fehlgeschlagen (wbadmin Exitcode $($r.ExitCode)) - $failTxt.$(if ($why.Count) { ' Grund laut Windows Server-Sicherung: ' + ($why -join ' / ') })"; Fix = 'Ursache steht in wbadmin-VMs.log und im Fehlerprotokoll der Windows Server-Sicherung (Links unten). Haeufig: Schattenkopie waehrend eines sehr langen Laufs verworfen (Platte zu langsam, z.B. USB 2.0; Speicher fuer Versionen zu klein), Platte voll, VM gesperrt, VSS-Fehler im Gast.' }
+                Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - $failTxt - Details: wbadmin-VMs.log im Berichtsordner" 'Error'
+                foreach ($w in $why) { Write-HMSbLog "  Fehlerprotokoll: $w" 'Error' }
+            }
             else {
+                $vmsSaved = @($vms)
                 $offVms = @($r.Lines | Where-Object { $_ -match '"(.+?) \(Offline\)"' } | ForEach-Object { if ($_ -match '"(.+?) \(Offline\)"') { $Matches[1] } } | Select-Object -Unique)
                 if ($offVms.Count) {
                     # vollstaendig gesichert -> kein Warnstatus, nur Hinweis
@@ -2177,6 +2484,8 @@ function Start-HMServerBackup {
     } catch {
         $msg = "$($_.Exception.Message)"
         $status = 'Error'
+        # Abbruch/Fehler vor dem Ende der VM-Sicherung: keine VM als gesichert zaehlen (Codepruefung B3)
+        if ($vms.Count -and -not @($vmsSaved).Count -and -not @($vmsFailed).Count -and -not @($vmsUnknown).Count) { $vmsFailed = @($vms) }
         if ($msg -eq 'Abgebrochen' -or $Job.Cancel) { $notes += 'abgebrochen'; Write-HMSbLog 'Server-Backup ABGEBROCHEN - Lauf wird im Verlauf festgehalten' 'Error'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = 'Die Sicherung wurde abgebrochen.'; Fix = 'Sicherung erneut starten. Was bis zum Abbruch gesichert war, zeigt der Button Versionen auf der Platte.' } }
         else { $notes += "Fehler: $msg"; Write-HMSbLog "Server-Backup FEHLER: $msg" 'Error'; $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die Sicherung ist mit einem Fehler abgebrochen: $msg"; Fix = 'Protokoll im Berichtsordner pruefen und erneut starten.' } }
     }
@@ -2229,9 +2538,24 @@ function Start-HMServerBackup {
     $Job.Status = 'Bericht'
     $dur = [math]::Round(((Get-Date) - $t0).TotalMinutes, 1)
     if (-not $vms.Count -and -not $vols.Count -and -not $Ctx.HostSystem -and -not $hostCfgOk -and -not ("$($res.ExportStatus)" -in @('OK', 'Warning'))) { $status = 'Error' }
+    # Fehler: fiel der Lauf in die Sperrzeit oder startete waehrenddessen eine andere Sicherung? (Praxis R770: iPACK-Wochenendsicherung)
+    if ($status -eq 'Error') {
+        try {
+            $tEnd = Get-Date
+            if ($script:SbBlockWindows) {
+                $ovx = Get-HMSbBlockOverlap $script:SbBlockWindows $t0 $tEnd
+                if ($ovx) { $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Der Lauf ueberschnitt die Sperrzeit $(Format-HMSbBlockWindow $ovx.Window) (ab $((Format-HMSbWhen $ovx.From))) - der Fehler kann damit zusammenhaengen."; Fix = 'Lauf so starten, dass er vor der Sperrzeit fertig ist; Platte schneller anschliessen (USB 3).' }; $notes += 'Lauf ueberschnitt die Sperrzeit'; Write-HMSbLog "Der Lauf ueberschnitt die Sperrzeit $(Format-HMSbBlockWindow $ovx.Window)" 'Error' }
+            }
+            foreach ($f in @(Find-HMSbForeignBackups $t0 $tEnd @($Ctx.ConflictWords) | Where-Object { -not $_.Unknown })) {
+                $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Waehrend des Laufs startete die geplante Aufgabe '$($f.Task)' ($($f.Trigger), $((Format-HMSbWhen $f.Start))) - eine zweite Sicherung zur selben Zeit kann die Schattenkopie dieses Laufs verwerfen."; Fix = "Sperrzeit im Profil eintragen und Laeufe davor beenden. Aufruf: $($f.Action)" }
+                $notes += "waehrend des Laufs startete '$(Split-Path $f.Task -Leaf)'"
+                Write-HMSbLog "Waehrend des Laufs startete die geplante Aufgabe '$($f.Task)' ($((Format-HMSbWhen $f.Start)))" 'Error'
+            }
+        } catch { Write-HMSbLog "Nachpruefung (Sperrzeit, andere Sicherungen): $($_.Exception.Message)" 'Warning' }
+    }
     $entry = [pscustomobject][ordered]@{
         Date = $t0.ToString('yyyy-MM-dd HH:mm'); Profile = "$($Ctx.Profile)"; Host = $env:COMPUTERNAME; Disk = "$($Ctx.DiskLabel)"; DiskSerial = "$($Ctx.DiskSerial)"
-        VMs = ($vms -join ', '); Volumes = ($vols -join ', '); VolVersionId = "$($res.VolVersionId)"; Status = $status; Minutes = $dur; SizeGB = [math]::Round($res.SizeBytes / 1GB, 1); VersionId = $verId
+        VMs = ($vmsSaved -join ', '); VmsFailed = ($vmsFailed -join ', '); VmsUnknown = (@($vmsUnknown) -join ', '); Volumes = ($vols -join ', '); VolVersionId = "$($res.VolVersionId)"; Status = $status; Minutes = $dur; SizeGB = [math]::Round($res.SizeBytes / 1GB, 1); VersionId = $verId
         HostConfig = $hostCfgOk; HostSystem = $hostSysOk; HostVersionId = "$($res.HostVersionId)"; Note = ($notes -join '; '); Tool = "HUMig $($Ctx.Version)"; Report = (Split-Path $rep -Leaf)
         Health = $healthLvl; HealthText = $healthTxt; Export = "$($res.Export)"; ExportStatus = "$($res.ExportStatus)"
         MBs = $rate; ShadowStorage = "$($res.ShadowStorage)"; TaskLog = "$($Ctx.TaskLog)"; Versions = $(if ($null -ne $vaNow) { @($vaNow).Count } else { -1 })
@@ -2249,7 +2573,7 @@ function Start-HMServerBackup {
         }
     } catch { Write-HMSbLog "Bericht: $($_.Exception.Message)" 'Warning' }
     # Stand der Platte fuer Meldungen: freier Platz, Versionen (vor dem Auswerfen/Offline-Schalten)
-    $res.Minutes = $dur; $res.VMs = ($vms -join ', '); $res.Volumes = ($vols -join ', ')
+    $res.Minutes = $dur; $res.VMs = ($vmsSaved -join ', '); $res.VmsFailed = ($vmsFailed -join ', '); $res.VmsUnknown = (@($vmsUnknown) -join ', '); $res.Volumes = ($vols -join ', ')
     $res.HostSystem = if ($Ctx.HostSystem) { if ($hostSysOk) { 'ja' } else { 'FEHLER' } } else { '' }
     try {
         $vol2 = Get-Volume -DriveLetter $L -ErrorAction Stop

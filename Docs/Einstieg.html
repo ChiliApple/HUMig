@@ -90,6 +90,18 @@ h1 em { font-style: normal; color: var(--mauve); }
 .meta span { font-size: 13px; color: var(--muted); background: var(--surface-2); border-radius: 6px; padding: 3px 9px; }
 .tip { margin-top: 14px; font-size: 14.5px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--yellow) var(--tint), var(--surface)); border: 1px solid color-mix(in srgb, var(--yellow) 35%, var(--line)); }
 .tip b { color: var(--fg-strong); }
+.scn-fig { grid-column: 1 / -1; margin: 0; padding: 14px 10px 6px; background: var(--surface-2); border-radius: 12px; }
+.scn-fig svg { display: block; width: 100%; height: auto; max-height: 230px; }
+.scn-fig .flow-v { display: none; max-height: none; max-width: 340px; margin: 0 auto; }
+.scn-fig figcaption { text-align: center; font-size: 13.5px; color: var(--muted); margin-top: 4px; }
+.flow-box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.flow-acc { fill: color-mix(in srgb, var(--c) 22%, var(--surface)); stroke: var(--c); stroke-width: 1.5; }
+.flow-t { fill: var(--fg-strong); font: 700 15px var(--f-display); }
+.flow-s { fill: var(--muted); font: 500 12.5px var(--f-body); }
+.flow-m { fill: var(--fg); font: 600 12.5px var(--f-mono); }
+.flow-line { stroke: var(--c); stroke-width: 3; fill: none; stroke-linecap: round; }
+.flow-dash { stroke: var(--c); stroke-width: 2; fill: none; stroke-dasharray: 2 7; stroke-linecap: round; opacity: .7; }
+.flow-head { fill: var(--c); }
 .shot { margin: 16px 0 0; max-width: 300px; display: grid; gap: 6px; }
 .shot img { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
 .shot figcaption { font-size: 13px; color: var(--muted); text-align: center; }
@@ -117,6 +129,8 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
 @media (max-width: 760px) {
   .scn-body { grid-template-columns: 1fr; gap: 20px; }
   .scn-head, .scn-body { padding-inline: 18px; }
+  .scn-fig .flow-h { display: none; }
+  .scn-fig .flow-v { display: block; }
   .lead { font-size: 17px; }
 }
 </style>
@@ -162,6 +176,7 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
   <nav class="finder">
     <a href="#neuer-laptop" style="--c: var(--blue)"><b>Ein Mitarbeiter bekommt einen neuen PC</b><small>alles vom alten Gerät mitnehmen</small></a>
     <a href="#neu-aufsetzen" style="--c: var(--teal)"><b>Vor einer Neuinstallation</b><small>Daten sichern und danach zurückholen</small></a>
+    <a href="#daten-umziehen" style="--c: var(--peach)"><b>Große Datenmengen umziehen</b><small>hunderte GB, zehntausende Dateien – auch an einen anderen Ort</small></a>
     <a href="#datei-weg" style="--c: var(--green)"><b>„Meine Datei ist weg!“</b><small>regelmäßige Backups, Dateien zurückholen</small></a>
     <a href="#server" style="--c: var(--mauve)"><b>Der Server soll gesichert werden</b><small>Hyper-V, Wechselplatten, Erinnerung</small></a>
     <a href="#edv-saal" style="--c: var(--peach)"><b>Programme aktuell halten</b><small>fast alle deine Apps – am eigenen PC oder auf vielen anderen</small></a>
@@ -230,6 +245,88 @@ footer { color: var(--muted); font-size: 14px; border-top: 1px solid var(--line)
           <li>Ein geprüftes Backup (Stichproben-Prüfung nach dem Kopieren)</li>
         </ul>
         <p class="tip"><b>Tipp:</b> Das Backup bleibt liegen. Fällt später noch etwas auf („die Vorlage fehlt“), holst du es einfach nach.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="scn" id="daten-umziehen" style="--c: var(--peach)">
+    <div class="scn-head">
+      <span class="tag">Daten umziehen</span>
+      <h3>Große Datenmengen umziehen – hunderte GB, zehntausende Dateien</h3>
+      <p class="quote">„Der Ordner D:\Projekte mit 300 GB muss auf den neuen PC – und dort nach E:\Daten. Der Explorer bricht ständig ab.“</p>
+    </div>
+    <div class="scn-body">
+      <figure class="scn-fig" aria-label="Ablauf: Ordner am alten PC sichern, auf der USB-SSD zwischenlagern, am neuen PC an ein anderes Ziel zurückspielen">
+        <svg class="flow-h" viewBox="0 0 860 200" role="img" xmlns="http://www.w3.org/2000/svg">
+          <title>D:\Projekte vom alten PC über die USB-SSD nach E:\Daten\Projekte am neuen PC</title>
+          <!-- alter PC -->
+          <rect class="flow-box" x="10" y="30" width="230" height="140" rx="14"/>
+          <rect class="flow-acc" x="28" y="104" width="194" height="46" rx="9"/>
+          <text class="flow-t" x="125" y="62" text-anchor="middle">Alter PC</text>
+          <text class="flow-s" x="125" y="84" text-anchor="middle">+ Ordner (Zusätzliche Ordner)</text>
+          <text class="flow-m" x="125" y="132" text-anchor="middle">D:\Projekte · 300 GB</text>
+          <!-- Pfeil 1 -->
+          <path class="flow-line" d="M248 100 H300"/>
+          <path class="flow-head" d="M300 92 L314 100 L300 108 Z"/>
+          <text class="flow-s" x="281" y="88" text-anchor="middle">Backup</text>
+          <!-- USB-SSD -->
+          <rect class="flow-acc" x="322" y="46" width="216" height="108" rx="14"/>
+          <text class="flow-t" x="430" y="80" text-anchor="middle">USB-SSD oder Netz</text>
+          <text class="flow-s" x="430" y="103" text-anchor="middle">bis zu 128 Threads parallel</text>
+          <text class="flow-s" x="430" y="122" text-anchor="middle">Abbruch? Weiter mit „aktualisieren“</text>
+          <text class="flow-s" x="430" y="141" text-anchor="middle">Protokoll + Prüfung</text>
+          <path class="flow-dash" d="M350 174 H510"/>
+          <text class="flow-s" x="430" y="194" text-anchor="middle">bleibt als Sicherung liegen</text>
+          <!-- Pfeil 2 -->
+          <path class="flow-line" d="M546 100 H598"/>
+          <path class="flow-head" d="M598 92 L612 100 L598 108 Z"/>
+          <text class="flow-s" x="579" y="88" text-anchor="middle">Restore</text>
+          <!-- neuer PC -->
+          <rect class="flow-box" x="620" y="30" width="230" height="140" rx="14"/>
+          <rect class="flow-acc" x="638" y="104" width="194" height="46" rx="9"/>
+          <text class="flow-t" x="735" y="62" text-anchor="middle">Neuer PC</text>
+          <text class="flow-s" x="735" y="84" text-anchor="middle">Ziel geändert im Restore</text>
+          <text class="flow-m" x="735" y="132" text-anchor="middle">E:\Daten\Projekte</text>
+        </svg>
+        <svg class="flow-v" viewBox="0 0 340 430" role="img" xmlns="http://www.w3.org/2000/svg">
+          <title>D:\Projekte vom alten PC über die USB-SSD nach E:\Daten\Projekte am neuen PC</title>
+          <rect class="flow-box" x="20" y="6" width="300" height="104" rx="14"/>
+          <text class="flow-t" x="170" y="36" text-anchor="middle">Alter PC</text>
+          <rect class="flow-acc" x="40" y="54" width="260" height="40" rx="9"/>
+          <text class="flow-m" x="170" y="79" text-anchor="middle">D:\Projekte · 300 GB</text>
+          <path class="flow-line" d="M170 116 V146"/><path class="flow-head" d="M162 146 L170 160 L178 146 Z"/>
+          <text class="flow-s" x="186" y="140">Backup</text>
+          <rect class="flow-acc" x="20" y="166" width="300" height="96" rx="14"/>
+          <text class="flow-t" x="170" y="194" text-anchor="middle">USB-SSD oder Netz</text>
+          <text class="flow-s" x="170" y="216" text-anchor="middle">bis zu 128 Threads parallel</text>
+          <text class="flow-s" x="170" y="236" text-anchor="middle">Protokoll + Prüfung · bleibt als Sicherung</text>
+          <path class="flow-line" d="M170 268 V298"/><path class="flow-head" d="M162 298 L170 312 L178 298 Z"/>
+          <text class="flow-s" x="186" y="292">Restore – Ziel geändert</text>
+          <rect class="flow-box" x="20" y="318" width="300" height="104" rx="14"/>
+          <text class="flow-t" x="170" y="348" text-anchor="middle">Neuer PC</text>
+          <rect class="flow-acc" x="40" y="366" width="260" height="40" rx="9"/>
+          <text class="flow-m" x="170" y="391" text-anchor="middle">E:\Daten\Projekte</text>
+        </svg>
+        <figcaption>Gesichert wird mit vollem Pfad – beim Restore entscheidest du je Ordner: gleicher Ort, neuer Ort oder auslassen.</figcaption>
+      </figure>
+      <div>
+        <h4>So gehst du vor</h4>
+        <ol class="steps">
+          <li><span>Am alten PC im Reiter Backup: <span class="ui">Keine</span> (alles abhaken), dann <span class="ui">+ Ordner</span> → <code>D:\Projekte</code> wählen → <span class="ui">Backup starten</span> auf die USB-SSD.</span></li>
+          <li><span>Abgebrochen oder inzwischen geändert? Mit <span class="ui">Vorhandenes Backup aktualisieren</span> nochmal starten – kopiert wird nur, was fehlt oder neu ist.</span></li>
+          <li><span>Am neuen PC im Reiter Restore das Backup wählen → <span class="ui">Ziele der Zusätzlichen Ordner …</span> → bei <code>D:\Projekte</code> als Ziel <code>E:\Daten\Projekte</code> eintragen (oder <span class="ui">…</span> wählen) → <span class="ui">Restore starten</span>.</span></li>
+        </ol>
+        <div class="meta"><span>⏱ USB4 + NVMe: rund 75 GB in 3–4 Minuten</span><span>auch übers Netzwerk</span><span>mehrere Ordner auf einmal</span></div>
+      </div>
+      <div>
+        <h4>Was du am Ende hast</h4>
+        <ul class="gets">
+          <li>Alles am neuen Ort – mit bis zu 128 parallelen Kopier-Threads (32 = Standard) statt einer Datei nach der anderen</li>
+          <li>Ein Protokoll, was kopiert wurde, und auf Wunsch eine Prüfung (Vergleich + Prüfsummen-Stichprobe)</li>
+          <li>Fehlt am neuen PC ein Laufwerk, sagt HUMig das gleich im Ziel-Fenster</li>
+          <li>Die Kopie bleibt auf der SSD als Sicherung liegen</li>
+        </ul>
+        <p class="tip"><b>Gut zu wissen:</b> HUMig <i>kopiert</i> – am alten PC bleibt alles, bis du es selbst löschst. So hast du jederzeit einen Weg zurück.</p>
       </div>
     </div>
   </article>

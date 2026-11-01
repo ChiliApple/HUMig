@@ -133,6 +133,7 @@ $ctx = @{
     LocalHistory = $localHist; LocalHealth = $localHealth; LocalReportDir = $repDir; Version = $version; ProfileData = $prof; TaskLog = (Split-Path $script:TaskLog -Leaf)
     After = (Get-HMSbAfterMode $prof "$($d.Label)")
     Export = (Get-HMSbExportOptions $prof)
+    ConflictWords = $(if ($cfg -and $cfg.PSObject.Properties['ConflictWords'] -and $cfg.ConflictWords) { @($cfg.ConflictWords) } else { $null })
 }
 if ($ctx.Export) { Write-HMSbLog "Nach der Sicherung: VM-Export $(@($ctx.Export.VMs) -join ', ') -> $(Get-HMSbExportBase $ctx.Export.Folder $d.Letter) (behalten: $($ctx.Export.Keep))" 'Info' }
 if ($ctx.After) { Write-HMSbLog "Nach der Sicherung: Platte $($d.Label) $(Format-HMSbAfterMode $ctx.After)" 'Info' }

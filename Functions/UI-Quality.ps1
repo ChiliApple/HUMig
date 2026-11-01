@@ -27,7 +27,220 @@ function New-HMRestoreCtx([switch]$Quiet) {
     if ($p.NoProfile) { $ctx.UserSid = $null; $ctx.ProfilePath = $null }
     $ctx.Options.VerifyAfter = ($script:Settings.Restore.VerifyAfter -ne $false)
     $ctx.SkippedApps = @()
+    $ctx.ExtraTargets = Get-HMExtraTargetsFor $b
     return $ctx
+}
+
+# ----------------------------------------------------------------------------
+# Restore: Ziele der Zusaetzlichen Ordner (anderer Ort oder auslassen)
+# $script:ExtraTargets[<Backup-Pfad>] = @{ <Originalpfad-Schluessel> = <neues Ziel> ('' = auslassen) } - nur Abweichungen
+# ----------------------------------------------------------------------------
+if ($null -eq $script:ExtraTargets) { $script:ExtraTargets = @{} }
+# Kopie der gewaehlten Ziele fuer den Restore-Lauf (nur Eintraege, die es im Backup gibt)
+function Get-HMExtraTargetsFor($Backup) {
+    $out = @{}
+    if (-not $Backup -or -not $Backup.Path -or -not $script:ExtraTargets.ContainsKey("$($Backup.Path)")) { return $out }
+    $keys = @(Get-HMExtraFolderEntries "$($Backup.Path)" ([bool]$Backup.Legacy) | ForEach-Object { ConvertTo-HMExtraKey $_.Path })
+    $m = $script:ExtraTargets["$($Backup.Path)"]
+    foreach ($k in @($m.Keys)) { if ($keys -contains $k) { $out[$k] = "$($m[$k])" } }
+    return $out
+}
+# Text fuer Bestaetigung/Statuszeile: nur geaenderte Ziele (leer = alles wie gesichert)
+function Get-HMExtraTargetsText($Backup, [switch]$Short) {
+    if (-not $Backup) { return '' }
+    $t = Get-HMExtraTargetsFor $Backup
+    if (-not $t.Count) { return '' }
+    $ent = @(Get-HMExtraFolderEntries "$($Backup.Path)" ([bool]$Backup.Legacy))
+    $chg = 0; $skip = 0; $lines = @()
+    foreach ($e in $ent) {
+        $k = ConvertTo-HMExtraKey $e.Path
+        if (-not $t.ContainsKey($k)) { continue }
+        if (-not "$($t[$k])".Trim()) { $skip++; $lines += "  $($e.Path)  ->  (ausgelassen)" } else { $chg++; $lines += "  $($e.Path)  ->  $($t[$k])" }
+    }
+    if ($Short) {
+        $parts = @(); if ($chg) { $parts += "$chg neues Ziel$(if ($chg -gt 1) { 'e' })" }; if ($skip) { $parts += "$skip ausgelassen" }
+        return ($parts -join ', ')
+    }
+    return ($lines -join "`n")
+}
+# Knopf und Statuszeile im Reiter Restore: nur bei einem Backup mit Zusaetzlichen Ordnern
+function Update-HMExtraTargetsUi {
+    try {
+        $b = $script:SelectedBackup
+        $ent = @(); if ($b -and @($b.Modules) -contains 'ExtraFolders') { $ent = @(Get-HMExtraFolderEntries "$($b.Path)" ([bool]$b.Legacy)) }
+        if (-not $ent.Count) { $ui.btnExtraTargets.Visibility = 'Collapsed'; $ui.lblExtraTargets.Visibility = 'Collapsed'; return }
+        $ui.btnExtraTargets.Visibility = 'Visible'; $ui.lblExtraTargets.Visibility = 'Visible'
+        $sh = Get-HMExtraTargetsText $b -Short
+        $ui.lblExtraTargets.Text = "$($ent.Count) Zusaetzliche$(if ($ent.Count -eq 1) { 'r' }) Ordner im Backup - $(if ($sh) { $sh } else { 'zurueck an denselben Pfad' })"
+        $ui.lblExtraTargets.Foreground = Get-ConsoleBrush $(if ($sh) { '#FF89B4FA' } else { '#FF6C7086' })
+    } catch { }
+}
+# Laufwerk am Ziel-PC vorhanden? (lokal direkt, sonst ueber die Admin-Freigabe) - $null = nicht pruefbar
+function Test-HMTargetDrive([string]$Computer, [string]$Letter, [hashtable]$Cache) {
+    $l = "$Letter".ToUpper()
+    if ($Cache.ContainsKey($l)) { return $Cache[$l] }
+    $r = $null
+    try {
+        if (Test-HMIsLocal $Computer) { $r = [bool](Test-Path -LiteralPath "${l}:\") }
+        else { $r = [bool](Test-Path -LiteralPath "\\$Computer\$l`$\") ; if (-not $r) { $r = $null } }
+    } catch { $r = $null }
+    $Cache[$l] = $r
+    return $r
+}
+function Get-HMExtraTargetHint([string]$Orig, [string]$Target, [bool]$Sel, [string]$Computer, [hashtable]$Cache) {
+    if (-not $Sel) { return 'wird nicht zurueckgespielt' }
+    $t = "$Target".Trim()
+    if (-not $t) { return 'bitte Ziel angeben (oder Haken weg = auslassen)' }
+    $bad = Test-HMExtraTargetPath $t
+    if ($bad) { return "Achtung: $bad" }
+    $txt = if ((ConvertTo-HMExtraKey $t) -eq (ConvertTo-HMExtraKey $Orig)) { 'wie gesichert' } else { 'neues Ziel' }
+    if ($t -match '^C:\\(Windows|Program Files|Program Files \(x86\)|ProgramData)(\\|$)') { return 'Systemordner - HUMig legt den Ordner stattdessen ins Profil des Zielbenutzers' }
+    $d = Test-HMTargetDrive $Computer $t.Substring(0, 1) $Cache
+    if ($d -eq $false) { return "Laufwerk $($t.Substring(0, 2).ToUpper()) gibt es am Ziel-PC nicht - bitte anderes Ziel waehlen" }
+    if ($null -eq $d) { return "$txt (Laufwerk am Ziel-PC nicht pruefbar)" }
+    return $txt
+}
+function Show-HMExtraTargetsDialog {
+    $b = $script:SelectedBackup
+    if (-not $b) { Out-Console 'Bitte zuerst ein Backup waehlen.' 'Warning'; return }
+    $ent = @(Get-HMExtraFolderEntries "$($b.Path)" ([bool]$b.Legacy))
+    if (-not $ent.Count) { Out-Console 'Dieses Backup enthaelt keine Zusaetzlichen Ordner.' 'Warning'; return }
+    $comp = Get-TargetComputer
+    $cur = Get-HMExtraTargetsFor $b
+    $x = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Zusaetzliche Ordner - Ziele beim Restore" Width="1040" Height="460" MinWidth="720" MinHeight="300" WindowStartupLocation="CenterOwner" Background="#FF1E1E2E">
+  <DockPanel Margin="12">
+    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+      <TextBlock x:Name="lblHead" Foreground="#FFCDD6F4" FontWeight="SemiBold" FontSize="13" TextWrapping="Wrap"/>
+      <TextBlock Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0" Text="Standard: zurueck an denselben Pfad. Anderes Ziel: Pfad in 'Zurueck nach' eintippen oder ... waehlen (fehlende Ordner legt der Restore an). Haken weg: diesen Ordner nicht zurueckspielen. Kopiert wird wie beim Backup (Robocopy mit Threads, Protokoll, Pruefung)."/>
+    </StackPanel>
+    <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+      <Button x:Name="btnReset" DockPanel.Dock="Left" Content="Alle wie gesichert" Width="140" Height="28" Background="#FF45475A" Foreground="#FFCDD6F4" ToolTip="Alle Ordner wieder an den Originalpfad, alle angehakt"/>
+      <TextBlock x:Name="lblSum" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="12,0,0,0"/>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button x:Name="btnOk" Content="Uebernehmen" Width="120" Height="28" Background="#FFA6E3A1" Foreground="#FF1E1E2E" FontWeight="SemiBold" Margin="0,0,6,0" IsDefault="True"/>
+        <Button x:Name="btnCancel" Content="Abbrechen" Width="100" Height="28" Background="#FF45475A" Foreground="#FFCDD6F4" IsCancel="True"/>
+      </StackPanel>
+    </DockPanel>
+    <DataGrid x:Name="dg" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column" SelectionMode="Single" SelectionUnit="FullRow"
+              Background="#FF313244" Foreground="#FFCDD6F4" RowBackground="#FF313244" AlternatingRowBackground="#FF3B3D52" GridLinesVisibility="None" BorderBrush="#FF585B70" RowHeight="30">
+      <DataGrid.ColumnHeaderStyle><Style TargetType="DataGridColumnHeader"><Setter Property="Background" Value="#FF181825"/><Setter Property="Foreground" Value="#FFCDD6F4"/><Setter Property="Padding" Value="6,4"/></Style></DataGrid.ColumnHeaderStyle>
+      <DataGrid.CellStyle><Style TargetType="DataGridCell"><Setter Property="BorderThickness" Value="0"/><Setter Property="VerticalContentAlignment" Value="Center"/><Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#FF45475A"/><Setter Property="Foreground" Value="#FFCDD6F4"/></Trigger></Style.Triggers></Style></DataGrid.CellStyle>
+      <DataGrid.Columns>
+        <DataGridTemplateColumn Header="Zurueck" Width="62"><DataGridTemplateColumn.CellTemplate><DataTemplate><CheckBox IsChecked="{Binding Sel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center" VerticalAlignment="Center" ToolTip="Haken weg = nicht zurueckspielen"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+        <DataGridTextColumn Header="Gesichert von" Binding="{Binding Orig}" IsReadOnly="True" Width="260"/>
+        <DataGridTemplateColumn Header="Zurueck nach" Width="*"><DataGridTemplateColumn.CellTemplate><DataTemplate>
+          <DockPanel>
+            <Button DockPanel.Dock="Right" Tag="browse" Content="..." Width="30" Height="24" Margin="4,0,2,0" Background="#FF89B4FA" Foreground="#FF1E1E2E" ToolTip="Ordner am Ziel-PC waehlen (auch neuen Ordner anlegen)"/>
+            <Button DockPanel.Dock="Right" Tag="orig" Content="&#x21BA;" Width="26" Height="24" Margin="4,0,0,0" Background="#FF45475A" Foreground="#FFCDD6F4" ToolTip="Zurueck auf den Originalpfad"/>
+            <TextBox Text="{Binding Target, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Sel}" Background="#FF1E1E2E" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,2" VerticalContentAlignment="Center"/>
+          </DockPanel>
+        </DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+        <DataGridTextColumn Header="Hinweis" Binding="{Binding Hint}" IsReadOnly="True" Width="300">
+          <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="VerticalAlignment" Value="Center"/>
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding Level}" Value="ok"><Setter Property="Foreground" Value="#FFA6E3A1"/></DataTrigger>
+              <DataTrigger Binding="{Binding Level}" Value="new"><Setter Property="Foreground" Value="#FF89B4FA"/></DataTrigger>
+              <DataTrigger Binding="{Binding Level}" Value="warn"><Setter Property="Foreground" Value="#FFF9E2AF"/></DataTrigger>
+              <DataTrigger Binding="{Binding Level}" Value="bad"><Setter Property="Foreground" Value="#FFF38BA8"/></DataTrigger>
+              <DataTrigger Binding="{Binding Level}" Value="off"><Setter Property="Foreground" Value="#FF6C7086"/></DataTrigger>
+            </Style.Triggers></Style></DataGridTextColumn.ElementStyle>
+        </DataGridTextColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</Window>
+'@
+    $w = [System.Windows.Markup.XamlReader]::Parse($x)
+    if ($script:AppIcon) { try { $w.Icon = $script:AppIcon } catch { } }
+    $w.Owner = $script:Window
+    $w.FindName('lblHead').Text = "Backup $($b.Name)  ->  Ziel-PC $comp  -  $($ent.Count) Zusaetzliche$(if ($ent.Count -eq 1) { 'r' }) Ordner"
+    $dt = New-Object System.Data.DataTable
+    foreach ($c in @('Orig', 'Target', 'Hint', 'Level', 'Key')) { [void]$dt.Columns.Add($c, [string]) }
+    [void]$dt.Columns.Add('Sel', [bool])
+    $st = @{ W = $w; Dt = $dt; Comp = $comp; Cache = @{}; Busy = $false; Lbl = $w.FindName('lblSum'); B = $b }
+    foreach ($e in $ent) {
+        $k = ConvertTo-HMExtraKey $e.Path
+        $r = $dt.NewRow(); $r.Orig = "$($e.Path)"; $r.Key = $k; $r.Sel = $true; $r.Target = "$($e.Path)"
+        if ($cur.ContainsKey($k)) { if ("$($cur[$k])".Trim()) { $r.Target = "$($cur[$k])" } else { $r.Sel = $false } }
+        $dt.Rows.Add($r)
+    }
+    $refresh = {
+        param($s, $row)
+        $rows = @($s.Dt.Rows)   # immer alle: Hinweise wie 'gleiches Ziel wie ...' haengen von den anderen Zeilen ab
+        $s.Busy = $true
+        try {
+            foreach ($r in $rows) {
+                $h = Get-HMExtraTargetHint "$($r.Orig)" "$($r.Target)" ([bool]($r.Sel -eq $true)) $s.Comp $s.Cache
+                $r.Hint = $h
+                $r.Level = $(if ($h -eq 'wird nicht zurueckgespielt') { 'off' } elseif ($h -like 'Achtung:*' -or $h -like 'Laufwerk*gibt es*' -or $h -like 'bitte Ziel*') { 'bad' } elseif ($h -like 'Systemordner*' -or $h -like '*nicht pruefbar*') { 'warn' } elseif ($h -like 'neues Ziel*') { 'new' } else { 'ok' })
+            }
+            # gleiches Ziel fuer mehrere Ordner (Inhalte werden zusammengefuehrt), Ziel im Backup-Ordner (nur lokal pruefbar) - Codepruefung B13
+            $sel = @($s.Dt.Rows | Where-Object { $_.Sel -eq $true -and "$($_.Target)".Trim() -and $_.Level -ne 'bad' })
+            foreach ($g in @($sel | Group-Object { ConvertTo-HMExtraKey "$($_.Target)" } | Where-Object { $_.Count -gt 1 })) {
+                foreach ($r in $g.Group) { $r.Hint = "gleiches Ziel wie $(@($g.Group | Where-Object { $_ -ne $r } | ForEach-Object { $_.Orig }) -join ', ') - Inhalte werden zusammengefuehrt"; $r.Level = 'warn' }
+            }
+            if (Test-HMIsLocal $s.Comp) {
+                $broot = ''; try { $broot = ConvertTo-HMExtraKey (Get-BackupRoot) } catch { }
+                if ($broot) { foreach ($r in $sel) { $k = ConvertTo-HMExtraKey "$($r.Target)"; if ($k -eq $broot -or $k.StartsWith($broot + '\')) { $r.Hint = 'Ziel liegt im Backup-Ordner - bitte anderes Ziel waehlen'; $r.Level = 'bad' } } }
+            }
+            $n = @($s.Dt.Rows | Where-Object { $_.Sel -eq $true -and "$($_.Hint)" -like 'neues Ziel*' }).Count
+            $o = @($s.Dt.Rows | Where-Object { $_.Sel -ne $true }).Count
+            $bd = @($s.Dt.Rows | Where-Object { $_.Level -eq 'bad' }).Count
+            $s.Lbl.Text = "$($s.Dt.Rows.Count) Ordner: $(@($s.Dt.Rows).Count - $n - $o) wie gesichert, $n neues Ziel, $o ausgelassen$(if ($bd) { "  -  $bd mit Problem" })"
+        } finally { $s.Busy = $false }
+    }
+    $st.Refresh = $refresh
+    $script:ExtraDlg = $st
+    & $refresh $st $null
+    $dg = $w.FindName('dg'); $dg.ItemsSource = $dt.DefaultView
+    $dt.Add_ColumnChanged({
+        param($sd, $e)
+        $s = $script:ExtraDlg
+        if (-not $s -or $s.Busy -or $e.Column.ColumnName -notin @('Target', 'Sel')) { return }
+        & $s.Refresh $s $e.Row
+    })
+    # Knoepfe in den Zeilen (... = Ordner waehlen, Pfeil = Originalpfad)
+    $dg.AddHandler([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent, [System.Windows.RoutedEventHandler]{
+        param($sd, $e)
+        $btn = $e.OriginalSource
+        if ($btn -isnot [System.Windows.Controls.Button] -or "$($btn.Tag)" -notin @('browse', 'orig')) { return }
+        $rv = $btn.DataContext
+        if ($rv -isnot [System.Data.DataRowView]) { return }
+        $e.Handled = $true
+        if ("$($btn.Tag)" -eq 'orig') { $rv.Row.Sel = $true; $rv.Row.Target = "$($rv.Row.Orig)"; return }
+        $sel = Select-HMSourceFolder "Ziel fuer $($rv.Row.Orig) am Ziel-PC waehlen (Ordner anlegen moeglich)" -Start "$($rv.Row.Target)" -AllowNew
+        if ($sel) { $rv.Row.Sel = $true; $rv.Row.Target = "$sel".TrimEnd('\') }
+    })
+    $w.FindName('btnReset').Add_Click({ $s = $script:ExtraDlg; foreach ($r in @($s.Dt.Rows)) { $r.Sel = $true; $r.Target = "$($r.Orig)" } })
+    $w.FindName('btnCancel').Add_Click({ $script:ExtraDlg.W.Close() })
+    $w.FindName('btnOk').Add_Click({
+        $s = $script:ExtraDlg
+        $dgx = $s.W.FindName('dg'); try { [void]$dgx.CommitEdit(); [void]$dgx.CommitEdit() } catch { }
+        & $s.Refresh $s $null
+        $bad = @($s.Dt.Rows | Where-Object { $_.Sel -eq $true -and $_.Level -eq 'bad' })
+        if ($bad.Count) {
+            $m = "Bei $($bad.Count) Ordner(n) passt das Ziel nicht:`n`n$(@($bad | ForEach-Object { "  $($_.Orig): $($_.Hint)" }) -join "`n")`n`nBitte korrigieren oder den Haken wegnehmen."
+            [void](Show-HMDialogBox -Owner $s.W -Text $m -Title 'Ziele pruefen' -Mode 'OK' -Icon 'Warning'); return
+        }
+        $map = @{}
+        foreach ($r in @($s.Dt.Rows)) {
+            if ($r.Sel -ne $true) { $map["$($r.Key)"] = ''; continue }
+            $t = "$($r.Target)".Trim().TrimEnd('\')
+            if ((ConvertTo-HMExtraKey $t) -ne "$($r.Key)") { $map["$($r.Key)"] = $t }
+        }
+        if ($map.Count) { $script:ExtraTargets["$($s.B.Path)"] = $map } elseif ($script:ExtraTargets.ContainsKey("$($s.B.Path)")) { $script:ExtraTargets.Remove("$($s.B.Path)") }
+        $sh = Get-HMExtraTargetsText $s.B -Short
+        Out-Console "Zusaetzliche Ordner beim Restore: $(if ($sh) { $sh } else { 'alle zurueck an denselben Pfad' })" 'Info'
+        foreach ($l in @((Get-HMExtraTargetsText $s.B) -split "`n" | Where-Object { "$_".Trim() })) { Out-Console $l 'Info' }
+        if ($map.Count -and -not @($script:RestoreChecks.Keys | Where-Object { $_ -eq 'ExtraFolders' -and $script:RestoreChecks[$_].IsChecked }).Count -and $script:RestoreChecks.ContainsKey('ExtraFolders')) { $script:RestoreChecks['ExtraFolders'].IsChecked = $true }
+        Update-HMExtraTargetsUi
+        $s.W.Close()
+    })
+    $w.Add_Closed({ $script:ExtraDlg = $null })
+    Set-HMWindowScale $w
+    [void]$w.ShowDialog()
 }
 
 # ----------------------------------------------------------------------------

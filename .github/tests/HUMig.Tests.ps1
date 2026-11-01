@@ -3490,3 +3490,277 @@ Describe '2.1.18: Meldungen im HUMig-Design, Wartefenster Server-Backup' {
         $c | Should -Match 'du kannst dich jetzt abmelden'
     }
 }
+
+Describe '2.1.19: Restore - Ziele der Zusaetzlichen Ordner' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        if (-not (Get-Command Write-HMLog -ErrorAction SilentlyContinue)) { function global:Write-HMLog($Job, $Msg, $Lvl) { } }
+        $script:XB = Join-Path $TestDrive 'XB'
+        $xd = Join-Path $script:XB 'ExtraFolders'
+        foreach ($n in 1, 2, 3) { New-Item -ItemType Directory -Path (Join-Path $xd "FOLDER$n") -Force | Out-Null }
+        ConvertTo-Json -InputObject @(@{ Index = 1; Path = 'D:\Projekte' }, @{ Index = 2; Path = 'D:\Alt' }, @{ Index = 3; Path = 'E:\Fotos\' }) | Set-Content -LiteralPath (Join-Path $xd 'folders.json') -Encoding UTF8
+    }
+    It 'liest die Ordnerliste des Backups (gemeinsam fuer Engine und Oberflaeche)' {
+        $e = @(Get-HMExtraFolderEntries $script:XB $false)
+        $e.Count | Should -Be 3
+        $e[0].Path | Should -Be 'D:\Projekte'
+        $e[0].Key | Should -Be 'FOLDER1'
+        @(Get-HMExtraFolderEntries (Join-Path $TestDrive 'gibtsnicht') $false).Count | Should -Be 0
+    }
+    It 'Schluessel ignoriert Gross-/Kleinschreibung und abschliessenden Backslash' {
+        ConvertTo-HMExtraKey 'e:\fotos\' | Should -Be (ConvertTo-HMExtraKey 'E:\Fotos')
+    }
+    It 'prueft eingegebene Ziele' {
+        Test-HMExtraTargetPath 'E:\Daten\Projekte' | Should -BeNullOrEmpty
+        Test-HMExtraTargetPath 'Daten\Projekte' | Should -Not -BeNullOrEmpty
+        Test-HMExtraTargetPath '\\server\freigabe' | Should -Not -BeNullOrEmpty
+        Test-HMExtraTargetPath 'E:\' | Should -Not -BeNullOrEmpty
+        Test-HMExtraTargetPath 'E:\a\..\Windows' | Should -Not -BeNullOrEmpty
+        Test-HMExtraTargetPath 'E:\a*b' | Should -Not -BeNullOrEmpty
+    }
+    It 'Restore: neues Ziel wird verwendet, abgewaehlter Ordner ausgelassen, Rest wie gesichert' {
+        Mock Get-HMRestoreSource { Join-Path $script:XB 'ExtraFolders' }
+        Mock Get-HMSyncRoots { @() }
+        Mock Get-HMProtectedTargetRoot { $null }
+        $script:XDest = New-Object System.Collections.Generic.List[string]
+        Mock Restore-HMFolderItem { $script:XDest.Add("$DestOverride"); [pscustomobject]@{ Name = 'x'; Status = 'OK'; Msg = 'kopiert' } }
+        $ctx = @{ Backup = [pscustomobject]@{ Path = $script:XB; Legacy = $false; ProfilePath = 'C:\Users\max' }; ProfilePath = 'C:\Users\max'; UserSid = 'S-1-5-21-1'; IsRemote = $false; ToolRoot = ''
+            ExtraTargets = @{ (ConvertTo-HMExtraKey 'D:\Projekte') = 'E:\Daten\Projekte'; (ConvertTo-HMExtraKey 'D:\Alt') = '' } }
+        $r = Restore-HMBuiltin $ctx $null ([pscustomobject]@{ Id = 'ExtraFolders' }) ([pscustomobject]@{ Handler = 'ExtraFolders' }) @{}
+        @($script:XDest) | Should -Be @('E:\Daten\Projekte', 'E:\Fotos')
+        $r.Status | Should -Be 'OK'
+        $r.Msg | Should -Match '1 ausgelassen'
+        $r.Msg | Should -Match ([regex]::Escape('D:\Projekte -> neues Ziel E:\Daten\Projekte'))
+        $r.Msg | Should -Match ([regex]::Escape('D:\Alt - ausgelassen'))
+    }
+    It 'Restore: ungueltiges Ziel aus dem Kontext wird nicht verwendet (Warnung, Daten bleiben im Backup)' {
+        Mock Get-HMRestoreSource { Join-Path $script:XB 'ExtraFolders' }
+        Mock Get-HMSyncRoots { @() }
+        Mock Get-HMProtectedTargetRoot { $null }
+        $script:XDest = New-Object System.Collections.Generic.List[string]
+        Mock Restore-HMFolderItem { $script:XDest.Add("$DestOverride"); [pscustomobject]@{ Name = 'x'; Status = 'OK'; Msg = 'kopiert' } }
+        $ctx = @{ Backup = [pscustomobject]@{ Path = $script:XB; Legacy = $false; ProfilePath = '' }; ProfilePath = ''; IsRemote = $false; ToolRoot = ''
+            ExtraTargets = @{ (ConvertTo-HMExtraKey 'D:\Projekte') = 'relativ\pfad' } }
+        $r = Restore-HMBuiltin $ctx $null ([pscustomobject]@{ Id = 'ExtraFolders' }) ([pscustomobject]@{ Handler = 'ExtraFolders' }) @{}
+        @($script:XDest) | Should -Not -Contain 'relativ\pfad'
+        $r.Status | Should -Be 'Warning'
+    }
+    It 'Restore: alle abgewaehlt = uebersprungen' {
+        Mock Get-HMRestoreSource { Join-Path $script:XB 'ExtraFolders' }
+        Mock Get-HMSyncRoots { @() }
+        Mock Restore-HMFolderItem { throw 'darf nicht kopieren' }
+        $all = @{}; foreach ($p in 'D:\Projekte', 'D:\Alt', 'E:\Fotos') { $all[(ConvertTo-HMExtraKey $p)] = '' }
+        $ctx = @{ Backup = [pscustomobject]@{ Path = $script:XB; Legacy = $false; ProfilePath = '' }; ProfilePath = ''; IsRemote = $false; ToolRoot = ''; ExtraTargets = $all }
+        (Restore-HMBuiltin $ctx $null ([pscustomobject]@{ Id = 'ExtraFolders' }) ([pscustomobject]@{ Handler = 'ExtraFolders' }) @{}).Status | Should -Be 'Skip'
+    }
+    It 'Oberflaeche: Knopf, Dialog und Uebergabe an den Restore vorhanden' {
+        $q = Get-Content (Join-Path $script:Root 'Functions\UI-Quality.ps1') -Raw
+        $q | Should -Match 'function Show-HMExtraTargetsDialog'
+        $q | Should -Match '\$ctx\.ExtraTargets = Get-HMExtraTargetsFor \$b'
+        $x = Get-Content (Join-Path $script:Root 'XAML\MainWindow.xaml') -Raw
+        $x | Should -Match 'x:Name="btnExtraTargets"'
+        $h = Get-Content (Join-Path $script:Root 'HUMig.ps1') -Raw
+        $h | Should -Match "'btnExtraTargets', 'lblExtraTargets'"
+        $h | Should -Match 'btnExtraTargets\.Add_Click'
+    }
+}
+
+Describe '2.1.19: Server-Backup - Ergebnis je VM, Fehlerprotokoll, geschriebene Menge' {
+    It 'erkennt gesicherte und fehlgeschlagene VMs aus der wbadmin-Zusammenfassung (Praxis R770)' {
+        $lines = @('Die Dateien fuer "VM-iPData (Online)" werden kopiert... 9% abgeschlossen.', '"VM-iPData (Online)" wurde erfolgreich gesichert.',
+            '"VM-iPLFS (Online)" wurde erfolgreich gesichert.', 'Fehler beim Sichern von "VM-iPWeb (Online)".', 'Fehler beim Sichern von "VM-Uniflow (Online)".',
+            'Die Anwendungssicherung wurde mit Fehlern abgeschlossen.')
+        $r = Get-HMSbVmResults $lines @('VM-iPData', 'VM-iPLFS', 'VM-iPWeb', 'VM-Uniflow', 'VM-Fehlt')
+        @($r.Ok) | Should -Be @('VM-iPData', 'VM-iPLFS')
+        @($r.Failed) | Should -Be @('VM-iPWeb', 'VM-Uniflow')
+        @($r.Unknown) | Should -Be @('VM-Fehlt')
+    }
+    It 'Offline gesicherte VM zaehlt als gesichert, Name ohne Gross-/Kleinschreibung' {
+        $r = Get-HMSbVmResults @('"vm-a (Offline)" wurde erfolgreich gesichert.') @('VM-A')
+        @($r.Ok) | Should -Be @('VM-A')
+    }
+    It 'liest Gruende aus dem Fehlerprotokoll (nur *Error*-Dateien, ohne Dubletten, gekuerzt)' {
+        $d = Join-Path $TestDrive 'wsb'; New-Item -ItemType Directory -Path $d -Force | Out-Null
+        $ef = Join-Path $d 'Backup_Error-30-10-2026_07-28-50.log'; $of = Join-Path $d 'Backup-30-10-2026_07-28-50.log'
+        # echtes Fehlerprotokoll (R770, 01.11.2026)
+        Set-Content -LiteralPath $ef -Encoding Unicode -Value @(
+            'Fehler beim Sichern von "D:\ipack\VM-iPWeb\Virtual Hard Disks\iPWebD.vhdx" waehrend des Lesevorgangs: [0x80070015] Das Geraet ist nicht bereit.',
+            'Fehler beim Sichern von "D:\ipack\" waehrend der Aufzaehlung: [0x800701b1] Ein nicht vorhandenes Geraet wurde angegeben.',
+            'Anwendungssicherung', 'Writer-ID: "{66841CD4-6DED-4F4B-8F17-FD23F8DDC3DE}"', '   Komponente: "3FCCC56A-3C6E-4798-84C1-1BD5FBD92499"',
+            '   Beschreibung     : Online\VM-iPWeb', '   Logischer Pfad: ""', '   Fehler           : 8078010E', '   Fehlermeldung   : Fehler beim Kopieren der Dateien.',
+            '   Detaillierter Fehler  : 80070015', '   Detaillierte Fehlermeldung : (null)', '*-----------------------------*', ('Fehler ' + ('x' * 400)))
+        Set-Content -LiteralPath $of -Value 'Fehler: das ist kein Fehlerprotokoll' -Encoding Unicode
+        $w = @(Get-HMSbErrorLogReasons @($ef, $of))
+        $w.Count | Should -Be 5
+        $w[0] | Should -Match '0x80070015'
+        $w[2] | Should -Be 'VM Online\VM-iPWeb'
+        $w[3] | Should -Be '  -> Fehler beim Kopieren der Dateien.'
+        ($w -join ' ') | Should -Not -Match 'Writer-ID|Komponente|null|8078010E'
+        $w[4].Length | Should -BeLessOrEqual 304
+    }
+    It 'Meldung nennt nicht gesicherte VMs; Verlauf zaehlt nur gesicherte' {
+        $c = Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1') -Raw
+        $c | Should -Match 'NICHT gesichert: VMs:'
+        $c | Should -Match 'VMs = \(\$vmsSaved -join'
+        $c | Should -Match "VmsFailed = ''"
+        $c | Should -Match 'Virtuelle Computer NICHT gesichert'
+        $c | Should -Match '\$written \+= '
+    }
+}
+
+Describe '2.1.19: Server-Backup - Sperrzeit, andere Sicherungen, fremde Schattenkopien' {
+    It 'liest Sperrzeiten (Wochentag, taeglich, mehrere, Fehler)' {
+        $r = ConvertFrom-HMSbBlockText 'Sa 23:45 - So 18:00 iPACK-Sicherung; taeglich 22:00 - 06:00'
+        $r.Error | Should -BeNullOrEmpty
+        @($r.Windows).Count | Should -Be 2
+        $r.Windows[0].FromDay | Should -Be 6
+        $r.Windows[0].ToDay | Should -Be 0
+        $r.Windows[0].Note | Should -Be 'iPACK-Sicherung'
+        $r.Windows[1].FromDay | Should -Be -1
+        (ConvertFrom-HMSbBlockText 'Samstag abends').Error | Should -Not -BeNullOrEmpty
+        (ConvertFrom-HMSbBlockText 'Sa 25:00 - So 01:00').Error | Should -Not -BeNullOrEmpty
+        @((ConvertFrom-HMSbBlockText '').Windows).Count | Should -Be 0
+        Format-HMSbBlockWindow $r.Windows[0] | Should -Be 'Sa 23:45 - So 18:00 (iPACK-Sicherung)'
+    }
+    It 'erkennt Ueberschneidung mit der Sperrzeit (Praxisfall R770: Fr 30.10. 08:26 + 44 h)' {
+        $w = (ConvertFrom-HMSbBlockText 'Sa 23:45 - So 18:00').Windows
+        $start = [datetime]'2026-10-30T08:26:00'   # Freitag
+        Get-HMSbBlockOverlap $w $start $start.AddHours(24) | Should -BeNullOrEmpty
+        $ov = Get-HMSbBlockOverlap $w $start $start.AddMinutes(2638)
+        $ov.From | Should -Be ([datetime]'2026-10-31T23:45:00')
+        $ov.To | Should -Be ([datetime]'2026-11-01T18:00:00')
+        # Start mitten in der Sperrzeit
+        (Get-HMSbBlockOverlap $w ([datetime]'2026-11-01T02:00:00') ([datetime]'2026-11-01T03:00:00')).From | Should -Be ([datetime]'2026-10-31T23:45:00')
+        # taeglich ueber Mitternacht
+        $d = (ConvertFrom-HMSbBlockText 'taeglich 22:00 - 06:00').Windows
+        (Get-HMSbBlockOverlap $d ([datetime]'2026-11-03T05:00:00') ([datetime]'2026-11-03T05:30:00')).From | Should -Be ([datetime]'2026-11-02T22:00:00')
+        Get-HMSbBlockOverlap $d ([datetime]'2026-11-03T07:00:00') ([datetime]'2026-11-03T21:00:00') | Should -BeNullOrEmpty
+    }
+    It 'schaetzt die Dauer vorsichtig (letzte Laeufe inkl. Fehllaeufe, langsamstes Tempo)' {
+        $h = @([pscustomobject]@{ Profile = 'GYM'; Status = 'OK'; Minutes = 372; Date = '2026-09-29 11:48' }, [pscustomobject]@{ Profile = 'GYM'; Status = 'OK'; Minutes = 1476; Date = '2026-10-15 08:10' },
+            [pscustomobject]@{ Profile = 'GYM'; Status = 'Error'; Minutes = 2638; Date = '2026-10-30 08:26' }, [pscustomobject]@{ Profile = 'EUGym'; Status = 'OK'; Minutes = 5000; Date = '2026-10-29 17:03' })
+        # Fehllauf (2638 min) zaehlt als Untergrenze mit - sonst warnt der R770-Fall nicht (Codepruefung B1)
+        Get-HMSbEstimateMinutes $h 'GYM' | Should -Be 2638
+        # langsamstes gemessenes Tempo der letzten Laeufe: 2,15 TB mit 15 MB/s
+        $h2 = @([pscustomobject]@{ Profile = 'GYM'; Status = 'OK'; Minutes = 372; MBs = 97; Date = '2026-09-29 11:48' }, [pscustomobject]@{ Profile = 'GYM'; Status = 'Error'; Minutes = 100; MBs = 15; Date = '2026-10-30 08:26' })
+        Get-HMSbEstimateMinutes $h2 'GYM' (2150GB) | Should -Be ([Math]::Round(2150GB / 1MB / 15 / 60, 0))
+        Get-HMSbEstimateMinutes @() 'GYM' (300GB) | Should -Be ([Math]::Round(300GB / 1MB / 30 / 60, 0))
+        Get-HMSbEstimateMinutes @() 'GYM' | Should -Be 360
+    }
+    It 'Quelllaufwerke aus den VM-Pfaden, ohne Ziel' {
+        $vi = @([pscustomobject]@{ Paths = @('D:\ipack\VM-iPWeb\Virtual Hard Disks\a.vhdx', 'E:\x.vhdx'); VmPath = 'C:\ProgramData\Microsoft\Windows\Hyper-V'; ConfigPath = '' })
+        @(Get-HMSbSourceLetters $vi @('F:') 'E:') | Should -Be @('D', 'C', 'F')
+    }
+    It 'findet eingebundene fremde Schattenkopie und Schattenkopie-Speicher auf USB (Praxisfall R770: D: -> W:)' {
+        $vols = @([pscustomobject]@{ DriveLetter = 'D:'; DeviceID = '\\?\Volume{d}\' }, [pscustomobject]@{ DriveLetter = 'W:'; DeviceID = '\\?\Volume{w}\' })
+        $copies = @([pscustomobject]@{ VolumeName = '\\?\Volume{d}\'; ExposedName = 'S:\'; InstallDate = [datetime]'2026-10-31T23:45:00' }, [pscustomobject]@{ VolumeName = '\\?\Volume{d}\'; ExposedName = ''; InstallDate = $null })
+        $stor = @([pscustomobject]@{ Volume = [pscustomobject]@{ DeviceID = '\\?\Volume{d}\' }; DiffVolume = [pscustomobject]@{ DeviceID = '\\?\Volume{w}\' } })
+        $r = @(Get-HMSbShadowRisks @('D') $vols $copies $stor { param($L) [pscustomobject]@{ Bus = 'USB'; Removable = $false; Label = 'M5_Backup_Weekend'; Name = 'ST4000LM' } })
+        $r.Count | Should -Be 2
+        $r[0].Kind | Should -Be 'Exposed'
+        $r[0].Text | Should -Match 'als S: eingebunden'
+        $r[1].Kind | Should -Be 'UsbDiff'
+        $r[1].Text | Should -Match 'W:.*M5_Backup_Weekend'
+        # interner Speicher: kein Hinweis
+        @(Get-HMSbShadowRisks @('D') $vols @() $stor { param($L) [pscustomobject]@{ Bus = 'RAID'; Removable = $false; Label = ''; Name = '' } }).Count | Should -Be 0
+    }
+    It 'findet andere geplante Sicherungen im Laufzeitraum (ohne HUMig-Aufgaben, ohne deaktivierte)' {
+        $mk = { param($path, $name, $state, $exe, $days)
+            [pscustomobject]@{ TaskPath = $path; TaskName = $name; State = $state; Description = ''; Actions = @([pscustomobject]@{ Execute = $exe; Arguments = 'sweekly - w:' })
+                Triggers = @([pscustomobject]@{ Enabled = $true; StartBoundary = '2009-07-05T23:45:00'; DaysOfWeek = $days; CimClass = [pscustomobject]@{ CimClassName = 'MSFT_TaskWeeklyTrigger' } }) } }
+        $tasks = @((& $mk '\' 'Backup der Server-VHDs (So)' 'Ready' 'D:\Backup\iPBackup.exe' 64), (& $mk '\' 'Backup der Server-VHDs (Di,Do)' 'Disabled' 'D:\Backup\iPBackup.exe' 20),
+            (& $mk '\HUMig\' 'Server-Backup - EUGym - Sa 23-00' 'Ready' 'powershell.exe' 64), (& $mk '\' 'Defrag' 'Ready' 'defrag.exe' 64))
+        $f = @(Find-HMSbForeignBackups ([datetime]'2026-10-29T08:26:00') ([datetime]'2026-11-01T04:25:00') $null $tasks)
+        $f.Count | Should -Be 1
+        $f[0].Task | Should -Be '\Backup der Server-VHDs (So)'
+        $f[0].Start | Should -Be ([datetime]'2026-10-31T23:45:00')
+    }
+    It 'Profil, Start, Planen, Zeitplan-Task und Lauf verwenden die Pruefungen' {
+        $u = Get-Content (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1') -Raw
+        $u | Should -Match 'BlockText = "\$\(\$p\.BlockText\)"\.Trim\(\)'
+        $u | Should -Match "Show-TextInputDialog -Title 'Sperrzeit \(optional\)'"
+        $u | Should -Match 'Get-HMSbPreflight \$p \$vi \$vols'
+        $u | Should -Match 'in die Sperrzeit des Profils'
+        (Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Task.ps1') -Raw) | Should -Match 'ConflictWords = '
+        $e = Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1') -Raw
+        $e | Should -Match 'Vorab-Pruefung: '
+        $e | Should -Match 'Der Lauf ueberschnitt die Sperrzeit'
+        $e | Should -Match 'Waehrend des Laufs startete die geplante Aufgabe'
+        $e | Should -Match 'Die Sperrzeit .* hat begonnen'
+    }
+}
+
+Describe '2.1.19: Codepruefung 029 (B1-B13)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        if (-not (Get-Command Write-HMLog -ErrorAction SilentlyContinue)) { function global:Write-HMLog($Job, $Msg, $Lvl) { } }
+    }
+    It 'B1: Start Fr 30.10. 08:26 mit echtem R770-Verlauf warnt vor der Sperrzeit Sa 23:45 (Vorab-Pruefung end-to-end)' {
+        Mock Find-HMSbForeignBackups { @() }
+        Mock Get-HMSbShadowRisks { @() }
+        $h = @([pscustomobject]@{ Profile = 'GYM-Leoben'; Status = 'OK'; Minutes = 372; MBs = 97; Date = '2026-09-29 11:48' }, [pscustomobject]@{ Profile = 'GYM-Leoben'; Status = 'OK'; Minutes = 1476; MBs = 24; Date = '2026-10-15 08:10' }, [pscustomobject]@{ Profile = 'GYM-Leoben'; Status = 'Error'; Minutes = 2638; MBs = 15; Date = '2026-10-30 08:26' })
+        $est = Get-HMSbEstimateMinutes $h 'GYM-Leoben' (2150GB)
+        $pf = @(Get-HMSbPreflight ([pscustomobject]@{ BlockText = 'Sa 23:45 - So 18:00 iPACK' }) @() @() 'G:' ([datetime]'2026-10-30T08:26:00') $est)
+        @($pf | Where-Object { $_.Kind -eq 'Block' -and $_.Lvl -eq 'Warning' }).Count | Should -Be 1
+        $pf[0].Text | Should -Match 'Sa 31\.10\. 23:45'
+    }
+    It 'B2: Wochentag ohne Bis-Tag und Bis vor Von = naechster Tag' {
+        $w = (ConvertFrom-HMSbBlockText 'Sa 22:00 - 06:00').Windows
+        $w[0].ToDay | Should -Be 0
+        Get-HMSbBlockOverlap $w ([datetime]'2026-11-04T10:00:00') ([datetime]'2026-11-04T11:00:00') | Should -BeNullOrEmpty   # Mittwoch frei
+        (Get-HMSbBlockOverlap $w ([datetime]'2026-11-08T05:00:00') ([datetime]'2026-11-08T05:10:00')).From | Should -Be ([datetime]'2026-11-07T22:00:00')
+        # So -> Mo ueber den Wochenwechsel
+        $sm = (ConvertFrom-HMSbBlockText 'So 22:00 - Mo 06:00').Windows
+        (Get-HMSbBlockOverlap $sm ([datetime]'2026-11-09T05:59:00') ([datetime]'2026-11-09T06:30:00')).From | Should -Be ([datetime]'2026-11-08T22:00:00')
+        Get-HMSbBlockOverlap $sm ([datetime]'2026-11-09T06:00:00') ([datetime]'2026-11-09T07:00:00') | Should -BeNullOrEmpty
+    }
+    It 'B3: gesichert zaehlt erst nach Erfolg, Abbruch/Neustart = nicht gesichert' {
+        $e = Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1') -Raw
+        $e | Should -Match '\$vmsSaved = @\(\); \$vmsFailed = @\(\); \$vmsUnknown = @\(\)'
+        $e | Should -Match "VMs = ''; VmsFailed = `"\`$\(\`$m\.VMs\)`""
+        $e | Should -Match 'if \(\$vms\.Count -and -not @\(\$vmsSaved\)\.Count'
+    }
+    It 'B4: Fortschritt und "0 Fehler" werten keine VM; nicht gefundene sind unklar, nicht fehlgeschlagen' {
+        $l = @('Die Dateien fuer "VM-A (Online)" werden kopiert... 9% abgeschlossen.', '"VM-A (Online)": 0 Fehler', '"VM-A (Online)" wurde erfolgreich gesichert.', 'Failed to back up "VM-B (Online)".')
+        $r = Get-HMSbVmResults $l @('VM-A', 'VM-B', 'VM-C')
+        @($r.Ok) | Should -Be @('VM-A')
+        @($r.Failed) | Should -Be @('VM-B')
+        @($r.Unknown) | Should -Be @('VM-C')
+        (Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1') -Raw) | Should -Match 'Ergebnis unklar: VMs:'
+    }
+    It 'B5: Fehler der Pruefungen werden als "nicht pruefbar" gemeldet' {
+        Mock Find-HMSbForeignBackups { throw 'Zugriff verweigert' }
+        Mock Get-HMSbShadowRisks { throw 'CIM nicht erreichbar' }
+        $pf = @(Get-HMSbPreflight $null @() @() 'G:' (Get-Date) 60)
+        @($pf | Where-Object { $_.Kind -eq 'NotChecked' }).Count | Should -Be 2
+        ($pf.Text -join ' ') | Should -Match 'nicht pruefbar: Zugriff verweigert'
+    }
+    It 'B5: Schattenkopie-Pruefung meldet unbekannte Platte als "nicht pruefbar"' {
+        $r = @(Get-HMSbShadowRisks @('D') @([pscustomobject]@{ DriveLetter = 'D:'; DeviceID = 'd' }, [pscustomobject]@{ DriveLetter = 'W:'; DeviceID = 'w' }) @() @([pscustomobject]@{ Volume = [pscustomobject]@{ DeviceID = 'd' }; DiffVolume = [pscustomobject]@{ DeviceID = 'w' } }) { param($L) $null })
+        $r[0].Kind | Should -Be 'NotChecked'
+    }
+    It 'B6: Ausloeser mit Wochenabstand und Wiederholung, Suchwoerter woertlich' {
+        $cls = { param($n) [pscustomobject]@{ CimClassName = $n } }
+        $w2 = [pscustomobject]@{ Triggers = @([pscustomobject]@{ Enabled = $true; StartBoundary = '2026-10-31T23:45:00'; DaysOfWeek = 64; WeeksInterval = 2; CimClass = (& $cls 'MSFT_TaskWeeklyTrigger') }) }
+        @(Get-HMSbTaskStarts $w2 ([datetime]'2026-11-01') ([datetime]'2026-11-22')) | Should -Be @([datetime]'2026-11-14T23:45:00')
+        $rp = [pscustomobject]@{ Triggers = @([pscustomobject]@{ Enabled = $true; StartBoundary = '2026-11-01T00:00:00'; DaysInterval = 1; Repetition = [pscustomobject]@{ Interval = 'PT4H'; Duration = 'P1D' }; CimClass = (& $cls 'MSFT_TaskDailyTrigger') }) }
+        @(Get-HMSbTaskStarts $rp ([datetime]'2026-11-02T09:00:00') ([datetime]'2026-11-02T13:00:00')) | Should -Be @([datetime]'2026-11-02T12:00:00')
+        $t = [pscustomobject]@{ TaskPath = '\'; TaskName = 'Backup [Monat]'; State = 'Ready'; Description = ''; Actions = @(); Triggers = @([pscustomobject]@{ Enabled = $true; StartBoundary = '2026-01-01T02:00:00'; CimClass = (& $cls 'MSFT_TaskMonthlyTrigger') }) }
+        $f = @(Find-HMSbForeignBackups (Get-Date) (Get-Date).AddDays(2) @('backup [monat]') @($t))
+        $f.Count | Should -Be 1
+        $f[0].Unknown | Should -BeTrue
+    }
+    It 'B9d: Wochentage deutsch, unabhaengig von der Sprache' {
+        Format-HMSbWhen ([datetime]'2026-10-31T23:45:00') | Should -Be 'Sa 31.10. 23:45'
+    }
+    It 'B11: Host-System zaehlt das Systemlaufwerk als Quelle' {
+        $env:SystemDrive = $(if ($env:SystemDrive) { $env:SystemDrive } else { 'C:' })
+        @(Get-HMSbSourceLetters @() @() 'G:' -HostSystem) | Should -Contain ($env:SystemDrive.Substring(0, 1).ToUpper())
+    }
+    It 'B13: reservierte Namen und Punkt/Leerzeichen am Ende werden abgelehnt' {
+        Test-HMExtraTargetPath 'E:\Daten\CON' | Should -Match 'reserviert'
+        Test-HMExtraTargetPath 'E:\Daten\x.' | Should -Match 'Punkt'
+        Test-HMExtraTargetPath 'E:\Daten\Projekte' | Should -BeNullOrEmpty
+    }
+}
+
