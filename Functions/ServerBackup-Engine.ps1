@@ -456,6 +456,9 @@ function Get-HMSbErrorLogReasons([string[]]$Files, [int]$Max = 6) {
         foreach ($l in $ls) {
             $t = "$l".Trim() -replace '\s+', ' '
             if (-not $t -or $t.Length -lt 8 -or $out.Contains($t)) { continue }
+            # nur aussagekraeftige Zeilen: Fehlerzeilen, Beschreibung (VM) und Fehlermeldung des Writers - keine IDs, Rahmen, (null)
+            if ($t -notmatch '(?i)^(fehler|error|failed)\b|^(beschreibung|description|fehlermeldung|error message)\s*:' -or $t -match '\(null\)\s*$' -or $t -match '(?i)^(fehler|error)\s*:\s*(0x)?[0-9a-f]+$') { continue }
+            $t = $t -replace '^(?i)(beschreibung|description)\s*:\s*', 'VM ' -replace '^(?i)(fehlermeldung|error message)\s*:\s*', '  -> '
             if ($t.Length -gt 300) { $t = $t.Substring(0, 300) + ' ...' }
             $out.Add($t)
             if ($out.Count -ge $Max) { return $out.ToArray() }
@@ -2100,6 +2103,9 @@ function Start-HMServerBackup {
                 $why = @(Get-HMSbErrorLogReasons @($r.LogFiles | ForEach-Object { Join-Path $rep (Split-Path $_ -Leaf) }))
                 $failTxt = if ($vmsSaved.Count) { "nicht gesichert: $($vmsFailed -join ', ') (gesichert: $($vmsSaved -join ', '))" } else { "keine VM gesichert" }
                 $notes += "VM-Sicherung fehlgeschlagen - $failTxt, wbadmin Exitcode $($r.ExitCode)"
+                # Quelle waehrend des Laufs nicht mehr lesbar (Schattenkopie des Quelllaufwerks verworfen): typische Codes deuten
+                $srcLost = [bool](@($why | Where-Object { $_ -match '(?i)0x80070015|0x800701b1|0x80042306|0x8004231f|0x80042317' }).Count)
+                if ($srcLost) { $why += 'Deutung: Das Quelllaufwerk bzw. seine Schattenkopie war mitten im Lauf nicht mehr lesbar ("Geraet nicht bereit"/"nicht vorhandenes Geraet"). Typisch, wenn Windows die Schattenkopie des Quelllaufwerks bei einem sehr langen Lauf verwirft - Lauf beschleunigen (Platte direkt an USB 3) und Speicher fuer Schattenkopien am Quelllaufwerk pruefen (vssadmin list shadowstorage).'; Write-HMSbLog '  Quelllaufwerk/Schattenkopie waehrend des Laufs verloren - langer Lauf (langsame Platte?) und Schattenkopie-Speicher des Quelllaufwerks pruefen' 'Warning' }
                 $hints += [pscustomobject]@{ Lvl = 'Error'; Text = "Die VM-Sicherung ist fehlgeschlagen (wbadmin Exitcode $($r.ExitCode)) - $failTxt.$(if ($why.Count) { ' Grund laut Windows Server-Sicherung: ' + ($why -join ' / ') })"; Fix = 'Ursache steht in wbadmin-VMs.log und im Fehlerprotokoll der Windows Server-Sicherung (Links unten). Haeufig: Schattenkopie waehrend eines sehr langen Laufs verworfen (Platte zu langsam, z.B. USB 2.0; Speicher fuer Versionen zu klein), Platte voll, VM gesperrt, VSS-Fehler im Gast.' }
                 Write-HMSbLog "VM-Sicherung FEHLGESCHLAGEN (wbadmin Exitcode $($r.ExitCode)) - $failTxt - Details: wbadmin-VMs.log im Berichtsordner" 'Error'
                 foreach ($w in $why) { Write-HMSbLog "  Fehlerprotokoll: $w" 'Error' }

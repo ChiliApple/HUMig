@@ -6,7 +6,7 @@
 - Ordnerauswahl startet beim bisherigen Ziel (naechster vorhandener Ordner darueber)
 ### Server-Backup
 - **Fehlgeschlagene VMs werden genannt** (Praxisfall R770, wbadmin Exitcode -4): gesichert/nicht gesichert wird je VM aus der wbadmin-Zusammenfassung gelesen - Teams/Mail zeigen "NICHT gesichert: VMs: ...", Verlauf und Bericht zaehlen nur wirklich gesicherte VMs (bisher standen alle gewaehlten VMs unter "Gesichert"); der Bericht hat eine eigene Zeile fuer nicht gesicherte VMs
-- Gruende aus dem Fehlerprotokoll der Windows Server-Sicherung (Backup_Error-*.log) stehen direkt im Protokoll und im Bericht-Hinweis
+- Gruende aus dem Fehlerprotokoll der Windows Server-Sicherung (Backup_Error-*.log) stehen direkt im Protokoll und im Bericht-Hinweis (nur die aussagekraeftigen Zeilen); typische Codes fuer "Quelllaufwerk/Schattenkopie waehrend des Laufs verloren" (0x80070015, 0x800701B1 ...) werden gedeutet
 - "ca. ... GB auf die Platte geschrieben" in der Lebenszeichen-Zeile zaehlt nur noch Zunahmen - verwirft Windows waehrend des Laufs aeltere Versionen, sprang der Wert bisher zurueck bzw. verschwand
 - Restore-Dialog: markierte Zeile bleibt dunkel lesbar
 ### Doku

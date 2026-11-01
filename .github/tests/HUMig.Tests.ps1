@@ -3582,12 +3582,21 @@ Describe '2.1.19: Server-Backup - Ergebnis je VM, Fehlerprotokoll, geschriebene 
     It 'liest Gruende aus dem Fehlerprotokoll (nur *Error*-Dateien, ohne Dubletten, gekuerzt)' {
         $d = Join-Path $TestDrive 'wsb'; New-Item -ItemType Directory -Path $d -Force | Out-Null
         $ef = Join-Path $d 'Backup_Error-30-10-2026_07-28-50.log'; $of = Join-Path $d 'Backup-30-10-2026_07-28-50.log'
-        Set-Content -LiteralPath $ef -Value @('', 'Fehler beim Sichern von VM-iPWeb: Schattenkopie wurde geloescht (0x80042306)', 'Fehler beim Sichern von VM-iPWeb: Schattenkopie wurde geloescht (0x80042306)', ('x' * 400)) -Encoding Unicode
-        Set-Content -LiteralPath $of -Value 'Datei gesichert: C:\a.vhdx' -Encoding Unicode
+        # echtes Fehlerprotokoll (R770, 01.11.2026)
+        Set-Content -LiteralPath $ef -Encoding Unicode -Value @(
+            'Fehler beim Sichern von "D:\ipack\VM-iPWeb\Virtual Hard Disks\iPWebD.vhdx" waehrend des Lesevorgangs: [0x80070015] Das Geraet ist nicht bereit.',
+            'Fehler beim Sichern von "D:\ipack\" waehrend der Aufzaehlung: [0x800701b1] Ein nicht vorhandenes Geraet wurde angegeben.',
+            'Anwendungssicherung', 'Writer-ID: "{66841CD4-6DED-4F4B-8F17-FD23F8DDC3DE}"', '   Komponente: "3FCCC56A-3C6E-4798-84C1-1BD5FBD92499"',
+            '   Beschreibung     : Online\VM-iPWeb', '   Logischer Pfad: ""', '   Fehler           : 8078010E', '   Fehlermeldung   : Fehler beim Kopieren der Dateien.',
+            '   Detaillierter Fehler  : 80070015', '   Detaillierte Fehlermeldung : (null)', '*-----------------------------*', ('Fehler ' + ('x' * 400)))
+        Set-Content -LiteralPath $of -Value 'Fehler: das ist kein Fehlerprotokoll' -Encoding Unicode
         $w = @(Get-HMSbErrorLogReasons @($ef, $of))
-        $w.Count | Should -Be 2
-        $w[0] | Should -Match '0x80042306'
-        $w[1].Length | Should -BeLessOrEqual 304
+        $w.Count | Should -Be 5
+        $w[0] | Should -Match '0x80070015'
+        $w[2] | Should -Be 'VM Online\VM-iPWeb'
+        $w[3] | Should -Be '  -> Fehler beim Kopieren der Dateien.'
+        ($w -join ' ') | Should -Not -Match 'Writer-ID|Komponente|null|8078010E'
+        $w[4].Length | Should -BeLessOrEqual 304
     }
     It 'Meldung nennt nicht gesicherte VMs; Verlauf zaehlt nur gesicherte' {
         $c = Get-Content (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1') -Raw
