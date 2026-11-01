@@ -42,6 +42,8 @@ irm https://github.com/ChiliApple/HUMig/releases/latest/download/Install.ps1 | i
 
 Fragt nach dem Zielordner (Vorschlag `C:\Program Files\HUMig`), lädt die freigegebene Version, prüft jede Datei (Prüfsumme und Signatur) und startet HUMig. Was die Zeile genau tut: [Install.ps1](Install.ps1). Ohne Einzeiler: `Pull.ps1` in einen leeren Ordner legen und starten – siehe [INSTALL.md](INSTALL.md).
 
+**Portabel vom USB-Laufwerk** – dafür wurde HUMig ursprünglich gebaut und so läuft es nach wie vor am besten: den Ordner mit `Pull.ps1` auf eine USB-SSD oder einen Stick legen (siehe [INSTALL.md](INSTALL.md)), `Start.cmd` ausführen – keine Installation am PC, die Backups landen direkt am Laufwerk (`BACKUPS` neben dem Programm). Am alten PC sichern, am neuen anstecken und zurückspielen. Eine USB-SSD (NVMe) ist deutlich schneller als ein Stick.
+
 Danach: Computer und Benutzer wählen → Reiter **Backup** → **Backup starten**.
 
 Was das Programm kann und wie es geht:
