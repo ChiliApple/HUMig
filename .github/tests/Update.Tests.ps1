@@ -10,7 +10,7 @@ BeforeAll {
     $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Pull.ps1'), [ref]$tok, [ref]$err)
     $names = @('ConvertTo-HMPullRelPath', 'Get-HMPullFileList', 'Get-HMPullOrder', 'New-HMPullJournalText', 'Get-HMPullCommonDir',
         'Resolve-HMPullJournal', 'Restore-HMPullJournal', 'Undo-HMPullReplace', 'Enter-HMPullLock', 'Get-HMPullInstalledVersion', 'Test-HMPullDowngrade',
-        'Test-HMPullSharingError', 'Get-HMPullLeftovers', 'Get-HMPullMissingRequired')
+        'Test-HMPullSharingError', 'Get-HMPullLeftovers', 'Get-HMPullMissingRequired', 'ConvertTo-HMPullRoot', 'Move-HMPullLeftovers', 'Resolve-HMPullTarget')
     $script:Pull = Join-Path $script:Root 'Pull.ps1'
     $script:Ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $defs = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false) | Where-Object { $names -contains $_.Name })
@@ -25,7 +25,7 @@ BeforeAll {
 
 Describe 'Pull.ps1: Hilfsfunktionen vorhanden' {
     It 'alle Funktionen aus Pull.ps1 geladen' {
-        @($script:PullFunctions).Count | Should -Be 14
+        @($script:PullFunctions).Count | Should -Be 17
     }
 }
 
@@ -396,16 +396,21 @@ Describe 'Abnahme Paket 6: Nachbesserungen' {
             Test-Path -LiteralPath "$t\Config\pull-journal.json" | Should -BeFalse
         }
     }
-    It 'Punkt 3: nicht zuordenbare Eintraege und noch Sicherungen im Ordner: Journal bleibt, ehrliche Meldung' {
+    It 'Punkt 3: nicht zuordenbare Eintraege und noch Sicherungen im Ordner: Journal bleibt, Reste aufbewahrt, ehrliche Meldung' {
         $t = Join-Path $TestDrive 'Fremd\HUMig'
         New-HMTestFile "$t\HUMig.ps1.pullold" 'alt'; New-HMTestFile "$t\HUMig.ps1" 'halb'
         New-HMTestFile "$t\Config\pull-journal.json" (ConvertTo-Json -InputObject @('..\Anderswo\HUMig.ps1'))
         $o = (& $script:Ps51 -NoProfile -ExecutionPolicy Bypass -Command "& '$script:Pull' -Target '$t' -Branch main -NonInteractive -NoStart *>&1 | Out-String" | Out-String) -replace '\s*\r?\n\s*', ' '
-        $o | Should -Match 'passt nicht zu diesem Programmordner'
-        $o | Should -Match ([regex]::Escape("noch nicht zurueckgestellt: $t\HUMig.ps1.pullold"))
+        $o | Should -Match ([regex]::Escape("Sicherung ohne passenden Journal-Eintrag: $t\HUMig.ps1.pullold"))
+        $o | Should -Match 'nicht sicher einheitlich - Pull laedt jetzt alle Dateien neu'
         Test-Path -LiteralPath "$t\Config\pull-journal.json" | Should -BeTrue
-        Test-Path -LiteralPath "$t\HUMig.ps1.pullold" | Should -BeTrue
+        Test-Path -LiteralPath "$t\HUMig.ps1.pullold" | Should -BeFalse
+        Get-Content -LiteralPath "$t\Config\pull-reste\HUMig.ps1.pullold" -Raw | Should -Match 'alt'
         Test-Path -LiteralPath "$t\pull.lock" | Should -BeFalse
+        # naechster Lauf (scheitert wieder vor dem Laden): Journal bleibt, weil Config\pull-reste noch da ist
+        $o = (& $script:Ps51 -NoProfile -ExecutionPolicy Bypass -Command "& '$script:Pull' -Target '$t' -Branch main -NonInteractive -NoStart *>&1 | Out-String" | Out-String) -replace '\s*\r?\n\s*', ' '
+        $o | Should -Match 'nicht sicher einheitlich'
+        Test-Path -LiteralPath "$t\Config\pull-journal.json" | Should -BeTrue
     }
     It 'Punkt 3: Reste-Suche nur in Wurzel und Programmordnern, nicht in Backups' {
         $t = Join-Path $TestDrive 'Reste'
@@ -431,5 +436,76 @@ Describe 'Abnahme Paket 6: Nachbesserungen' {
             $r.State | Should -Be 'nicht abgleichbar'
             $r.Text | Should -Match '^nicht abgleichbar: '
         } finally { $h.Dispose() }
+    }
+}
+
+Describe 'Gegenpruefung Paket 6: Nachbesserungen' {
+    It 'Punkt 1: altes Journal mit relativen Eintraegen ("HUMig\...") wird richtig zugeordnet' {
+        $t = Join-Path $TestDrive 'AltRel\HUMig'
+        New-HMTestFile "$t\HUMig.ps1" 'halb'; New-HMTestFile "$t\HUMig.ps1.pullold" 'alt'; New-HMTestFile "$t\Functions\A.ps1.pullold" 'altA'
+        $r = Resolve-HMPullJournal @('HUMig\HUMig.ps1', 'HUMig\Functions\A.ps1') $t
+        @($r.Paths) | Should -Be @("$t\HUMig.ps1", "$t\Functions\A.ps1")
+        New-HMTestFile "$t\Config\pull-journal.json" (ConvertTo-Json -InputObject @('HUMig\HUMig.ps1', 'HUMig\Functions\A.ps1'))
+        $o = (& $script:Ps51 -NoProfile -ExecutionPolicy Bypass -Command "Set-Location -LiteralPath '$(Split-Path $t)'; & '$script:Pull' -Target 'HUMig' -Branch main -NonInteractive -NoStart *>&1 | Out-String" | Out-String) -replace '\s*\r?\n\s*', ' '
+        $o | Should -Match ([regex]::Escape("zurueckgestellt: $t\HUMig.ps1"))
+        Get-Content -LiteralPath "$t\HUMig.ps1" -Raw | Should -Be 'alt'
+        Get-Content -LiteralPath "$t\Functions\A.ps1" -Raw | Should -Be 'altA'
+        Test-Path -LiteralPath "$t\Config\pull-journal.json" | Should -BeFalse
+    }
+    It 'Punkt 1: Ordner mit gleichem Namen wie der Programmordner bleibt erhalten (Kurzform nur, wenn eindeutig)' {
+        $t = Join-Path $TestDrive 'Gleich\HUMig'
+        New-HMTestFile "$t\HUMig\Daten.txt.pullold" 'x'
+        @((Resolve-HMPullJournal @('HUMig\Daten.txt') $t).Paths) | Should -Be @("$t\HUMig\Daten.txt")
+    }
+    It 'Punkt 1 und 2: Reste werden nach dem Zurueckstellen immer gesucht, auch in BIN und Ordnern der Dateiliste' {
+        $t = Join-Path $TestDrive 'Immer'
+        New-HMTestFile "$t\Config\installed.json" '{ "FileList": [ "HUMig.ps1", "BIN/LIESMICH.txt", "Docs/Bilder/a.png", "../aussen.txt" ] }'
+        New-HMTestFile "$t\BIN\LIESMICH.txt.pullold" 'x'; New-HMTestFile "$t\Docs\Bilder\a.png.pullold" 'x'
+        New-HMTestFile "$t\BIN\USMT\amd64\gross.dll.pullold" 'nicht durchsucht'; New-HMTestFile "$t\Config\pull-reste\X.pullold" 'aufbewahrt'
+        $r = @(Get-HMPullLeftovers $t)
+        $r | Should -Contain "$t\BIN\LIESMICH.txt.pullold"
+        $r | Should -Contain "$t\Docs\Bilder\a.png.pullold"
+        @($r | Where-Object { $_ -like '*USMT*' -or $_ -like '*pull-reste*' }).Count | Should -Be 0
+        # Journal passt (Eintrag zuordenbar), trotzdem bleibt eine Sicherung: Journal bleibt, Reste aufbewahrt
+        New-HMTestFile "$t\HUMig.ps1" 'neu'; New-HMTestFile "$t\HUMig.ps1.pullold" 'alt'
+        Remove-Item -LiteralPath "$t\Config\pull-reste" -Recurse -Force
+        New-HMTestFile "$t\Config\pull-journal.json" (New-HMPullJournalText $t @("$t\HUMig.ps1"))
+        $o = (& $script:Ps51 -NoProfile -ExecutionPolicy Bypass -Command "& '$script:Pull' -Target '$t' -Branch main -NonInteractive -NoStart *>&1 | Out-String" | Out-String) -replace '\s*\r?\n\s*', ' '
+        $o | Should -Match ([regex]::Escape("zurueckgestellt: $t\HUMig.ps1"))
+        $o | Should -Match 'nicht sicher einheitlich'
+        Test-Path -LiteralPath "$t\Config\pull-journal.json" | Should -BeTrue
+        Test-Path -LiteralPath "$t\Config\pull-reste\BIN\LIESMICH.txt.pullold" | Should -BeTrue
+        Test-Path -LiteralPath "$t\BIN\USMT\amd64\gross.dll.pullold" | Should -BeTrue
+    }
+    It 'Punkt 3: Laufwerkswurzel bleibt Wurzel' {
+        ConvertTo-HMPullRoot 'C:\' | Should -Be 'C:\'
+        ConvertTo-HMPullRoot 'C:' | Should -Be 'C:\'
+        ConvertTo-HMPullRoot 'C:\Tools\HUMig\' | Should -Be 'C:\Tools\HUMig'
+        @((New-HMPullJournalText 'E:\' @('E:\HUMig.ps1') | ConvertFrom-Json) | ForEach-Object { $_ })[0] | Should -Be 'E:\'
+        @((Resolve-HMPullJournal @('E:\', 'E:\HUMig.ps1', 'E:\Functions\A.ps1') 'E:\').Paths) | Should -Be @('E:\HUMig.ps1', 'E:\Functions\A.ps1')
+        @((Resolve-HMPullJournal @('E:\', 'E:\HUMig.ps1') 'E:').Paths) | Should -Be @('E:\HUMig.ps1')
+    }
+    It 'Punkt 3: Pull.ps1 allein in einer Laufwerkswurzel - Erstinstallation wie vor dem Paket (Desktop)' {
+        $desk = Join-Path $env:USERPROFILE 'Desktop\HUMig'
+        (Resolve-HMPullTarget 'C:\').Target | Should -Be $desk
+    }
+    It 'Punkt 3: echtes Laufwerk als Ziel (subst): Sperre und Journal in der Wurzel' {
+        $letter = @('Q', 'R', 'S', 'T', 'U', 'V', 'W') | Where-Object { -not (Test-Path "$($_):\") } | Select-Object -First 1
+        if (-not $letter) { Set-ItResult -Skipped -Because 'kein freier Laufwerksbuchstabe'; return }
+        $w = Join-Path $TestDrive 'Wurzel'; New-Item -ItemType Directory -Path $w -Force | Out-Null
+        & subst.exe "$($letter):" $w | Out-Null
+        try {
+            $r = "$($letter):\"
+            foreach ($tg in @($r, "$($letter):")) {
+                New-HMTestFile "$w\HUMig.ps1" 'halb'; New-HMTestFile "$w\HUMig.ps1.pullold" 'alt'
+                New-HMTestFile "$w\Config\pull-journal.json" (New-HMPullJournalText $r @("$($r)HUMig.ps1"))
+                $o = (& $script:Ps51 -NoProfile -ExecutionPolicy Bypass -Command "& '$script:Pull' -Target '$tg' -Branch main -NonInteractive -NoStart *>&1 | Out-String" | Out-String) -replace '\s*\r?\n\s*', ' '
+                $o | Should -Match ([regex]::Escape("zurueckgestellt: $($r)HUMig.ps1"))
+                $o | Should -Match 'Branch-Stand ist nicht signiert'
+                Get-Content -LiteralPath "$w\HUMig.ps1" -Raw | Should -Be 'alt'
+                Test-Path -LiteralPath "$w\Config\pull-journal.json" | Should -BeFalse
+                Test-Path -LiteralPath "$w\pull.lock" | Should -BeFalse
+            }
+        } finally { & subst.exe "$($letter):" /d | Out-Null }
     }
 }
