@@ -4144,7 +4144,8 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             @($ok.RunResults | Where-Object { $_ }).Count | Should -Be 0
             @($ok.SourceUnreachable | Where-Object { $_ }).Count | Should -Be 0
         }
-        It 'Punkt 6: Ordner in einem gesperrten Profil ist Fehler "nicht lesbar", nicht "nicht vorhanden" (echte Sperre in TestDrive)' {
+        # Als Administrator nicht sicher belegt, dass die Verweigerung fuer das eigene Konto gleich wirkt -> dort uebersprungen
+        It 'Punkt 6: Ordner in einem gesperrten Profil ist Warnung "nicht lesbar", nicht "nicht vorhanden" (echte Sperre in TestDrive)' -Skip:(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
             $prof = New-TDir 'profZu'; New-Item -ItemType Directory -Path (Join-Path $prof 'Documents') -Force | Out-Null
             $me = '*' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
             $null = & icacls.exe $prof /deny "${me}:(OI)(CI)F"
@@ -4153,9 +4154,47 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
                 $it = [pscustomobject]@{ Name = 'Docs'; Type = 'Folder'; Path = (Join-Path $prof 'Documents') }
                 $r = Backup-HMFolderItem $ctx (New-TJob) ([pscustomobject]@{ Id = 'Profile'; Name = 'Profil' }) $it @{}
             } finally { $null = & icacls.exe $prof /remove:d $me }
-            $r.Status | Should -Be 'Error'
+            $r.Status | Should -Be 'Warning'
+            $r.Unreadable | Should -BeTrue
             $r.Msg | Should -Match 'nicht lesbar'
             $r.Msg | Should -Not -Match 'nicht vorhanden'
+        }
+        It 'Punkt 6: Start-HMBackup - ein gesperrter Ordner neben gesicherten: Modul Warnung, im Restore waehlbar; ganzes Profil gesperrt: Fehler' -Skip:(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            Mock Get-HMTargetEnv { @{ WINDIR = (Join-Path $TestDrive 'win'); PROFILE = '' } }
+            Mock Get-HMSyncRoots { @() }
+            Mock Get-HMMachineGuid { '' }
+            Mock Get-HMTargetComputerName { '' }
+            Mock Dismount-HMHive { }
+            Mock Set-HMBackupFolderAcl { [pscustomobject]@{ Ok = $true; Who = @('Test'); Extra = @(); Notes = @(); Unchanged = $true; Skipped = $false; Error = '' } }
+            Mock Update-HMCatalogStats { 0 }
+            $me = '*' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            $run = {
+                param($prof)
+                $root = New-TDir 'BKG'
+                $mod = [pscustomobject]@{ Id = 'Daten'; Name = 'Daten'; Scope = 'User'; Items = @(
+                    [pscustomobject]@{ Name = 'A'; Type = 'Folder'; Path = (Join-Path $prof 'A') },
+                    [pscustomobject]@{ Name = 'B'; Type = 'Folder'; Path = (Join-Path $prof 'Zu\B') }) }
+                $ctx = @{ Computer = $env:COMPUTERNAME; BackupPath = (Join-Path $root 'neu'); BackupRoot = $root; Options = @{ SkipSpaceCheck = $true }; Settings = @{}; Modules = @($mod)
+                          ToolRoot = $TestDrive; ToolVersion = 'Test'; UserFolder = 'u'; Account = 'u'; UserSid = 'S-1-5-21-1-2-3-1001'; ProfilePath = $prof; Threads = 2 }
+                $j = New-TJob
+                Start-HMBackup -Ctx $ctx -Job $j
+                [pscustomobject]@{ Result = $j.Result; Path = $ctx.BackupPath }
+            }
+            # (a) A lesbar, B liegt unter einem gesperrten Ordner: Modul Warnung, Backup Warnung, Modul im Restore waehlbar
+            $p1 = New-TDir 'profA'; New-Item -ItemType Directory -Path (Join-Path $p1 'A'), (Join-Path $p1 'Zu\B') -Force | Out-Null; [System.IO.File]::WriteAllText((Join-Path $p1 'A\a.txt'), 'x')
+            $null = & icacls.exe (Join-Path $p1 'Zu') /deny "${me}:(OI)(CI)F"
+            try { $o1 = & $run $p1 } finally { $null = & icacls.exe (Join-Path $p1 'Zu') /remove:d $me }
+            $m1 = @($o1.Result.Modules | Where-Object { $_.Id -eq 'Daten' })[0]
+            $m1.Status | Should -Be 'Warning'
+            $o1.Result.Status | Should -Be 'Warning'
+            @((Read-HMBackupInfo -Path $o1.Path -Modules @()).Modules) | Should -Contain 'Daten'
+            # (b) ganzes Profil gesperrt: alle Ordner nicht lesbar -> Modul Fehler, Backup Fehler
+            $p2 = New-TDir 'profB'; New-Item -ItemType Directory -Path (Join-Path $p2 'A'), (Join-Path $p2 'Zu\B') -Force | Out-Null
+            $null = & icacls.exe $p2 /deny "${me}:(OI)(CI)F"
+            try { $o2 = & $run $p2 } finally { $null = & icacls.exe $p2 /remove:d $me }
+            @($o2.Result.Modules | Where-Object { $_.Id -eq 'Daten' })[0].Status | Should -Be 'Error'
+            $o2.Result.Status | Should -Be 'Error'
+            @((Read-HMBackupInfo -Path $o2.Path -Modules @()).Modules) | Should -Not -Contain 'Daten'
         }
         It 'Punkt 6: fehlendes Laufwerk (z. B. abgesteckter Stick) bleibt "nicht vorhanden"' {
             Mock Get-HMPathUnreachableReason { 'Das Laufwerk wurde nicht gefunden.' }

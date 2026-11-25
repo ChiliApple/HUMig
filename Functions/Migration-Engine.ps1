@@ -2196,9 +2196,10 @@ function Backup-HMFolderItem {
         # liegt der Ordner unter einer nicht erreichbaren Quelle (Test-HMBackupSource), ist "nicht vorhanden" nicht belegt -> Fehler
         $ur = @(@($Ctx.SourceUnreachable) | Where-Object { $_ -and (Test-HMPathUnder $srcLocal $_) }) | Select-Object -First 1
         if ($ur) { return (& $mk 'Error' "Quelle nicht erreichbar: $srcLocal (siehe Eintrag Quelle) - nicht gesichert") }
-        # Zugriff verweigert ist nicht "nicht vorhanden" -> Fehler mit Grund; alles andere (auch fehlendes Laufwerk) bleibt wie bisher
+        # Zugriff verweigert ist nicht "nicht vorhanden" -> Warnung mit Grund (Unreadable: ist im Modul gar nichts gesichert, wird das Modul Fehler);
+        # alles andere (auch fehlendes Laufwerk) bleibt wie bisher
         $nr = Get-HMPathUnreachableReason $src
-        if ($nr -eq 'Zugriff verweigert') { return (& $mk 'Error' "nicht lesbar: $srcLocal ($nr) - nicht gesichert. Rechte pruefen und Backup wiederholen") }
+        if ($nr -eq 'Zugriff verweigert') { $ro = & $mk 'Warning' "nicht lesbar: $srcLocal ($nr) - nicht gesichert. Rechte pruefen und Backup wiederholen"; $ro | Add-Member -NotePropertyName Unreadable -NotePropertyValue $true; return $ro }
         return (& $mk 'Skip' "nicht vorhanden: $srcLocal")
     }
     foreach ($p in @($Ctx.Options.ExcludePaths | Where-Object { $_ })) { if (Test-HMPathUnder $srcLocal $p) { return (& $mk 'Skip' "ausgeschlossen: $srcLocal") } }
@@ -3031,6 +3032,8 @@ function Start-HMBackup {
             Write-HMLog $Job $mod.Name 'Info'
             $Job.Status = $mod.Name
             $mres = [ordered]@{ Id = $mod.Id; Name = $mod.Name; Status = 'OK'; Bytes = [long]0; Items = @() }
+            # nicht lesbare Eintraege und gesicherte Eintraege zaehlen: nichts gesichert, aber etwas nicht lesbar -> Modul Fehler
+            $mUnread = 0; $mSaved = 0
             # Programm-Katalog: Programm schliessen / Dienst stoppen (Dienste werden im finally immer wieder gestartet)
             $pre = Enter-HMModule $Ctx $Job $mod $tenv 'Backup'
             foreach ($w in @($pre.Warn)) { Write-HMLog $Job "   $w" 'Warning'; $mres.Items += [pscustomobject]@{ Name = 'Hinweis'; Status = 'Warning'; Msg = $w; Bytes = [long]0; Source = '' } }
@@ -3082,6 +3085,7 @@ function Start-HMBackup {
                     if ($r.PSObject.Properties['MigState'] -and "$($r.MigState)") { $mres.MigState = "$($r.MigState)" }
                     elseif ("$($r.Status)" -eq 'Error' -and $Ctx.PrevUsmtUsable -eq $false) { $mres.MigState = 'Unusable' }
                 }
+                if ($r.PSObject.Properties['Unreadable'] -and $r.Unreadable) { $mUnread++ } elseif ("$($r.Status)" -in @('OK', 'Warning')) { $mSaved++ }
                 $mres.Bytes += [long]$r.Bytes
                 if ($r.Status -in @('Error', 'Cancel')) { $mres.Status = 'Error' } elseif ($r.Status -eq 'Warning' -and $mres.Status -eq 'OK') { $mres.Status = 'Warning' }
                 $done++; $wDone += $wIt; $Job.ItemBytes = 0
@@ -3091,6 +3095,7 @@ function Start-HMBackup {
             }
             } finally { $Ctx.LockedHint = $false; Exit-HMModule $Ctx $Job $pre }
             foreach ($sw in @(Get-HMServiceRestartItems $pre)) { $mres.Items += $sw; if ($mres.Status -eq 'OK') { $mres.Status = 'Warning' } }
+            if ($mUnread -gt 0 -and $mSaved -eq 0) { $mres.Status = 'Error' }
             if (@($mres.Items | Where-Object { $_.Status -ne 'Skip' }).Count -eq 0) { $mres.Status = 'Skip' }
             $allBytes += $mres.Bytes
             $Ctx.Manifest.Modules += [pscustomobject]$mres
