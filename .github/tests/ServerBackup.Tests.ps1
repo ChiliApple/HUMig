@@ -212,3 +212,77 @@ Describe 'Server-Backup: Profile (serverbackup.json) in der Oberflaeche (US-05, 
         @($j.Profiles[0].VMs) | Should -Be @('DC1')
     }
 }
+Describe 'Server-Backup: Speichern, Planen, Starten nur mit gelesener Liste (US-02)' {
+    BeforeAll {
+        $script:AppRoot = $script:Root
+        if (-not $script:ConfigDir) { $script:ConfigDir = Join-Path $TestDrive 'CfgUi2'; $script:LogDir = Join-Path $TestDrive 'LogsUi2' }
+        . (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+    }
+    It 'Ladezustand: lesen geht vor, Fehler vor Ok' {
+        Get-HMSbListState 'Loading' 'Ok' | Should -Be 'Loading'
+        Get-HMSbListState 'Ok' 'Loading' | Should -Be 'Loading'
+        Get-HMSbListState 'Error' 'Ok' | Should -Be 'Error'
+        Get-HMSbListState 'Ok' 'Error' | Should -Be 'Error'
+        Get-HMSbListState 'Ok' 'Ok' | Should -Be 'Ok'
+    }
+    It 'vor dem ersten Lesen gilt die Liste als "wird gelesen" (nie als leer)' {
+        $script:SbVmsState | Should -Be 'Loading'
+        Get-HMSbListState | Should -Be 'Loading'
+    }
+    It 'Engine liefert Lesefehler fuer VMs und Laufwerke getrennt' {
+        Mock Test-HMSbHyperVHost { $true }
+        Mock Get-HMSbVmList { throw 'Hyper-V antwortet nicht' }
+        Mock Get-HMSbVolumeList { , @([pscustomobject]@{ Letter = 'D:' }) }
+        $r = Get-HMSbSources
+        $r.VmError | Should -Match 'Hyper-V'
+        $r.VolError | Should -BeNullOrEmpty
+        Mock Test-HMSbHyperVHost { $false }
+        (Get-HMSbSources).VmError | Should -BeNullOrEmpty
+    }
+    It 'Speichern, Neu, Planen und Starten pruefen den Ladezustand' {
+        $ui = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+        foreach ($fn in @('Save-HMSbProfile', 'New-HMSbProfile', 'New-HMSbSchedule', 'Start-HMSbBackup')) {
+            $body = [regex]::Match($ui, "(?s)function $fn \{.*?\r?\n\}\r?\n").Value
+            $body | Should -Match 'Get-HMSbListState'
+        }
+        $sv = [regex]::Match($ui, '(?s)function Save-HMSbProfile \{.*?\r?\n\}\r?\n').Value
+        $sv | Should -Match 'if \(-not \$keepVms\) \{ \$x\.VMs = @\(Get-HMSbCheckedVms\) \}'
+    }
+}
+
+Describe 'Server-Backup: Auswerfen und Einrichten gegen laufende Sicherungen (US-03, US-04)' {
+    BeforeAll {
+        $script:AppRoot = $script:Root
+        . (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+    }
+    It 'nennt eine Sicherung (auch im Hintergrund) auf genau dieser Platte' {
+        $m = @([pscustomobject]@{ Profile = 'GYM'; Disk = 'HUMIG-GYM-1'; Started = (Get-Date).ToString('o'); Kind = 'Zeitplan' })
+        $h = @(Get-HMSbDiskRunHints $m @() @() @('humig-gym-1'))
+        $h.Count | Should -Be 1
+        $h[0] | Should -Match 'SYSTEM'
+        @(Get-HMSbDiskRunHints $m @() @() @('HUMIG-GYM-2')).Count | Should -Be 0
+    }
+    It 'laufende Aufgabe ohne Markierung wird genannt, mit Markierung nicht doppelt' {
+        $t = @([pscustomobject]@{ TaskName = 'Server-Backup - GYM - taeglich 22-00'; State = 'Running' })
+        @(Get-HMSbDiskRunHints @() $t @() @('HUMIG-GYM-1')).Count | Should -Be 1
+        $m = @([pscustomobject]@{ Profile = 'GYM'; Disk = 'HUMIG-GYM-2'; Started = (Get-Date).ToString('o'); Kind = 'Zeitplan' })
+        @(Get-HMSbDiskRunHints $m $t @() @('HUMIG-GYM-1')).Count | Should -Be 0
+    }
+    It 'wbadmin auf ein anderes Ziel betrifft die Platte nicht, ohne erkennbares Ziel schon' {
+        $b = @('wbadmin (PID 1): start backup -backupTarget:F: -quiet')
+        @(Get-HMSbDiskRunHints @() @() $b @('X') @('E')).Count | Should -Be 0
+        @(Get-HMSbDiskRunHints @() @() $b @('X') @('F:')).Count | Should -Be 1
+        @(Get-HMSbDiskRunHints @() @() @('Windows Server-Sicherung: Backup laeuft') @('X') @('E')).Count | Should -Be 1
+    }
+    It 'Auswerfen, Offline-Schalten und Einrichten fragen vorher nach' {
+        $ui = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+        ([regex]::Match($ui, '(?s)function Invoke-HMSbEject \{.*?\r?\n\}\r?\n').Value | Select-String -Pattern 'Confirm-HMSbNoRunOnDisk' -AllMatches).Matches.Count | Should -Be 2
+        [regex]::Match($ui, '(?s)function Invoke-HMSbDiskSetup\(.*?\r?\n\}\r?\n').Value | Should -Match 'Confirm-HMSbNoRunOnDisk'
+    }
+    It 'Einrichten: markierte Zeile muss zur gemerkten Platte passen (zwei offene Fenster)' {
+        $d = [pscustomobject]@{ Number = 3; Model = 'WD Elements'; Serial = 'S1' }
+        Test-HMSbDiskRowMatch ([pscustomobject]@{ Nr = 3; Modell = 'WD Elements'; Seriennummer = 'S1' }) $d | Should -BeTrue
+        Test-HMSbDiskRowMatch ([pscustomobject]@{ Nr = 3; Modell = 'Seagate'; Seriennummer = 'S9' }) $d | Should -BeFalse
+        Test-HMSbDiskRowMatch $null $d | Should -BeFalse
+    }
+}

@@ -84,11 +84,12 @@ function Get-HMSbVolumeList {
 function Get-HMSbSources {
     $hv = Test-HMSbHyperVHost
     $vms = @()
-    $err = ''
-    if ($hv) { try { $vms = Get-HMSbVmList; $vms = @($vms) } catch { $err = $_.Exception.Message } }
+    $err = ''; $vmErr = ''; $volErr = ''
+    if ($hv) { try { $vms = Get-HMSbVmList; $vms = @($vms) } catch { $err = $_.Exception.Message; $vmErr = $err } }
     $vols = @()
-    try { $vols = Get-HMSbVolumeList; $vols = @($vols) } catch { if (-not $err) { $err = $_.Exception.Message } }
-    return [pscustomobject]@{ HyperV = $hv; VMs = $vms; Volumes = $vols; Error = $err }
+    try { $vols = Get-HMSbVolumeList; $vols = @($vols) } catch { $volErr = $_.Exception.Message; if (-not $err) { $err = $volErr } }
+    # VmError/VolError getrennt: Speichern/Planen/Starten duerfen eine nicht gelesene Liste nie als "keine" verwenden
+    return [pscustomobject]@{ HyperV = $hv; VMs = $vms; Volumes = $vols; Error = $err; VmError = $vmErr; VolError = $volErr }
 }
 
 # Virtuelle Computer des Hosts mit Groesse der virtuellen Festplatten
