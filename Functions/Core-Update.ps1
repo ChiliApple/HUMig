@@ -199,6 +199,16 @@ function Get-HMSigningCert([string]$Thumbprint) {
     } catch { } finally { if ($st) { $st.Close() } }
     return $null
 }
+# Abweichung vom lokalen Stand: signieren? 'Sign' = ja, 'Ask' = in der Konsole nachfragen (Liste der Abweichungen), sonst nein
+function Confirm-HMSignMismatch([string]$Tag, $Cmp, [string]$Mode) {
+    if ($Mode -eq 'Sign') { return $true }
+    if ($Mode -ne 'Ask') { return $false }
+    Write-Host "`n${Tag}: $($Cmp.Text)" -ForegroundColor Yellow
+    foreach ($d in @($Cmp.Diff | Select-Object -First 30)) { Write-Host "   $d" -ForegroundColor Yellow }
+    if (@($Cmp.Diff).Count -gt 30) { Write-Host "   ... und $(@($Cmp.Diff).Count - 30) weitere" -ForegroundColor Yellow }
+    $a = Read-Host "$Tag trotzdem signieren? Die Signatur bestaetigt dann den Stand auf GitHub, nicht deinen lokalen. (s = signieren, Enter = auslassen)"
+    return ("$a".Trim() -match '^[sS]$')
+}
 # Abgetrennte PKCS#7/CMS-Signatur der Pruefsummen-Datei
 function New-HMManifestSignature([byte[]]$Manifest, $Cert) {
     try { Add-Type -AssemblyName System.Security -ErrorAction Stop } catch { }
@@ -218,10 +228,57 @@ function Publish-HMReleaseSignature([string]$Owner, [string]$Repo, [string]$Tag,
     }
     Invoke-RestMethod "https://uploads.github.com/repos/$Owner/$Repo/releases/$($rel.id)/assets?name=$($script:HMSignatureName)" -Method Post -Headers $h -ContentType 'application/octet-stream' -Body $Signature -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop | Out-Null
 }
+# Programmordner dieser Datei (Functions\..) - lokaler Stand fuer den Abgleich vor dem Signieren
+$script:HMUpdateAppRoot = $(if ($PSScriptRoot) { Split-Path $PSScriptRoot -Parent } else { '' })
+# Abgleich vor dem Signieren: passt die (von GitHub geladene) Pruefsummen-Datei eines Releases zu einem lokal geprueften Stand?
+# Lokaler Stand = ein Programmordner mit genau dieser Version (z.B. die getestete Installation, Config\version.json).
+# Unterschiede nur bei den Zeilenenden (CRLF/LF, z.B. Arbeitskopie mit autocrlf) gelten als gleich. Programmdateien, die
+# lokal vorhanden sind, aber in der Pruefsummen-Datei fehlen (Wurzel *.ps1/*.cmd, Functions, XAML, Tools), gelten als Abweichung.
+# Rueckgabe: State 'gleich' | 'abweichend' | 'nicht abgleichbar', Diff (Liste "Pfad: Grund"), Text (kurz)
+function Compare-HMReleaseManifest([string]$ManifestText, $Version, [string]$LocalRoot) {
+    $res = [pscustomobject]@{ State = 'nicht abgleichbar'; Diff = @(); Text = '' }
+    $want = ConvertTo-HMVersion "$Version"
+    $root = "$LocalRoot".TrimEnd('\')
+    if (-not $root -or -not (Test-Path -LiteralPath $root -PathType Container)) { $res.Text = "kein lokaler Stand zum Abgleich ($LocalRoot)"; return $res }
+    $have = $null
+    try { $have = ConvertTo-HMVersion "$((Get-Content -LiteralPath (Join-Path $root 'Config\version.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version)" } catch { }
+    if (-not $want -or -not $have -or $have -ne $want) { $res.Text = "lokaler Stand ($root) ist Version $(if ($have) { $have } else { 'unbekannt' }), nicht $Version - kein Abgleich moeglich"; return $res }
+    $m = ConvertFrom-HMManifest $ManifestText
+    if (-not $m.Count) { $res.Text = 'Pruefsummen-Datei leer oder beschaedigt'; return $res }
+    $diff = New-Object System.Collections.Generic.List[string]
+    foreach ($k in @($m.Keys | Sort-Object)) {
+        $p = Join-Path $root ("$k" -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { $diff.Add("${k}: fehlt lokal"); continue }
+        if ((Get-HMFileSha256 $p) -eq $m[$k]) { continue }
+        # nur Zeilenenden anders? (CRLF -> LF wie im Repo)
+        $b = [System.IO.File]::ReadAllBytes($p)
+        $lf = New-Object System.Collections.Generic.List[byte] ($b.Length)
+        for ($i = 0; $i -lt $b.Length; $i++) { if (-not ($b[$i] -eq 13 -and $i + 1 -lt $b.Length -and $b[$i + 1] -eq 10)) { $lf.Add($b[$i]) } }
+        $s = [System.Security.Cryptography.SHA256]::Create()
+        try { $h = -join ($s.ComputeHash($lf.ToArray()) | ForEach-Object { $_.ToString('x2') }) } finally { $s.Dispose() }
+        if ($h -ne $m[$k]) { $diff.Add("${k}: Inhalt anders") }
+    }
+    $local = @(Get-ChildItem -LiteralPath $root -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.ps1', '.cmd' } | ForEach-Object { $_.Name })
+    foreach ($d in @('Functions', 'XAML', 'Tools')) {
+        $dp = Join-Path $root $d
+        if (Test-Path -LiteralPath $dp -PathType Container) { $local += @(Get-ChildItem -LiteralPath $dp -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName.Substring($root.Length + 1) -replace '\\', '/' }) }
+    }
+    foreach ($f in $local) { if (-not $m.ContainsKey($f) -and $f -notmatch '\.(pullold|pulltmp)$') { $diff.Add("${f}: lokal vorhanden, fehlt in der Pruefsummen-Datei") } }
+    $res.Diff = @($diff)
+    if ($diff.Count) { $res.State = 'abweichend'; $res.Text = "weicht vom lokalen Stand ($root) ab: $($diff.Count) Datei(en), z.B. $(@($diff | Select-Object -First 3) -join '; ')" }
+    else { $res.State = 'gleich'; $res.Text = "gleich wie der lokale Stand ($root, $($m.Count) Dateien)" }
+    return $res
+}
 # Releases signieren: ohne -Tags alle Releases mit Pruefsummen-Datei, die noch keine Signatur haben.
 # Rueckgabe je Release: Tag, Ok, Text. Jede Signatur wird vor dem Hochladen geprueft.
-function Invoke-HMReleaseSigning([string]$Owner, [string]$Repo, [string]$Thumbprint, [string]$Token, [string[]]$Tags = @()) {
+# Vor dem Signieren wird die Pruefsummen-Datei mit dem lokalen Stand verglichen (Compare-HMReleaseManifest, $LocalRoot,
+# Standard: dieser Programmordner). Weicht sie ab oder ist kein Abgleich moeglich, entscheidet $OnMismatch:
+#   'Skip' (Standard) = nicht signieren, Grund melden; 'Ask' = je Release nachfragen (Konsole); 'Sign' = trotzdem signieren
+#   (der Grund steht im Ergebnis). So signiert die Signatur nie still, was nur auf GitHub liegt.
+function Invoke-HMReleaseSigning([string]$Owner, [string]$Repo, [string]$Thumbprint, [string]$Token, [string[]]$Tags = @(), [string]$LocalRoot = '', [ValidateSet('', 'Skip', 'Ask', 'Sign')][string]$OnMismatch = '') {
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+    if (-not $LocalRoot) { $LocalRoot = $script:HMUpdateAppRoot }
+    if (-not $OnMismatch) { $OnMismatch = 'Skip' }
     $cert = Get-HMSigningCert $Thumbprint
     if (-not $cert) { throw "Signatur-Zertifikat $Thumbprint mit privatem Schluessel ist auf diesem PC nicht vorhanden (oder abgelaufen)." }
     $list = @(Get-HMReleases $Owner $Repo $Token)
@@ -236,11 +293,18 @@ function Invoke-HMReleaseSigning([string]$Owner, [string]$Repo, [string]$Thumbpr
             # Versionszeile muss zum Tag passen - sonst wuerde eine fremde/falsche Pruefsummen-Datei signiert
             $why = Test-HMManifestRelease ([System.Text.Encoding]::UTF8.GetString($man)) $r.Version
             if ($why) { throw "nicht signiert: $why" }
+            # Abgleich mit dem lokalen Stand
+            $cmp = Compare-HMReleaseManifest ([System.Text.Encoding]::UTF8.GetString($man)) $r.Version $LocalRoot
+            $note = ''
+            if ($cmp.State -ne 'gleich') {
+                if (-not (Confirm-HMSignMismatch $r.Tag $cmp $OnMismatch)) { throw "nicht signiert: $($cmp.Text). Signieren erst nach Abgleich: getesteten Stand dieser Version einspielen oder Tools\Sign-HUMigRelease.ps1 -Version $($r.Version) (fragt bei Abweichung nach)." }
+                $note = " - OHNE lokalen Abgleich ($($cmp.Text))"
+            } else { $note = " (lokal abgeglichen: $($cmp.Text))" }
             $sig = New-HMManifestSignature $man $cert
             $why = Test-HMManifestSignature $man $sig $cert.Thumbprint
             if ($why) { throw "Signatur-Pruefung fehlgeschlagen: $why" }
             Publish-HMReleaseSignature $Owner $Repo $r.Tag $sig $Token
-            $out += [pscustomobject]@{ Tag = $r.Tag; Ok = $true; Text = 'signiert' }
+            $out += [pscustomobject]@{ Tag = $r.Tag; Ok = $true; Text = "signiert$note" }
         } catch {
             $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
             $out += [pscustomobject]@{ Tag = $r.Tag; Ok = $false; Text = $(if ($code -in 401, 403, 404) { "kein Schreibrecht (HTTP $code) - Token pruefen" } else { "$($_.Exception.Message)" }) }

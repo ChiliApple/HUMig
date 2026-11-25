@@ -238,3 +238,58 @@ Describe 'Start-Dateien: Ordner mit Klammer im Namen' {
         }
     }
 }
+
+Describe 'Signieren: Abgleich mit dem lokalen Stand (UP-01)' {
+    BeforeAll {
+        function New-HMSha([byte[]]$B) { $s = [System.Security.Cryptography.SHA256]::Create(); try { -join ($s.ComputeHash($B) | ForEach-Object { $_.ToString('x2') }) } finally { $s.Dispose() } }
+        $script:L = Join-Path $TestDrive 'Lokal'
+        New-HMTestFile "$script:L\Config\version.json" '{ "version": "9.0.1" }'
+        New-HMTestFile "$script:L\HUMig.ps1" "Zeile1`r`nZeile2`r`n"          # lokal CRLF, im Repo LF
+        New-HMTestFile "$script:L\Functions\B.ps1" 'B'
+        New-HMTestFile "$script:L\BACKUPS\x\eigen.ps1" 'eigene Daten'       # ausserhalb der Programmordner: zaehlt nicht
+        $script:Man = "# HUMig-Release v9.0.1`n" +
+            (New-HMSha ([Text.Encoding]::UTF8.GetBytes("Zeile1`nZeile2`n"))) + "  HUMig.ps1`n" +
+            (New-HMSha ([Text.Encoding]::UTF8.GetBytes('B'))) + "  Functions/B.ps1`n" +
+            (New-HMSha ([Text.Encoding]::UTF8.GetBytes('{ "version": "9.0.1" }'))) + "  Config/version.json`n"
+    }
+    It 'gleicher Stand (nur Zeilenenden anders): gleich' {
+        $r = Compare-HMReleaseManifest $script:Man '9.0.1' $script:L
+        $r.State | Should -Be 'gleich'
+        @($r.Diff).Count | Should -Be 0
+    }
+    It 'andere Version lokal oder kein Ordner: nicht abgleichbar' {
+        (Compare-HMReleaseManifest $script:Man '9.0.2' $script:L).State | Should -Be 'nicht abgleichbar'
+        (Compare-HMReleaseManifest $script:Man '9.0.1' (Join-Path $TestDrive 'fehlt')).State | Should -Be 'nicht abgleichbar'
+        (Compare-HMReleaseManifest $script:Man '9.0.1' '').State | Should -Be 'nicht abgleichbar'
+    }
+    It 'anderer Inhalt, fehlende Datei, lokale Programmdatei ohne Eintrag: abweichend mit Liste' {
+        $m2 = $script:Man -replace '  Functions/B\.ps1', '  Functions/B-alt.ps1'
+        New-HMTestFile "$script:L\Functions\Extra.ps1" 'x'
+        try {
+            $r = Compare-HMReleaseManifest ($m2 + ('0' * 64) + "  XAML/Neu.xaml`n") '9.0.1' $script:L
+            $r.State | Should -Be 'abweichend'
+            @($r.Diff) | Should -Contain 'Functions/B-alt.ps1: fehlt lokal'
+            @($r.Diff) | Should -Contain 'XAML/Neu.xaml: fehlt lokal'
+            @($r.Diff) | Should -Contain 'Functions/Extra.ps1: lokal vorhanden, fehlt in der Pruefsummen-Datei'
+            @($r.Diff) | Should -Contain 'Functions/B.ps1: lokal vorhanden, fehlt in der Pruefsummen-Datei'
+            @($r.Diff | Where-Object { $_ -like 'BACKUPS*' }).Count | Should -Be 0
+            $r.Text | Should -Not -Match 'Schreibrecht'   # dieses Wort loescht in HUMig den gespeicherten Schreib-Token
+        } finally { Remove-Item -LiteralPath "$script:L\Functions\Extra.ps1" -Force }
+        New-HMTestFile "$script:L\Functions\B.ps1" 'B geaendert'
+        try { (Compare-HMReleaseManifest $script:Man '9.0.1' $script:L).Diff | Should -Contain 'Functions/B.ps1: Inhalt anders' }
+        finally { New-HMTestFile "$script:L\Functions\B.ps1" 'B' }
+    }
+    It 'bei Abweichung signiert nur ausdruecklich (Sign oder Rueckfrage), Standard ist auslassen' {
+        $c = [pscustomobject]@{ State = 'abweichend'; Diff = @('a'); Text = 't' }
+        Confirm-HMSignMismatch 'v9.0.1' $c 'Skip' | Should -BeFalse
+        Confirm-HMSignMismatch 'v9.0.1' $c '' | Should -BeFalse
+        Confirm-HMSignMismatch 'v9.0.1' $c 'Sign' | Should -BeTrue
+    }
+    It 'Invoke-HMReleaseSigning: neue Parameter hinten, alter Aufruf mit fuenf Werten bleibt gueltig' {
+        $ps = @((Get-Command Invoke-HMReleaseSigning).Parameters.Keys)
+        $ix = [array]::IndexOf($ps, 'Tags')
+        $ix | Should -Be 4
+        [array]::IndexOf($ps, 'LocalRoot') | Should -BeGreaterThan $ix
+        [array]::IndexOf($ps, 'OnMismatch') | Should -BeGreaterThan $ix
+    }
+}
