@@ -190,10 +190,8 @@ function New-HMSbProfile {
     # die angehakten VMs/Laufwerke werden uebernommen: nicht waehrend des Lesens, nach Lesefehler nur nach Rueckfrage
     $ls = Get-HMSbListState
     if ($ls -eq 'Loading') { Out-Console "Neues Profil: $($script:SbListWaitText)" 'Warning'; return }
-    if ($ls -eq 'Error') {
-        $q = Get-HMSbListErrorText $null "Das neue Profil uebernimmt aus dieser Liste nichts (VMs/Laufwerke spaeter anhaken und 'Profil speichern').`n`nJa = trotzdem anlegen`nNein = abbrechen"
-        if ("$((Show-HMDialogBox -Owner $script:Window -Text $q -Title 'Neues Sicherungs-Profil' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { return }
-    }
+    # nicht lesbare Liste: ohne Rueckfrage anlegen, Hinweis in der Konsole
+    if ($ls -eq 'Error') { Out-Console ("Neues Profil: " + ((Get-HMSbListErrorText $null '') -replace "`n", ' ') + " Das Profil uebernimmt daraus nichts - nach ""Aktualisieren"" anhaken und ""Profil speichern"".") 'Warning' }
     $n = Show-TextInputDialog -Title 'Neues Sicherungs-Profil' -Label 'Name des Profils (z.B. Schule oder Standort):'
     if (-not "$n".Trim()) { return }
     $n = "$n".Trim()
@@ -234,10 +232,8 @@ function Save-HMSbProfile {
     $ls = Get-HMSbListState
     if ($ls -eq 'Loading') { Out-Console "Profil speichern: $($script:SbListWaitText)" 'Warning'; return }
     $keepVms = ($script:SbVmsState -ne 'Ok'); $keepVols = ($script:SbVolsState -ne 'Ok')
-    if ($ls -eq 'Error') {
-        $q = Get-HMSbListErrorText $p "Ja = die gespeicherte Auswahl dieser Liste(n) unveraendert lassen und nur den Rest (Optionen$(if (-not $keepVms) { ', VMs' })$(if (-not $keepVols) { ', Laufwerke' })) speichern`nNein = nicht speichern"
-        if ("$((Show-HMDialogBox -Owner $script:Window -Text $q -Title 'Profil speichern' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { Out-Console 'Profil nicht gespeichert.' 'Info'; return }
-    }
+    # nicht lesbare Liste: ohne Rueckfrage die gespeicherte Auswahl dieser Liste behalten (Hinweis in der Konsole)
+    if ($ls -eq 'Error') { Out-Console ("Profil speichern: " + ((Get-HMSbListErrorText $p '') -replace "`n", ' ') + " Diese Auswahl bleibt unveraendert gespeichert.") 'Warning' }
     $cfg = Get-HMSbConfig
     $nVm = 0; $nVol = 0
     foreach ($x in $cfg.Profiles) {
@@ -1832,10 +1828,7 @@ function New-HMSbSchedule {
     # der Zeitplan friert die angehakten VMs/Laufwerke ein: nicht waehrend des Lesens, nach Lesefehler nur nach Rueckfrage
     $ls = Get-HMSbListState
     if ($ls -eq 'Loading') { Out-Console "Zeitplan: $($script:SbListWaitText)" 'Warning'; return }
-    if ($ls -eq 'Error') {
-        $q = Get-HMSbListErrorText $p "Der Zeitplan wuerde aus dieser Liste NICHTS sichern (er nimmt nur, was jetzt angehakt ist). Besser vorher ""Aktualisieren"".`n`nJa = trotzdem planen`nNein = nicht planen"
-        if ("$((Show-HMDialogBox -Owner $script:Window -Text $q -Title 'Server-Backup planen' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { return }
-    }
+    # nicht lesbare Liste: keine eigene Rueckfrage, Hinweis steht im Zeitplan-Fenster (unten, $info)
     $vms = @(Get-HMSbCheckedVms)
     $vols = @(Get-HMSbCheckedVols)
     $hc = [bool]$ui.chkSbHostConfig.IsChecked; $hs = [bool]$ui.chkSbHostSystem.IsChecked; $vf = [bool]$ui.chkSbVerify.IsChecked
@@ -1844,6 +1837,7 @@ function New-HMSbSchedule {
     foreach ($x in $vms) { if ("$x" -match '["|]') { Out-Console "Zeitplan: Name '$x' enthaelt ein nicht erlaubtes Zeichen (Anfuehrungszeichen oder |)." 'Error'; return } }
     $info = "Profil: $($p.Name)   (Platten $($p.DiskPrefix)-...)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })   Pruefen: $(if ($vf) { 'ja' } else { 'nein' })   Host-System: $(if ($hs) { 'ja' } else { 'nein' })`n`nEs gelten die aktuell angehakten VMs und Optionen.$(if (Get-HMSbExportOptions $p) { "`nNach der Sicherung: VM-Export $(@($p.ExportVMs) -join ', ') (Einstellung im Profil - gilt beim Lauf, Button 'VMs exportieren ...')" })"
     if ($hs) { $sv = Format-HMSbSysDriveVms (Get-HMSbSysDriveVms $script:SbVms); if ($sv) { $info += "`n`n$sv" } }
+    if ($ls -eq 'Error') { $info += "`n`nACHTUNG - " + (Get-HMSbListErrorText $p 'Der Zeitplan sichert aus dieser Liste nichts (er nimmt nur, was jetzt angehakt ist). Besser abbrechen und vorher "Aktualisieren".') }
     $r = Show-HMSbScheduleDialog $info
     if (-not $r) { return }
     # andere Sicherungsaufgaben, die sich ueberschneiden (naechste 14 Tage)
