@@ -1265,6 +1265,12 @@ function Set-HMUserMemoryEntry([hashtable]$Memory, [string]$Computer, $Entry, [s
     if ($null -eq $Memory -or -not "$Computer".Trim() -or -not $Entry -or -not ("$($Entry.SID)" -or "$($Entry.Account)")) { return }
     $Memory[(Get-HMComputerKey $Computer $Local)] = [pscustomobject]@{ SID = "$($Entry.SID)"; Account = "$($Entry.Account)"; NoProfile = [bool]$Entry.NoProfile }
 }
+# Taugt der Benutzer fuers Gedaechtnis? Profil aus der Liste (SID) oder vollstaendig eingetragenes Konto (DOM\name bzw. name@domaene)
+function Test-HMMemorableProfile($P) {
+    if (-not $P) { return $false }
+    if ("$($P.SID)") { return $true }
+    return ([bool]$P.NoProfile -and "$($P.Account)".Trim() -match '^[^\\\s]+\\[^\\\s]+$|^[^@\s]+@[^@\s]+$')
+}
 function Get-HMUserMemoryEntry([hashtable]$Memory, [string]$Computer, [string]$Local = $env:COMPUTERNAME) {
     if ($null -eq $Memory) { return $null }
     $k = Get-HMComputerKey $Computer $Local
@@ -1410,9 +1416,12 @@ function Get-HMDeletingWarning([string]$Name, [string]$Action) {
 # PC -> zuletzt gewaehlter Benutzer (Get-HMUserMemoryEntry); gemerkt bei jeder Auswahl, solange der PC verbunden ist
 $script:HMUserMemory = @{}
 function Save-HMUserMemory {
-    # nur eine wirklich getroffene Auswahl aus der Liste merken, keine (halb) getippten Konten
-    if (-not ($script:Target -and $script:Target.Connected)) { return }
-    try { $i = [int]$ui.cmbUser.SelectedIndex; if ($i -ge 0 -and $i -lt @($script:Profiles).Count) { Set-HMUserMemoryEntry $script:HMUserMemory "$($script:Target.Computer)" $script:Profiles[$i] } } catch { }
+    # gemerkt wird der WIRKSAME Benutzer (Listenauswahl oder vollstaendig eingetragenes Konto wie DOM\name) - nur zu festen
+    # Zeitpunkten: Start von Backup, Restore oder einem Werkzeug mit Benutzer, vor dem Neuladen durch HUMig und vor stillem Umschalten.
+    # Nicht bei Auswahlwechsel, Tastendruck oder automatischer Vorauswahl.
+    if (-not ($script:Target -and "$($script:Target.Computer)")) { return }
+    try { $p = Get-SelectedProfile } catch { return }
+    if (Test-HMMemorableProfile $p) { Set-HMUserMemoryEntry $script:HMUserMemory "$($script:Target.Computer)" $p }
 }
 
 # Text im Feld Computer (nur fuer Verbinden, Anmeldedaten und die Anzeige - Ziel einer Aktion ist Get-TargetComputer)
@@ -1451,9 +1460,10 @@ function Confirm-HMTarget([string]$Action) {
     # waehrend Backup/Restore wird nie neu verbunden (das Ziel wuerde mitten im Vorgang wechseln)
     $job = Get-HMBackupRestoreTitle
     $q = Get-HMTargetQuestion $st $Action $job -FieldLocked:([bool]$script:JobRunning)
-    if (-not $q) { return $true }
+    if (-not $q) { Save-HMUserMemory; return $true }
     if ("$((Show-HMDialogBox -Owner $script:Window -Text $q -Title 'Welcher Computer?' -Mode 'YesNo' -Icon 'Question' -Default 'No'))" -ne 'Yes') { $script:HMTargetDeclined = $true; return $false }
     $ui.cmbComputer.Text = $st.Computer; Update-HMTargetLabel; Out-Console "$Action auf $($st.Computer) (Feld Computer zurueckgesetzt)" 'Info'
+    Save-HMUserMemory
     return $true
 }
 # Backup oder Restore laeuft - dazu gehoert die Phase "erst fehlende Programme installieren, dann Restore" ($script:RestoreAfterInstall,
@@ -1549,7 +1559,7 @@ function Update-SidLabel {
     Update-IncrementalInfo
 }
 $ui.lblSid.Add_MouseLeftButtonUp({ $p = Get-SelectedProfile; if ($p -and $p.SID) { [System.Windows.Clipboard]::SetText("$($p.SID)"); Out-Console "SID kopiert: $($p.SID)" 'Success' } })
-$ui.cmbUser.Add_SelectionChanged({ $script:Window.Dispatcher.BeginInvoke([action]{ Save-HMUserMemory; Update-SidLabel }) | Out-Null })
+$ui.cmbUser.Add_SelectionChanged({ $script:Window.Dispatcher.BeginInvoke([action]{ Update-SidLabel }) | Out-Null })
 $ui.cmbUser.Add_KeyUp({ Update-SidLabel })
 
 # Verbinden. -FromField: mit dem PC im Feld Computer (Verbinden, Enter, Lokal, Geraete-Dialog).
@@ -1576,8 +1586,9 @@ function Connect-Target([switch]$FromField) {
     }
     $old = $script:Target
     $comp = $(if ($FromField -or -not $old -or -not "$($old.Computer)") { Get-HMFieldComputer } else { "$($old.Computer)" })
-    # Auswahl des bisherigen PCs ins Gedaechtnis (PC -> Benutzer); angewendet wird sie nur, wenn derselbe PC wieder verbunden wird
-    Save-HMUserMemory
+    # HUMig laedt von sich aus neu (nach Restore, Profil-Werkzeugen, beim Start): wirksamen Benutzer vorher merken.
+    # Verbinden aus dem Feld (Enter, Verbinden, Lokal) merkt nichts - dort gilt, was zuletzt gestartet wurde.
+    if (-not $FromField) { Save-HMUserMemory }
     $same = [bool]($old -and (Test-HMSameComputer $comp "$($old.Computer)"))
     $seq = $script:ConnectSeq
     $script:Target = @{ Computer = $comp; Connected = $false; Connecting = $true; Seq = $seq }
@@ -1760,7 +1771,9 @@ function Start-EngineJob {
         # OnFinished wie bei einem abgebrochenen Vorgang aufrufen, damit Folgeaktionen sauber enden
         # (z.B. Installation vor dem Restore: Merkmal zurueck, Restore wird nicht gestartet)
         $job.Cancel = $true; $job.Error = "$err"; $job.Ended = Get-Date
-        if ($OnFinished) { try { & $OnFinished $job } catch { Out-Console "${Title}: $($_.Exception.Message)" 'Error' } }
+        # Statuszeile "... nicht gestartet" bleibt vorn, auch wenn OnFinished neu verbindet (Set-ConnectStatus)
+        $script:JobEndStatus = @{ Text = "$Title nicht gestartet"; Color = '#FFF38BA8' }
+        if ($OnFinished) { try { & $OnFinished $job } catch { Out-Console "${Title}: $($_.Exception.Message)" 'Error' } finally { $script:JobEndStatus = $null } } else { $script:JobEndStatus = $null }
     }
 }
 # Laufenden Vorgang abbrechen. -Confirmed: ohne Rueckfrage (z.B. am Handy schon bestaetigt)
@@ -2315,6 +2328,7 @@ $ui.btnRestore.Add_Click({
     # Konto des Backups als Ziel vorschlagen, fehlendes lokales Konto anlegen (kann die Auswahl oben aendern)
     if (-not (Invoke-HMRestoreAccountCheck $b $p $mods $comp)) { Out-Console 'Restore abgebrochen.' 'Warning'; return }
     $p = Get-SelectedProfile
+    Save-HMUserMemory   # Gedaechtnis: das nach der Kontopruefung gesetzte Konto (z.B. Konto des Backups ohne Profil)
     if (-not $p) { Out-Console 'Bitte Zielbenutzer waehlen (oder DOMAENE\Benutzer eintragen).' 'Warning'; return }
     if ($p.NoProfile -and -not @($mods | Where-Object { $_.Id -eq 'Usmt' }).Count -and @($mods | Where-Object { $_.Scope -eq 'User' }).Count) {
         Out-Console "$($p.Account) hat an $comp noch kein Profil: Benutzer einmal anmelden lassen oder 'Windows-Einstellungen (USMT)' mitwaehlen." 'Warning'
@@ -2438,6 +2452,7 @@ function Test-HMToolStart($Tag) {
     $d = Get-HMToolDecision "$($Tag.Kind)" (Get-HMTargetState (Get-HMFieldComputer) $script:Target) (Test-HMBackupRestoreRunning)
     if ($d -eq 'Switch') { Select-HMFieldTarget "'$($Tag.Name)'"; return $true }
     if ($d -eq 'Ask') { return (Confirm-HMTarget "'$($Tag.Name)'") }
+    if ("$($Tag.Kind)" -eq 'User') { Save-HMUserMemory }   # mit diesem Benutzer wird gearbeitet
     return $true
 }
 $tc = $ui.pnlToolsComputer

@@ -191,7 +191,7 @@ Describe 'Ziel: Verbinden verwirft veraltete Antworten und behaelt die Auswahl' 
         function Add-ComputerHistory { }
         function Format-ProfileEntry($p) { "$($p.Account)" }
         function Test-HMIsLocal($c) { $false }
-        function Get-SelectedProfile { $i = $ui.cmbUser.SelectedIndex; if ($i -ge 0 -and $i -lt @($script:Profiles).Count) { return $script:Profiles[$i] }; return $null }
+        function Get-SelectedProfile { $i = $ui.cmbUser.SelectedIndex; if ($i -ge 0 -and $i -lt @($script:Profiles).Count) { return $script:Profiles[$i] }; if ("$($ui.cmbUser.Text)".Trim()) { return [pscustomobject]@{ SID = $null; Account = "$($ui.cmbUser.Text)".Trim(); Folder = ''; LocalPath = $null; NoProfile = $true } }; return $null }
         function Invoke-AsyncCommand { param($ScriptBlock, $ArgumentList, $TimeoutSec, $State, $OnComplete) $script:Calls.Add(@{ State = $State; OnComplete = $OnComplete }) }
     }
     BeforeEach {
@@ -256,19 +256,60 @@ Describe 'Ziel: Verbinden verwirft veraltete Antworten und behaelt die Auswahl' 
         $ui.cmbUser.SelectedIndex | Should -Be 0
         (($script:Lines -join "`n") -match 'kein Profil mehr') | Should -BeFalse
     }
-    It 'nur eine Auswahl aus der Liste wird gemerkt, kein getipptes Konto; gemerkter Benutzer mit Infozeile' {
+    It 'Ablauf Umzug: bert aus der Liste, Kontopruefung setzt DOM\neu, Restore legt das Profil an - danach ist DOM\neu gewaehlt' {
+        $ui.cmbComputer.Text = 'PC09'; Connect-Target -FromField
+        $p = @((New-ZielProfile 'S-A' 'DOM\anna' $true), (New-ZielProfile 'S-B' 'DOM\bert'))
+        & $script:Calls[0].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[0].State
+        $ui.cmbUser.SelectedIndex = 1; Save-HMUserMemory                          # Restore gestartet (Rueckfrage zum Ziel frei)
+        $ui.cmbUser.SelectedIndex = -1; $ui.cmbUser.Text = 'DOM\neu'; Save-HMUserMemory   # nach der Kontopruefung
+        Connect-Target                                                           # OnFinished des Restores laedt neu
+        $p2 = @((New-ZielProfile 'S-A' 'DOM\anna' $true), (New-ZielProfile 'S-B' 'DOM\bert'), (New-ZielProfile 'S-N' 'DOM\neu'))
+        & $script:Calls[1].OnComplete ([pscustomobject]@{ Profiles = $p2; Error = $null; WinRM = $null }) $script:Calls[1].State
+        $ui.cmbUser.SelectedIndex | Should -Be 2
+        ($script:Lines -join "`n") | Should -Match 'Benutzer DOM\\neu wie zuletzt an diesem PC gewaehlt'
+        # Restore-Knopf merkt nach der Kontopruefung das dort gesetzte Konto
+        $script:MainSrc | Should -Match "(?s)Invoke-HMRestoreAccountCheck \`$b \`$p \`$mods \`$comp\)\) \{.*?\}\r?\n    \`$p = Get-SelectedProfile\r?\n    Save-HMUserMemory"
+    }
+    It 'Ablauf: PC01/bert Backup gestartet, PC02 verbinden, zurueck zu PC01 - bert' {
         $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
         $p = @((New-ZielProfile 'S-A' 'DOM\anna' $true), (New-ZielProfile 'S-B' 'DOM\bert'))
         & $script:Calls[0].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[0].State
-        $ui.cmbUser.SelectedIndex = -1; $ui.cmbUser.Text = 'DOM\be'   # halb getippt
-        Save-HMUserMemory
+        $ui.cmbUser.SelectedIndex = 1; Save-HMUserMemory                          # Backup gestartet
+        $ui.cmbComputer.Text = 'PC02'; Connect-Target -FromField
+        & $script:Calls[1].OnComplete ([pscustomobject]@{ Profiles = @(New-ZielProfile 'S-C' 'DOM\cara' $true); Error = $null; WinRM = $null }) $script:Calls[1].State
+        $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
+        & $script:Calls[2].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[2].State
+        $ui.cmbUser.SelectedIndex | Should -Be 1
+    }
+    It 'Ablauf: nur angesehen, nichts gestartet, anderer PC, zurueck - normale Vorauswahl' {
+        $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
+        $p = @((New-ZielProfile 'S-A' 'DOM\anna' $true), (New-ZielProfile 'S-B' 'DOM\bert'))
+        & $script:Calls[0].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[0].State
+        $ui.cmbUser.SelectedIndex = 1                                            # nur angesehen
+        $ui.cmbComputer.Text = 'PC02'; Connect-Target -FromField
+        & $script:Calls[1].OnComplete ([pscustomobject]@{ Profiles = @(New-ZielProfile 'S-C' 'DOM\cara' $true); Error = $null; WinRM = $null }) $script:Calls[1].State
+        $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
+        & $script:Calls[2].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[2].State
+        $ui.cmbUser.SelectedIndex | Should -Be 0
         $script:HMUserMemory.Count | Should -Be 0
-        $ui.cmbUser.SelectedIndex = 1; Save-HMUserMemory
-        (Get-HMUserMemoryEntry $script:HMUserMemory 'PC01').SID | Should -Be 'S-B'
-        Connect-Target
+    }
+    It 'Ablauf: automatisches Neuladen nach einem Profil-Werkzeug - Benutzer bleibt' {
+        $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
+        $p = @((New-ZielProfile 'S-A' 'DOM\anna' $true), (New-ZielProfile 'S-B' 'DOM\bert'))
+        & $script:Calls[0].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[0].State
+        $ui.cmbUser.SelectedIndex = 1
+        Connect-Target                                                           # Werkzeug laedt nach dem Ergebnis neu
         & $script:Calls[1].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[1].State
         $ui.cmbUser.SelectedIndex | Should -Be 1
-        ($script:Lines -join "`n") | Should -Match 'Info\|Benutzer DOM\\bert wie zuletzt an diesem PC gewaehlt'
+    }
+    It 'Gedaechtnis: nur Listenauswahl oder vollstaendiges Konto; Auswahlwechsel merkt nichts' {
+        Test-HMMemorableProfile (New-ZielProfile 'S-B' 'DOM\bert') | Should -BeTrue
+        Test-HMMemorableProfile ([pscustomobject]@{ SID = $null; Account = 'DOM\neu'; NoProfile = $true }) | Should -BeTrue
+        Test-HMMemorableProfile ([pscustomobject]@{ SID = $null; Account = 'neu@dom.local'; NoProfile = $true }) | Should -BeTrue
+        Test-HMMemorableProfile ([pscustomobject]@{ SID = $null; Account = 'DOM\'; NoProfile = $true }) | Should -BeFalse
+        Test-HMMemorableProfile ([pscustomobject]@{ SID = $null; Account = 'ber'; NoProfile = $true }) | Should -BeFalse
+        Test-HMMemorableProfile $null | Should -BeFalse
+        $script:MainSrc | Should -Match '\$ui\.cmbUser\.Add_SelectionChanged\(\{ \$script:Window\.Dispatcher\.BeginInvoke\(\[action\]\{ Update-SidLabel \}\)'
     }
     It 'Werkzeugklick mit Tippfehler schaltet still um; zurueck auf PC01 ist derselbe Benutzer wieder gewaehlt' {
         $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
@@ -337,6 +378,7 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
         function Out-Console { }
         function Update-HMTargetLabel { }
         function Connect-Target([switch]$FromField) { $script:Connected = "FromField=$([bool]$FromField)" }
+        function Save-HMUserMemory { }
         function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Asked = @{ Text = $Text; Mode = $Mode; Default = $Default }; return $script:Answer }
     }
     BeforeEach { $script:Asked = $null; $script:Connected = $null; $script:UserMode = $false; $script:JobRunning = $false; $script:JobTitle = ''; $script:RestoreAfterInstall = $null; $script:Target = @{ Computer = 'PC01'; Connected = $true }; $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC02' } } }
@@ -646,8 +688,11 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
         }
         It 'Start wirft: Oberflaeche wird wieder freigegeben ("Vorgang laeuft" zurueck)' {
             $script:LongJobThrows = $true
-            $script:Finished = $null
-            Start-EngineJob -Command 'x' -Ctx @{} -Title 'Backup' -ScriptFiles @('a') -OnFinished { param($j) $script:Finished = $j }
+            $script:Finished = $null; $script:JobEndStatus = $null
+            Start-EngineJob -Command 'x' -Ctx @{} -Title 'Backup' -ScriptFiles @('a') -OnFinished { param($j) $script:Finished = $j; $script:SeenEnd = $script:JobEndStatus }
+            # waehrend OnFinished steht "nicht gestartet" als Ergebnis bereit (Set-ConnectStatus stellt es vor), danach geraeumt
+            $script:SeenEnd.Text | Should -Be 'Backup nicht gestartet'
+            $script:JobEndStatus | Should -BeNullOrEmpty
             @($script:UiCalls) | Should -Be @($true, $false)
             # OnFinished wie bei Abbruch: Folgeaktionen (z.B. Restore nach der Installation) enden sauber
             $script:Finished.Cancel | Should -BeTrue

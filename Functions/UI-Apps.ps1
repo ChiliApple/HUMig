@@ -523,7 +523,9 @@ function Start-HMRestorePrep([hashtable]$Ctx) {
                 }
                 $ok = Start-HMReinstallQueue $script:Window $c.Computer (@($plan.Packages.Keys) + @($plan.Winget.Keys)) -NoConfirm
                 if (-not $ok) { $script:SwQueueDone = $null; $script:RestoreAfterInstall = $null; Out-Console 'Installation nicht gestartet - Restore abgebrochen.' 'Warning' }
-                else { Out-Console "Zuerst werden $($plan.Installable) Programm(e) installiert - der Restore startet danach automatisch." 'Info' }
+                # Ist die Warteschlange schon beim Start gescheitert, ist die Folgeaktion bereits verbraucht (Complete-HMInstallQueue)
+                # und meldet gleich "Restore wird NICHT gestartet" - dann diese Zeile nicht ausgeben
+                elseif ($script:SwQueueDone) { Out-Console "Zuerst werden $($plan.Installable) Programm(e) installiert - der Restore startet danach automatisch." 'Info' }
                 return
             }
         } elseif ($plan -and @($plan.Rows).Count) {
