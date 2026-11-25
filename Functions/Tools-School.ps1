@@ -640,6 +640,9 @@ function Get-HMOriginalPath($Backup, [string]$Rel) {
 function Restore-HMSearchHitsToOrigin($Rows, $Backup, $Win) {
     # schreibt in das Profil des gewaehlten Benutzers: steht im Feld ein anderer PC, nachfragen (wie Backup/Restore)
     if (-not (Confirm-HMTarget "'An Originalort zurueck'")) { return }
+    # Backup nicht erreichbar (z.B. USB-Platte abgezogen): ehrlich melden statt Kopien ohne Quelle zu versuchen
+    $bOk = $false; try { $bOk = Test-Path -LiteralPath "$($Backup.Path)" } catch { $bOk = $false }
+    if (-not $bOk) { [void](Show-HMDialogBox -Owner $Win -Text "Das Backup ist nicht erreichbar (z.B. USB-Platte abgezogen):`n$($Backup.Path)`n`nEs wurde nichts kopiert." -Title 'An Originalort zurueck' -Mode 'OK' -Icon 'Warning'); return }
     $comp = Get-TargetComputer
     $pctx = @{ Computer = $comp; IsRemote = -not (Test-HMIsLocal $comp) }
     $prof = Get-SelectedProfile
@@ -649,7 +652,7 @@ function Restore-HMSearchHitsToOrigin($Rows, $Backup, $Win) {
         $o = Get-HMOriginalPath $Backup "$($x.Pfad)"
         if (-not $o) { $noMap++; continue }
         if ($srcProf -and $prof -and $prof.LocalPath -and ($o -ieq $srcProf -or $o.StartsWith($srcProf + '\', [StringComparison]::OrdinalIgnoreCase))) { $o = "$($prof.LocalPath)".TrimEnd('\') + $o.Substring($srcProf.Length) }
-        $plan += [pscustomobject]@{ Src = (Join-Path $Backup.Path "$($x.Pfad)"); Dst = $o }
+        $plan += [pscustomobject]@{ Src = [System.IO.Path]::Combine("$($Backup.Path)", "$($x.Pfad)"); Dst = $o }
     }
     if (-not $plan.Count) { [void](Show-HMDialogBox -Owner $Win -Text 'Fuer die markierten Dateien ist kein Originalort bekannt (z. B. Registry-Export oder Backup der Vorgaengerversion). "Markierte kopieren nach ..." verwenden.' -Title 'An Originalort zurueck' -Mode 'OK' -Icon 'Information'); return }
     # Ziele unter Windows/Programme/ProgramData kennzeichnen (Kopie laeuft mit Adminrechten)

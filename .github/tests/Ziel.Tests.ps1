@@ -7,6 +7,10 @@ BeforeAll {
     $script:MainFile = Join-Path $script:Root 'HUMig.ps1'
     $script:MainSrc = Get-Content -Raw -LiteralPath $script:MainFile -Encoding UTF8
     $script:MainAst = [System.Management.Automation.Language.Parser]::ParseFile($script:MainFile, [ref]$null, [ref]$null)
+    # Laufwerk fuer reine Texttests: ein Buchstabe, den es auf diesem PC nicht gibt (kein Test haengt von einem Laufwerk ab).
+    # HMZIEL_DRIVE kann ihn fuer eine Gegenprobe festlegen (z.B. 'X:').
+    $used = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name)".ToUpperInvariant() })
+    $script:ND = $(if ($env:HMZIEL_DRIVE) { $env:HMZIEL_DRIVE } else { (@('Q', 'R', 'S', 'T', 'U', 'V', 'W', 'K', 'L', 'N', 'O', 'P') | Where-Object { $used -notcontains $_ } | Select-Object -First 1) + ':' })
     # Quelltext einer Funktion aus HUMig.ps1 (Syntaxbaum), zum Dot-Sourcen im Test
     function Get-ZielFn([string]$Name) {
         $f = @($script:MainAst.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $Name }, $true))[0]
@@ -166,7 +170,7 @@ Describe 'Ziel: Aktionen nehmen PC und Benutzer aus dem Ziel, nie den PC aus dem
         $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC02' }; cmbThreads = [pscustomobject]@{ SelectedItem = 8 } }
         $script:Target = @{ Computer = 'PC01'; Connected = $true }
         function Get-SelectedProfile { New-ZielProfile 'S-1-5-21-1-1001' 'SCHULE\anna' }
-        function Get-BackupRoot { 'X:\BACKUPS' }
+        function Get-BackupRoot { "$($script:ND)\BACKUPS" }
         function Get-BackupOptions { @{} }
         $c = New-BaseCtx
         $c.Computer | Should -Be 'PC01'
@@ -599,20 +603,20 @@ Describe 'Ziel: Umzugs-Assistent bei abgelehnter Rueckfrage' {
 
 Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
     It 'Pfade: gleich, darunter, darueber; kein Treffer bei aehnlichem Namen' {
-        Get-HMPathConflict @('X:\BACKUPS\A') @('x:\backups\a\') | Should -Be 'X:\BACKUPS\A'
-        Get-HMPathConflict @('X:\BACKUPS\A\_GELOESCHT') @('X:\BACKUPS\A') | Should -Be 'X:\BACKUPS\A\_GELOESCHT'
-        Get-HMPathConflict @('X:\BACKUPS\A') @('X:\BACKUPS\A\_GELOESCHT') | Should -Be 'X:\BACKUPS\A'
-        Get-HMPathConflict @('X:\BACKUPS\A') @('X:\BACKUPS\AB') | Should -BeNullOrEmpty
-        Get-HMPathConflict @('X:\BACKUPS\A') @() | Should -BeNullOrEmpty
+        Get-HMPathConflict @("$($script:ND)\BACKUPS\A") @("$($script:ND)\backups\a\") | Should -Be "$($script:ND)\BACKUPS\A"
+        Get-HMPathConflict @("$($script:ND)\BACKUPS\A\_GELOESCHT") @("$($script:ND)\BACKUPS\A") | Should -Be "$($script:ND)\BACKUPS\A\_GELOESCHT"
+        Get-HMPathConflict @("$($script:ND)\BACKUPS\A") @("$($script:ND)\BACKUPS\A\_GELOESCHT") | Should -Be "$($script:ND)\BACKUPS\A"
+        Get-HMPathConflict @("$($script:ND)\BACKUPS\A") @("$($script:ND)\BACKUPS\AB") | Should -BeNullOrEmpty
+        Get-HMPathConflict @("$($script:ND)\BACKUPS\A") @() | Should -BeNullOrEmpty
         # mehrere gegen mehrere (Treffer nicht nur beim letzten Element)
-        Get-HMPathConflict @('X:\n', 'X:\b1') @('X:\b1', 'X:\b2') | Should -Be 'X:\b1'
-        Get-HMPathConflict @('X:\n', 'X:\m') @('X:\b1', 'X:\b2') | Should -BeNullOrEmpty
-        Get-HMPathConflict @('') @('X:\BACKUPS\A') | Should -BeNullOrEmpty
+        Get-HMPathConflict @("$($script:ND)\n", "$($script:ND)\b1") @("$($script:ND)\b1", "$($script:ND)\b2") | Should -Be "$($script:ND)\b1"
+        Get-HMPathConflict @("$($script:ND)\n", "$($script:ND)\m") @("$($script:ND)\b1", "$($script:ND)\b2") | Should -BeNullOrEmpty
+        Get-HMPathConflict @('') @("$($script:ND)\BACKUPS\A") | Should -BeNullOrEmpty
     }
     It 'benutzte Pfade eines Vorgangs: Backup-Ziel, weitergefuehrtes Backup, Restore-Quelle' {
-        @(Get-HMCtxPaths @{ BackupPath = 'X:\B\neu'; ExistingBackup = 'X:\B\alt' }) | Should -Be @('X:\B\neu', 'X:\B\alt')
-        @(Get-HMCtxPaths @{ Backup = [pscustomobject]@{ Path = 'X:\B\r' } }) | Should -Be @('X:\B\r')
-        @(Get-HMCtxPaths @{ CompareA = 'X:\B\1'; CompareB = 'X:\B\2' }) | Should -Be @('X:\B\1', 'X:\B\2')
+        @(Get-HMCtxPaths @{ BackupPath = "$($script:ND)\B\neu"; ExistingBackup = "$($script:ND)\B\alt" }) | Should -Be @("$($script:ND)\B\neu", "$($script:ND)\B\alt")
+        @(Get-HMCtxPaths @{ Backup = [pscustomobject]@{ Path = "$($script:ND)\B\r" } }) | Should -Be @("$($script:ND)\B\r")
+        @(Get-HMCtxPaths @{ CompareA = "$($script:ND)\B\1"; CompareB = "$($script:ND)\B\2" }) | Should -Be @("$($script:ND)\B\1", "$($script:ND)\B\2")
         @(Get-HMCtxPaths @{ Kind = 'Setup' }).Count | Should -Be 0
         @(Get-HMCtxPaths $null).Count | Should -Be 0
     }
@@ -633,24 +637,24 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
             function Out-Console { }
             function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Asked = @{ Text = $Text; Mode = $Mode; Default = $Default }; return $script:Answer }
         }
-        BeforeEach { $script:Asked = $null; $script:JobRunning = $true; $script:JobTitle = 'Restore'; $script:JobCtx = @{ Backup = [pscustomobject]@{ Path = 'X:\B\r' } }; $script:RestoreAfterInstall = $null }
+        BeforeEach { $script:Asked = $null; $script:JobRunning = $true; $script:JobTitle = 'Restore'; $script:JobCtx = @{ Backup = [pscustomobject]@{ Path = "$($script:ND)\B\r" } }; $script:RestoreAfterInstall = $null }
         It 'Restore laeuft aus diesem Backup: Warnung mit Standard Nein' {
             $script:Answer = 'No'
-            Confirm-HMBackupNotInUse @('X:\B\r') 'r' | Should -BeFalse
+            Confirm-HMBackupNotInUse @("$($script:ND)\B\r") 'r' | Should -BeFalse
             $script:Asked.Default | Should -Be 'No'
             $script:Asked.Text | Should -Match "vom laufenden Vorgang 'Restore' benutzt"
             $script:Answer = 'Yes'
-            Confirm-HMBackupNotInUse @('X:\B\r\_GELOESCHT') 'r' | Should -BeTrue
+            Confirm-HMBackupNotInUse @("$($script:ND)\B\r\_GELOESCHT") 'r' | Should -BeTrue
         }
         It 'anderes Backup oder kein Vorgang: keine Rueckfrage' {
-            Confirm-HMBackupNotInUse @('X:\B\anders') 'anders' | Should -BeTrue
+            Confirm-HMBackupNotInUse @("$($script:ND)\B\anders") 'anders' | Should -BeTrue
             $script:JobRunning = $false
-            Confirm-HMBackupNotInUse @('X:\B\r') 'r' | Should -BeTrue
+            Confirm-HMBackupNotInUse @("$($script:ND)\B\r") 'r' | Should -BeTrue
             $script:Asked | Should -BeNullOrEmpty
         }
         It 'Installationsphase vor dem Restore: dessen Backup gilt als benutzt' {
-            $script:JobRunning = $false; $script:RestoreAfterInstall = @{ Backup = [pscustomobject]@{ Path = 'X:\B\inst' } }; $script:Answer = 'No'
-            Confirm-HMBackupNotInUse @('X:\B\inst') 'inst' | Should -BeFalse
+            $script:JobRunning = $false; $script:RestoreAfterInstall = @{ Backup = [pscustomobject]@{ Path = "$($script:ND)\B\inst" } }; $script:Answer = 'No'
+            Confirm-HMBackupNotInUse @("$($script:ND)\B\inst") 'inst' | Should -BeFalse
             $script:Asked.Text | Should -Match "vom laufenden Vorgang 'Restore' benutzt \(der Restore liest daraus\)"
         }
     }
@@ -671,16 +675,16 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
             $ui = @{ pbMain = [pscustomobject]@{ Value = 0 } }
         }
         It 'Backup wird geloescht: Warnung, bei Nein startet nichts' {
-            $script:HMDeleting.Add('X:\B\r')
+            $script:HMDeleting.Add("$($script:ND)\B\r")
             $script:Answer = 'No'
-            Start-EngineJob -Command 'x' -Ctx @{ Backup = [pscustomobject]@{ Path = 'X:\B\r' } } -Title 'Restore' -ScriptFiles @('a')
+            Start-EngineJob -Command 'x' -Ctx @{ Backup = [pscustomobject]@{ Path = "$($script:ND)\B\r" } } -Title 'Restore' -ScriptFiles @('a')
             $script:Asked.Default | Should -Be 'No'
             $script:LongJobStarted | Should -BeFalse
             $script:UiCalls.Count | Should -Be 0
         }
         It 'anderes Backup wird geloescht: startet ohne Rueckfrage und merkt sich den Kontext' {
-            $script:HMDeleting.Add('X:\B\anders')
-            $ctx = @{ Backup = [pscustomobject]@{ Path = 'X:\B\r' } }
+            $script:HMDeleting.Add("$($script:ND)\B\anders")
+            $ctx = @{ Backup = [pscustomobject]@{ Path = "$($script:ND)\B\r" } }
             Start-EngineJob -Command 'x' -Ctx $ctx -Title 'Restore' -ScriptFiles @('a')
             $script:Asked | Should -BeNullOrEmpty
             $script:LongJobStarted | Should -BeTrue
@@ -716,33 +720,43 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
         }
         BeforeEach {
             $script:Async = $null; $script:Texts = New-Object System.Collections.Generic.List[string]; $script:Answers = New-Object System.Collections.Queue
-            $script:CurRoot = 'X:\B'; $script:BackupInfos = @(); $script:JobRunning = $false; $script:JobCtx = $null; $script:JobTitle = ''; $script:RestoreAfterInstall = $null
+            $script:BRoot = Join-Path $TestDrive 'B'; [void](New-Item -ItemType Directory -Path $script:BRoot -Force)
+            $script:CurRoot = $script:BRoot; $script:BackupInfos = @(); $script:JobRunning = $false; $script:JobCtx = $null; $script:JobTitle = ''; $script:RestoreAfterInstall = $null
             $script:HMDeleting = New-Object System.Collections.Generic.List[string]; $script:Engine = 'x'
             $script:Win = [pscustomobject]@{ Closed = $false } | Add-Member -MemberType ScriptMethod -Name Close -Value { $this.Closed = $true } -PassThru
         }
         It 'Backup-Ordner inzwischen gewechselt: nichts loeschen' {
-            $script:CurRoot = 'Y:\NEU'
+            $script:CurRoot = Join-Path $TestDrive 'NEU'
             $script:Answers.Enqueue('OK')
-            Remove-HMBackupFolders $script:Win 'X:\B' @('alt1')
+            Remove-HMBackupFolders $script:Win $script:BRoot @('alt1')
             $script:Async | Should -BeNullOrEmpty
             $script:Texts[0] | Should -Match 'Backup-Ordner wurde gewechselt'
         }
         It 'Restore laeuft aus einem der Backups: deutliche Warnung, bei Nein nichts' {
-            $script:JobRunning = $true; $script:JobTitle = 'Restore'; $script:JobCtx = @{ Backup = [pscustomobject]@{ Path = 'X:\B\alt1' } }
+            $script:JobRunning = $true; $script:JobTitle = 'Restore'; $script:JobCtx = @{ Backup = [pscustomobject]@{ Path = (Join-Path $script:BRoot 'alt1') } }
             $script:Answers.Enqueue('Yes'); $script:Answers.Enqueue('No')
-            Remove-HMBackupFolders $script:Win 'X:\B' @('alt1', 'alt2')
+            Remove-HMBackupFolders $script:Win $script:BRoot @('alt1', 'alt2')
             $script:Async | Should -BeNullOrEmpty
             $script:Win.Closed | Should -BeFalse
             $script:Texts[1] | Should -Match "Das Backup 'alt1' wird gerade vom laufenden Vorgang 'Restore' benutzt"
         }
+        It 'Backup-Ordner nicht erreichbar (z.B. USB-Platte abgezogen): Meldung, nichts geloescht' {
+            $gone = Join-Path $TestDrive 'abgezogen'
+            $script:CurRoot = $gone
+            $script:Answers.Enqueue('OK')
+            Remove-HMBackupFolders $script:Win $gone @('alt1')
+            $script:Async | Should -BeNullOrEmpty
+            $script:Texts[0] | Should -Match 'Backup-Ordner ist nicht erreichbar'
+            $script:Texts[0] | Should -Match 'Es wurde nichts geloescht'
+        }
         It 'ohne Konflikt: loescht, merkt die Pfade bis zum Ende der Loeschung' {
             $script:Answers.Enqueue('Yes')
-            Remove-HMBackupFolders $script:Win 'X:\B' @('alt1')
+            Remove-HMBackupFolders $script:Win $script:BRoot @('alt1')
             $script:Async | Should -Not -BeNullOrEmpty
             $script:Win.Closed | Should -BeTrue
-            @($script:HMDeleting) | Should -Be @('X:\B\alt1')
+            @($script:HMDeleting) | Should -Be @((Join-Path $script:BRoot 'alt1'))
             function Update-HMBackupOverview { }
-            & $script:Async.OnComplete @('OK X:\B\alt1') $script:Async.State
+            & $script:Async.OnComplete @("OK $(Join-Path $script:BRoot 'alt1')") $script:Async.State
             $script:HMDeleting.Count | Should -Be 0
         }
     }
@@ -760,21 +774,26 @@ Describe 'Ziel: Im Backup suchen - An Originalort zurueck' {
         function Get-HMProtectedTargetRoot { $null }
         function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Asked = $Text; return 'No' }
     }
-    BeforeEach { $script:TargetAsked = $null; $script:TargetOk = $true; $script:Asked = $null; $script:Mapped = 0; $script:Sel = $null }
+    BeforeEach { $script:TargetAsked = $null; $script:TargetOk = $true; $script:Asked = $null; $script:Mapped = 0; $script:Sel = $null; $script:BkDir = Join-Path $TestDrive 'Bk'; [void](New-Item -ItemType Directory -Path $script:BkDir -Force) }
+    It 'Backup nicht erreichbar (z.B. USB-Platte abgezogen): Meldung, nichts kopiert' {
+        Restore-HMSearchHitsToOrigin @([pscustomobject]@{ Pfad = 'x' }) ([pscustomobject]@{ Path = (Join-Path $TestDrive 'abgezogen'); ProfilePath = 'C:\Users\alt' }) $null
+        $script:Asked | Should -Match 'Das Backup ist nicht erreichbar'
+        $script:Mapped | Should -Be 0
+    }
     It 'anderer PC im Feld und abgelehnt: nichts' {
         $script:TargetOk = $false
-        Restore-HMSearchHitsToOrigin @([pscustomobject]@{ Pfad = 'x' }) ([pscustomobject]@{ Path = 'X:\B\b'; ProfilePath = 'C:\Users\alt' }) $null
+        Restore-HMSearchHitsToOrigin @([pscustomobject]@{ Pfad = 'x' }) ([pscustomobject]@{ Path = $script:BkDir; ProfilePath = 'C:\Users\alt' }) $null
         $script:TargetAsked | Should -Be "'An Originalort zurueck'"
         $script:Mapped | Should -Be 0
         $script:Asked | Should -BeNullOrEmpty
     }
     It 'kein Benutzer gewaehlt (z.B. nach stillem Umschalten): Rueckfrage sagt klar, wohin Profildateien gehen' {
-        Restore-HMSearchHitsToOrigin @([pscustomobject]@{ Pfad = 'x' }) ([pscustomobject]@{ Path = 'X:\B\b'; ProfilePath = 'C:\Users\alt' }) $null
+        Restore-HMSearchHitsToOrigin @([pscustomobject]@{ Pfad = 'x' }) ([pscustomobject]@{ Path = $script:BkDir; ProfilePath = 'C:\Users\alt' }) $null
         $script:Asked | Should -Match 'ACHTUNG: An PC02 ist kein Benutzer gewaehlt\. 1 Datei\(en\) aus dem Profil gehen an den Profilpfad aus dem Backup \(C:\\Users\\alt\)\.'
     }
     It 'Benutzer gewaehlt: Profildateien gehen in dessen Profil, keine Warnung' {
         $script:Sel = New-ZielProfile 'S-N' 'PC02\neu'
-        Restore-HMSearchHitsToOrigin @([pscustomobject]@{ Pfad = 'x' }) ([pscustomobject]@{ Path = 'X:\B\b'; ProfilePath = 'C:\Users\alt' }) $null
+        Restore-HMSearchHitsToOrigin @([pscustomobject]@{ Pfad = 'x' }) ([pscustomobject]@{ Path = $script:BkDir; ProfilePath = 'C:\Users\alt' }) $null
         $script:Asked | Should -Match 'C:\\Users\\neu\\Desktop\\a\.txt'
         $script:Asked | Should -Not -Match 'kein Benutzer gewaehlt'
     }

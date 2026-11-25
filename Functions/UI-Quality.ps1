@@ -620,6 +620,12 @@ function Remove-HMBackupFolders($Win, [string]$Root, [string[]]$Names) {
         [void](Show-HMDialogBox -Owner $Win -Text "Der Backup-Ordner wurde gewechselt, seit dieses Fenster offen ist.`n`nBitte 'Alte loeschen' neu oeffnen." -Title 'Backups loeschen' -Mode 'OK' -Icon 'Information')
         return
     }
+    # Backup-Ordner nicht erreichbar (z.B. USB-Platte abgezogen): ehrlich melden statt still nichts bzw. mit Fehlern zu loeschen
+    $rootOk = $false; try { $rootOk = Test-Path -LiteralPath $Root } catch { $rootOk = $false }
+    if (-not $rootOk) {
+        [void](Show-HMDialogBox -Owner $Win -Text "Der Backup-Ordner ist nicht erreichbar (z.B. USB-Platte abgezogen):`n$Root`n`nEs wurde nichts geloescht." -Title 'Backups loeschen' -Mode 'OK' -Icon 'Warning')
+        return
+    }
     # Loeschen ist endgueltig -> immer nachfragen, mit Status je Backup
     $info = @{}; foreach ($b in @($script:BackupInfos)) { if ($b) { $info["$($b.Name)"] = $b } }
     $lines = @($Names | ForEach-Object { if ($info.ContainsKey($_)) { "$_  ($(Format-HMBackupStatus $info[$_]))" } else { $_ } })
@@ -633,7 +639,7 @@ function Remove-HMBackupFolders($Win, [string]$Root, [string[]]$Names) {
     $last = @($newest.Values | Where-Object { $Names -contains "$($_.Name)" } | ForEach-Object { "$($_.Name)" })
     if ($last.Count) { $list += "`n`nACHTUNG - das ist das NEUESTE brauchbare Backup dieses PCs/Benutzers:`n$($last -join "`n")" }
     if ("$((Show-HMDialogBox -Owner $Win -Text ("$($Names.Count) Backup(s) endgueltig loeschen?`n`n$list") -Title 'Backups loeschen' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
-    $paths = @($Names | ForEach-Object { Join-Path $Root $_ })
+    $paths = @($Names | ForEach-Object { [System.IO.Path]::Combine($Root, $_) })   # reiner Text, Join-Path prueft das Laufwerk
     # laeuft ein Vorgang mit einem dieser Backups (Restore daraus, Backup hinein): deutliche Warnung, Standard Nein
     $uc = Get-HMUsedBackupConflict $paths
     if ($uc) {
