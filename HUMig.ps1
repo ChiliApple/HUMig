@@ -1281,20 +1281,34 @@ function Get-HMTargetLabel($State) {
         default      { 'nicht verbunden' }
     }
     $col = switch ("$($State.Conn)") { 'Connected' { '#FFA6E3A1' } 'Connecting' { '#FFF9E2AF' } 'Failed' { '#FFFAB387' } default { '#FFA6ADC8' } }
+    $tip = 'Auf diesen Computer und seine Benutzerliste wirken Backup, Restore und Werkzeuge.'
     if ("$($State.Kind)" -eq 'Differs') {
-        $t += "   |   im Feld steht $($State.Field): Enter oder Verbinden = mit $($State.Field) verbinden"
+        # kurz halten (lange Namen, schmales Fenster): Namen vor dem ersten Punkt, wenn sie sich dann noch unterscheiden;
+        # der ganze Satz mit den vollen Namen steht im Tooltip
+        $sh = { param($n) if ("$n" -match '^\d{1,3}(\.\d{1,3}){3}$') { "$n" } else { ("$n" -split '\.')[0] } }
+        $sf = & $sh $State.Field; $sc = & $sh $State.Computer
+        if ($sf -ieq $sc) { $sf = $State.Field; $sc = $State.Computer }
+        $base = switch ("$($State.Conn)") { 'Connected' { "verbunden mit $sc" } 'Connecting' { "verbinde mit $sc ..." } 'Failed' { "nicht verbunden: $sc (fehlgeschlagen)" } default { 'nicht verbunden' } }
+        $t = "$base   |   im Feld: $sf (Enter = verbinden)"
+        $tip = "Im Feld Computer steht $($State.Field), Ziel ist aber $($State.Computer). Enter oder Verbinden = mit $($State.Field) verbinden. Bis dahin fragt jeder Vorgang nach.`n`n$tip"
         if ("$($State.Conn)" -ne 'Failed') { $col = '#FFF9E2AF' }
     }
-    return [pscustomobject]@{ Text = $t; Color = $col }
+    return [pscustomobject]@{ Text = $t; Color = $col; Tip = $tip }
 }
 # Rueckfrage, wenn ein Vorgang startet, waehrend im Feld ein anderer PC steht als das Ziel ($null = keine Rueckfrage noetig)
-function Get-HMTargetQuestion($State, [string]$Action) {
+# -RunningJob: waehrend eines Vorgangs wird nicht neu verbunden - dann nur Ja (auf dem Ziel) oder Nein (nichts tun)
+function Get-HMTargetQuestion($State, [string]$Action, [string]$RunningJob = '') {
     if ("$($State.Kind)" -ne 'Differs') { return $null }
     $f = $State.Field; $c = $State.Computer
     $was = switch ("$($State.Conn)") {
         'Connected'  { "verbunden ist $c" }
         'Connecting' { "die Verbindung zu $c wird gerade aufgebaut" }
         default      { "gewaehlt ist $c (nicht verbunden)" }
+    }
+    if ($RunningJob) {
+        return ("Im Feld Computer steht $f, $was.`n`n$Action wuerde auf $c laufen, nicht auf $f. Waehrend '$RunningJob' laeuft, wird nicht neu verbunden.`n`n" +
+            "Ja = $Action auf $c ausfuehren (das Feld wird auf $c zurueckgesetzt)`n" +
+            "Nein = nichts tun (mit $f erst nach dem Vorgang verbinden: Enter oder Verbinden)")
     }
     return ("Im Feld Computer steht $f, $was.`n`n$Action wuerde auf $c laufen, nicht auf $f.`n`n" +
         "Ja = zuerst mit $f verbinden ($Action startet danach nicht von selbst)`n" +
@@ -1329,6 +1343,15 @@ function Select-HMProfileIndex($Profiles, $Previous, [bool]$SamePc, [bool]$IsLoc
     if (-not $sel) { $sel = @($list | Sort-Object { "$($_.LastUse)" } -Descending)[0] }
     if (-not $sel) { return -1 }
     return [array]::IndexOf($list, $sel)
+}
+# Ist $Profile der bisher gewaehlte Benutzer? Gleiche Regeln wie Select-HMProfileIndex (SID, Konto, Konto ohne Domaene)
+function Test-HMProfileKept($Candidate, $Previous) {
+    if (-not $Candidate -or -not $Previous) { return $false }
+    if ("$($Previous.SID)" -and "$($Candidate.SID)" -eq "$($Previous.SID)") { return $true }
+    $acc = "$($Previous.Account)".Trim()
+    if (-not $acc) { return $false }
+    if ("$($Candidate.Account)" -ieq $acc) { return $true }
+    return ($acc -notmatch '\\' -and "$($Candidate.Account)".Split('\')[-1] -ieq $acc)
 }
 # Liegt einer der Pfade A im oder ueber einem der Pfade B (oder ist gleich)? Rueckgabe: erster Treffer (Pfad aus A) oder $null
 function Get-HMPathConflict([string[]]$A, [string[]]$B) {
@@ -1376,11 +1399,20 @@ function Update-HMTargetLabel {
     $l = Get-HMTargetLabel (Get-HMTargetState (Get-HMFieldComputer) $script:Target)
     $ui.lblConnected.Text = $l.Text
     $ui.lblConnected.Foreground = Get-ConsoleBrush $l.Color
+    $ui.lblConnected.ToolTip = $l.Tip
 }
 # Vor jedem Vorgang: steht im Feld ein anderer PC als das Ziel, nachfragen statt still zu mischen. $true = Vorgang starten
 function Confirm-HMTarget([string]$Action) {
     if ($script:UserMode) { return $true }
     $st = Get-HMTargetState (Get-HMFieldComputer) $script:Target
+    # laeuft ein Vorgang (z.B. Werkzeug waehrend des Restores), nicht neu verbinden: sonst wechselt das Ziel mitten im Vorgang
+    if ($script:JobRunning) {
+        $q = Get-HMTargetQuestion $st $Action "$($script:JobTitle)"
+        if (-not $q) { return $true }
+        if ("$((Show-HMDialogBox -Owner $script:Window -Text $q -Title 'Welcher Computer?' -Mode 'YesNo' -Icon 'Question' -Default 'No'))" -ne 'Yes') { return $false }
+        $ui.cmbComputer.Text = $st.Computer; Update-HMTargetLabel; Out-Console "$Action auf $($st.Computer) (Feld Computer zurueckgesetzt)" 'Info'
+        return $true
+    }
     $q = Get-HMTargetQuestion $st $Action
     if (-not $q) { return $true }
     $a = "$((Show-HMDialogBox -Owner $script:Window -Text $q -Title 'Welcher Computer?' -Mode 'YesNoCancel' -Icon 'Question' -Default 'Cancel'))"
@@ -1522,8 +1554,9 @@ function Connect-Target([switch]$FromField) {
         $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
         $ix = Select-HMProfileIndex $script:Profiles $st.Prev ([bool]$st.Same) (Test-HMIsLocal $comp) $me
         if ($ix -ge 0) { $ui.cmbUser.SelectedIndex = $ix }
-        if ($st.Same -and $st.Prev -and $ix -ge 0 -and "$($st.Prev.Account)" -and -not ("$($script:Profiles[$ix].Account)" -ieq "$($st.Prev.Account)" -or ("$($st.Prev.SID)" -and "$($script:Profiles[$ix].SID)" -eq "$($st.Prev.SID)"))) {
-            Out-Console "Benutzer $($st.Prev.Account) gibt es an $comp nicht mehr - Auswahl: $($script:Profiles[$ix].Account)" 'Warning'
+        if ($st.Same -and $st.Prev -and "$($st.Prev.Account)" -and $ix -ge 0 -and -not (Test-HMProfileKept $script:Profiles[$ix] $st.Prev)) {
+            if ($st.Prev.NoProfile) { Out-Console "Konto $($st.Prev.Account) hat an $comp noch kein Profil - Auswahl: $($script:Profiles[$ix].Account)" 'Warning' }
+            else { Out-Console "Benutzer $($st.Prev.Account) hat an $comp kein Profil mehr - Auswahl: $($script:Profiles[$ix].Account)" 'Warning' }
         }
         Out-Console "$($script:Profiles.Count) Benutzerprofile auf $comp" 'Success'
         if ($null -ne $r.WinRM) {
@@ -2278,7 +2311,7 @@ $ui.btnOverview.Add_Click({ Update-HMBackupOverview -Open })
 $ui.btnApps.Add_Click({ Start-HMAppDetect -Show })
 $ui.btnFeedback.Add_Click({ Start-HMAppFeedback -Source 'Detected' })
 $ui.btnFeedbackR.Add_Click({ Start-HMAppFeedback -Source 'Backup' })
-$ui.btnBackupSchedule.Add_Click({ New-HMBackupSchedule })
+$ui.btnBackupSchedule.Add_Click({ if (Confirm-HMTarget 'Zeitplan') { New-HMBackupSchedule } })
 $ui.btnBackupSchedule.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMBackupSchedules })
 $ui.btnApps.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMAppCatalog })
 $ui.btnReinstall.Add_Click({ Start-HMAppReinstall })

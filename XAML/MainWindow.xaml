@@ -255,7 +255,7 @@
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Computer:" Style="{StaticResource Lbl}"/>
-                    <TextBlock x:Name="lblConnected" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="4" Text="nicht verbunden" Foreground="{StaticResource CatSubtext}" FontSize="11" Margin="2,0,4,4" TextTrimming="CharacterEllipsis" ToolTip="Auf diesen Computer und seine Benutzerliste wirken Backup, Restore und Werkzeuge. Steht im Feld ein anderer Name: Enter oder Verbinden"/>
+                    <TextBlock x:Name="lblConnected" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="5" Text="nicht verbunden" Foreground="{StaticResource CatSubtext}" FontSize="11" Margin="2,0,4,4" TextTrimming="CharacterEllipsis" ToolTip="Auf diesen Computer und seine Benutzerliste wirken Backup, Restore und Werkzeuge. Steht im Feld ein anderer Name: Enter oder Verbinden"/>
                     <ComboBox x:Name="cmbComputer" Grid.Row="0" Grid.Column="1" IsEditable="True" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Dieser PC (lokal) oder Name/IP eines anderen PCs (Remote-Backup/-Restore ueber C$ und WinRM). Enter = Verbinden"/>
                     <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal">
                         <Button x:Name="btnConnect" Content="Verbinden" Style="{StaticResource BtnBlue}" ToolTip="Links: Benutzerprofile des PCs laden + Verbindung pruefen | Rechts: andere Anmeldedaten fuer diesen PC"/>

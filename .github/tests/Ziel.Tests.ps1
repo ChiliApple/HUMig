@@ -53,8 +53,15 @@ Describe 'Ziel: Feld gegen verbundenen PC' {
         $l.Text | Should -Be 'verbunden mit PC01'
         $l.Color | Should -Be '#FFA6E3A1'
         $l = Get-HMTargetLabel (Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connected = $true } 'EIGEN')
-        $l.Text | Should -Match '^verbunden mit PC01 .*im Feld steht PC02: Enter oder Verbinden = mit PC02 verbinden$'
+        $l.Text | Should -Be 'verbunden mit PC01   |   im Feld: PC02 (Enter = verbinden)'
         $l.Color | Should -Be '#FFF9E2AF'
+        $l.Tip | Should -Match '^Im Feld Computer steht PC02, Ziel ist aber PC01\. Enter oder Verbinden = mit PC02 verbinden\.'
+        (Get-HMTargetLabel (Get-HMTargetState 'PC02' @{ Computer = 'PC01' } 'EIGEN')).Text | Should -Be 'nicht verbunden: PC01 (fehlgeschlagen)   |   im Feld: PC02 (Enter = verbinden)'
+        # lange Namen kurz, wenn eindeutig; sonst voll; IP-Adressen nie gekuerzt
+        (Get-HMTargetLabel (Get-HMTargetState 'pc02.a.local' @{ Computer = 'pc01.a.local'; Connected = $true } 'EIGEN')).Text | Should -Be 'verbunden mit pc01   |   im Feld: pc02 (Enter = verbinden)'
+        (Get-HMTargetLabel (Get-HMTargetState 'pc01.b.local' @{ Computer = 'pc01.a.local'; Connected = $true } 'EIGEN')).Text | Should -Be 'verbunden mit pc01.a.local   |   im Feld: pc01.b.local (Enter = verbinden)'
+        (Get-HMTargetLabel (Get-HMTargetState '203.0.113.6' @{ Computer = '203.0.113.5'; Connected = $true } 'EIGEN')).Text | Should -Be 'verbunden mit 203.0.113.5   |   im Feld: 203.0.113.6 (Enter = verbinden)'
+        (Get-HMTargetLabel (Get-HMTargetState 'pc02.a.local' @{ Computer = 'pc01.a.local'; Connected = $true } 'EIGEN')).Tip | Should -Match 'steht pc02\.a\.local, Ziel ist aber pc01\.a\.local'
         (Get-HMTargetLabel (Get-HMTargetState 'PC01' @{ Computer = 'PC01'; Connecting = $true } 'EIGEN')).Text | Should -Be 'verbinde mit PC01 ...'
         (Get-HMTargetLabel (Get-HMTargetState 'PC01' @{ Computer = 'PC01' } 'EIGEN')).Text | Should -Match '^nicht verbunden: PC01 \(Verbindung fehlgeschlagen'
         (Get-HMTargetLabel (Get-HMTargetState 'PC01' $null 'EIGEN')).Text | Should -Be 'nicht verbunden'
@@ -69,6 +76,12 @@ Describe 'Ziel: Feld gegen verbundenen PC' {
         $q | Should -Match 'Abbrechen = nichts tun$'
         (Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connecting = $true } 'EIGEN') 'Restore') | Should -Match 'die Verbindung zu PC01 wird gerade aufgebaut'
         (Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01' } 'EIGEN') 'Restore') | Should -Match 'gewaehlt ist PC01 \(nicht verbunden\)'
+        # waehrend eines Vorgangs: kein Verbinden anbieten
+        $q = Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connected = $true } 'EIGEN') "'Netzwerktest'" 'Restore'
+        $q | Should -Match "Waehrend 'Restore' laeuft, wird nicht neu verbunden\."
+        $q | Should -Match "Ja = 'Netzwerktest' auf PC01 ausfuehren \(das Feld wird auf PC01 zurueckgesetzt\)"
+        $q | Should -Match 'Nein = nichts tun \(mit PC02 erst nach dem Vorgang verbinden: Enter oder Verbinden\)$'
+        $q | Should -Not -Match 'zuerst mit'
     }
     It 'Antwort eines Verbindens zaehlt nur, wenn sie zum neuesten gehoert' {
         Test-HMConnectCurrent 3 3 | Should -BeTrue
@@ -179,6 +192,14 @@ Describe 'Ziel: Vorauswahl nach dem Verbinden' {
         Select-HMProfileIndex $l ([pscustomobject]@{ SID = $null; Account = 'pc01\BERT' }) $true $false '' | Should -Be 1
         Select-HMProfileIndex $l ([pscustomobject]@{ SID = $null; Account = 'bert' }) $true $false '' | Should -Be 1
     }
+    It 'Auswahl behalten erkennt dieselben Faelle wie die Vorauswahl (keine falsche Warnung)' {
+        $p = New-ZielProfile 'S-B' 'PC01\bert'
+        Test-HMProfileKept $p ([pscustomobject]@{ SID = 'S-B'; Account = 'PC01\bert' }) | Should -BeTrue
+        Test-HMProfileKept $p ([pscustomobject]@{ SID = $null; Account = 'pc01\BERT' }) | Should -BeTrue
+        Test-HMProfileKept $p ([pscustomobject]@{ SID = $null; Account = 'bert' }) | Should -BeTrue
+        Test-HMProfileKept $p ([pscustomobject]@{ SID = 'S-X'; Account = 'PC01\xaver' }) | Should -BeFalse
+        Test-HMProfileKept $p $null | Should -BeFalse
+    }
     It 'anderer PC oder Benutzer weg: angemeldet, geladen, zuletzt verwendet; leer = -1' {
         $l = @((New-ZielProfile 'S-A' 'PC01\anna' $false $false '2026-01-01'), (New-ZielProfile 'S-B' 'PC01\bert' $false $true '2025-01-01'), (New-ZielProfile 'S-C' 'PC01\cara' $true))
         Select-HMProfileIndex $l ([pscustomobject]@{ SID = 'S-B' }) $false $false '' | Should -Be 2
@@ -199,7 +220,7 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
         function Connect-Target([switch]$FromField) { $script:Connected = "FromField=$([bool]$FromField)" }
         function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Asked = @{ Text = $Text; Mode = $Mode; Default = $Default }; return $script:Answer }
     }
-    BeforeEach { $script:Asked = $null; $script:Connected = $null; $script:UserMode = $false; $script:Target = @{ Computer = 'PC01'; Connected = $true }; $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC02' } } }
+    BeforeEach { $script:Asked = $null; $script:Connected = $null; $script:UserMode = $false; $script:JobRunning = $false; $script:Target = @{ Computer = 'PC01'; Connected = $true }; $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC02' } } }
     It 'Feld passt: keine Rueckfrage' {
         $ui.cmbComputer.Text = 'pc01'
         Confirm-HMTarget 'Backup' | Should -BeTrue
@@ -224,6 +245,20 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
         $ui.cmbComputer.Text | Should -Be 'PC02'
         $script:Connected | Should -BeNullOrEmpty
     }
+    It 'waehrend eines Vorgangs: nie neu verbinden, Ja = auf dem Ziel, Standard Nein' {
+        $script:JobRunning = $true; $script:JobTitle = 'Restore'
+        $script:Answer = 'No'
+        Confirm-HMTarget "'Netzwerktest'" | Should -BeFalse
+        $script:Asked.Mode | Should -Be 'YesNo'
+        $script:Asked.Default | Should -Be 'No'
+        $script:Connected | Should -BeNullOrEmpty
+        $ui.cmbComputer.Text | Should -Be 'PC02'
+        $script:Answer = 'Yes'
+        Confirm-HMTarget "'Netzwerktest'" | Should -BeTrue
+        $script:Connected | Should -BeNullOrEmpty
+        $ui.cmbComputer.Text | Should -Be 'PC01'
+        $script:JobRunning = $false
+    }
     It 'Benutzer-Modus: keine Rueckfrage' {
         $script:UserMode = $true
         Confirm-HMTarget 'Backup' | Should -BeTrue
@@ -235,6 +270,7 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
         $script:MainSrc | Should -Match "btnProfileSize\.Add_Click\(\{ if \(Confirm-HMTarget 'Groesse ermitteln'\)"
         $script:MainSrc | Should -Match "if \(-not \(Confirm-HMTarget 'Vorab-Pruefung'\)\) \{ return \}"
         (Get-ZielFn 'Get-SelectedProfilePath') | Should -Match "Confirm-HMTarget 'Ordner oeffnen'"
+        $script:MainSrc | Should -Match "btnBackupSchedule\.Add_Click\(\{ if \(Confirm-HMTarget 'Zeitplan'\) \{ New-HMBackupSchedule \} \}\)"
     }
     It 'Verbinden aus dem Feld nur ueber Verbinden, Enter, Lokal und den Geraete-Dialog' {
         $script:MainSrc | Should -Match '\$ui\.btnConnect\.Add_Click\(\{ Connect-Target -FromField \}\)'
