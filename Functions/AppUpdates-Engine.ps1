@@ -472,7 +472,8 @@ function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payloa
     }
     # Kennung dieses Laufs: die Laufordner am Ziel heissen run_<Kennung>_..., damit "Abbrechen" genau sie trifft
     $tag = [guid]::NewGuid().ToString('N').Substring(0, 16)
-    $Payload = $Payload.Clone(); $Payload.RunTag = $tag
+    $Payload = if ($Payload) { $Payload.Clone() } else { @{} }
+    $Payload.RunTag = $tag
     # entfernte PCs als Hintergrundauftrag starten, waehrenddessen den eigenen PC bearbeiten
     $rj = $null
     if ($rem.Count) {

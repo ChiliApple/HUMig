@@ -1254,16 +1254,16 @@ function Start-HMProfileAssign {
         $cred = New-Object System.Management.Automation.PSCredential ('x', $f.Pw)
     }
     if (-not (Confirm-Action "Profil $($p.LocalPath)`nvon $($p.Account)`nan $t uebergeben (auf $c)?`n`nDer Profil-Eintrag des alten Kontos wird entfernt (Sicherung unter ProgramData\HUMig\ProfilZuweisung).`nDauer: je nach Profilgroesse einige Minuten.`n`nFortfahren?")) { return }
-    Invoke-HMProfileAssign -Profile $p -Computer $c -Target $t -Create ([bool]$f.Create) -Cred $cred -Admin ([bool]$f.Admin) -Owner ([bool]$f.Owner) -AllowBlank $false
+    Invoke-HMProfileAssign -Prof $p -Computer $c -Target $t -Create ([bool]$f.Create) -Cred $cred -Admin ([bool]$f.Admin) -Owner ([bool]$f.Owner) -AllowBlank $false
 }
 # Lauf der Profil-Zuweisung; meldet das Ziel "wuerde ohne Kennwort anlegen", folgt eine Rueckfrage (Standard Nein) und ein zweiter Lauf
-function Invoke-HMProfileAssign($Profile, [string]$Computer, [string]$Target, [bool]$Create, $Cred, [bool]$Admin, [bool]$Owner, [bool]$AllowBlank) {
-    $st = @{ Profile = $Profile; Computer = $Computer; Target = $Target; Create = $Create; Cred = $Cred; Admin = $Admin; Owner = $Owner }
-    Invoke-HMTool -Title "Profil zuweisen ($($Profile.Folder) -> $Target)" -Computer $Computer -TimeoutSec 3600 -ArgumentList @($Profile.SID, $Target, $Create, $Cred, $Admin, $Owner, $AllowBlank) -Script $script:RS_ProfileAssign -ProtectData -State $st -OnResult {
+function Invoke-HMProfileAssign($Prof, [string]$Computer, [string]$Target, [bool]$Create, $Cred, [bool]$Admin, [bool]$Owner, [bool]$AllowBlank) {
+    $st = @{ Prof = $Prof; Computer = $Computer; Target = $Target; Create = $Create; Cred = $Cred; Admin = $Admin; Owner = $Owner }
+    Invoke-HMTool -Title "Profil zuweisen ($($Prof.Folder) -> $Target)" -Computer $Computer -TimeoutSec 3600 -ArgumentList @($Prof.SID, $Target, $Create, $Cred, $Admin, $Owner, $AllowBlank) -Script $script:RS_ProfileAssign -ProtectData -State $st -OnResult {
         param($r, $comp, $s)
         if (Test-HMBlankPasswordQuestion $r) {
             if (-not (Confirm-Action (Get-HMBlankPasswordText $s.Target $comp $s.Admin) 'Profil zuweisen')) { Out-Console "   Profil-Zuweisung abgebrochen - kein Konto ohne Kennwort angelegt, nichts geaendert." 'Warning'; return }
-            Invoke-HMProfileAssign -Profile $s.Profile -Computer $s.Computer -Target $s.Target -Create $s.Create -Cred $s.Cred -Admin $s.Admin -Owner $s.Owner -AllowBlank $true
+            Invoke-HMProfileAssign -Prof $s.Prof -Computer $s.Computer -Target $s.Target -Create $s.Create -Cred $s.Cred -Admin $s.Admin -Owner $s.Owner -AllowBlank $true
             return
         }
         Write-HMToolResult $r; Connect-Target
