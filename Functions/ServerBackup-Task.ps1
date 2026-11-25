@@ -116,14 +116,16 @@ if (-not $prefix) { $prefix = 'HUMIG-' + (ConvertTo-HMSbSafeName $ProfileName).T
 $dl = $null
 try { $dl = Get-HMSbDriveList } catch { Add-HMSbTaskError "Platten nicht lesbar: $($_.Exception.Message)"; exit 2 }
 foreach ($m in @($dl.Messages)) { if ($m) { Write-HMSbLog $m 'Warning' } }
+# Pass-Through-Meldungen gehoeren in den Fehlertext (Verlauf, Teams), falls keine Platte gefunden wird
+$ptWhy = Get-HMSbPassThroughNote @($dl.Messages)
 $drives = @(@($dl.Drives) | Where-Object { $_ -and (Test-HMSbLabelMatch "$($_.Label)" $prefix) })
 if ($DiskLabel) {
     # bestimmte Platte (in der Oberflaeche gewaehlt): nur diese - nie eine andere Platte des Profils
     if (-not (Test-HMSbDiskLabel $DiskLabel)) { Add-HMSbTaskError "Ungueltige Platten-Bezeichnung '$DiskLabel'"; exit 2 }
     $drives = @($drives | Where-Object { "$($_.Label)" -ieq $DiskLabel })
-    if (-not $drives.Count) { Add-HMSbTaskError "Platte $DiskLabel ist nicht (mehr) angesteckt oder gehoert nicht zum Profil ($prefix-...)"; exit 2 }
+    if (-not $drives.Count) { Add-HMSbTaskError "Platte $DiskLabel ist nicht (mehr) angesteckt oder gehoert nicht zum Profil ($prefix-...)$ptWhy"; exit 2 }
 }
-if (-not $drives.Count) { Add-HMSbTaskError "Keine Platte des Profils angesteckt ($prefix-...)"; exit 2 }
+if (-not $drives.Count) { Add-HMSbTaskError "Keine Platte des Profils angesteckt ($prefix-...)$ptWhy"; exit 2 }
 # Rotations-Platten vor Archiv-Platten (<Prefix>-A<n>)
 $drives = @(@($drives | Where-Object { -not (Test-HMSbArchiveLabel "$($_.Label)" $prefix) }) + @($drives | Where-Object { Test-HMSbArchiveLabel "$($_.Label)" $prefix }))
 if ($drives.Count -gt 1) { Write-HMSbLog "Mehrere Platten des Profils angesteckt - verwendet wird $($drives[0].Letter): $($drives[0].Label)" 'Warning' }

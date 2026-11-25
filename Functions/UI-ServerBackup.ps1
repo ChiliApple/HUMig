@@ -969,9 +969,18 @@ function Start-HMSbBackup {
     }
     # unmittelbar vor dem Start: gehoert der Buchstabe noch zur gewaehlten Platte? (Rueckfragen koennen lange offen sein)
     $mm = ''; try { $mm = Get-HMSbDriveMismatch "$($d.Letter)" "$($d.Label)" "$($d.Serial)" } catch { }
+    $ans = ''; $now = $null
     if ($mm) {
         $mq = "Die gewaehlte Ziel-Platte hat sich geaendert:`n$mm`n`nJa = trotzdem auf $($d.Letter): sichern (Warnung im Bericht)`nNein = nicht starten (danach ""Aktualisieren"" und Platte neu waehlen)"
-        if ("$((Show-HMDialogBox -Owner $script:Window -Text $mq -Title 'Server-Backup' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { Out-Console "Server-Backup nicht gestartet: $mm" 'Warning'; return }
+        $ans = "$((Show-HMDialogBox -Owner $script:Window -Text $mq -Title 'Server-Backup' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))"
+        if ($ans -eq 'Yes') { $now = Get-HMSbDriveNow "$($d.Letter)" }
+    }
+    $sd = Resolve-HMSbStartDrive $d $mm $ans $now
+    if (-not $sd.Start) { Out-Console "Server-Backup nicht gestartet: $mm" 'Warning'; return }
+    if ($mm) {
+        # Verlauf und Plattenwechsel laufen unter der Platte, die wirklich beschrieben wird
+        $d = $sd.Drive
+        $after = if ($p -and (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { Get-HMSbAfterMode $p $d.Label } else { '' }
     }
     # Vorab-Pruefung: laeuft schon eine Sicherung/Wiederherstellung am Host?
     $busy = @(Get-HMSbBusy)
@@ -985,7 +994,7 @@ function Start-HMSbBackup {
         Profile = $pName; DiskPrefix = $(if ($p) { $p.DiskPrefix } else { '' }); Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
         VMs = $vms; Volumes = $vols; HostConfig = $hc; HostSystem = $hs; Verify = [bool]$ui.chkSbVerify.IsChecked
         LocalHistory = $script:SbHistFile; LocalHealth = $script:SbHealthFile; LocalReportDir = $script:SbReportDir; Version = $script:Version
-        ProfileData = $(if ($p) { $p } else { $null }); After = $after; Export = $exp; ConflictWords = @(Get-HMSbConflictWords)
+        ProfileData = $(if ($p) { $p } else { $null }); After = $after; Export = $exp; ConflictWords = @(Get-HMSbConflictWords); DiskNote = "$($sd.Note)"
     }
     $script:SbAfterRun = $after
     $script:SbRunProfile = $pName
@@ -1229,6 +1238,7 @@ function Start-HMSbExportUi {
     if (-not $r) { return }
     if ($r.Action -eq 'Save') {
         Save-HMSbExportSettings $p.Name $r
+        if (-not $script:SbLastSaveOk) { return }
         $b = Get-HMSbExportBase $r.Folder ''
         Out-Console ("Profil '{0}': VM-Export {1}{2}" -f $p.Name, $(if ($r.After) { "nach jeder Sicherung: $($r.VMs -join ', ')" } else { "nach der Sicherung aus (gemerkte Auswahl: $(if ($r.VMs.Count) { $r.VMs -join ', ' } else { '-' }))" }), " - Ziel: $(if ($b) { $b } else { 'Platte des Profils \HUMig-Export' }), behalten je VM: $($r.Keep)") 'Success'
         Update-HMSbSchedules

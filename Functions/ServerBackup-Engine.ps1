@@ -150,17 +150,20 @@ function Get-HMSbDriveList([switch]$KeepHumigOffline) {
     $msgs = @()
     $marks = @(Get-HMSbOfflineMarks)
     $marksNew = @($marks)
-    # direkt an eine VM durchgereichte Platten (Pass-Through) sind am Host offline und duerfen nie online geschaltet werden
-    # (VM-Liste nur lesen, wenn es eine offline USB-Platte gibt - der uebliche Weg bleibt wie bisher)
+    # direkt an eine VM durchgereichte Platten (Pass-Through) sind am Host offline und duerfen nie online geschaltet werden.
+    # Eine von HUMig selbst offline geschaltete Platte (Markierung) ist nachweislich die eigene: keine Pruefung, wie bisher.
+    # Die VM-Liste wird nur fuer offline Platten OHNE Markierung gelesen, mit Zeitgrenze (haengender Hyper-V-Dienst).
     $pt = @(); $ptKnown = $true; $ptRead = $false
     foreach ($d in @(Get-Disk -ErrorAction SilentlyContinue | Where-Object { "$($_.BusType)" -match '^(USB|7)$' })) {
         $k = Get-HMSbDiskKey $d
         $m = $null
         if ($k) { $m = @($marks | Where-Object { "$_".Split('|')[0] -eq $k })[0] }
         if (-not $d.IsOffline) { if ($m) { $marksNew = @($marksNew | Where-Object { $_ -ne $m }) }; continue }
-        if (-not $ptRead) { $ptRead = $true; $pt = Get-HMSbPassThroughDisks; $ptKnown = ($null -ne $pt); if (-not $ptKnown) { $pt = @() } }
-        if (@($pt) -contains [int]$d.Number) { $msgs += "USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) ist direkt an eine VM durchgereicht (Pass-Through) - bleibt offline und ist kein Sicherungsziel"; continue }
-        if (-not $ptKnown -and -not $m) { $msgs += "Hinweis: Hyper-V-VM-Liste nicht lesbar - ob die offline USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) an eine VM durchgereicht ist, war nicht pruefbar; sie wird wie bisher online geschaltet" }
+        if (-not $m) {
+            if (-not $ptRead) { $ptRead = $true; $pt = Get-HMSbPassThroughDisks -TimeoutSec $script:SbPassThroughTimeoutSec; $ptKnown = ($null -ne $pt); if (-not $ptKnown) { $pt = @() } }
+            if (@($pt) -contains [int]$d.Number) { $msgs += "USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) ist direkt an eine VM durchgereicht (Pass-Through) - bleibt offline und ist kein Sicherungsziel"; continue }
+            if (-not $ptKnown) { $msgs += "Hinweis: Hyper-V-VM-Liste nicht lesbar oder zu langsam - ob die offline USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) an eine VM durchgereicht ist, war nicht pruefbar; sie wird wie bisher online geschaltet" }
+        }
         if ($KeepHumigOffline -and $m) { $msgs += "USB-Platte $("$m".Split('|')[1]) (Datentraeger $($d.Number)) wurde nach der Sicherung von HUMig offline geschaltet und bleibt offline - ""Aktualisieren"" schaltet sie wieder online."; continue }
         try {
             Set-Disk -Number $d.Number -IsOffline $false -ErrorAction Stop
@@ -190,9 +193,12 @@ function Get-HMSbDriveList([switch]$KeepHumigOffline) {
 # Zuordnung ueber die Zugriffspfade der Partitionen (Laufwerksbuchstabe, Bereitstellungspunkt, \\?\Volume{...}\) - laengster passender Pfad.
 # Ist Hyper-V installiert, aber die VM-Liste nicht lesbar: Fehler (nie "keine VMs" annehmen). Ohne Hyper-V: leere Liste.
 # Datentraeger-Nummern, die als physische Platte direkt an eine VM durchgereicht sind (Pass-Through, DiskNumber gesetzt).
-# Ohne Hyper-V: leere Liste. VM-Liste nicht lesbar: $null (der Aufrufer entscheidet und meldet es).
-function Get-HMSbPassThroughDisks {
-    if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return ,@() }
+# Ohne Hyper-V: leere Liste. VM-Liste nicht lesbar oder Zeitgrenze ueberschritten: $null (der Aufrufer entscheidet und meldet).
+# -TimeoutSec > 0: Abfrage in einem eigenen Runspace; nach der Zeitgrenze wartet niemand auf einen haengenden Hyper-V-Dienst.
+# Ergebnis als Text 'OK:<Nummern>' bzw. 'ERR' (laesst sich aus dem Runspace ohne Umwandlungsfragen zurueckgeben)
+$script:SbPassThroughTimeoutSec = 30
+$script:SbPassThroughScript = {
+    if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return 'OK:' }
     $n = @()
     try {
         foreach ($vm in @(Get-VM -ErrorAction Stop)) {
@@ -200,8 +206,38 @@ function Get-HMSbPassThroughDisks {
                 if ($null -ne $hd.DiskNumber -and "$($hd.DiskNumber)" -match '^\d+$' -and $n -notcontains [int]$hd.DiskNumber) { $n += [int]$hd.DiskNumber }
             }
         }
-    } catch { return $null }
-    return ,$n
+    } catch { return 'ERR' }
+    return ('OK:' + ($n -join ','))
+}
+function ConvertFrom-HMSbPassThroughText([string]$Text) {
+    if ("$Text" -notmatch '^OK:([\d,]*)$') { return $null }
+    $l = @($Matches[1] -split ',' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
+    return ,$l
+}
+function Get-HMSbPassThroughDisks([int]$TimeoutSec = 0) {
+    if ($TimeoutSec -le 0) { return (ConvertFrom-HMSbPassThroughText (& $script:SbPassThroughScript)) }
+    $r = Invoke-HMSbWithTimeout $script:SbPassThroughScript $TimeoutSec
+    if (-not $r.Done) { return $null }
+    return (ConvertFrom-HMSbPassThroughText "$($r.Output)")
+}
+# Skriptblock in einem eigenen Runspace mit Zeitgrenze. Done = rechtzeitig fertig, Output = erste Ausgabe als Text.
+# Nach Ueberschreiten wird der Runspace nicht abgewartet (Stop im Hintergrund), der Aufrufer laeuft sofort weiter.
+function Invoke-HMSbWithTimeout([scriptblock]$Script, [int]$TimeoutSec) {
+    $res = [pscustomobject]@{ Done = $false; Output = '' }
+    $ps = [System.Management.Automation.PowerShell]::Create()
+    try {
+        [void]$ps.AddScript($Script.ToString())
+        $h = $ps.BeginInvoke()
+        if (-not $h.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds($TimeoutSec))) {
+            try { [void]$ps.BeginStop($null, $null) } catch { }
+            return $res
+        }
+        $out = @($ps.EndInvoke($h))
+        $res.Done = $true
+        if ($out.Count) { $res.Output = "$($out[0])" }
+        try { $ps.Dispose() } catch { }
+        return $res
+    } catch { try { $ps.Dispose() } catch { }; return $res }
 }
 function Get-HMSbVmDiskNumbers {
     if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return }
@@ -227,6 +263,30 @@ function Get-HMSbVmDiskNumbers {
         if ($hit -and $nums -notcontains $hit.Disk) { $nums += $hit.Disk }
     }
     return $nums
+}
+# Zusatz fuer den Fehlertext "keine Platte": Meldungen zu durchgereichten Platten ('' = keine)
+function Get-HMSbPassThroughNote([string[]]$Messages) {
+    $pt = @($Messages | Where-Object { "$_" -match 'Pass-Through' })
+    if (-not $pt.Count) { return '' }
+    return (' - ' + ($pt -join '; '))
+}
+# Bezeichnung und Seriennummer, die jetzt unter dem Laufwerksbuchstaben stecken (fuer "trotzdem sichern")
+function Get-HMSbDriveNow([string]$Letter) {
+    $L = "$Letter".TrimEnd(':', '\').ToUpper()
+    $lab = ''; $sn = ''
+    try { $lab = "$((Get-Volume -DriveLetter $L -ErrorAction Stop).FileSystemLabel)".Trim() } catch { }
+    try { $sn = "$((Get-Partition -DriveLetter $L -ErrorAction Stop | Get-Disk -ErrorAction Stop).SerialNumber)".Trim() } catch { }
+    return [pscustomobject]@{ Label = $lab; Serial = $sn }
+}
+# Entscheidung beim Start in HUMig, wenn der Buchstabe nicht mehr zur gewaehlten Platte passt:
+# Start = weiter, Drive = Ziel mit der Bezeichnung/Seriennummer, die jetzt dort steckt, Note = Warnung fuer Bericht/Verlauf
+function Resolve-HMSbStartDrive($Drive, [string]$Mismatch, [string]$Answer, $Now) {
+    if (-not $Mismatch) { return [pscustomobject]@{ Start = $true; Drive = $Drive; Note = '' } }
+    if ($Answer -ne 'Yes') { return [pscustomobject]@{ Start = $false; Drive = $Drive; Note = $Mismatch } }
+    $d = [pscustomobject]@{}
+    foreach ($p in @($Drive.PSObject.Properties)) { $d | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value }
+    if ($Now) { $d.Label = "$($Now.Label)"; $d.Serial = "$($Now.Serial)" }
+    return [pscustomobject]@{ Start = $true; Drive = $d; Note = $Mismatch }
 }
 # Gehoert der Laufwerksbuchstabe noch zur erwarteten Platte (Bezeichnung, Seriennummer beim Lesen der Liste)?
 # '' = passt oder nicht pruefbar, sonst Beschreibung der Abweichung. Seriennummer nur, wenn beide bekannt sind
@@ -894,9 +954,14 @@ function Stop-HMSbOwnJob($R) {
         [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
         return $true
     }
-    if ($R -and [bool]$R.Started -and -not [bool]$R.Busy) { Write-HMSbLog 'Abbruch: die eigene Sicherung war schon beendet - nichts zu stoppen' 'Warning' }
-    else { Write-HMSbLog 'Abbruch: HUMig hatte noch keine eigene Sicherung laufen - ein anderer Vorgang am Host laeuft unveraendert weiter' 'Warning' }
+    Write-HMSbLog "Abbruch: $(Get-HMSbCancelText $R)" 'Warning'
     return $false
+}
+# Wortlaut beim Abbrechen ohne eigenen laufenden Vorgang (je Fall)
+function Get-HMSbCancelText($R) {
+    if ($R -and [bool]$R.Started -and -not [bool]$R.Busy) { return 'die eigene Sicherung war schon beendet - nichts zu stoppen' }
+    if ($R -and [bool]$R.Busy) { return 'HUMig wartete auf einen anderen Vorgang am Host und hat keine eigene Sicherung gestartet - der andere Vorgang wird nicht beendet' }
+    return 'vor dem Start abgebrochen - keine Sicherung gestartet'
 }
 $script:HMSbBusyFix = 'Es lief bereits eine andere Sicherung/Wiederherstellung am Host (die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig). Laufenden Vorgang in wbadmin.msc bzw. mit "wbadmin get status" pruefen, Zeitplaene verschiedener Profile am selben Host zeitlich trennen und die Sicherung spaeter erneut starten.'
 
@@ -1279,7 +1344,8 @@ function Remove-HMSbHistory([string]$Path, [string[]]$Keys) {
     $old = Get-HMSbJsonItems $old
     $keep = @($old | Where-Object { -not $k.ContainsKey(("$($_.Date)|$($_.Host)|$($_.Disk)").ToUpperInvariant()) })
     $n = $old.Count - $keep.Count
-    if ($n -gt 0) { Write-HMSbJsonList $Path $keep }
+    # beschaedigte Datei wurde beiseitegelegt: neu beginnen heisst ein gueltiger, leerer Verlauf
+    if ($n -gt 0 -or -not [System.IO.File]::Exists($Path)) { Write-HMSbJsonList $Path $keep }
     return $n
 }
 
@@ -1739,7 +1805,7 @@ function Rename-HMSbProfileInFile([string]$Path, [string]$Old, [string]$New) {
         if ($e.PSObject.Properties['Profile'] -and "$($e.Profile)" -eq $Old) { $e.Profile = $New; $n++ }
         if ($e.PSObject.Properties['DiskPrefix'] -and $e.PSObject.Properties['Name'] -and "$($e.Name)" -eq $Old) { $e.Name = $New; $n++ }
     }
-    if ($n) { Write-HMSbJsonList $Path $arr }
+    if ($n -or -not [System.IO.File]::Exists($Path)) { Write-HMSbJsonList $Path $arr }
     return $n
 }
 
@@ -2433,6 +2499,8 @@ function Start-HMServerBackup {
     if ("$env:SystemDrive".TrimEnd(':').ToUpper() -eq $L) { throw 'Ziel darf nicht das System-Laufwerk sein' }
     # Buchstabe noch bei der erwarteten Platte? (Platte zwischen Lesen der Liste und Start getauscht) - Warnung im Ergebnis, kein Abbruch
     $mm = ''; try { $mm = Get-HMSbDriveMismatch $L "$($Ctx.DiskLabel)" "$($Ctx.DiskSerial)" } catch { }
+    # in HUMig bestaetigt ("trotzdem sichern"): Ctx traegt schon die neue Platte, die Abweichung kommt als DiskNote
+    if (-not $mm -and "$($Ctx.DiskNote)") { $mm = "$($Ctx.DiskNote)" }
     if ($mm) {
         Write-HMSbLog "ACHTUNG Ziel-Platte: $mm" 'Warning'
         $status = 'Warning'; $notes += "Ziel-Platte: $mm"
