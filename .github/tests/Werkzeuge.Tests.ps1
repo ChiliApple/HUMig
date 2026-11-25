@@ -430,8 +430,17 @@ Describe 'Softwareverteilung: Nachkontrolle mit Mindestversion und Rechte der Pa
     }
     It 'echter Ordner: ohne Freigabe kein Hinweis, mit Aendern fuer Benutzer ein Hinweis' {
         $d = Join-Path $TestDrive 'Ablage'; New-Item -ItemType Directory -Path $d -Force | Out-Null
-        @(Get-SwPathWriteRisk @($d)) | Should -BeNullOrEmpty
+        # Ausgangslage unabhaengig vom Ort des Temp-Ordners (CI-Runner: anderes Laufwerk, evtl. offene geerbte Rechte):
+        # Vererbung aus, nur SYSTEM, Administratoren und das eigene Konto; Dateisystem fest auf NTFS (FAT-Zweig hat eigenen Test)
+        Mock Get-SwPathFileSystem { 'NTFS' }
         $i = Get-Item -LiteralPath $d
+        $base = New-Object System.Security.AccessControl.DirectorySecurity
+        $base.SetAccessRuleProtection($true, $false)
+        foreach ($sid in @('S-1-5-18', 'S-1-5-32-544', [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)) {
+            $base.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier $sid), 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
+        }
+        if ($i.PSObject.Methods['SetAccessControl']) { $i.SetAccessControl($base) } else { [System.IO.FileSystemAclExtensions]::SetAccessControl($i, $base) }
+        @(Get-SwPathWriteRisk @($d)) | Should -BeNullOrEmpty
         $acl = Get-Acl -LiteralPath $d   # GetAccessControl() gibt es unter PowerShell 7 an DirectoryInfo nicht
         $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-32-545'), 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
         if ($i.PSObject.Methods['SetAccessControl']) { $i.SetAccessControl($acl) } else { [System.IO.FileSystemAclExtensions]::SetAccessControl($i, $acl) }
@@ -450,9 +459,11 @@ Describe 'Softwareverteilung: Nachkontrolle mit Mindestversion und Rechte der Pa
         $script:SwFatHintShown = $false
         Mock Get-SwPathFileSystem { 'exFAT' }
         Mock Get-SwPathWriteRisk { throw 'darf auf FAT nicht laufen' }
-        $p = [pscustomobject]@{ SrcPath = 'X:\Ablage\x'; ConfigPath = '' }
-        (Get-SwPackageRiskText $p 'X:\Ablage') | Should -Match '^Hinweis: Paketablage auf einem Datentraeger ohne Rechte \(exFAT\)'
-        (Get-SwPackageRiskText $p 'X:\Ablage') | Should -Be ''
+        # Dateisystem kommt aus der Ersatzfunktion - kein festes Laufwerk, egal ob es am PC bzw. CI-Runner existiert
+        $ab = Join-Path $TestDrive 'AblageFat'
+        $p = [pscustomobject]@{ SrcPath = (Join-Path $ab 'x'); ConfigPath = '' }
+        (Get-SwPackageRiskText $p $ab) | Should -Match '^Hinweis: Paketablage auf einem Datentraeger ohne Rechte \(exFAT\)'
+        (Get-SwPackageRiskText $p $ab) | Should -Be ''
     }
 }
 
@@ -662,14 +673,15 @@ Describe 'Restore-Vorschau zeigt, was der Restore nicht zurueckspielt' {
     It 'Zusaetzliche Ordner: abgewaehlte als "nicht zurueckgespielt", geaenderte mit neuem Ziel' {
         $ed = Join-Path $script:Bk 'ExtraFolders'
         & $script:Mk (Join-Path $ed 'FOLDER1\a.txt'); & $script:Mk (Join-Path $ed 'FOLDER2\b.txt')
-        $p1 = 'D:\Projekte'; $p2 = 'D:\Archiv'
+        # keine festen Laufwerke: Original- und neue Ziele unter $TestDrive (existiert auf jedem PC und CI-Runner)
+        $p1 = Join-Path $TestDrive 'Quelle\Projekte'; $p2 = Join-Path $TestDrive 'Quelle\Archiv'
         [IO.File]::WriteAllText((Join-Path $ed 'folders.json'), (ConvertTo-Json -InputObject @(@{ Index = 1; Path = $p1 }, @{ Index = 2; Path = $p2 })))
-        $neu = "$($env:SystemDrive)\HUMigTestZiel\Archiv"
+        $neu = Join-Path $TestDrive 'Neu\Archiv'
         $script:Ctx.ExtraTargets = @{ (ConvertTo-HMExtraKey $p1) = ''; (ConvertTo-HMExtraKey $p2) = $neu }
         $script:Ctx.Modules = @([pscustomobject]@{ Id = 'ExtraFolders'; Name = 'Zusaetzliche Ordner'; Scope = 'Machine'; Items = @([pscustomobject]@{ Type = 'Builtin'; Name = 'ExtraFolders'; Handler = 'ExtraFolders' }) })
         $r = & $script:RunPreview $script:Ctx
         @($r.Rows | Where-Object { $_.Aktion -match 'beim Restore abgewaehlt' -and $_.Ziel -eq $p1 }).Count | Should -Be 1
-        $row = @($r.Rows | Where-Object { $_.Aktion -match '^Zusaetzlicher Ordner' -and $_.Ziel -match ([regex]::Escape("$neu (statt D:\Archiv)")) })
+        $row = @($r.Rows | Where-Object { $_.Aktion -match '^Zusaetzlicher Ordner' -and $_.Ziel -match ([regex]::Escape("$neu (statt $p2)")) })
         $row.Count | Should -Be 1
         $row[0].Aktion | Should -Match 'Restore leitet noch um'
     }
