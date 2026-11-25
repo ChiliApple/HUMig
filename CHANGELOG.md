@@ -9,18 +9,21 @@
 ### 💾 Backup
 - **Nicht erreichbare Quelle ist ein Fehler:** Ist der PC, die Freigabe oder der Profilordner nicht lesbar, meldet das Backup "Quelle nicht erreichbar" mit Grund. Die Ordner darunter gelten nicht mehr als "nicht vorhanden".
   - Was trotzdem erreichbar ist, wird weiter gesichert.
+  - Der Profilordner wird nur geprüft, wenn ein gewähltes Modul Daten des Benutzers sichert. Ist er vorhanden, aber nicht auflistbar, ist das eine Warnung.
   - Ordner, die es am PC wirklich nicht gibt, bleiben wie bisher "nicht vorhanden".
 - **Gescheiterte Anmeldung an der Freigabe steht im Ergebnis:** als Warnung, nicht mehr nur als Zeile im Protokoll.
-- **Windows-Einstellungen (USMT) nur mit neuem Stand OK:** Erzeugt ScanState keinen neuen Stand, meldet das Backup einen Fehler mit dem Datum des vorhandenen alten Stands. HUMig löscht den vorhandenen Stand dafür nicht vorher.
-  - Scheitert beim Fernzugriff die Kopie von USMT zum PC oder zurück, wird das gemeldet, statt einen alten Stand als Ergebnis zu nehmen.
-- **WLAN-Profile:** Meldet der Export einen Fehler oder lässt sich ein Profil nicht ins Backup kopieren, ist das Ergebnis eine Warnung.
-- **Prüfung nach dem Backup:** Konnte der Vergleich nicht laufen oder wurde keine einzige Stichprobe geprüft, steht "Prüfung nicht möglich" mit Grund und das Backup endet mit Warnung, statt "vollständig" zu melden.
+- **Windows-Einstellungen (USMT) nur mit neuem Stand OK:** Erzeugt ScanState keinen neuen Stand, meldet das Backup eine Warnung mit dem Datum des vorhandenen alten Stands. Der alte Stand bleibt im Restore wählbar, ein Restore spielt ihn ein. HUMig löscht ihn dafür nicht vorher.
+  - Scheitert beim Fernzugriff die Kopie von USMT zum PC oder zurück, wird das gemeldet, statt einen alten Stand als neues Ergebnis zu nehmen.
+  - Gibt es gar keinen USMT-Stand, ist das wie bisher ein Fehler.
+- **WLAN-Profile:** Meldet der Export einen Fehler oder lässt sich ein Profil nicht ins Backup kopieren, ist das Ergebnis eine Warnung. Gibt es am PC keine gespeicherten WLAN-Profile, steht "keine WLAN-Profile gefunden", ohne Warnung.
+- **Prüfung nach dem Backup:** Konnte der Vergleich nicht laufen, war die Quelle nicht erreichbar oder waren die Dateien der Stichprobe nicht lesbar, steht "Prüfung nicht möglich" mit Grund und das Backup endet mit Warnung, statt "vollständig" zu melden.
+  - Gibt es keine geeignete Datei für die Stichprobe (nur sehr große oder gerade geänderte Dateien) oder ist die Robocopy-Zusammenfassung auf einem Windows in anderer Sprache nicht auswertbar, steht nur ein Hinweis im Protokoll.
 ### ♻️ Restore
 - **Windows-Einstellungen (USMT) mit eigenem Ergebnis:** LoadState steht jetzt als eigene Zeile im Ergebnis und im Bericht. Code 0 ist OK, Code 3 (Teil übersprungen, Rest übernommen) eine Warnung, jeder andere Code ein Fehler mit Erklärung.
   - USMT nicht gefunden, kein USMT-Stand im Backup oder eine gescheiterte Kopie zum Ziel-PC sind ebenfalls Fehler.
   - Bricht LoadState mit einer Ausnahme ab, laufen die übrigen Module weiter und der Bericht entsteht trotzdem.
 - **Zielbenutzer ohne Profil:** Die Benutzer-Module werden wie bisher ausgelassen und die Computer-Module zurückgespielt. Neu steht ein Fehler im Ergebnis, der die ausgelassenen Module nennt.
-- **Benutzer-Registry und Anmelde-Aktionen:** Ist die Registry des Zielbenutzers nicht verfügbar oder lässt sich die Aufgabe für die nächste Anmeldung nicht einrichten, steht eine Warnung im Ergebnis.
+- **Benutzer-Registry und Anmelde-Aktionen:** Ist die Registry des Zielbenutzers nicht verfügbar, obwohl ein gewähltes Modul sie braucht, oder lässt sich die Aufgabe für die nächste Anmeldung nicht einrichten, steht eine Warnung im Ergebnis.
   - Netzwerkdrucker und Symbolpositionen melden dann nicht mehr "OK, wird bei der Anmeldung ...", sondern eine Warnung zum Nachholen.
 - **Nacharbeiten:** Ein Nach-Skript, das nicht ausgeführt wurde oder abbrach, ist ein Fehler im Ergebnis, ein nicht gefundenes Nach-Skript eine Warnung. Eine Ausnahme in den Nacharbeiten beendet den Restore nicht mehr ohne Bericht.
 - **Kontrolle nach dem Restore:** War die Kontrolle bei einem Ordner nicht möglich, ist dieser Ordner eine Warnung. Der Schlusstext nennt nur noch, wie viele Ordner wirklich kontrolliert wurden.

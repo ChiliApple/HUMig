@@ -3943,6 +3943,14 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             $p.Items[0].Status | Should -Be 'Warning'
             $p.Items[0].Msg | Should -Match 'NICHT eingerichtet'
         }
+        It 'Punkt 4: Benutzer-Registry nicht bereit, aber kein Modul braucht sie - keine Warnung' {
+            Mock Mount-HMHive { $false }
+            $ctx = New-TRestoreCtx @((New-TMod 'Drivers' 'Treiber' 'Computer' 'Drivers')) (New-TDir 'prof') 'S-1-5-21-1-2-3-1001'
+            $j = New-TJob
+            Start-HMRestore -Ctx $ctx -Job $j
+            @($j.Result.Modules | Where-Object { $_.Id -eq 'UserRegistry' }).Count | Should -Be 0
+            $j.Result.Status | Should -Be 'OK'
+        }
         It 'Punkt 4: Anmelde-Aufgabe nicht registriert - Drucker auf Warnung' {
             Mock Register-HMLogonTask { $false }
             Mock Restore-HMBuiltin { $Ctx.LogonDependents = @($Ctx.LogonDependents) + @("$($Module.Id)"); Add-HMLogonAction $Ctx '# Drucker'; [pscustomobject]@{ Name = 'PrinterConnections'; Status = 'OK'; Msg = '1 Drucker werden bei der Anmeldung verbunden' } }
@@ -4032,7 +4040,7 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             $r.Msg | Should -Match 'nicht gestartet'
             Should -Invoke Invoke-HMTarget -ParameterFilter { "$Script" -match 'loadstate' } -Times 0 -Exactly
         }
-        It 'Punkt 5 (Backup): nur ein alter USMT-Stand vorhanden - Fehler mit Datum statt OK' {
+        It 'Punkt 5 (Backup): nur ein alter USMT-Stand vorhanden - Warnung mit Datum statt OK, bleibt im Restore waehlbar' {
             Mock Find-HMUsmt { (Join-Path $TestDrive 'usmtbin') }; New-Item -ItemType Directory -Path (Join-Path $TestDrive 'usmtbin') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $TestDrive 'usmtbin\scanstate.exe') -Value 'x'
             $bb = New-TDir 'BB'
             $st = Join-Path $bb 'Usmt\STORE\USMT'; New-Item -ItemType Directory -Path $st -Force | Out-Null
@@ -4040,9 +4048,20 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             Mock Invoke-HMTarget { 0 }
             $ctx = @{ BackupPath = $bb; Account = 'DOM\u'; ToolRoot = $TestDrive; IsRemote = $false; Settings = @{}; Threads = 2 }
             $r = Backup-HMUsmt $ctx (New-TJob) ([pscustomobject]@{ Id = 'Usmt' })
-            $r.Status | Should -Be 'Error'
+            $r.Status | Should -Be 'Warning'
             $r.Msg | Should -Match 'stammt vom'
+            $r.Msg | Should -Match 'aelteren Stand ein'
             Test-Path -LiteralPath $mig | Should -BeTrue
+            # im Backup gespeichert: das Modul bleibt in der Restore-Auswahl (Read-HMBackupInfo nimmt OK und Warning)
+            $bk = New-TDir 'BKI'
+            @{ Created = '2026-11-25 10:00:00'; SourceComputer = 'Q'; UserName = 'u'; Modules = @([pscustomobject]@{ Id = 'Usmt'; Name = 'Windows-Einstellungen (USMT)'; Status = $r.Status; Items = @($r) }); Status = 'Warning' } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $bk 'manifest.json') -Encoding UTF8
+            @((Read-HMBackupInfo -Path $bk -Modules @()).Modules) | Should -Contain 'Usmt'
+        }
+        It 'Punkt 5 (Backup): kein USMT-Stand und ScanState gescheitert bleibt Fehler' {
+            Mock Find-HMUsmt { (Join-Path $TestDrive 'usmtbin') }; New-Item -ItemType Directory -Path (Join-Path $TestDrive 'usmtbin') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $TestDrive 'usmtbin\scanstate.exe') -Value 'x'
+            Mock Invoke-HMTarget { 5 }
+            $ctx = @{ BackupPath = (New-TDir 'BB'); Account = 'DOM\u'; ToolRoot = $TestDrive; IsRemote = $false; Settings = @{}; Threads = 2 }
+            (Backup-HMUsmt $ctx (New-TJob) ([pscustomobject]@{ Id = 'Usmt' })).Status | Should -Be 'Error'
         }
         It 'Punkt 5 (Backup): neu geschriebenes USMT.MIG ist OK' {
             Mock Find-HMUsmt { (Join-Path $TestDrive 'usmtbin') }; New-Item -ItemType Directory -Path (Join-Path $TestDrive 'usmtbin') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $TestDrive 'usmtbin\scanstate.exe') -Value 'x'
@@ -4063,8 +4082,13 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             $st = Join-Path $bb 'Usmt\STORE\USMT'; New-Item -ItemType Directory -Path $st -Force | Out-Null; [System.IO.File]::WriteAllText((Join-Path $st 'USMT.MIG'), 'alt')
             $ctx = @{ BackupPath = $bb; Account = 'DOM\u'; ToolRoot = $TestDrive; IsRemote = $true; Computer = 'HMTESTPC'; Settings = @{}; Threads = 2 }
             $r = Backup-HMUsmt $ctx (New-TJob) ([pscustomobject]@{ Id = 'Usmt' })
-            $r.Status | Should -Be 'Error'
+            # alter Stand vorhanden: Warnung (bleibt waehlbar), ScanState nicht gestartet
+            $r.Status | Should -Be 'Warning'
+            $r.Msg | Should -Match 'aelteren Stand ein'
             Should -Invoke Invoke-HMTarget -ParameterFilter { "$Script" -match 'scanstate' } -Times 0 -Exactly
+            # ohne alten Stand: Fehler
+            $ctx.BackupPath = (New-TDir 'BB')
+            (Backup-HMUsmt $ctx (New-TJob) ([pscustomobject]@{ Id = 'Usmt' })).Status | Should -Be 'Error'
         }
         It 'Punkt 6: Ordner unter nicht erreichbarer Quelle ist Fehler, nicht "nicht vorhanden"' {
             $prof = Join-Path $TestDrive 'profNichtDa'
@@ -4090,6 +4114,28 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             @($ok.RunResults | Where-Object { $_ }).Count | Should -Be 0
             @($ok.SourceUnreachable | Where-Object { $_ }).Count | Should -Be 0
         }
+        It 'Punkt 6: nur Computer-Module gewaehlt - Profilordner wird nicht geprueft' {
+            $mods = @([pscustomobject]@{ Id = 'DataC'; Name = 'Daten auf C:'; Scope = 'Machine'; Items = @([pscustomobject]@{ Name = 'C'; Type = 'Folder'; Path = '{SYSTEMDRIVE}\' }) })
+            $ctx = @{ IsRemote = $false; ProfilePath = (Join-Path $TestDrive 'gibtEsNicht2'); Modules = $mods; Options = @{} }
+            Test-HMBackupSource $ctx (New-TJob)
+            @($ctx.RunResults | Where-Object { $_ }).Count | Should -Be 0
+            @($ctx.SourceUnreachable | Where-Object { $_ }).Count | Should -Be 0
+            # Computer-Modul mit Profil-Pfad (z. B. Schriftarten des Benutzers) zaehlt als Benutzer-Daten
+            $ctx.Modules = @([pscustomobject]@{ Id = 'Fonts'; Name = 'Schriftarten'; Scope = 'Machine'; Items = @([pscustomobject]@{ Name = 'F'; Type = 'Folder'; Path = '{LOCALAPPDATA}\Microsoft\Windows\Fonts' }) })
+            Test-HMBackupSource $ctx (New-TJob)
+            @($ctx.RunResults | Where-Object { $_.Status -eq 'Error' }).Count | Should -Be 1
+        }
+        It 'Punkt 6: Profilordner vorhanden, aber nicht auflistbar - Warnung, kein Gesamtfehler' {
+            $prof = New-TDir 'profGesperrt'
+            Mock Get-HMPathUnreachableReason { 'Zugriff verweigert' } -ParameterFilter { $Path -eq $prof }
+            $ctx = @{ IsRemote = $false; ProfilePath = $prof; Modules = @([pscustomobject]@{ Id = 'Profile'; Name = 'Profil'; Scope = 'User'; Items = @() }); Options = @{} }
+            Test-HMBackupSource $ctx (New-TJob)
+            $e = @($ctx.RunResults | Where-Object { $_ })
+            $e.Count | Should -Be 1
+            $e[0].Status | Should -Be 'Warning'
+            $e[0].Items[0].Msg | Should -Match 'nicht auflistbar'
+            @($ctx.SourceUnreachable | Where-Object { $_ }).Count | Should -Be 0
+        }
         It 'Punkt 6: Start-HMBackup - nicht erreichbares Profil macht das Backup zum Fehler, Eintrag in RunIssues statt in Modules' {
             Mock Get-HMTargetEnv { @{ WINDIR = (Join-Path $TestDrive 'win'); PROFILE = '' } }
             Mock Get-HMSyncRoots { @() }
@@ -4099,16 +4145,16 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             Mock Set-HMBackupFolderAcl { [pscustomobject]@{ Ok = $true; Who = @('Test'); Extra = @(); Notes = @(); Unchanged = $true; Skipped = $false; Error = '' } }
             Mock Update-HMCatalogStats { 0 }
             $bp = Join-Path (New-TDir 'BKS') 'neu'
-            $ctx = @{ Computer = $env:COMPUTERNAME; BackupPath = $bp; BackupRoot = (Split-Path $bp -Parent); Modules = @(); Options = @{ SkipSpaceCheck = $true }; Settings = @{}
+            $ctx = @{ Computer = $env:COMPUTERNAME; BackupPath = $bp; BackupRoot = (Split-Path $bp -Parent); Modules = @([pscustomobject]@{ Id = 'Leer'; Name = 'Benutzer leer'; Scope = 'User'; Items = @() }); Options = @{ SkipSpaceCheck = $true }; Settings = @{}
                       ToolRoot = $TestDrive; ToolVersion = 'Test'; UserFolder = 'u'; Account = 'u'; UserSid = 'S-1-5-21-1-2-3-1001'; ProfilePath = (Join-Path $TestDrive 'profFehlt'); Threads = 2 }
             $j = New-TJob
             Start-HMBackup -Ctx $ctx -Job $j
             $j.Result.Status | Should -Be 'Error'
-            @($j.Result.Modules).Count | Should -Be 0
+            @($j.Result.Modules | Where-Object { $_.Id -eq 'Source' }).Count | Should -Be 0
             @($j.Result.RunIssues | Where-Object { $_.Id -eq 'Source' -and $_.Status -eq 'Error' }).Count | Should -Be 1
             $mf = Get-Content -LiteralPath (Join-Path $bp 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
             $mf.Status | Should -Be 'Error'
-            @($mf.Modules | Where-Object { $_ }).Count | Should -Be 0
+            @($mf.Modules | Where-Object { $_ -and $_.Id -eq 'Source' }).Count | Should -Be 0
             Get-Content -LiteralPath (Join-Path $bp 'HUMig.log') -Raw -Encoding UTF8 | Should -Match 'Quelle nicht erreichbar'
         }
         It 'Punkt 7 (Backup): Vergleich nicht moeglich ergibt Warnung statt vollstaendig' {
@@ -4118,18 +4164,53 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             $v.Status | Should -Be 'Warning'
             $v.Problem | Should -Match 'Vergleich nicht moeglich'
         }
-        It 'Punkt 7 (Backup): keine Stichprobe geprueft trotz Dateien im Backup ergibt Warnung' {
+        It 'Punkt 7 (Backup): keine geeignete Datei fuer die Stichprobe ist nur ein Hinweis, Status bleibt OK' {
             $src = New-TDir 'q2'; $dst = New-TDir 'd2'
             [System.IO.File]::WriteAllText((Join-Path $dst 'a.txt'), 'nur im Backup')
+            [System.IO.File]::WriteAllText((Join-Path $dst 'b.txt'), 'alt'); [System.IO.File]::WriteAllText((Join-Path $src 'b.txt'), 'seit dem Kopieren geaendert')
             $map = @([pscustomobject]@{ Module = 'M'; Name = 'I'; Src = $src; Dst = $dst; Files = @(); XD = @(); XF = @(); NoHidden = $false; NoRecurse = $false })
             $v = Test-HMBackupIntegrity @{ Threads = 2 } (New-TJob) $map 5
-            $v.Status | Should -Be 'Warning'
-            $v.Problem | Should -Match 'keine Stichprobe'
+            $v.Status | Should -Be 'OK'
+            $v.Problem | Should -BeNullOrEmpty
+            $v.Note | Should -Match 'keine geeignete Datei'
             # gleiche Datei an Quelle und im Backup: Stichprobe geprueft, OK
             Copy-Item -LiteralPath (Join-Path $dst 'a.txt') -Destination (Join-Path $src 'a.txt')
             $v2 = Test-HMBackupIntegrity @{ Threads = 2 } (New-TJob) $map 5
             $v2.Status | Should -Be 'OK'
             $v2.Sampled | Should -Be 1
+        }
+        It 'Punkt 7 (Backup): geeignete Stichprobe nicht lesbar oder Quelle weg ergibt Warnung' {
+            $src = New-TDir 'q3'; $dst = New-TDir 'd3'
+            [System.IO.File]::WriteAllText((Join-Path $src 'c.txt'), 'gleich')
+            Copy-Item -LiteralPath (Join-Path $src 'c.txt') -Destination (Join-Path $dst 'c.txt')
+            $map = @([pscustomobject]@{ Module = 'M'; Name = 'I'; Src = $src; Dst = $dst; Files = @(); XD = @(); XF = @(); NoHidden = $false; NoRecurse = $false })
+            $lock = [System.IO.File]::Open((Join-Path $src 'c.txt'), 'Open', 'Read', 'None')
+            try { $v = Test-HMBackupIntegrity @{ Threads = 2 } (New-TJob) $map 5 } finally { $lock.Dispose() }
+            $v.Status | Should -Be 'Warning'
+            $v.Problem | Should -Match 'nicht lesbar'
+            $map[0].Src = (Join-Path $TestDrive 'quelleWeg')
+            $v2 = Test-HMBackupIntegrity @{ Threads = 2 } (New-TJob) $map 5
+            $v2.Status | Should -Be 'Warning'
+            $v2.Problem | Should -Match 'Quelle nicht erreichbar'
+        }
+        It 'Punkt 7 (Backup): Robocopy-Zusammenfassung nicht erkannt bei Exitcode unter 8 ist nur ein Hinweis' {
+            Mock Invoke-HMRobocopy { [pscustomobject]@{ ExitCode = 1; Level = 'OK'; FilesCopied = 0; BytesCopied = 0; HaveDirs = $false } }
+            $map = @([pscustomobject]@{ Module = 'M'; Name = 'I'; Src = (Join-Path $TestDrive 'q1'); Dst = (Join-Path $TestDrive 'nichtDa'); Files = @(); XD = @(); XF = @(); NoHidden = $false; NoRecurse = $false })
+            $v = Test-HMBackupIntegrity @{ Threads = 2 } (New-TJob) $map 5
+            $v.Status | Should -Be 'OK'
+            $v.Problem | Should -BeNullOrEmpty
+            $v.Note | Should -Match 'nicht auswertbar'
+        }
+        It 'Punkt 8: WLAN ohne gespeicherte Profile ist kein Fehler, mit Profilen und ohne Export eine Warnung' {
+            $script:TWx = New-TDir 'wxLeer'
+            Mock Invoke-HMTarget { [pscustomobject]@{ Dir = $script:TWx; Code = 1; Text = 'kein Profil'; Profiles = 0 } }
+            $ctx = @{ BackupPath = (New-TDir 'BW'); IsRemote = $false; Settings = @{ WlanExportClearKey = $false } }
+            $r = Backup-HMBuiltin $ctx (New-TJob) ([pscustomobject]@{ Id = 'Wlan'; Name = 'WLAN' }) ([pscustomobject]@{ Name = 'Wlan'; Type = 'Builtin'; Handler = 'Wlan' }) @{}
+            $r.Status | Should -Be 'Skip'
+            $r.Msg | Should -Match 'keine WLAN-Profile'
+            $script:TWx = New-TDir 'wxLeer2'
+            Mock Invoke-HMTarget { [pscustomobject]@{ Dir = $script:TWx; Code = 1; Text = 'Fehler'; Profiles = 2 } }
+            (Backup-HMBuiltin $ctx (New-TJob) ([pscustomobject]@{ Id = 'Wlan'; Name = 'WLAN' }) ([pscustomobject]@{ Name = 'Wlan'; Type = 'Builtin'; Handler = 'Wlan' }) @{}).Status | Should -Be 'Warning'
         }
         It 'Punkt 7 (Restore): Kontrolle nicht moeglich ergibt Warnung im Eintrag' {
             Mock Test-HMRestoredItem { [pscustomobject]@{ Missing = 0; Error = 'Robocopy-Code 16' } }
