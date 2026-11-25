@@ -4157,6 +4157,14 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             $r.Msg | Should -Match 'nicht lesbar'
             $r.Msg | Should -Not -Match 'nicht vorhanden'
         }
+        It 'Punkt 6: fehlendes Laufwerk (z. B. abgesteckter Stick) bleibt "nicht vorhanden"' {
+            Mock Get-HMPathUnreachableReason { 'Das Laufwerk wurde nicht gefunden.' }
+            $ctx = @{ IsRemote = $false; SourceUnreachable = @(); Options = @{}; SyncRoots = @(); BackupPath = (New-TDir 'BF') }
+            $it = [pscustomobject]@{ Name = 'FOLDER1'; Type = 'Folder'; Path = (Join-Path $TestDrive 'stickWeg\Daten') }
+            $r = Backup-HMFolderItem $ctx (New-TJob) ([pscustomobject]@{ Id = 'ExtraFolders'; Name = 'Zusaetzliche Ordner' }) $it @{}
+            $r.Status | Should -Be 'Skip'
+            $r.Msg | Should -Match 'nicht vorhanden'
+        }
         It 'Punkt 6: nur Computer-Module gewaehlt - Profilordner wird nicht geprueft' {
             $mods = @([pscustomobject]@{ Id = 'DataC'; Name = 'Daten auf C:'; Scope = 'Machine'; Items = @([pscustomobject]@{ Name = 'C'; Type = 'Folder'; Path = '{SYSTEMDRIVE}\' }) })
             $ctx = @{ IsRemote = $false; ProfilePath = (Join-Path $TestDrive 'gibtEsNicht2'); Modules = $mods; Options = @{} }
@@ -4228,6 +4236,10 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             $res = & $run ([pscustomobject]@{ Id = 'Usmt'; Name = 'USMT'; Status = 'Error'; MigState = 'Unusable'; Items = @() })
             $script:TPrevUsable | Should -BeFalse
             @($res.Modules | Where-Object { $_.Id -eq 'Usmt' })[0].MigState | Should -Be 'Unusable'
+            # wirft Backup-HMUsmt (z. B. Verbindung weg), bleibt die Markierung trotzdem erhalten
+            Mock Backup-HMUsmt { throw 'Verbindung weg' }
+            $res2 = & $run ([pscustomobject]@{ Id = 'Usmt'; Name = 'USMT'; Status = 'Error'; MigState = 'Unusable'; Items = @() })
+            @($res2.Modules | Where-Object { $_.Id -eq 'Usmt' })[0].MigState | Should -Be 'Unusable'
         }
         It 'Punkt 7 (Backup): Vergleich nicht moeglich ergibt Warnung statt vollstaendig' {
             Mock Invoke-HMRobocopy { [pscustomobject]@{ ExitCode = 16; Level = 'Error'; FilesCopied = 0; BytesCopied = 0; HaveDirs = $false } }

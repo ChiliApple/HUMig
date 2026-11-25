@@ -2171,7 +2171,8 @@ function Test-HMBackupSource([hashtable]$Ctx, $Job) {
     if ($null -ne $Ctx.Modules -and -not (Test-HMModulesUseProfile $Ctx)) { Write-HMLog $Job '   Quelle: nur Computer-Module gewaehlt - Profilordner nicht geprueft' 'Debug'; return }
     $pReach = Convert-HMPath $Ctx $prof
     $why = Get-HMPathUnreachableReason $pReach
-    if ($why -and (Test-Path -LiteralPath $pReach -PathType Container)) {
+    $pThere = $false; try { $pThere = [bool](Test-Path -LiteralPath $pReach -PathType Container -ErrorAction Stop) } catch { $pThere = $false }
+    if ($why -and $pThere) {
         # Ordner da, aber nicht auflistbar (z. B. Rechte nur auf Unterordnern): kein Gesamtfehler - Unterordner werden einzeln gesichert und gemeldet
         Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'Source' -Name 'Quelle' -Status 'Warning' -Msg "Profilordner $pReach nicht auflistbar ($why) - die Ordner darin werden einzeln gesichert; was dort nicht lesbar ist, steht als Fehler beim jeweiligen Modul. Rechte des Profilordners pruefen"
         return
@@ -2194,9 +2195,9 @@ function Backup-HMFolderItem {
         # liegt der Ordner unter einer nicht erreichbaren Quelle (Test-HMBackupSource), ist "nicht vorhanden" nicht belegt -> Fehler
         $ur = @(@($Ctx.SourceUnreachable) | Where-Object { $_ -and (Test-HMPathUnder $srcLocal $_) }) | Select-Object -First 1
         if ($ur) { return (& $mk 'Error' "Quelle nicht erreichbar: $srcLocal (siehe Eintrag Quelle) - nicht gesichert") }
-        # "nicht vorhanden" nur, wenn es den Ordner wirklich nicht gibt - sonst (z. B. Zugriff verweigert) Fehler mit Grund
+        # Zugriff verweigert ist nicht "nicht vorhanden" -> Fehler mit Grund; alles andere (auch fehlendes Laufwerk) bleibt wie bisher
         $nr = Get-HMPathUnreachableReason $src
-        if ($nr -and $nr -ne 'nicht gefunden') { return (& $mk 'Error' "nicht lesbar: $srcLocal ($nr) - nicht gesichert. Rechte pruefen und Backup wiederholen") }
+        if ($nr -eq 'Zugriff verweigert') { return (& $mk 'Error' "nicht lesbar: $srcLocal ($nr) - nicht gesichert. Rechte pruefen und Backup wiederholen") }
         return (& $mk 'Skip' "nicht vorhanden: $srcLocal")
     }
     foreach ($p in @($Ctx.Options.ExcludePaths | Where-Object { $_ })) { if (Test-HMPathUnder $srcLocal $p) { return (& $mk 'Skip' "ausgeschlossen: $srcLocal") } }
@@ -3076,7 +3077,7 @@ function Start-HMBackup {
                 Write-HMLog $Job ("   {0}: {1}" -f $r.Name, ("$($r.Msg)" -replace "`r?`n", "`n      ")) $lvl
                 $mres.Items += [pscustomobject]@{ Name = $r.Name; Status = $r.Status; Msg = $r.Msg; Bytes = [long]$r.Bytes; Source = $r.Source }
                 # USMT: unbrauchbarer Stand in der Ablage merken (auch weitergeben, wenn dieser Lauf ihn nicht ersetzt hat) - der naechste Lauf vertraut ihm dann nicht
-                if ("$($r.Name)" -eq 'Usmt') {
+                if ("$($it.Handler)" -eq 'Usmt') {
                     if ($r.PSObject.Properties['MigState'] -and "$($r.MigState)") { $mres.MigState = "$($r.MigState)" }
                     elseif ("$($r.Status)" -eq 'Error' -and $Ctx.PrevUsmtUsable -eq $false) { $mres.MigState = 'Unusable' }
                 }
