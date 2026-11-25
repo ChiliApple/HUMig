@@ -1043,13 +1043,24 @@ function Set-HMFirewallRow($Rows, $Win, $Ctx, [string]$What) {
     $Win.Close()
     Invoke-HMTool -Title 'Firewall/Netzwerk aendern' -Computer $Ctx.Computer -ArgumentList @($act, $arg) -Script $script:RS_Firewall -OnResult { param($x) Write-HMToolResult $x; Show-HMFirewall }
 }
+# Rueckfrage noetig? Nur beim Umstellen eines ANDEREN PCs auf "Oeffentlich" (eigener PC oder schon oeffentlich: keine)
+function Test-HMFirewallPublicRisk([string]$What, [string]$Current, [string]$Computer) {
+    if ($What -ne 'Public' -or $Current -eq 'Public') { return $false }
+    $c = "$Computer".Trim()
+    if (-not $c -or $c -eq '.' -or $c -ieq 'localhost' -or $c -ieq $env:COMPUTERNAME -or $c -ilike "$($env:COMPUTERNAME).*") { return $false }
+    return $true
+}
+function Get-HMFirewallPublicText([string]$Network, [string]$Computer) {
+    return "Netzwerk '$Network' auf $Computer auf 'Oeffentlich' stellen?`n`nIm oeffentlichen Netz laesst die Firewall Fernwartung (WinRM, Remotedesktop, Freigaben) oft nicht mehr zu - die Verbindung zu diesem PC kann danach abbrechen und ist nur noch am PC selbst zurueckzustellen."
+}
 
 # ============================================================================
 # 13. PROFIL EINEM ANDEREN KONTO ZUWEISEN (z.B. Domaene -> lokal). Profil bleibt am Ort, nichts wird kopiert.
 #     Benutzer abgemeldet; Sicherung: ProfileList-.reg + Dateirechte (icacls /save) unter ProgramData\HUMig\ProfilZuweisung
 # ============================================================================
 $script:RS_ProfileAssign = {
-    param($srcSid, $target, $createLocal, $cred, $addAdmin, $setOwner)
+    # $allowBlank: lokales Konto darf ohne Kennwort angelegt werden (erst nach Rueckfrage). Ohne: Rueckgabe 'FRAGE OHNE_KENNWORT', bevor etwas geaendert wird
+    param($srcSid, $target, $createLocal, $cred, $addAdmin, $setOwner, $allowBlank = $false)
     # Verknuepfungen (Junction/SymbolicLink) unter $Root mit Ziel ausserhalb $Root, max. $Max Treffer ("<link> -> <ziel>")
     function Find-HUOutsideLinks([string]$Root, [int]$Max = 20) {
         $hits = New-Object System.Collections.Generic.List[string]
@@ -1101,6 +1112,9 @@ $script:RS_ProfileAssign = {
         if (-not $sid2) {
             if (-not $createLocal -or $name -notlike "$env:COMPUTERNAME\*") { return "FEHLER: Konto $name nicht gefunden$(if ($name -notlike "$env:COMPUTERNAME\*") { ' (Domaene erreichbar?)' } else { ' - Option Lokales Konto anlegen waehlen' })" }
             $short = $name.Split('\')[-1]
+            # ohne Kennwort nur nach ausdruecklicher Rueckfrage (bis hier ist nichts geaendert)
+            if ((-not $cred -or -not $cred.Password -or $cred.Password.Length -eq 0) -and -not $allowBlank) { return 'FRAGE OHNE_KENNWORT' }
+            if (-not $cred) { $cred = New-Object System.Management.Automation.PSCredential ('x', (New-Object System.Security.SecureString)) }
             New-LocalUser -Name $short -Password $cred.Password -FullName $short -PasswordNeverExpires:$false -ErrorAction Stop | Out-Null
             Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $short -ErrorAction SilentlyContinue
             $sid2 = (New-Object System.Security.Principal.NTAccount($name)).Translate([System.Security.Principal.SecurityIdentifier]).Value
@@ -1214,7 +1228,7 @@ function Start-HMProfileAssign {
     if (-not $t -or $t -match '^AzureAD\\' -or $t -match '@') { Out-Console "Ungueltiges oder nicht unterstuetztes Konto: '$t' (Entra-ID/UPN nicht moeglich)" 'Warning'; return }
     $cred = $null
     if ($f.Create) {
-        if ($f.Pw_Len -gt 0) {
+        if ($f.Pw_Len -gt 0 -or $f.Pw2_Len -gt 0) {
             $a = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($f.Pw))
             $b = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($f.Pw2))
             $same = ($a -ceq $b); $a = $null; $b = $null
@@ -1223,7 +1237,24 @@ function Start-HMProfileAssign {
         $cred = New-Object System.Management.Automation.PSCredential ('x', $f.Pw)
     }
     if (-not (Confirm-Action "Profil $($p.LocalPath)`nvon $($p.Account)`nan $t uebergeben (auf $c)?`n`nDer Profil-Eintrag des alten Kontos wird entfernt (Sicherung unter ProgramData\HUMig\ProfilZuweisung).`nDauer: je nach Profilgroesse einige Minuten.`n`nFortfahren?")) { return }
-    Invoke-HMTool -Title "Profil zuweisen ($($p.Folder) -> $t)" -Computer $c -TimeoutSec 3600 -ArgumentList @($p.SID, $t, [bool]$f.Create, $cred, [bool]$f.Admin, [bool]$f.Owner) -Script $script:RS_ProfileAssign -ProtectData -OnResult { param($r) Write-HMToolResult $r; Connect-Target }
+    Invoke-HMProfileAssign -Profile $p -Computer $c -Target $t -Create ([bool]$f.Create) -Cred $cred -Admin ([bool]$f.Admin) -Owner ([bool]$f.Owner) -AllowBlank $false
+}
+# Lauf der Profil-Zuweisung; meldet das Ziel "wuerde ohne Kennwort anlegen", folgt eine Rueckfrage (Standard Nein) und ein zweiter Lauf
+function Invoke-HMProfileAssign($Profile, [string]$Computer, [string]$Target, [bool]$Create, $Cred, [bool]$Admin, [bool]$Owner, [bool]$AllowBlank) {
+    $st = @{ Profile = $Profile; Computer = $Computer; Target = $Target; Create = $Create; Cred = $Cred; Admin = $Admin; Owner = $Owner }
+    Invoke-HMTool -Title "Profil zuweisen ($($Profile.Folder) -> $Target)" -Computer $Computer -TimeoutSec 3600 -ArgumentList @($Profile.SID, $Target, $Create, $Cred, $Admin, $Owner, $AllowBlank) -Script $script:RS_ProfileAssign -ProtectData -State $st -OnResult {
+        param($r, $comp, $s)
+        if (Test-HMBlankPasswordQuestion $r) {
+            if (-not (Confirm-Action (Get-HMBlankPasswordText $s.Target $comp $s.Admin) 'Profil zuweisen')) { Out-Console "   Profil-Zuweisung abgebrochen - kein Konto ohne Kennwort angelegt, nichts geaendert." 'Warning'; return }
+            Invoke-HMProfileAssign -Profile $s.Profile -Computer $s.Computer -Target $s.Target -Create $s.Create -Cred $s.Cred -Admin $s.Admin -Owner $s.Owner -AllowBlank $true
+            return
+        }
+        Write-HMToolResult $r; Connect-Target
+    }
+}
+function Test-HMBlankPasswordQuestion($Result) { return (@(@($Result) | ForEach-Object { "$_".Trim() }) -contains 'FRAGE OHNE_KENNWORT') }
+function Get-HMBlankPasswordText([string]$Target, [string]$Computer, [bool]$Admin) {
+    return "Das Konto $Target gibt es auf $Computer noch nicht und es wuerde OHNE Kennwort angelegt$(if ($Admin) { ' - als lokaler Administrator' }).`n`nJeder, der an diesem PC sitzt, kann sich dann damit anmelden.`n`nTrotzdem ohne Kennwort anlegen? (Nein = abbrechen und ein Kennwort eintragen)"
 }
 
 # ============================================================================
