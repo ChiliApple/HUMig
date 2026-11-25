@@ -1,0 +1,240 @@
+﻿#Requires -Version 5.1
+# Pester-Tests (Pester 5) fuer die Update-Kette: Pull.ps1 (Dateiliste, Journal, Zurueckstellen, Sperre, Zurueckstufen),
+# Start-Dateien und Release-Abgleich vor dem Signieren. Ohne Netz, nur Ersatzordner in $TestDrive.
+
+BeforeAll {
+    $script:Root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    . (Join-Path $script:Root 'Functions\Core-Update.ps1')
+    # Hilfsfunktionen aus Pull.ps1 laden (Pull.ps1 selbst startet sofort einen Update-Lauf und wird darum nicht ausgefuehrt)
+    $tok = $null; $err = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Pull.ps1'), [ref]$tok, [ref]$err)
+    $names = @('ConvertTo-HMPullRelPath', 'Get-HMPullFileList', 'Get-HMPullOrder', 'New-HMPullJournalText', 'Get-HMPullCommonDir',
+        'Resolve-HMPullJournal', 'Restore-HMPullJournal', 'Undo-HMPullReplace', 'Enter-HMPullLock', 'Get-HMPullInstalledVersion', 'Test-HMPullDowngrade')
+    $defs = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false) | Where-Object { $names -contains $_.Name })
+    foreach ($d in $defs) { . ([scriptblock]::Create($d.Extent.Text)) }
+    $script:PullFunctions = @($defs | ForEach-Object { $_.Name })
+    function New-HMTestFile([string]$Path, [string]$Text) {
+        $d = Split-Path $Path -Parent
+        if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+        [IO.File]::WriteAllText($Path, $Text)
+    }
+}
+
+Describe 'Pull.ps1: Hilfsfunktionen vorhanden' {
+    It 'alle Funktionen aus Pull.ps1 geladen' {
+        @($script:PullFunctions).Count | Should -Be 11
+    }
+}
+
+Describe 'Pull.ps1: Dateiliste aus der Pruefsummen-Datei' {
+    It 'nur relative Pfade ohne Laufwerk und ohne ..' {
+        ConvertTo-HMPullRelPath 'Functions/Core-Update.ps1' | Should -Be 'Functions/Core-Update.ps1'
+        ConvertTo-HMPullRelPath 'Functions\Core-Update.ps1' | Should -Be 'Functions/Core-Update.ps1'
+        ConvertTo-HMPullRelPath '../x.ps1' | Should -Be ''
+        ConvertTo-HMPullRelPath 'a/../../x' | Should -Be ''
+        ConvertTo-HMPullRelPath 'C:\Windows\x.ps1' | Should -Be ''
+        ConvertTo-HMPullRelPath '/etc/x' | Should -Be ''
+        ConvertTo-HMPullRelPath '\\server\share\x' | Should -Be ''
+        ConvertTo-HMPullRelPath 'a//b' | Should -Be ''
+        ConvertTo-HMPullRelPath './a' | Should -Be ''
+        ConvertTo-HMPullRelPath '' | Should -Be ''
+    }
+    It 'Liste sortiert, Pull.ps1 am Ende, .github ausgelassen' {
+        $h = 'a' * 64
+        $m = ConvertFrom-HMManifest ("# HUMig-Release v9.0.1`n$h  Pull.ps1`n$h  HUMig.ps1`n$h  Functions/B.ps1`n$h  .github/x.yml`n$h  Docs/a b.html`n")
+        $r = Get-HMPullFileList $m
+        @($r.Bad).Count | Should -Be 0
+        @($r.Files)[-1] | Should -Be 'Pull.ps1'
+        @($r.Files) | Should -Not -Contain '.github/x.yml'
+        @($r.Files) | Should -Contain 'Docs/a b.html'
+        @($r.Files).Count | Should -Be 4
+    }
+    It 'unzulaessige Eintraege werden gemeldet (nicht installiert)' {
+        $h = 'b' * 64
+        $m = ConvertFrom-HMManifest ("$h  HUMig.ps1`n$h  ../boese.ps1`n$h  Functions\Rueck.ps1`n$h  C:/x.ps1`n")
+        $r = Get-HMPullFileList $m
+        @($r.Bad) | Should -Contain '../boese.ps1'
+        @($r.Bad) | Should -Contain 'Functions\Rueck.ps1'
+        @($r.Bad) | Should -Contain 'C:/x.ps1'
+        @($r.Files) | Should -Be @('HUMig.ps1')
+    }
+    It 'Git-Baum-Reihenfolge (ohne Pruefsummen-Datei): Pull.ps1 ebenfalls am Ende' {
+        @(Get-HMPullOrder @('A.ps1', 'Pull.ps1', 'Z.ps1')) | Should -Be @('A.ps1', 'Z.ps1', 'Pull.ps1')
+    }
+}
+
+Describe 'Pull.ps1: Journal' {
+    It 'neues Journal: erster Eintrag ist der Programmordner, danach volle Pfade' {
+        $t = Join-Path $TestDrive 'HUMig'
+        $j = @(New-HMPullJournalText $t @("$t\HUMig.ps1", "$t\Functions\A.ps1") | ConvertFrom-Json)
+        $j = @($j | ForEach-Object { $_ })
+        $j[0] | Should -Be "$t\"
+        $j[1] | Should -Be "$t\HUMig.ps1"
+        $j.Count | Should -Be 3
+    }
+    It 'gleicher Ordner: Pfade bleiben gleich' {
+        $t = Join-Path $TestDrive 'HUMig'
+        $e = @(New-HMPullJournalText $t @("$t\HUMig.ps1", "$t\Functions\A.ps1") | ConvertFrom-Json) | ForEach-Object { $_ }
+        $r = Resolve-HMPullJournal $e $t
+        @($r.Paths) | Should -Be @("$t\HUMig.ps1", "$t\Functions\A.ps1")
+        @($r.Bad).Count | Should -Be 0
+    }
+    It 'anderer Laufwerksbuchstabe (neues Journal): Pfade folgen dem Programmordner' {
+        $r = Resolve-HMPullJournal @('E:\Tools\HUMig\', 'E:\Tools\HUMig\HUMig.ps1', 'E:\Tools\HUMig\Functions\A.ps1') 'F:\Tools\HUMig'
+        @($r.Paths) | Should -Be @('F:\Tools\HUMig\HUMig.ps1', 'F:\Tools\HUMig\Functions\A.ps1')
+    }
+    It 'altes Journal (nur volle Pfade) im selben Ordner und nach Laufwerkswechsel' {
+        $r = Resolve-HMPullJournal @('C:\X\HUMig\HUMig.ps1', 'C:\X\HUMig\Functions\Core-Update.ps1') 'C:\X\HUMig'
+        @($r.Paths) | Should -Be @('C:\X\HUMig\HUMig.ps1', 'C:\X\HUMig\Functions\Core-Update.ps1')
+        $r = Resolve-HMPullJournal @('E:\HUMig\HUMig.ps1', 'E:\HUMig\Functions\Core-Update.ps1', 'E:\HUMig\Docs\Sub\a.html') 'F:\HUMig'
+        @($r.Paths) | Should -Be @('F:\HUMig\HUMig.ps1', 'F:\HUMig\Functions\Core-Update.ps1', 'F:\HUMig\Docs\Sub\a.html')
+    }
+    It 'relative Eintraege werden auf den Programmordner bezogen, Ausbrueche abgelehnt' {
+        $r = Resolve-HMPullJournal @('HUMig.ps1', 'Functions/A.ps1', '..\boese.ps1', 'Functions\..\..\x') 'D:\HUMig'
+        @($r.Paths) | Should -Be @('D:\HUMig\HUMig.ps1', 'D:\HUMig\Functions\A.ps1')
+        @($r.Bad).Count | Should -Be 2
+    }
+    It 'Eintrag ausserhalb des Ordner-Eintrags wird nicht angefasst' {
+        $r = Resolve-HMPullJournal @('D:\HUMig\', 'D:\HUMig\HUMig.ps1', 'C:\Windows\System32\x.dll') 'D:\HUMig'
+        @($r.Paths) | Should -Be @('D:\HUMig\HUMig.ps1')
+        @($r.Bad) | Should -Be @('C:\Windows\System32\x.dll')
+    }
+    It 'alte Leselogik (Pull.ps1 bis 2.1.21) stellt mit dem neuen Journal richtig zurueck und stoert sich nicht am Ordner-Eintrag' {
+        $t = Join-Path $TestDrive 'AltLeser'
+        New-HMTestFile "$t\HUMig.ps1.pullold" 'alt'; New-HMTestFile "$t\HUMig.ps1" 'neu'
+        New-HMTestFile "$t\Functions\A.ps1.pullold" 'altA'
+        New-HMTestFile "$t\Functions\A.ps1.pulltmp" 'tmp'
+        $jl = New-HMPullJournalText $t @("$t\HUMig.ps1", "$t\Functions\A.ps1") | ConvertFrom-Json
+        # Kopie der Schleife aus Pull.ps1 2.1.18 bis 2.1.21 (unveraendert)
+        $jbad = 0
+        foreach ($jp in @($jl)) {
+            if (-not "$jp") { continue }
+            $jo = "$jp.pullold"
+            if (Test-Path -LiteralPath $jo) {
+                try { Move-Item -LiteralPath $jo -Destination "$jp" -Force -ErrorAction Stop }
+                catch { $jbad++ }
+            }
+            Remove-Item -LiteralPath "$jp.pulltmp" -Force -ErrorAction SilentlyContinue
+        }
+        $jbad | Should -Be 0
+        Get-Content -LiteralPath "$t\HUMig.ps1" -Raw | Should -Be 'alt'
+        Get-Content -LiteralPath "$t\Functions\A.ps1" -Raw | Should -Be 'altA'
+        Test-Path -LiteralPath "$t\Functions\A.ps1.pulltmp" | Should -BeFalse
+        @(Get-ChildItem -LiteralPath $t -Recurse -Force -Filter '*.pullold').Count | Should -Be 0
+    }
+    It 'Zurueckstellen: Sicherungen zurueck, Zwischendateien weg, gesperrte Datei wird als Fehler gemeldet' {
+        $t = Join-Path $TestDrive 'Restore'
+        New-HMTestFile "$t\A.ps1.pullold" 'altA'; New-HMTestFile "$t\A.ps1" 'neuA'; New-HMTestFile "$t\A.ps1.pulltmp" 'x'
+        New-HMTestFile "$t\B.ps1.pullold" 'altB'; New-HMTestFile "$t\B.ps1" 'neuB'
+        New-HMTestFile "$t\C.ps1" 'neuC'   # neu hinzugekommen, keine Sicherung
+        $lock = [IO.File]::Open("$t\B.ps1", 'Open', 'Read', 'None')
+        try { $r = @(Restore-HMPullJournal @("$t\A.ps1", "$t\B.ps1", "$t\C.ps1")) } finally { $lock.Dispose() }
+        $r.Count | Should -Be 2
+        @($r | Where-Object { $_.Path -eq "$t\A.ps1" })[0].Ok | Should -BeTrue
+        @($r | Where-Object { $_.Path -eq "$t\B.ps1" })[0].Ok | Should -BeFalse
+        Get-Content -LiteralPath "$t\A.ps1" -Raw | Should -Be 'altA'
+        Test-Path -LiteralPath "$t\A.ps1.pulltmp" | Should -BeFalse
+        Test-Path -LiteralPath "$t\B.ps1.pullold" | Should -BeTrue
+    }
+}
+
+Describe 'Pull.ps1: Ersetzen rueckgaengig machen (ehrliche Meldung)' {
+    It 'alles zurueck: keine Restliste' {
+        $t = Join-Path $TestDrive 'Undo1'
+        New-HMTestFile "$t\A.ps1" 'neuA'; New-HMTestFile "$t\A.ps1.pullold" 'altA'; New-HMTestFile "$t\N.ps1" 'neu'
+        $moved = New-Object System.Collections.Generic.List[object]
+        $moved.Add(@("$t\A.ps1", "$t\A.ps1.pullold")); $moved.Add(@("$t\N.ps1", ''))
+        @(Undo-HMPullReplace $moved).Count | Should -Be 0
+        Get-Content -LiteralPath "$t\A.ps1" -Raw | Should -Be 'altA'
+        Test-Path -LiteralPath "$t\N.ps1" | Should -BeFalse
+    }
+    It 'gesperrte Datei: wird mit Zustand gemeldet, die anderen trotzdem zurueckgestellt' {
+        $t = Join-Path $TestDrive 'Undo2'
+        New-HMTestFile "$t\A.ps1" 'neuA'; New-HMTestFile "$t\A.ps1.pullold" 'altA'
+        New-HMTestFile "$t\B.ps1" 'neuB'; New-HMTestFile "$t\B.ps1.pullold" 'altB'
+        $moved = New-Object System.Collections.Generic.List[object]
+        $moved.Add(@("$t\A.ps1", "$t\A.ps1.pullold")); $moved.Add(@("$t\B.ps1", "$t\B.ps1.pullold"))
+        $lock = [IO.File]::Open("$t\B.ps1", 'Open', 'Read', 'None')
+        try { $r = @(Undo-HMPullReplace $moved) } finally { $lock.Dispose() }
+        $r.Count | Should -Be 1
+        $r[0].Path | Should -Be "$t\B.ps1"
+        $r[0].Text | Should -Match 'B\.ps1\.pullold'
+        Get-Content -LiteralPath "$t\A.ps1" -Raw | Should -Be 'altA'
+    }
+}
+
+Describe 'Pull.ps1: Sperre gegen zwei gleichzeitige Laeufe' {
+    It 'zweiter Lauf bekommt die Sperre nicht, nach dem Ende ist sie frei und die Datei weg' {
+        $t = Join-Path $TestDrive 'Sperre'; New-Item -ItemType Directory -Path $t -Force | Out-Null
+        $a = Enter-HMPullLock $t
+        $a | Should -Not -BeNullOrEmpty
+        try { Enter-HMPullLock $t | Should -BeNullOrEmpty } finally { $a.Dispose() }
+        Test-Path -LiteralPath (Join-Path $t 'pull.lock') | Should -BeFalse
+        $b = Enter-HMPullLock $t
+        $b | Should -Not -BeNullOrEmpty
+        $b.Dispose()
+    }
+    It 'Sperre gilt auch fuer einen anderen Prozess' {
+        $t = Join-Path $TestDrive 'Sperre2'; New-Item -ItemType Directory -Path $t -Force | Out-Null
+        $a = Enter-HMPullLock $t
+        try {
+            $f = Join-Path $t 'pull.lock'
+            $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $o = & $ps -NoProfile -Command "try { [IO.File]::Open('$f', 'OpenOrCreate', 'ReadWrite', 'None').Dispose(); 'frei' } catch { 'besetzt' }"
+            "$o".Trim() | Should -Be 'besetzt'
+        } finally { $a.Dispose() }
+    }
+}
+
+Describe 'Pull.ps1: kein stilles Zurueckstufen' {
+    It 'installierte Version aus version.json, sonst installed.json' {
+        $t = Join-Path $TestDrive 'Ver'
+        New-HMTestFile "$t\Config\installed.json" '{ "Version": "2.1.19" }'
+        "$(Get-HMPullInstalledVersion $t)" | Should -Be '2.1.19'
+        New-HMTestFile "$t\Config\version.json" '{ "version": "2.1.20" }'
+        "$(Get-HMPullInstalledVersion $t)" | Should -Be '2.1.20'
+        New-HMTestFile "$t\Config\version.json" '{ "version": "kaputt" }'
+        "$(Get-HMPullInstalledVersion $t)" | Should -Be '2.1.19'
+        $u = Join-Path $TestDrive 'VerBranch'
+        New-HMTestFile "$u\Config\installed.json" '{ "Version": "Branch main" }'
+        Get-HMPullInstalledVersion $u | Should -BeNullOrEmpty
+    }
+    It 'aeltere Version ohne -Version: nachfragen; gleiche, neuere, ausdrueckliche oder unbekannte: nicht' {
+        Test-HMPullDowngrade ([Version]'2.1.20') ([Version]'2.1.19') '' | Should -BeTrue
+        Test-HMPullDowngrade ([Version]'2.1.20') ([Version]'2.1.19') '2.1.19' | Should -BeFalse
+        Test-HMPullDowngrade ([Version]'2.1.20') ([Version]'2.1.20') '' | Should -BeFalse
+        Test-HMPullDowngrade ([Version]'2.1.19') ([Version]'2.1.21') '' | Should -BeFalse
+        Test-HMPullDowngrade $null ([Version]'2.1.19') '' | Should -BeFalse
+    }
+}
+
+Describe 'Update-Bibliothek: Grenzversion der Versionszeile' {
+    It 'Grenze ist einstellbar (Vorlage fuer andere Apps)' {
+        $old = $script:HMManifestTagSince
+        try {
+            Test-HMManifestRelease 'abc' '2.0.120' | Should -BeNullOrEmpty
+            Test-HMManifestRelease 'abc' '2.0.121' | Should -Match 'ohne Versionszeile'
+            $script:HMManifestTagSince = '1.0.0'
+            Test-HMManifestRelease 'abc' '1.0.0' | Should -Match 'Pflicht ab 1\.0\.0'
+        } finally { $script:HMManifestTagSince = $old }
+    }
+}
+
+Describe 'Start-Dateien: Ordner mit Klammer im Namen' {
+    It 'kein Ordnerpfad (%~dp0) in einem Klammerblock' {
+        foreach ($f in @('Start.cmd', 'Start-Benutzer.cmd')) {
+            $t = Get-Content -LiteralPath (Join-Path $script:Root $f) -Raw
+            $t | Should -Not -Match '(?m)\(\s*$'
+            $t | Should -Not -Match "'%~dp0"
+        }
+    }
+    It 'laufen in "Test (1)" ohne Syntaxfehler bis zur Meldung "nicht gefunden"' {
+        $d = Join-Path $TestDrive 'Test (1)'; New-Item -ItemType Directory -Path $d -Force | Out-Null
+        foreach ($f in @('Start.cmd', 'Start-Benutzer.cmd')) {
+            Copy-Item -LiteralPath (Join-Path $script:Root $f) -Destination $d
+            $o = cmd.exe /c "echo.| `"$(Join-Path $d $f)`"" 2>&1
+            $LASTEXITCODE | Should -Be 1
+            "$o" | Should -Match 'nicht gefunden'
+        }
+    }
+}
