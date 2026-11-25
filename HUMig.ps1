@@ -40,6 +40,12 @@ $script:JobRunning = $false
 $script:CurrentJob = $null
 $script:RemoteCred = $null
 $script:Profiles   = @()
+# Ziel = der zuletzt verbundene (bzw. gerade verbindende) PC, nicht der Text im Feld Computer.
+# Computer, Benutzerliste ($script:Profiles), SID und Profilpfad gehoeren immer zu diesem Ziel (Connect-Target).
+$script:Target     = $null   # @{ Computer; Connected; Connecting; Seq }
+$script:ConnectSeq = 0       # Zaehler je Verbinden: aeltere Antworten werden verworfen
+$script:JobCtx     = $null   # Kontext des laufenden Vorgangs (benutzte Backup-Pfade)
+$script:HMDeleting = New-Object System.Collections.Generic.List[string]   # Backup-Pfade, die gerade geloescht werden
 $script:BackupChecks  = @{}
 $script:RestoreChecks = @{}
 $script:SelectedBackup = $null
@@ -718,7 +724,7 @@ if ($script:AppIcon) { $script:Window.Icon = $script:AppIcon }
 
 function Get-UI([string]$n) { $e = $script:Window.FindName($n); if (-not $e) { Write-Host "[WARN] UI '$n' fehlt" -ForegroundColor Yellow }; return $e }
 $ui = @{}
-foreach ($n in @('btnWizard', 'btnRemote', 'brdMonBackup', 'brdMonRestore', 'brdMonServer', 'tabStatus', 'pnlStatus', 'btnStatusRefresh', 'lblStatusTime', 'imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
+foreach ($n in @('btnWizard', 'btnRemote', 'brdMonBackup', 'brdMonRestore', 'brdMonServer', 'tabStatus', 'pnlStatus', 'btnStatusRefresh', 'lblStatusTime', 'imgLogo', 'lblTitle', 'lblSubTitle', 'btnUpdate', 'btnSettings', 'btnHelp', 'btnAbout', 'cmbComputer', 'lblConnected', 'btnConnect', 'btnLocal', 'cmbUser', 'lblSid',
     'txtBackupRoot', 'btnBrowseRoot', 'btnOpenRoot', 'lblFree', 'tabMain', 'cmbPreset', 'btnAllOn', 'btnAllOff', 'btnPresetSave', 'pnlBackupModules', 'lstExtra', 'btnExtraAdd',
     'btnExtraDel', 'chkMinProfileExc', 'chkNoProfileFileExc', 'chkMinSystemExc', 'chkNoSystemFileExc', 'btnEditExceptions', 'cmbThreads', 'btnPrecheck',
     'btnProfileSize', 'btnBackup', 'btnCancel', 'btnRefreshBackups', 'btnOpenBackup', 'btnDeleteBackup', 'btnCleanupBackups', 'btnEmptyDeleted', 'btnArchiveBackup', 'dgBackups', 'lblRestoreInfo',
@@ -1239,11 +1245,264 @@ function Add-ComputerHistory([string]$Name) {
     }
     if (-not $ui.cmbComputer.Items.Contains($Name)) { $ui.cmbComputer.Items.Insert(1, $Name) }
 }
-function Get-TargetComputer {
+#region HMZiel - reine Funktionen (ohne Fenster testbar, .github\tests\Ziel.Tests.ps1)
+# Eine Regel fuer "derselbe PC" (Abgleich Feld gegen Ziel und Gedaechtnis PC -> Benutzer): gleich ohne Beachtung von Gross/klein,
+# oder beide sind nach der Regel von Test-HMIsLocal dieser PC. Kurzname gegen FQDN gilt nicht als gleich (die Domaene eines
+# Kurznamens ist unbekannt).
+function Test-HMSameComputer([string]$A, [string]$B, [string]$Local = $env:COMPUTERNAME) {
+    return ((Get-HMComputerKey $A $Local) -eq (Get-HMComputerKey $B $Local))
+}
+# Schluessel eines Computernamens: '.' fuer diesen PC - dieselbe Regel wie Test-HMIsLocal in der Engine (leer, '.', localhost,
+# 127.0.0.1, eigener Name, eigener Name mit beliebiger Domaene), damit Anzeige und Ausfuehrung uebereinstimmen; sonst Grossbuchstaben
+function Get-HMComputerKey([string]$Name, [string]$Local = $env:COMPUTERNAME) {
+    $c = "$Name".Trim().ToUpperInvariant()
+    $l = "$Local".Trim().ToUpperInvariant()
+    if (-not $c -or $c -in @('.', 'LOCALHOST', '127.0.0.1') -or ($l -and ($c -eq $l -or $c -like "$l.*"))) { return '.' }
+    return $c
+}
+# Gedaechtnis "PC -> zuletzt gewaehlter Benutzer" (SID, Konto). Gilt beim Verbinden nur fuer denselben PC.
+function Set-HMUserMemoryEntry([hashtable]$Memory, [string]$Computer, $Entry, [string]$Local = $env:COMPUTERNAME) {
+    if ($null -eq $Memory -or -not "$Computer".Trim() -or -not $Entry -or -not ("$($Entry.SID)" -or "$($Entry.Account)")) { return }
+    $Memory[(Get-HMComputerKey $Computer $Local)] = [pscustomobject]@{ SID = "$($Entry.SID)"; Account = "$($Entry.Account)"; NoProfile = [bool]$Entry.NoProfile }
+}
+# Taugt der Benutzer fuers Gedaechtnis? Profil aus der Liste (SID) oder vollstaendig eingetragenes Konto (DOM\name bzw. name@domaene)
+function Test-HMMemorableProfile($P) {
+    if (-not $P) { return $false }
+    if ("$($P.SID)") { return $true }
+    return ([bool]$P.NoProfile -and "$($P.Account)".Trim() -match '^[^\\\s]+\\[^\\\s]+$|^[^@\s]+@[^@\s]+$')
+}
+function Get-HMUserMemoryEntry([hashtable]$Memory, [string]$Computer, [string]$Local = $env:COMPUTERNAME) {
+    if ($null -eq $Memory) { return $null }
+    $k = Get-HMComputerKey $Computer $Local
+    if ($Memory.ContainsKey($k)) { return $Memory[$k] }
+    return $null
+}
+# Feld Computer gegen Ziel. Kind: Match | Differs | None (noch nie verbunden). Conn: Connected | Connecting | Failed | None
+function Get-HMTargetState([string]$Field, $Target, [string]$Local = $env:COMPUTERNAME) {
+    $f = "$Field".Trim(); if (-not $f) { $f = $Local }   # leeres Feld = dieser PC (wie bisher)
+    $c = $(if ($Target) { "$($Target.Computer)".Trim() } else { '' })
+    $kind = $(if (-not $c) { 'None' } elseif (Test-HMSameComputer $f $c $Local) { 'Match' } else { 'Differs' })
+    $conn = $(if (-not $c) { 'None' } elseif ($Target.Connected) { 'Connected' } elseif ($Target.Connecting) { 'Connecting' } elseif ($Target.Chosen) { 'Chosen' } else { 'Failed' })
+    return [pscustomobject]@{ Kind = $kind; Field = $f; Computer = $c; Conn = $conn }
+}
+# Dauerhafte Anzeige unter dem Feld Computer (wird von der Statuszeile nicht ueberschrieben)
+function Get-HMTargetLabel($State) {
+    $t = switch ("$($State.Conn)") {
+        'Connected'  { "verbunden mit $($State.Computer)" }
+        'Connecting' { "verbinde mit $($State.Computer) ..." }
+        'Failed'     { "nicht verbunden: $($State.Computer) (Verbindung fehlgeschlagen, Benutzerliste leer)" }
+        'Chosen'     { "gewaehlt: $($State.Computer) (nicht verbunden, Benutzerliste leer)" }
+        default      { 'nicht verbunden' }
+    }
+    $col = switch ("$($State.Conn)") { 'Connected' { '#FFA6E3A1' } 'Connecting' { '#FFF9E2AF' } 'Failed' { '#FFFAB387' } 'Chosen' { '#FFF9E2AF' } default { '#FFA6ADC8' } }
+    $tip = 'Auf diesen Computer und seine Benutzerliste wirken Backup, Restore und Werkzeuge.'
+    if ("$($State.Kind)" -eq 'Differs') {
+        # kurz halten (lange Namen, schmales Fenster): Namen vor dem ersten Punkt, wenn sie sich dann noch unterscheiden;
+        # der ganze Satz mit den vollen Namen steht im Tooltip
+        $sh = { param($n) if ("$n" -match '^\d{1,3}(\.\d{1,3}){3}$') { "$n" } else { ("$n" -split '\.')[0] } }
+        $sf = & $sh $State.Field; $sc = & $sh $State.Computer
+        if ($sf -ieq $sc) { $sf = $State.Field; $sc = $State.Computer }
+        $base = switch ("$($State.Conn)") { 'Connected' { "verbunden mit $sc" } 'Connecting' { "verbinde mit $sc ..." } 'Failed' { "nicht verbunden: $sc (fehlgeschlagen)" } 'Chosen' { "gewaehlt: $sc (nicht verbunden)" } default { 'nicht verbunden' } }
+        $t = "$base   |   im Feld: $sf (Enter = verbinden)"
+        $tip = "Im Feld Computer steht $($State.Field), Ziel ist aber $($State.Computer). Enter oder Verbinden = mit $($State.Field) verbinden. Werkzeuge, die nur den PC brauchen, laufen auf $($State.Field); Backup, Restore und Werkzeuge mit Benutzer fragen nach.`n`n$tip"
+        if ("$($State.Conn)" -ne 'Failed') { $col = '#FFF9E2AF' }
+    }
+    return [pscustomobject]@{ Text = $t; Color = $col; Tip = $tip }
+}
+# Rueckfrage, wenn ein Vorgang startet, waehrend im Feld ein anderer PC steht als das Ziel ($null = keine Rueckfrage noetig)
+# Beide Varianten gleich belegt: Ja = auf dem Ziel ausfuehren, Nein = nichts tun (Standard). -RunningJob: Backup/Restore laeuft
+function Get-HMTargetQuestion($State, [string]$Action, [string]$RunningJob = '', [switch]$FieldLocked) {
+    if ("$($State.Kind)" -ne 'Differs') { return $null }
+    $f = $State.Field; $c = $State.Computer
+    $was = switch ("$($State.Conn)") {
+        'Connected'  { "verbunden ist $c" }
+        'Connecting' { "die Verbindung zu $c wird gerade aufgebaut" }
+        default      { "gewaehlt ist $c (nicht verbunden)" }
+    }
+    # -FieldLocked: ein Vorgang laeuft, Feld und Verbinden sind gesperrt
+    $hint = $(if ($RunningJob -and $FieldLocked) { "Waehrend '$RunningJob' laeuft, wird nicht neu verbunden. Fuer ${f}: Nein, nach dem Vorgang im Feld Enter oder Verbinden." }
+        elseif ($RunningJob) { "Waehrend '$RunningJob' laeuft, schaltet HUMig nicht von selbst um. Fuer ${f}: Nein, dann im Feld Enter oder Verbinden." }
+        elseif ($FieldLocked) { "Fuer ${f}: Nein, nach dem laufenden Vorgang im Feld Enter oder Verbinden." }
+        else { "Fuer ${f}: Nein, dann im Feld Enter oder Verbinden." })
+    return ("Im Feld Computer steht $f, $was.`n`n$Action wuerde auf $c laufen, nicht auf $f.`n`n" +
+        "Ja = $Action auf $c ausfuehren (das Feld wird auf $c zurueckgesetzt)`n" +
+        "Nein = nichts tun`n`n$hint")
+}
+# Laeuft ein Vorgang, der PC oder Profil belegt? Nur Backup und Restore (Groesse ermitteln, Pruefen, Vergleichen, App-Updates,
+# Server-Backup usw. zaehlen nicht)
+function Test-HMIsBackupRestoreJob([string]$Title) { return ("$Title" -in @('Backup', 'Restore')) }
+# Art des Werkzeugs: User = braucht Benutzer/SID/Profilpfad des Ziels, Pc = braucht nur den PC, None = wirkt nicht auf den gewaehlten PC.
+# Entscheidung bei abweichendem Feld: None/Match -> Run, Pc ohne Backup/Restore -> Switch (still auf den PC im Feld), sonst Ask
+function Get-HMToolDecision([string]$Kind, $State, [bool]$BackupRestoreRunning) {
+    if ($Kind -eq 'None' -or "$($State.Kind)" -ne 'Differs') { return 'Run' }
+    if ($Kind -eq 'Pc' -and -not $BackupRestoreRunning) { return 'Switch' }
+    return 'Ask'
+}
+# Rueckfrage fuer eingreifende Werkzeuge waehrend Backup oder Restore
+function Get-HMBusyQuestion([string]$JobTitle, [string]$Tool) {
+    return "Es laeuft gerade: $JobTitle.`n`n$Tool greift in den PC bzw. das Benutzerprofil ein und kann den laufenden Vorgang stoeren.`n`nTrotzdem ausfuehren?"
+}
+# Antwort eines Verbindens noch gueltig? Nur die Antwort des neuesten Verbindens zaehlt.
+function Test-HMConnectCurrent([int]$Seq, [int]$Current) { return ($Seq -eq $Current) }
+# Vorauswahl nach dem Verbinden (Index in $Profiles, -1 = keine).
+# Gleicher PC wie vorher (z.B. nach dem Restore oder einem Profil-Werkzeug): bisherige Auswahl behalten - zuerst ueber die SID,
+# sonst ueber das Konto (ein Konto ohne Profil hat nach dem Restore mit USMT eine SID). Sonst: lokal der eigene angemeldete
+# Benutzer, dann ein angemeldeter, dann einer mit geladener Registry, dann der zuletzt verwendete.
+function Select-HMProfileIndex($Profiles, $Previous, [bool]$SamePc, [bool]$IsLocal, [string]$MySid) {
+    $list = @($Profiles | Where-Object { $_ })
+    if (-not $list.Count) { return -1 }
+    if ($SamePc -and $Previous) {
+        if ("$($Previous.SID)") { for ($i = 0; $i -lt $list.Count; $i++) { if ("$($list[$i].SID)" -eq "$($Previous.SID)") { return $i } } }
+        $acc = "$($Previous.Account)".Trim()
+        if ($acc) {
+            for ($i = 0; $i -lt $list.Count; $i++) { if ("$($list[$i].Account)" -ieq $acc) { return $i } }
+            if ($acc -notmatch '\\') { for ($i = 0; $i -lt $list.Count; $i++) { if ("$($list[$i].Account)".Split('\')[-1] -ieq $acc) { return $i } } }
+        }
+    }
+    $sel = $null
+    if ($IsLocal -and $MySid) { $sel = @($list | Where-Object { "$($_.SID)" -eq $MySid -and $_.Interactive })[0] }
+    if (-not $sel) { $sel = @($list | Where-Object { $_.Interactive })[0] }
+    if (-not $sel) { $sel = @($list | Where-Object { $_.Loaded })[0] }
+    if (-not $sel) { $sel = @($list | Sort-Object { "$($_.LastUse)" } -Descending)[0] }
+    if (-not $sel) { return -1 }
+    return [array]::IndexOf($list, $sel)
+}
+# Ist $Profile der bisher gewaehlte Benutzer? Gleiche Regeln wie Select-HMProfileIndex (SID, Konto, Konto ohne Domaene)
+function Test-HMProfileKept($Candidate, $Previous) {
+    if (-not $Candidate -or -not $Previous) { return $false }
+    if ("$($Previous.SID)" -and "$($Candidate.SID)" -eq "$($Previous.SID)") { return $true }
+    $acc = "$($Previous.Account)".Trim()
+    if (-not $acc) { return $false }
+    if ("$($Candidate.Account)" -ieq $acc) { return $true }
+    return ($acc -notmatch '\\' -and "$($Candidate.Account)".Split('\')[-1] -ieq $acc)
+}
+# Liegt einer der Pfade A im oder ueber einem der Pfade B (oder ist gleich)? Rueckgabe: erster Treffer (Pfad aus A) oder $null
+function Get-HMPathConflict([string[]]$A, [string[]]$B) {
+    $n = { param($p) "$p".Trim().Replace('/', '\').TrimEnd('\').ToUpperInvariant() }
+    # Schleifenvariablen nicht $a/$b nennen: PowerShell unterscheidet nicht nach Gross/klein, sie wuerden $A/$B ueberschreiben
+    $listB = @($B | Where-Object { "$_".Trim() })
+    foreach ($pa in @($A | Where-Object { "$_".Trim() })) {
+        $x = & $n $pa
+        foreach ($pb in $listB) {
+            $y = & $n $pb
+            if ($x -eq $y -or $x.StartsWith("$y\") -or $y.StartsWith("$x\")) { return $pa }
+        }
+    }
+    return $null
+}
+# Backup-Pfade, die ein Vorgang benutzt (Backup: Ziel und weitergefuehrtes Backup; Restore, Pruefen, Vergleichen: Quelle)
+function Get-HMCtxPaths($Ctx) {
+    if (-not $Ctx) { return @() }
+    $out = @()
+    foreach ($k in @('BackupPath', 'ExistingBackup', 'CompareA', 'CompareB')) { try { if ("$($Ctx[$k])") { $out += "$($Ctx[$k])" } } catch { } }
+    try { if ($Ctx['Backup'] -and "$($Ctx['Backup'].Path)") { $out += "$($Ctx['Backup'].Path)" } } catch { }
+    return $out
+}
+function Get-HMDeleteWarning([string]$Name, [string]$JobTitle) {
+    $use = switch ("$JobTitle") {
+        'Backup' { 'das Backup schreibt hinein' }
+        'Restore' { 'der Restore liest daraus' }
+        'Backup pruefen' { 'die Pruefung liest daraus' }
+        'Backups vergleichen' { 'der Vergleich liest daraus' }
+        'Restore-Vorschau' { 'die Vorschau liest daraus' }
+        default { 'der Vorgang arbeitet damit' }
+    }
+    return "ACHTUNG: Das Backup '$Name' wird gerade vom laufenden Vorgang '$JobTitle' benutzt ($use).`n`nLoeschen bricht den Vorgang nicht ab. Er laeuft mit fehlenden Dateien weiter und kann unvollstaendig oder mit Fehlern enden.`n`nTrotzdem jetzt loeschen?"
+}
+function Get-HMDeletingWarning([string]$Name, [string]$Action) {
+    return "ACHTUNG: Das Backup '$Name' wird gerade geloescht.`n`n$Action wuerde damit arbeiten, waehrend Dateien verschwinden. Das Ergebnis waere unvollstaendig.`n`nTrotzdem starten?"
+}
+#endregion HMZiel
+# PC -> zuletzt gewaehlter Benutzer (Get-HMUserMemoryEntry); gemerkt bei jeder Auswahl, solange der PC verbunden ist
+$script:HMUserMemory = @{}
+function Save-HMUserMemory {
+    # gemerkt wird der WIRKSAME Benutzer (Listenauswahl oder vollstaendig eingetragenes Konto wie DOM\name) - nur zu festen
+    # Zeitpunkten: Start von Backup, Restore oder einem Werkzeug mit Benutzer, vor dem Neuladen durch HUMig und vor stillem Umschalten.
+    # Nicht bei Auswahlwechsel, Tastendruck oder automatischer Vorauswahl.
+    if (-not ($script:Target -and "$($script:Target.Computer)")) { return }
+    try { $p = Get-SelectedProfile } catch { return }
+    if (Test-HMMemorableProfile $p) { Set-HMUserMemoryEntry $script:HMUserMemory "$($script:Target.Computer)" $p }
+}
+
+# Text im Feld Computer (nur fuer Verbinden, Anmeldedaten und die Anzeige - Ziel einer Aktion ist Get-TargetComputer)
+function Get-HMFieldComputer {
     $c = "$($ui.cmbComputer.Text)".Trim()
     if (-not $c) { $c = $env:COMPUTERNAME }
     return $c
 }
+# Ziel aller Aktionen: der verbundene bzw. zuletzt gewaehlte PC (auch wenn das Verbinden scheiterte, z.B. fuer
+# Wake-on-LAN, Fernwartung aktivieren, Netzwerktest). Vor dem ersten Verbinden: der Text im Feld.
+function Get-TargetComputer {
+    if ($script:Target -and "$($script:Target.Computer)") { return "$($script:Target.Computer)" }
+    return (Get-HMFieldComputer)
+}
+# Beschriftung fuer Fenster, die das Ziel nur anzeigen (z.B. "Gewaehlter Computer: $(Get-HMTargetCaption)"): "PC01" bzw.
+# "PC01, im Feld: PC02". Umgeschaltet wird erst beim Klick auf eine Aktion (Use-HMPcTarget).
+function Get-HMTargetCaption {
+    $st = Get-HMTargetState (Get-HMFieldComputer) $script:Target
+    if ("$($st.Kind)" -eq 'Differs') { return "$($st.Computer), im Feld: $($st.Field)" }
+    return (Get-TargetComputer)
+}
+function Update-HMTargetLabel {
+    if (-not $ui.lblConnected) { return }
+    if ($script:UserMode) { $ui.lblConnected.Text = "Benutzer-Modus: eigenes Profil auf $env:COMPUTERNAME"; $ui.lblConnected.Foreground = Get-ConsoleBrush '#FFA6ADC8'; return }
+    $l = Get-HMTargetLabel (Get-HMTargetState (Get-HMFieldComputer) $script:Target)
+    $ui.lblConnected.Text = $l.Text
+    $ui.lblConnected.Foreground = Get-ConsoleBrush $l.Color
+    $ui.lblConnected.ToolTip = $l.Tip
+}
+# Vor jedem Vorgang: steht im Feld ein anderer PC als das Ziel, nachfragen statt still zu mischen. $true = Vorgang starten
+# $script:HMTargetDeclined: $true, wenn der Anwender die Rueckfrage abgelehnt hat (fuer den Umzugs-Assistenten)
+function Confirm-HMTarget([string]$Action) {
+    $script:HMTargetDeclined = $false
+    if ($script:UserMode) { return $true }
+    $st = Get-HMTargetState (Get-HMFieldComputer) $script:Target
+    # waehrend Backup/Restore wird nie neu verbunden (das Ziel wuerde mitten im Vorgang wechseln)
+    $job = Get-HMBackupRestoreTitle
+    $q = Get-HMTargetQuestion $st $Action $job -FieldLocked:([bool]$script:JobRunning)
+    if (-not $q) { Save-HMUserMemory; return $true }
+    if ("$((Show-HMDialogBox -Owner $script:Window -Text $q -Title 'Welcher Computer?' -Mode 'YesNo' -Icon 'Question' -Default 'No'))" -ne 'Yes') { $script:HMTargetDeclined = $true; return $false }
+    $ui.cmbComputer.Text = $st.Computer; Update-HMTargetLabel; Out-Console "$Action auf $($st.Computer) (Feld Computer zurueckgesetzt)" 'Info'
+    Save-HMUserMemory
+    return $true
+}
+# Backup oder Restore laeuft - dazu gehoert die Phase "erst fehlende Programme installieren, dann Restore" ($script:RestoreAfterInstall,
+# gesetzt in UI-Apps.ps1, auf jedem Ausgang zurueckgesetzt)
+function Test-HMBackupRestoreRunning { return (([bool]$script:JobRunning -and (Test-HMIsBackupRestoreJob "$($script:JobTitle)")) -or [bool]$script:RestoreAfterInstall) }
+function Get-HMBackupRestoreTitle {
+    if ([bool]$script:JobRunning -and (Test-HMIsBackupRestoreJob "$($script:JobTitle)")) { return "$($script:JobTitle)" }
+    if ($script:RestoreAfterInstall) { return 'Restore (vorher Programme installieren)' }
+    return ''
+}
+# Benutzt ein laufender Vorgang (auch die Installationsphase vor dem Restore) einen der Pfade? Rueckgabe @{ Hit; Title } oder $null
+function Get-HMUsedBackupConflict([string[]]$Paths) {
+    if ($script:JobRunning) { $h = Get-HMPathConflict $Paths @(Get-HMCtxPaths $script:JobCtx); if ($h) { return @{ Hit = $h; Title = "$($script:JobTitle)" } } }
+    if ($script:RestoreAfterInstall) { $h = Get-HMPathConflict $Paths @(Get-HMCtxPaths $script:RestoreAfterInstall); if ($h) { return @{ Hit = $h; Title = 'Restore' } } }
+    return $null
+}
+# Werkzeug, das nur den PC braucht: still auf den PC im Feld umschalten (wie bisher lief es auf dem Feldtext). Der PC wird
+# gewaehlt, ohne Benutzerliste - die Benutzer des bisherigen PCs werden verworfen, nichts kann sich mischen.
+function Select-HMFieldTarget([string]$Action) {
+    $f = Get-HMFieldComputer
+    Save-HMUserMemory   # beim Zurueckverbinden auf den bisherigen PC ist derselbe Benutzer wieder gewaehlt
+    $script:ConnectSeq++
+    $script:Target = @{ Computer = $f; Connected = $false; Connecting = $false; Chosen = $true; Seq = $script:ConnectSeq }
+    $script:Profiles = @(); $ui.cmbUser.Items.Clear(); $ui.cmbUser.Text = ''; $ui.lblSid.Text = ''
+    Set-ConnectStatus "Gewaehlt: $f (nicht verbunden)" '#FFF9E2AF'
+    Update-HMTargetLabel
+    try { Update-RestoreTargetLabel } catch { }
+    Out-Console "$Action auf $f (gewaehlt, nicht verbunden - fuer Backup/Restore: Enter oder Verbinden)" 'Info'
+}
+# Laeuft gerade ein Vorgang, der dieses Backup benutzt, bzw. wird es gerade geloescht? Warnung mit Standard Nein. $true = weiter
+function Confirm-HMBackupNotInUse([string[]]$Paths, [string]$Name) {
+    $c = Get-HMUsedBackupConflict $Paths
+    if (-not $c) { return $true }
+    $ok = "$((Show-HMDialogBox -Owner $script:Window -Text (Get-HMDeleteWarning $Name $c.Title) -Title 'Backup wird benutzt' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -eq 'Yes'
+    if ($ok) { Out-Console "Backup '$Name' wird trotz laufendem Vorgang '$($c.Title)' geloescht (bestaetigt)." 'Warning' }
+    return $ok
+}
+function Add-HMDeleting([string[]]$Paths) { foreach ($p in @($Paths)) { if ("$p") { $script:HMDeleting.Add("$p") } } }
+function Remove-HMDeleting([string[]]$Paths) { foreach ($p in @($Paths)) { if ("$p") { [void]$script:HMDeleting.Remove("$p") } } }
 function Format-ProfileEntry($p, [switch]$NoSize) {
     $s = $p.Folder
     if ($p.Account -and ($p.Account.Split('\')[-1] -ne $p.Folder)) { $s += "  ($($p.Account))" } elseif ($p.Account) { $s += "  ($($p.Account.Split('\')[0]))" }
@@ -1303,27 +1562,43 @@ $ui.lblSid.Add_MouseLeftButtonUp({ $p = Get-SelectedProfile; if ($p -and $p.SID)
 $ui.cmbUser.Add_SelectionChanged({ $script:Window.Dispatcher.BeginInvoke([action]{ Update-SidLabel }) | Out-Null })
 $ui.cmbUser.Add_KeyUp({ Update-SidLabel })
 
-function Connect-Target {
+# Verbinden. -FromField: mit dem PC im Feld Computer (Verbinden, Enter, Lokal, Geraete-Dialog).
+# Ohne Schalter: das bisherige Ziel neu laden (nach dem Restore, nach Profil-Werkzeugen, beim Start) - die Auswahl bleibt.
+function Connect-Target([switch]$FromField) {
     # Ergebnis des gerade beendeten Vorgangs (nur waehrend dessen OnFinished gesetzt) beim Verbinden vorn behalten
     $script:ConnectKeepStatus = $script:JobEndStatus
+    $script:ConnectSeq++
     if ($script:UserMode) {
         # Benutzer-Modus: nur das eigene Profil auf diesem PC (keine Profil-Abfrage anderer Benutzer)
         $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
         $ui.cmbComputer.Text = $env:COMPUTERNAME; $script:RemoteCred = $null
         $script:Profiles = @([pscustomobject]@{ SID = $id.User.Value; LocalPath = $env:USERPROFILE; Folder = (Split-Path $env:USERPROFILE -Leaf)
             Account = $id.Name; Loaded = $true; Interactive = $true; LastUse = (Get-Date).ToString('yyyy-MM-dd HH:mm') })
+        $script:Target = @{ Computer = $env:COMPUTERNAME; Connected = $true; Connecting = $false; Seq = $script:ConnectSeq }
         $ui.cmbUser.Items.Clear(); [void]$ui.cmbUser.Items.Add((Format-ProfileEntry $script:Profiles[0])); $ui.cmbUser.SelectedIndex = 0
         Out-Console "Benutzer-Modus: $($id.Name) auf $env:COMPUTERNAME - vor dem Backup/Restore offene Programme (Outlook, Browser, Office) schliessen" 'Info'
         Set-ConnectStatus "Benutzer-Modus: $($id.Name)" '#FFA6E3A1'
         $script:ConnectKeepStatus = $null
+        Update-HMTargetLabel
         Update-SidLabel
         Start-HMAppDetect
         return
     }
-    $comp = Get-TargetComputer
+    $old = $script:Target
+    $comp = $(if ($FromField -or -not $old -or -not "$($old.Computer)") { Get-HMFieldComputer } else { "$($old.Computer)" })
+    # HUMig laedt von sich aus neu (nach Restore, Profil-Werkzeugen, beim Start): wirksamen Benutzer vorher merken.
+    # Verbinden aus dem Feld (Enter, Verbinden, Lokal) merkt nichts - dort gilt, was zuletzt gestartet wurde.
+    if (-not $FromField) { Save-HMUserMemory }
+    $same = [bool]($old -and (Test-HMSameComputer $comp "$($old.Computer)"))
+    $seq = $script:ConnectSeq
+    $script:Target = @{ Computer = $comp; Connected = $false; Connecting = $true; Seq = $seq }
     Set-ConnectStatus "Verbinde mit $comp ..." '#FFF9E2AF'
     Out-Console "Benutzerprofile von $comp laden ..." 'Info'
     $ui.cmbUser.Items.Clear(); $script:Profiles = @(); $ui.lblSid.Text = ''
+    # anderer PC: ein eingetipptes Konto des bisherigen PCs nicht stehen lassen
+    if (-not $same) { $ui.cmbUser.Text = '' }
+    Update-HMTargetLabel
+    try { Update-RestoreTargetLabel } catch { }
     Invoke-AsyncCommand -ScriptBlock {
         param($eng, $comp, $cred)
         . $eng
@@ -1339,21 +1614,32 @@ function Connect-Target {
             }
         } catch { }
         [pscustomobject]$out
-    } -ArgumentList @($script:Engine, $comp, $script:RemoteCred) -TimeoutSec 90 -State $comp -OnComplete {
-        param($r, $comp)
-        if ($r -is [string]) { Out-Console "Verbindung zu ${comp}: $r" 'Error'; Set-ConnectStatus 'Fehler' '#FFF38BA8'; $script:ConnectKeepStatus = $null; return }
-        if ($r.Error -and -not @($r.Profiles).Count) { Out-Console "Profile von $comp nicht lesbar: $($r.Error)" 'Error'; Set-ConnectStatus 'Fehler' '#FFF38BA8'; $script:ConnectKeepStatus = $null; return }
+    } -ArgumentList @($script:Engine, $comp, $script:RemoteCred) -TimeoutSec 90 -State @{ Comp = $comp; Seq = $seq } -OnComplete {
+        param($r, $st)
+        $comp = $st.Comp
+        # inzwischen wird ein anderer PC verbunden (oder derselbe neu): diese Antwort ist veraltet und wird verworfen.
+        # Statuszeile, Benutzerliste und $script:ConnectKeepStatus gehoeren dem neueren Verbinden.
+        if (-not (Test-HMConnectCurrent $st.Seq $script:ConnectSeq)) { Out-Console "Antwort von $comp verworfen - inzwischen ist $(Get-TargetComputer) das Ziel" 'Info'; return }
+        $script:Target.Connecting = $false
+        if ($r -is [string]) { Out-Console "Verbindung zu ${comp}: $r" 'Error'; Set-ConnectStatus 'Fehler' '#FFF38BA8'; $script:ConnectKeepStatus = $null; Update-HMTargetLabel; return }
+        if ($r.Error -and -not @($r.Profiles).Count) { Out-Console "Profile von $comp nicht lesbar: $($r.Error)" 'Error'; Set-ConnectStatus 'Fehler' '#FFF38BA8'; $script:ConnectKeepStatus = $null; Update-HMTargetLabel; return }
         $script:Profiles = @($r.Profiles)
+        $script:Target.Connected = $true
         foreach ($p in $script:Profiles) { [void]$ui.cmbUser.Items.Add((Format-ProfileEntry $p)) }
-        # Vorauswahl: angemeldeter Benutzer, sonst zuletzt verwendet
-        # Vorauswahl: lokal der Benutzer, der das Tool startet (wenn angemeldet) - sonst angemeldeter Benutzer, sonst Registry geladen
+        # Vorauswahl: fuer diesen PC gemerkter Benutzer (Gedaechtnis PC -> Benutzer); sonst lokal der Benutzer, der das Tool startet
+        # (wenn angemeldet), sonst angemeldeter Benutzer, sonst Registry geladen, sonst zuletzt verwendet
         $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-        $sel = @()
-        if (Test-HMIsLocal $comp) { $sel = @($script:Profiles | Where-Object { $_.SID -eq $me -and $_.Interactive } | Select-Object -First 1) }
-        if (-not $sel) { $sel = @($script:Profiles | Where-Object { $_.Interactive } | Select-Object -First 1) }
-        if (-not $sel) { $sel = @($script:Profiles | Where-Object { $_.Loaded } | Select-Object -First 1) }
-        if (-not $sel) { $sel = @($script:Profiles | Sort-Object LastUse -Descending | Select-Object -First 1) }
-        if ($sel) { $ui.cmbUser.SelectedIndex = [array]::IndexOf($script:Profiles, $sel[0]) }
+        $prev = Get-HMUserMemoryEntry $script:HMUserMemory $comp
+        $ix = Select-HMProfileIndex $script:Profiles $prev ([bool]$prev) (Test-HMIsLocal $comp) $me
+        if ($ix -ge 0) { $ui.cmbUser.SelectedIndex = $ix }
+        # gemerkter Benutzer statt der ueblichen Vorauswahl: sagen, warum
+        if ($prev -and $ix -ge 0 -and (Test-HMProfileKept $script:Profiles[$ix] $prev) -and $ix -ne (Select-HMProfileIndex $script:Profiles $null $false (Test-HMIsLocal $comp) $me)) {
+            Out-Console "Benutzer $($script:Profiles[$ix].Account) wie zuletzt an diesem PC gewaehlt" 'Info'
+        }
+        if ($prev -and "$($prev.Account)" -and $ix -ge 0 -and -not (Test-HMProfileKept $script:Profiles[$ix] $prev)) {
+            if ($prev.NoProfile) { Out-Console "Konto $($prev.Account) hat an $comp noch kein Profil - Auswahl: $($script:Profiles[$ix].Account)" 'Warning' }
+            else { Out-Console "Benutzer $($prev.Account) hat an $comp kein Profil mehr - Auswahl: $($script:Profiles[$ix].Account)" 'Warning' }
+        }
         Out-Console "$($script:Profiles.Count) Benutzerprofile auf $comp" 'Success'
         if ($null -ne $r.WinRM) {
             Out-Console ("   Admin-Freigabe C`$: {0}   PowerShell-Remoting (WinRM): {1}" -f $(if ($r.Smb) { 'OK' } else { 'NICHT erreichbar' }), $(if ($r.WinRM) { 'OK' } else { 'NICHT erreichbar (Registry/USMT/Drucker/WLAN remote nicht moeglich) - Werkzeuge > Fernwartung aktivieren' })) $(if ($r.Smb -and $r.WinRM) { 'Success' } else { 'Warning' })
@@ -1365,19 +1651,23 @@ function Connect-Target {
         }
         Set-ConnectStatus "Verbunden: $comp" '#FFA6E3A1'
         $script:ConnectKeepStatus = $null
+        Update-HMTargetLabel
         Update-SidLabel
         # Programm-Katalog: installierte Programme erkennen, passende Module einblenden
         if ($null -eq $r.WinRM -or $r.WinRM) { Start-HMAppDetect }
     }
 }
-$ui.btnConnect.Add_Click({ Connect-Target })
+$ui.btnConnect.Add_Click({ Connect-Target -FromField })
 $ui.btnConnect.Add_MouseRightButtonUp({
-    $c = Get-Credential -Message "Anmeldedaten fuer $(Get-TargetComputer) (nur fuer diese Sitzung, leer/Abbrechen = eigene Anmeldung)"
+    $c = Get-Credential -Message "Anmeldedaten fuer $(Get-HMFieldComputer) (nur fuer diese Sitzung, leer/Abbrechen = eigene Anmeldung)"
     $script:RemoteCred = $c
     Out-Console $(if ($c) { "Remote-Anmeldedaten: $($c.UserName) (nur diese Sitzung)" } else { 'Remote-Anmeldedaten entfernt - eigene Anmeldung wird verwendet' }) 'Info'
 })
-$ui.btnLocal.Add_Click({ $ui.cmbComputer.Text = $env:COMPUTERNAME; $script:RemoteCred = $null; Connect-Target })
-$ui.cmbComputer.Add_KeyDown({ if ($_.Key -eq 'Return') { Connect-Target } })
+$ui.btnLocal.Add_Click({ $ui.cmbComputer.Text = $env:COMPUTERNAME; $script:RemoteCred = $null; Connect-Target -FromField })
+$ui.cmbComputer.Add_KeyDown({ if ($_.Key -eq 'Return') { Connect-Target -FromField } })
+# Anzeige "verbunden mit" sofort nachziehen, wenn sich der Text im Feld aendert (Tippen oder Auswahl aus der Liste)
+$ui.cmbComputer.AddHandler([System.Windows.Controls.Primitives.TextBoxBase]::TextChangedEvent, [System.Windows.Controls.TextChangedEventHandler]{ Update-HMTargetLabel })
+$ui.cmbComputer.Add_SelectionChanged({ $script:Window.Dispatcher.BeginInvoke([action]{ Update-HMTargetLabel }) | Out-Null })
 $ui.btnADDevices.Add_Click({ Show-HMMultiDialog })
 
 # ============================================================================
@@ -1404,14 +1694,23 @@ function Set-JobUi([bool]$Running) {
 function Start-EngineJob {
     param([string]$Command, [hashtable]$Ctx, [string]$Title, [scriptblock]$OnFinished, [string[]]$ScriptFiles = @())
     if (-not @($ScriptFiles).Count) { $ScriptFiles = @($script:Engine, $script:EngineQuality) }
+    # Backup, das gerade geloescht wird: nicht still damit arbeiten (Warnung, Standard Nein)
+    $hit = Get-HMPathConflict @(Get-HMCtxPaths $Ctx) @($script:HMDeleting)
+    if ($hit) {
+        $go = "$((Show-HMDialogBox -Owner $script:Window -Text (Get-HMDeletingWarning (Split-Path $hit -Leaf) $Title) -Title 'Backup wird geloescht' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -eq 'Yes'
+        if (-not $go) { Out-Console "$Title nicht gestartet - das Backup wird gerade geloescht." 'Warning'; return }
+        Out-Console "$Title startet trotz laufender Loeschung von $(Split-Path $hit -Leaf) (bestaetigt)." 'Warning'
+    }
     $job = New-JobState
     $script:CurrentJob = $job
+    $script:JobCtx = $Ctx
     Set-JobUi $true
     $ui.pbMain.Value = 0
     Set-Status "$Title ..." '#FFF9E2AF'
     $script:JobTitle = $Title
     $script:JobOnFinished = $OnFinished
     $script:JobReport = $null   # Bericht des Vorgangs (fuer den Verlauf am Handy) - setzt OnFinished bei Bedarf
+    try {
     Start-LongJob -ScriptFiles $ScriptFiles -Command $Command -Ctx $Ctx -Job $job -OnTick {
         param($j)
         $n = 0
@@ -1425,6 +1724,7 @@ function Start-EngineJob {
         $j.Ended = Get-Date   # Ende des Vorgangs (Dialoge in OnFinished zaehlen nicht zur Dauer)
         Set-JobUi $false
         $script:CurrentJob = $null
+        $script:JobCtx = $null
         $ttl = $script:JobTitle
         # Ergebnis einmal bestimmen - Statuszeile, Farbe, Fortschritt, Hinweis und Handy zeigen dasselbe
         $res = $j.Result
@@ -1461,10 +1761,24 @@ function Start-EngineJob {
             } catch { }
         }
     }
+    } catch {
+        # Start gescheitert: Oberflaeche nicht gesperrt lassen ("Vorgang laeuft" zuruecksetzen)
+        $err = $_.Exception.Message
+        Set-JobUi $false
+        $script:CurrentJob = $null; $script:JobCtx = $null
+        Set-Status "$Title nicht gestartet" '#FFF38BA8'
+        Out-Console "$Title konnte nicht gestartet werden: $err" 'Error'
+        # OnFinished wie bei einem abgebrochenen Vorgang aufrufen, damit Folgeaktionen sauber enden
+        # (z.B. Installation vor dem Restore: Merkmal zurueck, Restore wird nicht gestartet)
+        $job.Cancel = $true; $job.Error = "$err"; $job.Ended = Get-Date
+        # Statuszeile "... nicht gestartet" bleibt vorn, auch wenn OnFinished neu verbindet (Set-ConnectStatus)
+        $script:JobEndStatus = @{ Text = "$Title nicht gestartet"; Color = '#FFF38BA8' }
+        if ($OnFinished) { try { & $OnFinished $job } catch { Out-Console "${Title}: $($_.Exception.Message)" 'Error' } finally { $script:JobEndStatus = $null } } else { $script:JobEndStatus = $null }
+    }
 }
 # Laufenden Vorgang abbrechen. -Confirmed: ohne Rueckfrage (z.B. am Handy schon bestaetigt)
 function Invoke-HMJobCancel([switch]$Confirmed) {
-    if ($script:CurrentJob -and ($Confirmed -or (Confirm-Action 'Laufenden Vorgang abbrechen? Bereits kopierte Daten bleiben erhalten.'))) {
+    if ($script:CurrentJob -and ($Confirmed -or (Confirm-Action "Laufenden Vorgang ($($script:JobTitle)) abbrechen? Bereits kopierte Daten bleiben erhalten."))) {
         $script:CurrentJob.Cancel = $true
         Stop-HMJobProcess $script:CurrentJob
         Out-Console 'Abbruch angefordert ...' 'Warning'
@@ -1527,6 +1841,7 @@ function New-BaseCtx {
 # BACKUP
 # ============================================================================
 $ui.btnBackup.Add_Click({
+    if (-not (Confirm-HMTarget 'Backup')) { return }
     $p = Get-SelectedProfile
     if (-not $p -or $p.NoProfile) { Out-Console 'Bitte zuerst einen Benutzer mit Profil waehlen (Verbinden).' 'Warning'; return }
     $mods = @(Get-BackupModules)
@@ -1657,10 +1972,11 @@ function Start-SizeMeasure([bool]$All) {
         if (@($r.Top).Count) { Out-Console "Groesste Ordner/Dateien: Knopf 'Grosse Dateien ...' (dort direkt ausschliessen)" 'Info' }
     }
 }
-$ui.btnProfileSize.Add_Click({ Start-SizeMeasure $false })
-$ui.btnProfileSize.Add_MouseRightButtonUp({ Start-SizeMeasure $true })
+$ui.btnProfileSize.Add_Click({ if (Confirm-HMTarget 'Groesse ermitteln') { Start-SizeMeasure $false } })
+$ui.btnProfileSize.Add_MouseRightButtonUp({ if (Confirm-HMTarget 'Groesse ermitteln') { Start-SizeMeasure $true } })
 
 $ui.btnPrecheck.Add_Click({
+    if (-not (Confirm-HMTarget 'Vorab-Pruefung')) { return }
     $p = Get-SelectedProfile
     $ctx = New-BaseCtx
     Out-Separator
@@ -1851,10 +2167,14 @@ $ui.btnDeleteBackup.Add_Click({
     $b = $script:SelectedBackup
     if (-not $b) { return }
     if (Test-HMBackupArchived $b.Path) { Out-Console "Backup '$($b.Name)' ist als Archiv markiert und wird nicht geloescht - zuerst 'Archiv aufheben'." 'Warning'; return }
-    if (-not (Confirm-Action "Backup '$($b.Name)' endgueltig loeschen?")) { return }
+    if (-not (Confirm-HMBackupNotInUse @("$($b.Path)") "$($b.Name)")) { return }
+    # unvollstaendig bzw. "laeuft": z.B. ein geplantes Backup in einem anderen Prozess schreibt gerade hinein
+    $runTxt = $(if ("$($b.Status)" -eq 'Running') { "`n`nACHTUNG: Dieses Backup ist unvollstaendig oder wird gerade geschrieben (z.B. von einem geplanten Backup)." } else { '' })
+    if (-not (Confirm-Action "Backup '$($b.Name)' endgueltig loeschen?$runTxt")) { return }
     Out-Console "Loesche $($b.Path) ..." 'Warning'
-    Invoke-AsyncCommand -ScriptBlock { param($eng, $p) . $eng; Remove-HMBackupFolder $p } -ArgumentList @($script:Engine, $b.Path) -TimeoutSec 3600 -OnComplete {
-        param($r) Out-Console $(if ($r -eq 'OK') { 'Backup geloescht' } else { "$r" }) $(if ($r -eq 'OK') { 'Success' } else { 'Error' }); $script:SelectedBackup = $null; Update-BackupList; Update-BackupRootInfo
+    Add-HMDeleting @("$($b.Path)")
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $p) . $eng; Remove-HMBackupFolder $p } -ArgumentList @($script:Engine, $b.Path) -TimeoutSec 3600 -State "$($b.Path)" -OnComplete {
+        param($r, $dp) Remove-HMDeleting @($dp); Out-Console $(if ($r -eq 'OK') { 'Backup geloescht' } else { "$r" }) $(if ($r -eq 'OK') { 'Success' } else { 'Error' }); $script:SelectedBackup = $null; Update-BackupList; Update-BackupRootInfo
     }
 })
 # Mehrere markierte Backups loeschen: eine Rueckfrage (Anzahl, Groesse, Namen), Archive und unvollstaendige ausgelassen, Ergebnis je Backup
@@ -1880,12 +2200,15 @@ function Remove-HMSelectedBackups {
     # waehrend des Loeschens Liste und Backup-Knoepfe sperren - sonst koennte ein gerade geloeschtes Backup markiert und gestartet werden (B46)
     $script:MultiDelBusy = $true; $ui.dgBackups.IsEnabled = $false
     foreach ($bn in @($script:BackupSingleButtons + @('btnDeleteBackup', 'btnCleanupBackups'))) { if ($ui.$bn) { $ui.$bn.IsEnabled = $false } }
+    $script:MultiDelPaths = @($todo | ForEach-Object { "$($_.Path)" })
+    Add-HMDeleting $script:MultiDelPaths
     Invoke-AsyncCommand -ScriptBlock {
         param($eng, $paths)
         . $eng
         foreach ($p in @($paths)) { $r = 'FEHLER: unbekannt'; try { $r = Remove-HMBackupFolder $p } catch { $r = "FEHLER: $($_.Exception.Message)" }; [pscustomobject]@{ Path = $p; Result = "$r" } }
     } -ArgumentList @($script:Engine, @($todo | ForEach-Object { "$($_.Path)" })) -TimeoutSec 7200 -BusyTag 'Del' -BusyText 'Backups werden geloescht ...' -OnComplete {
         param($res)
+        Remove-HMDeleting $script:MultiDelPaths; $script:MultiDelPaths = @()
         $script:MultiDelBusy = $false; $ui.dgBackups.IsEnabled = $true
         foreach ($bn in @('btnDeleteBackup', 'btnCleanupBackups')) { if ($ui.$bn) { $ui.$bn.IsEnabled = -not $script:JobRunning } }
         $ok = 0; $bad = 0
@@ -1938,15 +2261,18 @@ $ui.btnEmptyDeleted.Add_Click({
         if (-not $r -or $r -is [string]) { Out-Console "Beiseitegelegte nicht lesbar: $r" 'Error'; return }
         $fmt = { param($x) if ("$x" -match '^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})') { "$($Matches[3]).$($Matches[2]).$($Matches[1]) $($Matches[4]):$($Matches[5])" } else { "$x" } }
         if (-not (Confirm-Action "Backup '$($c.Name)': $($r.Files) beiseitegelegte Datei(en) ($(Format-HMSize $r.Bytes)) aus $($r.Runs) Lauf/Laeufen$(if ($r.First) { " ($(& $fmt $r.First) bis $(& $fmt $r.Last))" }).`n`nDas sind Dateien, die am Quell-PC geloescht wurden. Endgueltig loeschen?`n`nDanach sind sie auch ueber 'Im Backup suchen' nicht mehr auffindbar. Der aktuelle Stand des Backups bleibt unveraendert." 'Geloeschte leeren')) { return }
+        # waehrend der Rueckfrage kann ein Vorgang gestartet worden sein, der in dieses Backup schreibt
+        if (-not (Confirm-HMBackupNotInUse @("$($c.Dir)") "$($c.Name) (beiseitegelegte Dateien)")) { return }
         Out-Console "Loesche beiseitegelegte Dateien in $($c.Name) ..." 'Warning'
+        Add-HMDeleting @("$($c.Dir)")
         Invoke-AsyncCommand -ScriptBlock {
             param($eng, $p)
             . $eng
             $r = Remove-HMBackupFolder $p
             try { Update-HMManifestDeleted (Split-Path $p -Parent) } catch { }
             $r
-        } -ArgumentList @($script:Engine, $c.Dir) -TimeoutSec 3600 -OnComplete {
-            param($r2) Out-Console $(if ($r2 -eq 'OK') { 'Beiseitegelegte Dateien geloescht' } else { "$r2" }) $(if ($r2 -eq 'OK') { 'Success' } else { 'Error' }); Update-BackupList; Update-BackupRootInfo
+        } -ArgumentList @($script:Engine, $c.Dir) -TimeoutSec 3600 -State "$($c.Dir)" -OnComplete {
+            param($r2, $dp) Remove-HMDeleting @($dp); Out-Console $(if ($r2 -eq 'OK') { 'Beiseitegelegte Dateien geloescht' } else { "$r2" }) $(if ($r2 -eq 'OK') { 'Success' } else { 'Error' }); Update-BackupList; Update-BackupRootInfo
         }
     }
 })
@@ -1991,6 +2317,7 @@ $ui.txtPostScript.Add_LostFocus({ if ("$($ui.txtPostScript.Text)".Trim() -ne "$(
 
 $ui.btnRestore.Add_Click({
     if ($script:RestoreAfterInstall) { Out-Console 'Es werden gerade fehlende Programme installiert - der Restore startet danach automatisch.' 'Warning'; return }
+    if (-not (Confirm-HMTarget 'Restore')) { return }
     $b = $script:SelectedBackup
     if (-not $b) { Out-Console 'Bitte zuerst ein Backup waehlen.' 'Warning'; return }
     $p = Get-SelectedProfile
@@ -2001,6 +2328,7 @@ $ui.btnRestore.Add_Click({
     # Konto des Backups als Ziel vorschlagen, fehlendes lokales Konto anlegen (kann die Auswahl oben aendern)
     if (-not (Invoke-HMRestoreAccountCheck $b $p $mods $comp)) { Out-Console 'Restore abgebrochen.' 'Warning'; return }
     $p = Get-SelectedProfile
+    Save-HMUserMemory   # Gedaechtnis: das nach der Kontopruefung gesetzte Konto (z.B. Konto des Backups ohne Profil)
     if (-not $p) { Out-Console 'Bitte Zielbenutzer waehlen (oder DOMAENE\Benutzer eintragen).' 'Warning'; return }
     if ($p.NoProfile -and -not @($mods | Where-Object { $_.Id -eq 'Usmt' }).Count -and @($mods | Where-Object { $_.Scope -eq 'User' }).Count) {
         Out-Console "$($p.Account) hat an $comp noch kein Profil: Benutzer einmal anmelden lassen oder 'Windows-Einstellungen (USMT)' mitwaehlen." 'Warning'
@@ -2061,27 +2389,28 @@ function Start-RestoreJob([hashtable]$Ctx) {
         }
     }
 }
-$ui.btnRestorePreview.Add_Click({ if (-not $script:JobRunning) { Start-HMRestorePreviewUi } })
-$ui.btnExtraTargets.Add_Click({ if (-not $script:JobRunning) { Show-HMExtraTargetsDialog } })
+$ui.btnRestorePreview.Add_Click({ if (-not $script:JobRunning -and (Confirm-HMTarget 'Restore-Vorschau')) { Start-HMRestorePreviewUi } })
+$ui.btnExtraTargets.Add_Click({ if (-not $script:JobRunning -and (Confirm-HMTarget 'Ziele der Zusaetzlichen Ordner')) { Show-HMExtraTargetsDialog } })
 $ui.btnChecklist.Add_Click({ Show-HMChecklist })
 $ui.btnVerifyBackup.Add_Click({ if (-not $script:JobRunning) { Start-HMVerifyBackup $false } })
 $ui.btnVerifyBackup.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; if (-not $script:JobRunning) { Start-HMVerifyBackup $true } })
 $ui.btnCompare.Add_Click({ if (-not $script:JobRunning) { Start-HMCompareBackups } })
 $ui.btnBackupSearch.Add_Click({ if (-not $script:JobRunning) { Start-HMBackupSearch } })
-$ui.btnFileSearch.Add_Click({ if (-not $script:JobRunning) { Start-HMFileSearch } })
+$ui.btnFileSearch.Add_Click({ if (-not $script:JobRunning -and (Use-HMPcTarget 'Wichtige Dateien suchen')) { Start-HMFileSearch } })
 $ui.btnOverview.Add_Click({ Update-HMBackupOverview -Open })
-$ui.btnApps.Add_Click({ Start-HMAppDetect -Show })
+$ui.btnApps.Add_Click({ if (Confirm-HMTarget 'Programme erkennen') { Start-HMAppDetect -Show } })
 $ui.btnFeedback.Add_Click({ Start-HMAppFeedback -Source 'Detected' })
 $ui.btnFeedbackR.Add_Click({ Start-HMAppFeedback -Source 'Backup' })
-$ui.btnBackupSchedule.Add_Click({ New-HMBackupSchedule })
+$ui.btnBackupSchedule.Add_Click({ if (Confirm-HMTarget 'Zeitplan') { New-HMBackupSchedule } })
 $ui.btnBackupSchedule.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMBackupSchedules })
 $ui.btnApps.Add_MouseRightButtonUp({ param($s, $e) $e.Handled = $true; Show-HMAppCatalog })
-$ui.btnReinstall.Add_Click({ Start-HMAppReinstall })
+$ui.btnReinstall.Add_Click({ if (Use-HMPcTarget 'Neu installieren') { Start-HMAppReinstall } })
 
 # ============================================================================
 # WERKZEUGE
 # ============================================================================
 function Get-SelectedProfilePath([string]$Sub) {
+    if (-not (Confirm-HMTarget 'Ordner oeffnen')) { return $null }
     $p = Get-SelectedProfile
     if (-not $p -or -not $p.LocalPath) { Out-Console 'Kein Profil gewaehlt.' 'Warning'; return $null }
     $path = if ($Sub) { Join-Path $p.LocalPath $Sub } else { $p.LocalPath }
@@ -2095,52 +2424,72 @@ $ui.btnToolCredWiz.Add_Click({
     Out-Console 'Assistent fuer Anmeldeinformationen (credwiz) - sichert/stellt die Anmeldedaten des ANGEMELDETEN Windows-Benutzers her. Sicherungsdatei am besten in den Backup-Ordner legen.' 'Info'
     Start-Process credwiz.exe
 })
-$ui.btnToolCredList.Add_Click({ Show-HMCredentials })
+$ui.btnToolCredList.Add_Click({ Show-HMCredentials })   # nur dieser PC (cmdkey, eigenes Konto)
 
-# Werkzeug-Knoepfe (Text, Stil, Tooltip, Linksklick, Rechtsklick)
-function Add-ToolButton($Panel, [string]$Text, [string]$Style, [string]$Tip, [scriptblock]$Click, [scriptblock]$Right = $null) {
+# Werkzeug-Knoepfe (Text, Stil, Tooltip, Linksklick, Rechtsklick).
+# -Busy: greift in PC oder Profil ein - waehrend Backup/Restore Rueckfrage "Trotzdem ausfuehren?" (Standard Nein).
+# Ohne Schalter: braucht nur den PC - steht im Feld ein anderer PC, laeuft es still auf diesem (ausser waehrend Backup/Restore).
+# -User: braucht Benutzer, SID oder Profilpfad - bei anderem PC im Feld Rueckfrage (sonst mischten sich PC und Benutzer).
+# -NoTarget: wirkt nicht auf den gewaehlten PC (mehrere PCs, dieser PC, ein Backup) - keine Pruefung des Felds.
+function Add-ToolButton($Panel, [string]$Text, [string]$Style, [string]$Tip, [scriptblock]$Click, [scriptblock]$Right = $null, [switch]$Busy, [switch]$User, [switch]$NoTarget) {
     $b = New-Object System.Windows.Controls.Button
     $b.Content = $Text; $b.Style = $script:Window.FindResource($Style); $b.ToolTip = $Tip
-    $b.Tag = @{ Click = $Click; Right = $Right }
-    $b.Add_Click({ param($src) if ($script:JobRunning -and $src.Tag.Busy) { return }; try { & $src.Tag.Click } catch { Out-Console "$($src.Content): $($_.Exception.Message)" 'Error' } })
-    if ($Right) { $b.Add_MouseRightButtonUp({ param($src, $e) $e.Handled = $true; try { & $src.Tag.Right } catch { Out-Console "$($src.Content): $($_.Exception.Message)" 'Error' } }) }
+    $b.Tag = @{ Click = $Click; Right = $Right; Busy = [bool]$Busy; Kind = $(if ($NoTarget) { 'None' } elseif ($User) { 'User' } else { 'Pc' }); Name = $Text }
+    $b.Add_Click({ param($src) if (-not (Test-HMToolStart $src.Tag)) { return }; try { & $src.Tag.Click } catch { Out-Console "$($src.Content): $($_.Exception.Message)" 'Error' } })
+    if ($Right) { $b.Add_MouseRightButtonUp({ param($src, $e) $e.Handled = $true; if (-not (Test-HMToolStart $src.Tag)) { return }; try { & $src.Tag.Right } catch { Out-Console "$($src.Content): $($_.Exception.Message)" 'Error' } }) }
     [void]$Panel.Children.Add($b)
+}
+# Knoepfe ausserhalb der Werkzeug-Leisten, die nur den PC brauchen (wie Add-ToolButton ohne Schalter)
+function Use-HMPcTarget([string]$Action) { return (Test-HMToolStart @{ Kind = 'Pc'; Busy = $false; Name = $Action }) }
+# Vor jedem Werkzeug: laufender Vorgang (nur eingreifende Werkzeuge) und Feld Computer gegen Ziel. $true = ausfuehren
+function Test-HMToolStart($Tag) {
+    if ($Tag.Busy -and (Test-HMBackupRestoreRunning)) {
+        $a = "$((Show-HMDialogBox -Owner $script:Window -Text (Get-HMBusyQuestion (Get-HMBackupRestoreTitle) "'$($Tag.Name)'") -Title 'Vorgang laeuft' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))"
+        if ($a -ne 'Yes') { return $false }
+        Out-Console "'$($Tag.Name)' waehrend '$(Get-HMBackupRestoreTitle)' ausgefuehrt (bestaetigt)." 'Warning'
+    }
+    if ($script:UserMode) { return $true }
+    $d = Get-HMToolDecision "$($Tag.Kind)" (Get-HMTargetState (Get-HMFieldComputer) $script:Target) (Test-HMBackupRestoreRunning)
+    if ($d -eq 'Switch') { Select-HMFieldTarget "'$($Tag.Name)'"; return $true }
+    if ($d -eq 'Ask') { return (Confirm-HMTarget "'$($Tag.Name)'") }
+    if ("$($Tag.Kind)" -eq 'User') { Save-HMUserMemory }   # mit diesem Benutzer wird gearbeitet
+    return $true
 }
 $tc = $ui.pnlToolsComputer
 Add-ToolButton $tc 'Fernwartung aktivieren' 'BtnGreen' 'Am gewaehlten PC WinRM, Remotedesktop, SMB/C$, Remoteregistrierung und Firewall-Regeln aktivieren - Start ueber WMI (Port 135), auch wenn WinRM noch aus ist' { Start-HMEnableRemote }
-Add-ToolButton $tc 'Umbenennen' 'BtnPeach' 'Computernamen aendern (Domaenen-PC: Domaenen-Anmeldedaten), optional Neustart' { Start-HMRenameComputer }
-Add-ToolButton $tc 'IP-Adresse / DHCP' 'BtnPeach' 'Statische IP oder DHCP - wird als SYSTEM-Aufgabe am Ziel ausgefuehrt (Verbindungsabbruch egal)' { Start-HMNetworkConfig }
+Add-ToolButton $tc 'Umbenennen' 'BtnPeach' 'Computernamen aendern (Domaenen-PC: Domaenen-Anmeldedaten), optional Neustart' { Start-HMRenameComputer } -Busy
+Add-ToolButton $tc 'IP-Adresse / DHCP' 'BtnPeach' 'Statische IP oder DHCP - wird als SYSTEM-Aufgabe am Ziel ausgefuehrt (Verbindungsabbruch egal)' { Start-HMNetworkConfig } -Busy
 Add-ToolButton $tc 'Lokale Gruppen' 'BtnBlue' 'Administratoren, Netzwerkkonfigurations-Operatoren, Remotedesktopbenutzer, Benutzer: anzeigen, hinzufuegen, entfernen' { Show-HMLocalGroups }
 Add-ToolButton $tc 'Autologon' 'BtnDefault' 'Automatische Anmeldung setzen/aufheben/anzeigen (Kennwort als LSA-Geheimnis)' { Start-HMAutologon }
 Add-ToolButton $tc 'Sperrbildschirm / Energie' 'BtnDefault' 'Links: Sperrbildschirm, automatisches Sperren, Bildschirm aus, Energiesparen, Schnellstart setzen | Rechts: aktuelle Werte' { Start-HMPowerSettings } { Show-HMPowerSettings }
 Add-ToolButton $tc 'Firewall / Netzwerkprofil' 'BtnDefault' 'Firewall-Profile und Netzwerkkategorie (Privat/Oeffentlich) anzeigen und aendern' { Show-HMFirewall }
 Add-ToolButton $tc 'Angemeldete Benutzer' 'BtnTeal' 'Wer ist angemeldet? Sitzungen abmelden (z.B. vor einem Backup)' { Show-HMSessions }
 Add-ToolButton $tc 'Nachricht senden' 'BtnTeal' 'Nachricht an alle angemeldeten Benutzer' { Start-HMMessage }
-Add-ToolButton $tc 'Neustart / Herunterfahren' 'BtnRed' 'Mit Wartezeit und Nachricht - oder geplanten Neustart abbrechen' { Start-HMShutdown }
+Add-ToolButton $tc 'Neustart / Herunterfahren' 'BtnRed' 'Mit Wartezeit und Nachricht - oder geplanten Neustart abbrechen' { Start-HMShutdown } -Busy
 Add-ToolButton $tc 'Netzwerktest' 'BtnDefault' 'Von diesem PC zum Ziel: DNS (vor/rueckwaerts), Ping, Ports 445/5985/135/3389, WinRM' { Start-HMNetTest }
-Add-ToolButton $tc 'Geraete (AD) / Mehrfach' 'BtnGreen' 'PCs aus dem Active Directory (Filter, OU) anhaken und Aktionen parallel ausfuehren: Online-Check, Fernwartung, Inventar, Autopilot, Uebermittlungsoptimierung, Aufraeumen, Software, GPUpdate, Intune, Nachricht, Neustart' { Show-HMMultiDialog }
+Add-ToolButton $tc 'Geraete (AD) / Mehrfach' 'BtnGreen' 'PCs aus dem Active Directory (Filter, OU) anhaken und Aktionen parallel ausfuehren: Online-Check, Fernwartung, Inventar, Autopilot, Uebermittlungsoptimierung, Aufraeumen, Software, GPUpdate, Intune, Nachricht, Neustart' { Show-HMMultiDialog } -NoTarget
 Add-ToolButton $tc 'Remote-PowerShell' 'BtnTeal' 'Links: PowerShell-Sitzung am gewaehlten PC (Enter-PSSession) | Rechts: CMD (winrs)' { Start-HMRemoteShell $false } { Start-HMRemoteShell $true }
 Add-ToolButton $tc 'Uebermittlungsoptimierung' 'BtnDefault' 'Delivery Optimization: Updates zwischen PCs im Netz teilen (LAN/Gruppe) - lokale Richtlinie setzen und Status anzeigen' { Start-HMDeliveryOpt }
 Add-ToolButton $tc 'Ordnerfreigaben' 'BtnBlue' 'Freigaben mit Freigabe- und NTFS-Rechten anzeigen, Freigaben aus einem Backup uebernehmen' { Show-HMShares }
-Add-ToolButton $tc 'USMT einrichten (ADK)' 'BtnDefault' 'User State Migration Tool aus dem Windows ADK nach BIN\USMT kopieren - ohne ADK: nur USMT still installieren' { Start-HMUsmtSetup }
-Add-ToolButton $tc 'Inventar (mehrere PCs)' 'BtnMauve' 'Links: Hardware, Windows, BitLocker, TPM, IP/MAC mehrerer PCs parallel (WinRM) - Tabelle + CSV im Backup-Ordner\Inventar | Rechts: zusaetzlich installierte Software' { Start-HMInventory $false } { Start-HMInventory $true }
+Add-ToolButton $tc 'USMT einrichten (ADK)' 'BtnDefault' 'User State Migration Tool aus dem Windows ADK nach BIN\USMT kopieren - ohne ADK: nur USMT still installieren' { Start-HMUsmtSetup } -NoTarget
+Add-ToolButton $tc 'Inventar (mehrere PCs)' 'BtnMauve' 'Links: Hardware, Windows, BitLocker, TPM, IP/MAC mehrerer PCs parallel (WinRM) - Tabelle + CSV im Backup-Ordner\Inventar | Rechts: zusaetzlich installierte Software' { Start-HMInventory $false } { Start-HMInventory $true } -NoTarget
 Add-ToolButton $tc 'BitLocker-Schluessel' 'BtnBlue' 'Status und Schluesselschutz aller Laufwerke, Wiederherstellungskennwort in AD oder Entra ID sichern' { Show-HMBitLockerKeys }
 Add-ToolButton $tc 'Autopilot-Hash' 'BtnDefault' 'Hardware-Hash fuer Intune/Autopilot als CSV (Backup-Ordner\Autopilot) - ist HUPilot eingetragen, auf Wunsch auch an HUPilot uebergeben' { Start-HMAutopilotHash }
-Add-ToolButton $tc 'HUPilot ...' 'BtnDefault' 'Links: HUPilot-Setup an diesem PC oeffnen (Autopilot per USB-Stick - eigenes Werkzeug; noch nicht eingetragen: suchen oder Anleitung) | Rechts: HUPilot-Ordner neu waehlen' { Start-HMHUPilot } { Start-HMHUPilot -Choose }
+Add-ToolButton $tc 'HUPilot ...' 'BtnDefault' 'Links: HUPilot-Setup an diesem PC oeffnen (Autopilot per USB-Stick - eigenes Werkzeug; noch nicht eingetragen: suchen oder Anleitung) | Rechts: HUPilot-Ordner neu waehlen' { Start-HMHUPilot } { Start-HMHUPilot -Choose } -NoTarget
 Add-ToolButton $tc 'Wake-on-LAN' 'BtnDefault' 'PC aufwecken (MAC aus Inventar/Backup) - optional ueber einen PC im Zielnetz senden' { Start-HMWakeOnLan }
 Add-ToolButton $tc 'Laufwerke (C$)' 'BtnBlue' 'Links: Laufwerk C: des gewaehlten PCs im Explorer oeffnen (remote \\PC\C$) | Rechts: Laufwerk oder Freigabe waehlen - auch USB-Sticks am Remote-PC. Der angemeldete Windows-Benutzer braucht Adminrechte am Ziel-PC.' { Open-HMAdminShare } { Show-HMDriveMenu }
 $tp = $ui.pnlToolsProfile
-Add-ToolButton $tp 'Profil erneuern (Test)' 'BtnPeach' 'Profilordner umbenennen + Registry-Eintrag sichern/entfernen: Benutzer bekommt beim Anmelden ein frisches Profil (z.B. bei defektem Profil). Rueckgaengig: Profil zurueckholen' { Start-HMProfileRenew }
-Add-ToolButton $tp 'Profil zurueckholen' 'BtnGreen' 'Erneuerte Profile anzeigen und das alte Profil wiederherstellen (Test-Profil wird beiseitegelegt)' { Show-HMProfileRestore }
-Add-ToolButton $tp 'Profilordner umbenennen' 'BtnDefault' 'Ordnernamen des Profils aendern (z.B. nach Namensaenderung) und ProfileList anpassen' { Start-HMProfileRename }
-Add-ToolButton $tp 'Profil anderem Konto zuweisen' 'BtnMauve' 'Profil bleibt am Ort und gehoert danach einem anderen Konto (z.B. Domaene -> lokal): Rechte, Registry, ProfileList' { Start-HMProfileAssign }
-Add-ToolButton $tp 'Windows-Apps neu registrieren' 'BtnDefault' 'Store-Apps, Startmenue, Einstellungen reparieren - im Kontext des Benutzers (sofort oder bei Anmeldung)' { Start-HMAppxReregister }
-Add-ToolButton $tp 'Gruppenrichtlinien-Ergebnis' 'BtnDefault' 'gpresult als HTML fuer PC + gewaehlten Benutzer' { Start-HMGpResult }
+Add-ToolButton $tp 'Profil erneuern (Test)' 'BtnPeach' 'Profilordner umbenennen + Registry-Eintrag sichern/entfernen: Benutzer bekommt beim Anmelden ein frisches Profil (z.B. bei defektem Profil). Rueckgaengig: Profil zurueckholen' { Start-HMProfileRenew } -Busy -User
+Add-ToolButton $tp 'Profil zurueckholen' 'BtnGreen' 'Erneuerte Profile anzeigen und das alte Profil wiederherstellen (Test-Profil wird beiseitegelegt)' { Show-HMProfileRestore } -Busy
+Add-ToolButton $tp 'Profilordner umbenennen' 'BtnDefault' 'Ordnernamen des Profils aendern (z.B. nach Namensaenderung) und ProfileList anpassen' { Start-HMProfileRename } -Busy -User
+Add-ToolButton $tp 'Profil anderem Konto zuweisen' 'BtnMauve' 'Profil bleibt am Ort und gehoert danach einem anderen Konto (z.B. Domaene -> lokal): Rechte, Registry, ProfileList' { Start-HMProfileAssign } -Busy -User
+Add-ToolButton $tp 'Windows-Apps neu registrieren' 'BtnDefault' 'Store-Apps, Startmenue, Einstellungen reparieren - im Kontext des Benutzers (sofort oder bei Anmeldung)' { Start-HMAppxReregister } -User
+Add-ToolButton $tp 'Gruppenrichtlinien-Ergebnis' 'BtnDefault' 'gpresult als HTML fuer PC + gewaehlten Benutzer' { Start-HMGpResult } -User
 Add-ToolButton $tp 'Aufgaben aus Backup importieren' 'BtnDefault' 'Geplante Aufgaben aus dem im Reiter Restore markierten Backup einzeln importieren' { Show-HMTaskImport }
-Add-ToolButton $tp 'Alte Profile loeschen' 'BtnRed' 'Alle Profile mit letzter Anmeldung anzeigen, markierte sauber loeschen (Ordner + Registry)' { Show-HMOldProfiles }
+Add-ToolButton $tp 'Alte Profile loeschen' 'BtnRed' 'Alle Profile mit letzter Anmeldung anzeigen, markierte sauber loeschen (Ordner + Registry)' { Show-HMOldProfiles } -Busy
 Add-ToolButton $tp 'Wichtige Dateien suchen' 'BtnPeach' 'PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche finden und als Zusaetzliche Ordner aufnehmen' { Start-HMFileSearch }
-Add-ToolButton $tp 'Datenbanken suchen' 'BtnPeach' 'Lokale Datenbanken (SQLite, Access, KeePass, SQL Server, Firebird ...) und Datenbank-Dienste am PC finden - als Zusaetzliche Ordner oder als Katalog-Eintrag uebernehmen (Programm wird dann vor dem Backup geschlossen)' { Start-HMDbSearch }
-Add-ToolButton $tp 'Im Backup suchen' 'BtnTeal' 'Dateien im markierten Backup suchen und einzeln herauskopieren' { Start-HMBackupSearch }
+Add-ToolButton $tp 'Datenbanken suchen' 'BtnPeach' 'Lokale Datenbanken (SQLite, Access, KeePass, SQL Server, Firebird ...) und Datenbank-Dienste am PC finden - als Zusaetzliche Ordner oder als Katalog-Eintrag uebernehmen (Programm wird dann vor dem Backup geschlossen)' { Start-HMDbSearch } -User
+Add-ToolButton $tp 'Im Backup suchen' 'BtnTeal' 'Dateien im markierten Backup suchen und einzeln herauskopieren' { Start-HMBackupSearch } -NoTarget
 $td = $ui.pnlToolsDiag
 Add-ToolButton $td 'Ereignisse (Fehler)' 'BtnBlue' 'Links: Fehler der letzten 3 Tage | Rechts: 14 Tage inkl. Warnungen' { Show-HMEventLog 3 $false } { Show-HMEventLog 14 $true }
 Add-ToolButton $td 'Akku-Bericht' 'BtnDefault' 'Ladestand, Akku-Zustand in %, Ladezyklen + ausfuehrlicher Windows-Akku-Bericht (HTML)' { Start-HMBatteryReport }
@@ -2203,6 +2552,9 @@ function Open-HMLinkNow([string]$Url, [bool]$CopySerial, [string]$Serial, [strin
     Open-HMUrl ($Url.Replace('{SERIAL}', [uri]::EscapeDataString($Serial)).Replace('{COMPUTER}', $Computer))
 }
 function Open-HMLink([string]$Url, [bool]$CopySerial) {
+    # reiner Web-Link ohne Platzhalter: kein PC noetig, weder umschalten noch fragen
+    if (-not $CopySerial -and $Url -notmatch '\{(COMPUTER|SERIAL)\}') { Open-HMLinkNow $Url $false '' ''; return }
+    if (-not (Use-HMPcTarget 'Link')) { return }
     $comp = Get-TargetComputer
     $isLocal = ($comp -eq '.' -or $comp -ieq 'localhost' -or $comp -ieq $env:COMPUTERNAME -or $comp -ilike "$($env:COMPUTERNAME).*")
     if (-not $CopySerial -and $Url -notmatch '\{SERIAL\}') { Open-HMLinkNow $Url $false '' $comp; return }
@@ -2254,9 +2606,9 @@ foreach ($l in @($script:Settings.Links)) {
 Build-LinksPanel
 
 # Software
-$ui.btnToolSoftDeploy.Add_Click({ Show-SoftwareWindow })
-$ui.btnToolDrvDeploy.Add_Click({ Show-DriverWindow })
-$ui.btnToolSoftList.Add_Click({ Show-InstalledSoftware (Get-TargetComputer) })
+$ui.btnToolSoftDeploy.Add_Click({ if (Use-HMPcTarget 'Softwareverteilung') { Show-SoftwareWindow } })
+$ui.btnToolDrvDeploy.Add_Click({ if (Use-HMPcTarget 'Treiber') { Show-DriverWindow } })
+$ui.btnToolSoftList.Add_Click({ if (Use-HMPcTarget 'Installierte Software') { Show-InstalledSoftware (Get-TargetComputer) } })
 
 # ============================================================================
 # EINSTELLUNGEN / AUSNAHMEN (JSON im Editor)

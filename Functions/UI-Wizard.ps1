@@ -173,11 +173,16 @@ function Invoke-HMWizardAction {
         }
         2 {
             if (-not (Test-HMWizSelection $s.Source 'alte PC')) { return }
-            Select-HMMainTab 'Backup'; Invoke-HMMainButton $ui.btnPrecheck; Set-HMWizDone 2
+            # Rueckfrage "Welcher Computer?" abgelehnt: Schritt nicht als erledigt markieren
+            $script:HMTargetDeclined = $false
+            Select-HMMainTab 'Backup'; Invoke-HMMainButton $ui.btnPrecheck
+            if (-not $script:HMTargetDeclined) { Set-HMWizDone 2 }
         }
         3 {
             if (-not (Test-HMWizSelection $s.Source 'alte PC')) { return }
+            $script:HMTargetDeclined = $false
             Select-HMMainTab 'Backup'; $script:WizWaitFor = 'Backup'; Invoke-HMMainButton $ui.btnBackup
+            if ($script:HMTargetDeclined) { $script:WizWaitFor = $null }
         }
         4 {
             $sel = Get-HMWizSelection
@@ -196,7 +201,7 @@ function Invoke-HMWizardAction {
             if (-not $row) { [void](Show-HMDialogBox -Owner $script:Wiz.Win -Text ("Das Backup steht nicht in der Liste des Backup-Ordners ($(Get-BackupRoot)).`nOben den Backup-Ordner waehlen, in dem $(Split-Path "$($s.BackupPath)" -Leaf) liegt.") -Title 'Umzugs-Assistent' -Mode 'OK' -Icon 'Warning'); return }
             $ui.dgBackups.SelectedItem = $row; $ui.dgBackups.ScrollIntoView($row)
             $script:WizWaitFor = 'Restore'
-            $script:Window.Dispatcher.BeginInvoke([action]{ Invoke-HMMainButton $ui.btnRestore }, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null
+            $script:Window.Dispatcher.BeginInvoke([action]{ $script:HMTargetDeclined = $false; Invoke-HMMainButton $ui.btnRestore; if ($script:HMTargetDeclined) { $script:WizWaitFor = $null } }, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null
         }
         6 {
             if ($s.RestoreReport -and (Test-Path -LiteralPath "$($s.RestoreReport)")) { Show-HMChecklist -ReportPath "$($s.RestoreReport)" } else { Show-HMChecklist }

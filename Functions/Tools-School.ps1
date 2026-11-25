@@ -638,6 +638,11 @@ function Get-HMOriginalPath($Backup, [string]$Rel) {
     return ("$($it.Source)".TrimEnd('\') + '\' + $parts[2])
 }
 function Restore-HMSearchHitsToOrigin($Rows, $Backup, $Win) {
+    # schreibt in das Profil des gewaehlten Benutzers: steht im Feld ein anderer PC, nachfragen (wie Backup/Restore)
+    if (-not (Confirm-HMTarget "'An Originalort zurueck'")) { return }
+    # Backup nicht erreichbar (z.B. USB-Platte abgezogen): ehrlich melden statt Kopien ohne Quelle zu versuchen
+    $bOk = $false; try { $bOk = Test-Path -LiteralPath "$($Backup.Path)" } catch { $bOk = $false }
+    if (-not $bOk) { [void](Show-HMDialogBox -Owner $Win -Text "Das Backup ist nicht erreichbar (z.B. USB-Platte abgezogen):`n$($Backup.Path)`n`nEs wurde nichts kopiert." -Title 'An Originalort zurueck' -Mode 'OK' -Icon 'Warning'); return }
     $comp = Get-TargetComputer
     $pctx = @{ Computer = $comp; IsRemote = -not (Test-HMIsLocal $comp) }
     $prof = Get-SelectedProfile
@@ -647,7 +652,7 @@ function Restore-HMSearchHitsToOrigin($Rows, $Backup, $Win) {
         $o = Get-HMOriginalPath $Backup "$($x.Pfad)"
         if (-not $o) { $noMap++; continue }
         if ($srcProf -and $prof -and $prof.LocalPath -and ($o -ieq $srcProf -or $o.StartsWith($srcProf + '\', [StringComparison]::OrdinalIgnoreCase))) { $o = "$($prof.LocalPath)".TrimEnd('\') + $o.Substring($srcProf.Length) }
-        $plan += [pscustomobject]@{ Src = (Join-Path $Backup.Path "$($x.Pfad)"); Dst = $o }
+        $plan += [pscustomobject]@{ Src = [System.IO.Path]::Combine("$($Backup.Path)", "$($x.Pfad)"); Dst = $o }
     }
     if (-not $plan.Count) { [void](Show-HMDialogBox -Owner $Win -Text 'Fuer die markierten Dateien ist kein Originalort bekannt (z. B. Registry-Export oder Backup der Vorgaengerversion). "Markierte kopieren nach ..." verwenden.' -Title 'An Originalort zurueck' -Mode 'OK' -Icon 'Information'); return }
     # Ziele unter Windows/Programme/ProgramData kennzeichnen (Kopie laeuft mit Adminrechten)
@@ -656,6 +661,9 @@ function Restore-HMSearchHitsToOrigin($Rows, $Backup, $Win) {
     $show = @($sysFirst) + @($plan | Where-Object { $sysHits -notcontains $_ } | Select-Object -First ([Math]::Max(0, 12 - $sysFirst.Count)))
     $list = (@($show | ForEach-Object { if ($sysHits -contains $_) { "ACHTUNG Systemordner: $($_.Dst)" } else { $_.Dst } }) -join "`n") + $(if ($plan.Count -gt 12) { "`n..." } else { '' })
     $sysTxt = if ($sysHits.Count) { "ACHTUNG: $($sysHits.Count) Datei(en) liegen unter Windows, Programme oder ProgramData - nur zurueckkopieren, wenn du dem Backup vertraust.`n`n" } else { '' }
+    # kein Benutzer gewaehlt (z.B. nach stillem Umschalten auf einen PC ohne Benutzerliste): Profildateien gehen an den Pfad aus dem Backup - das klar sagen
+    $inProf = @($plan | Where-Object { $srcProf -and ($_.Dst -ieq $srcProf -or $_.Dst.StartsWith($srcProf + '\', [StringComparison]::OrdinalIgnoreCase)) }).Count
+    if ($inProf) { $sysTxt += $(if ($prof -and $prof.LocalPath) { "$inProf Datei(en) aus dem Profil gehen in das Profil von $($prof.Account) ($($prof.LocalPath)).`n`n" } else { "ACHTUNG: An $comp ist kein Benutzer gewaehlt. $inProf Datei(en) aus dem Profil gehen an den Profilpfad aus dem Backup ($srcProf). Fuer ein anderes Profil: Nein, verbinden und Benutzer waehlen.`n`n" }) }
     $q = "$sysTxt$($plan.Count) Datei(en) an den Originalort auf $comp zurueckkopieren?`n`n$list`n`nVorhandene Dateien werden NICHT ueberschrieben - dann entsteht '<Name> (wiederhergestellt $(Get-Date -Format 'yyyy-MM-dd'))'.$(if ($noMap) { "`n$noMap Datei(en) ohne bekannten Originalort werden ausgelassen." })"
     if ("$((Show-HMDialogBox -Owner $Win -Text $q -Title 'An Originalort zurueck' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return }
     $ok = 0; $bad = 0; $ren = 0

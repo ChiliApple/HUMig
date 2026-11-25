@@ -438,7 +438,7 @@ function Start-HMReinstallQueue($Win, [string]$Computer, [string[]]$PackageIds, 
     if (-not $NoConfirm -and (Show-HMDialogBox -Owner $own -Text $cfTxt -Title 'Programme installieren' -Mode 'YesNo' -Icon 'Question') -ne 'Yes') { return $false }
     $script:SwQueueThen = $null
     if ($wgs.Count) { $script:SwQueueThen = @{ Computer = $Computer; Items = @($wgs) } }
-    if (-not $ids.Count) { $t = $script:SwQueueThen; $script:SwQueueThen = $null; Start-HMAuInstall $t.Computer $t.Items; return $true }
+    if (-not $ids.Count) { $t = $script:SwQueueThen; $script:SwQueueThen = $null; try { Start-HMAuInstall $t.Computer $t.Items } catch { Stop-HMInstallQueue "WinGet-Installation nicht gestartet: $($_.Exception.Message)" }; return $true }
     $script:SwQueue = New-Object System.Collections.Generic.Queue[object]
     foreach ($id in $ids) { $script:SwQueue.Enqueue(@{ Host = $Computer; Package = $script:ReinstallPackages[$id] }) }
     $script:SwQueueTotal = $ids.Count
@@ -449,12 +449,23 @@ function Invoke-HMSwQueueNext {
     if (-not $script:SwQueue) { return }
     if ($script:SwQueue.Count -eq 0) {
         $script:SwQueue = $null; Out-Console 'Installations-Warteschlange fertig.' 'Success'
-        if ($script:SwQueueThen) { $t = $script:SwQueueThen; $script:SwQueueThen = $null; Start-HMAuInstall $t.Computer $t.Items }
+        if ($script:SwQueueThen) { $t = $script:SwQueueThen; $script:SwQueueThen = $null; try { Start-HMAuInstall $t.Computer $t.Items } catch { Stop-HMInstallQueue "WinGet-Installation nicht gestartet: $($_.Exception.Message)" } }
         else { Complete-HMInstallQueue $false }
         return
     }
     $n = $script:SwQueue.Dequeue()
-    Start-SoftwareDeploy -Hosts @($n.Host) -Package $n.Package -Label ("{0}/{1}" -f ($script:SwQueueTotal - $script:SwQueue.Count), $script:SwQueueTotal)
+    # ohne PC oder Paket kehrt Start-SoftwareDeploy still zurueck und ruft nie das naechste Paket: hier auslassen und weiter
+    if (-not $n.Package -or -not "$($n.Host)".Trim()) { Out-Console 'Installations-Warteschlange: Eintrag ohne PC oder Paket ausgelassen.' 'Warning'; Invoke-HMSwQueueNext; return }
+    # eine Ausnahme beim Start eines Pakets beendet die Warteschlange ehrlich (sonst bliebe sie und ein wartender Restore haengen)
+    try { Start-SoftwareDeploy -Hosts @($n.Host) -Package $n.Package -Label ("{0}/{1}" -f ($script:SwQueueTotal - $script:SwQueue.Count), $script:SwQueueTotal) }
+    catch { Stop-HMInstallQueue "Paket '$($n.Package.Settings.Name)' nicht gestartet: $($_.Exception.Message)" }
+}
+# Warteschlange abbrechen: Meldung, restliche Pakete und WinGet-Schritt verwerfen, Folgeaktion als abgebrochen melden
+# (ein wartender Restore startet dann nicht, das Merkmal RestoreAfterInstall wird dort zurueckgesetzt)
+function Stop-HMInstallQueue([string]$Reason) {
+    Out-Console "Installations-Warteschlange abgebrochen - $Reason" 'Error'
+    $script:SwQueue = $null; $script:SwQueueThen = $null
+    Complete-HMInstallQueue $true
 }
 # Ende der ganzen Installation (auch nach WinGet): wartende Folgeaktion ausserhalb des laufenden Ereignisses starten
 function Complete-HMInstallQueue([bool]$Cancelled) {
@@ -512,7 +523,9 @@ function Start-HMRestorePrep([hashtable]$Ctx) {
                 }
                 $ok = Start-HMReinstallQueue $script:Window $c.Computer (@($plan.Packages.Keys) + @($plan.Winget.Keys)) -NoConfirm
                 if (-not $ok) { $script:SwQueueDone = $null; $script:RestoreAfterInstall = $null; Out-Console 'Installation nicht gestartet - Restore abgebrochen.' 'Warning' }
-                else { Out-Console "Zuerst werden $($plan.Installable) Programm(e) installiert - der Restore startet danach automatisch." 'Info' }
+                # Ist die Warteschlange schon beim Start gescheitert, ist die Folgeaktion bereits verbraucht (Complete-HMInstallQueue)
+                # und meldet gleich "Restore wird NICHT gestartet" - dann diese Zeile nicht ausgeben
+                elseif ($script:SwQueueDone) { Out-Console "Zuerst werden $($plan.Installable) Programm(e) installiert - der Restore startet danach automatisch." 'Info' }
                 return
             }
         } elseif ($plan -and @($plan.Rows).Count) {
