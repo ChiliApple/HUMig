@@ -603,7 +603,7 @@ try {
         }
         'ScheduleGet' {
             $t = @(Get-ScheduledTask -TaskName $AutoTask -ErrorAction SilentlyContinue)[0]
-            $o = [ordered]@{ Exists = [bool]$t; When = ''; Next = ''; Last = ''; LastResult = ''; Summary = ''; Running = $false; Progress = ''; Log = @(); History = @(); Errors = @() }
+            $o = [ordered]@{ Exists = [bool]$t; When = ''; Next = ''; Last = ''; LastResult = ''; LastErr = $null; Summary = ''; Running = $false; Progress = ''; Log = @(); History = @(); Errors = @() }
             if ($t) { $o.Running = ("$($t.State)" -eq 'Running') }
             if ($t) {
                 $tr = @($t.Triggers)[0]
@@ -614,7 +614,7 @@ try {
                 try { $i = Get-ScheduledTaskInfo -TaskPath $t.TaskPath -TaskName $t.TaskName; if ($i.NextRunTime) { $o.Next = $i.NextRunTime.ToString('dd.MM.yyyy HH:mm') }; if ($i.LastRunTime -and $i.LastRunTime.Year -gt 2000) { $o.Last = $i.LastRunTime.ToString('dd.MM.yyyy HH:mm') }; $o.LastResult = "$($i.LastTaskResult)" } catch { }
             }
             $lf = Join-Path $Base 'auto\last.json'
-            if (Test-Path -LiteralPath $lf) { try { $l = Get-Content -LiteralPath $lf -Raw -Encoding UTF8 | ConvertFrom-Json; $o.Summary = "$($l.Date): $($l.Ok) aktualisiert, $($l.Err) Fehler, $($l.Excluded) Ausnahme(n)$(if ([int]"0$($l.Skipped)") { ", $($l.Skipped) uebersprungen (lief)" })" } catch { } }
+            if (Test-Path -LiteralPath $lf) { try { $l = Get-Content -LiteralPath $lf -Raw -Encoding UTF8 | ConvertFrom-Json; $o.LastErr = [int]"0$($l.Err)"; $o.Summary = "$($l.Date): $($l.Ok) aktualisiert, $($l.Err) Fehler, $($l.Excluded) Ausnahme(n)$(if ([int]"0$($l.Skipped)") { ", $($l.Skipped) uebersprungen (lief)" })" } catch { } }
             $pf = Join-Path $Base 'auto\progress.json'
             if ($o.Running -and (Test-Path -LiteralPath $pf)) { try { $g = Get-Content -LiteralPath $pf -Raw -Encoding UTF8 | ConvertFrom-Json; $o.Progress = "$($g.Done)/$($g.Total)$(if ($g.Current) { ": $($g.Current)" }) ($($g.Ok) ok, $($g.Err) Fehler)" } catch { } }
             $lg = Join-Path $Base 'auto\log.txt'

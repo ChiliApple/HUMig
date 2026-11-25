@@ -189,3 +189,5 @@ try {
     [pscustomobject]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Found = $found; Ok = $ok; Err = $err; Excluded = $excl; Skipped = $skip } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Dir 'last.json') -Encoding UTF8
 } catch { Write-ALog "Bericht nicht speicherbar: $($_.Exception.Message)" }
 Write-ALog "=== Ende: $ok aktualisiert, $err Fehler$(if ($skip) { ", $skip uebersprungen (lief)" })"
+# Rueckgabewert der geplanten Aufgabe: 1 bei mindestens einem Fehler (Aufgabenplanung zeigt sonst "erfolgreich")
+exit $(if ($err -gt 0) { 1 } else { 0 })

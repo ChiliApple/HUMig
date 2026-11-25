@@ -317,3 +317,117 @@ Describe 'Treiberverteilung: Nachkontrolle und Hinweis zur Geraete-Sperre' {
         ${function:Confirm-DrvDeploy}.ToString() | Should -Match 'Get-SwPackageRiskText'
     }
 }
+
+Describe 'App-Updates: Abbrechen, Doppelstart, Zeitplan-Status, Zeitlimit' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1')
+        # einzelne Funktionen aus Dateien laden, die sonst die Oberflaeche brauchen bzw. eigenstaendig laufen
+        $script:LoadFn = {
+            param([string]$File, [string[]]$Names)
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root $File), [ref]$null, [ref]$null)
+            foreach ($n in $Names) {
+                $fn = $ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true) | Select-Object -First 1
+                if (-not $fn) { throw "Funktion $n fehlt in $File" }
+                . ([scriptblock]::Create($fn.Extent.Text.Replace("function $n", "function global:$n")))
+            }
+        }
+        & $script:LoadFn 'Functions\UI-AppUpdates.ps1' @('Get-HMAuScheduleResultText', 'Get-HMAuBusyText')
+        & $script:LoadFn 'Functions\AppUpdates-Auto.ps1' @('Invoke-AWinget')
+        $script:Target = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\AppUpdates-Target.ps1'))
+        $script:Worker = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\AppUpdates-Worker.ps1'))
+        $script:Auto = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\AppUpdates-Auto.ps1'))
+    }
+    It 'Abbrechen an anderen PCs: erst Signal, dann alle 30 s wiederholen, nach der Wartezeit Verbindung beenden' {
+        $t0 = Get-Date '2026-11-26 01:00:00'
+        Get-HMAuCancelAction $false $null $null $false $t0 20 | Should -Be ''
+        Get-HMAuCancelAction $true $null $null $false $t0 20 | Should -Be 'First'
+        Get-HMAuCancelAction $true $t0 $t0 $false $t0.AddSeconds(10) 20 | Should -Be ''
+        Get-HMAuCancelAction $true $t0 $t0 $false $t0.AddSeconds(31) 20 | Should -Be 'Send'
+        Get-HMAuCancelAction $true $t0 $t0.AddMinutes(19) $false $t0.AddMinutes(20) 20 | Should -Be 'Stop'
+        Get-HMAuCancelAction $true $t0 $t0 $true $t0.AddMinutes(30) 20 | Should -Be ''
+    }
+    It 'Abbruch-Signal legt "cancel" nur in die Laufordner dieses Laufs (Kennung), falsche Kennung wird nicht gesendet' {
+        $pd = Join-Path $TestDrive 'pd'
+        $base = Join-Path $pd 'HUMig\AppUpdates'
+        foreach ($d in @('run_aaaaaaaaaaaaaaaa_1', 'run_aaaaaaaaaaaaaaaa_2', 'run_bbbbbbbbbbbbbbbb_1', 'auto')) { New-Item -ItemType Directory -Path (Join-Path $base $d) -Force | Out-Null }
+        $old = $env:ProgramData
+        try {
+            $env:ProgramData = $pd
+            Mock Invoke-Command { & $ScriptBlock @ArgumentList }
+            Send-HMAuRemoteCancel @('PC-A') 'aaaaaaaaaaaaaaaa' $null
+            Should -Invoke Invoke-Command -Times 1 -Exactly
+            Send-HMAuRemoteCancel @('PC-A') 'x;y' $null
+            Send-HMAuRemoteCancel @() 'aaaaaaaaaaaaaaaa' $null
+            Should -Invoke Invoke-Command -Times 1 -Exactly
+        } finally { $env:ProgramData = $old }
+        Test-Path (Join-Path $base 'run_aaaaaaaaaaaaaaaa_1\cancel') | Should -BeTrue
+        Test-Path (Join-Path $base 'run_aaaaaaaaaaaaaaaa_2\cancel') | Should -BeTrue
+        Test-Path (Join-Path $base 'run_bbbbbbbbbbbbbbbb_1\cancel') | Should -BeFalse
+        Test-Path (Join-Path $base 'auto\cancel') | Should -BeFalse
+    }
+    It 'Ziel-PC: Laufordner mit Kennung, kein neuer Schritt nach Abbruch, Abbruch-Datei wird erkannt' {
+        $script:Target | Should -Match ([regex]::Escape('$dir = Join-Path $Base $(if ($RunTag) { "run_$($RunTag)_$id" } else { "run_$id" })'))
+        $script:Target | Should -Match ([regex]::Escape('if (Test-TCancel) { return }'))
+        $script:Target | Should -Match ([regex]::Escape("if (-not `$script:TCancelled -and (Test-Path -LiteralPath (Join-Path `$dir 'cancel'))) { `$script:TCancelled = `$true"))
+        foreach ($g in @('while ($todoM.Count -and -not (Test-TCancel))', 'if ($usr.Count -and -not (Test-TCancel))', 'while ($todo.Count -and -not (Test-TCancel))', 'if ($ie.Count -and -not (Test-TCancel))')) {
+            $script:Target | Should -Match ([regex]::Escape($g))
+        }
+        # Kennung nur aus Hex-Zeichen uebernommen
+        $script:Target | Should -Match ([regex]::Escape("-match '^[0-9a-f]{8,32}$'"))
+    }
+    It 'Ziel-PC: gestoppte Dienste werden auch bei Fehler wieder gestartet (finally ohne Ausgabe)' {
+        $i = $script:Target.IndexOf('$rsDone = $false')
+        $f = $script:Target.IndexOf('if (-not $rsDone -and ($rs.Services.Count -or $rs.Apps.Count)) { try { $null = @(Restart-TStopped $rs) } catch { } }')
+        $i | Should -BeGreaterThan 0
+        $f | Should -BeGreaterThan $i
+        $script:Target.Substring($f - 40, 40) | Should -Match 'finally \{'
+    }
+    It 'eigener PC: geschlossene Programme werden im finally wieder gestartet' {
+        $t = ${function:Start-HMAppUpdate}.ToString()
+        $t | Should -Match ([regex]::Escape('if (-not $restarted) { try { Restart-HMAuStopped $Job $restart } catch { } }'))
+    }
+    It 'Worker: Abbruch-Datei oder verschwundener Laufordner beendet nach dem laufenden Programm' {
+        ([regex]::Matches($script:Worker, [regex]::Escape("if (-not (Test-Path -LiteralPath `$Dir) -or (Test-Path -LiteralPath (Join-Path `$Dir 'cancel'))) { Write-WLog 'CANCEL'; break }"))).Count | Should -Be 2
+    }
+    It 'Zeitlimit je Programm als SYSTEM (Standard 60 min, Rest laeuft weiter)' {
+        $script:Target | Should -Match ([regex]::Escape('$SysItemMin = if ([int]"0$($Payload.ItemTimeoutMin)" -gt 0)'))
+        $script:Target | Should -Match ([regex]::Escape("} else { 60 }"))
+        $script:Target | Should -Match ([regex]::Escape('$false 10800 $SysItemMin'))
+    }
+    It 'Doppelstart: Rueckfrage nur, wenn noch eine Pruefung laeuft' {
+        $script:AsyncBusy = @{ 'Au' = 0 }; $script:AsyncBusyText = @{ 'Au' = '' }
+        Get-HMAuBusyText | Should -Be ''
+        $script:AsyncBusy = @{ 'Au' = 1 }; $script:AsyncBusyText = @{ 'Au' = 'Laufende Programme pruefen ...' }
+        Get-HMAuBusyText | Should -Be 'es laeuft noch: Laufende Programme pruefen ...'
+        $script:AsyncBusy = @{ 'Au' = 2 }; $script:AsyncBusyText = @{}
+        Get-HMAuBusyText | Should -Match 'eine Pruefung fuer App-Updates'
+        [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\UI-AppUpdates.ps1')) | Should -Match ([regex]::Escape("if (`$busy -and -not (Confirm-Action"))
+    }
+    It 'Zeitplan: Fehler aus dem letzten Bericht gehen vor dem Rueckgabewert 0' {
+        Get-HMAuScheduleResultText $false '0' '26.11.2026 03:00' 5 | Should -Be 'Fehler (5)'
+        Get-HMAuScheduleResultText $false '0' '26.11.2026 03:00' 0 | Should -Be 'OK'
+        Get-HMAuScheduleResultText $false '0' '26.11.2026 03:00' $null | Should -Be 'OK'
+        Get-HMAuScheduleResultText $false '1' '26.11.2026 03:00' 2 | Should -Be 'Fehler (2)'
+        Get-HMAuScheduleResultText $false '2147942402' '26.11.2026 03:00' $null | Should -Be 'Code 2147942402'
+        Get-HMAuScheduleResultText $true '0' '26.11.2026 03:00' 3 | Should -Be 'laeuft'
+        Get-HMAuScheduleResultText $false '267009' '' 0 | Should -Be 'laeuft'
+        Get-HMAuScheduleResultText $false '0' '' 0 | Should -Be ''
+    }
+    It 'Zeitplan: Ziel liefert die Fehlerzahl, Skript setzt den Rueckgabewert' {
+        $script:Target | Should -Match ([regex]::Escape('$o.LastErr = [int]"0$($l.Err)"'))
+        $script:Auto | Should -Match ([regex]::Escape('exit $(if ($err -gt 0) { 1 } else { 0 })'))
+        $script:Auto | Should -Match ([regex]::Escape('Invoke-AWinget $wg @('))
+    }
+    It 'Zeitplan: winget mit Zeitlimit - Rueckgabecode, Ausgabe und Abbruch nach dem Limit' {
+        $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $r = Invoke-AWinget $ps @('-NoProfile', '-Command', 'Write-Output "Zeile eins"; exit 3') 1
+        $r.TimedOut | Should -BeFalse
+        $r.Code | Should -Be 3
+        ($r.Out -join ' ') | Should -Match 'Zeile eins'
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $r2 = Invoke-AWinget $ps @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') 0.03
+        $sw.Stop()
+        $r2.TimedOut | Should -BeTrue
+        $sw.Elapsed.TotalSeconds | Should -BeLessThan 20
+    }
+}

@@ -442,6 +442,16 @@ function Start-HMAuSchedule {
     }
     Start-EngineJob -Command 'Start-HMAuScheduleJob -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'App-Updates Zeitplan' -ScriptFiles @($script:Engine, $script:AuEngine) -OnFinished { param($j) }
 }
+# Spalte "Ergebnis" im Fenster Zeitplaene: Fehler aus dem letzten Bericht (last.json) gehen vor dem Rueckgabewert der Aufgabe -
+# aeltere Zeitplaene liefern immer 0, auch wenn Programme scheiterten
+function Get-HMAuScheduleResultText([bool]$Running, [string]$LastResult, [string]$Last, $LastErr) {
+    if ($Running -or $LastResult -eq '267009') { return 'laeuft' }
+    if (-not $Last) { return '' }
+    $ne = 0; if ($null -ne $LastErr -and "$LastErr" -match '^\d+$') { $ne = [int]"$LastErr" }
+    if ($ne -gt 0) { return "Fehler ($ne)" }
+    if ($LastResult -eq '0') { return 'OK' }
+    return "Code $LastResult"
+}
 function Start-HMAuScheduleView {
     if ($script:JobRunning) { Out-Console 'Es laeuft bereits ein Vorgang.' 'Warning'; return }
     Update-HMAuTargetLabel
@@ -455,7 +465,7 @@ function Start-HMAuScheduleView {
             $v = $j.Result.ByPc[$k]
             if (-not $v.PSObject.Properties['Exists']) { [void]$rows.Add(@($k, '(nicht erreichbar)', '', '', '', '', (@($v.Errors) -join '; '))); continue }
             $lr = "$($v.LastResult)"
-            $lrT = if ([bool]$v.Running -or $lr -eq '267009') { 'laeuft' } elseif (-not $v.Last) { '' } elseif ($lr -eq '0') { 'OK' } else { "Code $lr" }
+            $lrT = Get-HMAuScheduleResultText ([bool]$v.Running) $lr "$($v.Last)" $(if ($v.PSObject.Properties['LastErr']) { $v.LastErr } else { $null })
             [void]$rows.Add(@($k, $(if ($v.Exists) { "$($v.When)" } else { '(kein Zeitplan)' }), "$($v.Next)", "$($v.Last)", $lrT, "$($v.Progress)", "$($v.Summary)", "$(@($v.History).Count) Eintraege"))
         }
         $run = @($rows | Where-Object { $_[4] -eq 'laeuft' }).Count
