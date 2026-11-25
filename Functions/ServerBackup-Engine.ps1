@@ -84,11 +84,12 @@ function Get-HMSbVolumeList {
 function Get-HMSbSources {
     $hv = Test-HMSbHyperVHost
     $vms = @()
-    $err = ''
-    if ($hv) { try { $vms = Get-HMSbVmList; $vms = @($vms) } catch { $err = $_.Exception.Message } }
+    $err = ''; $vmErr = ''; $volErr = ''
+    if ($hv) { try { $vms = Get-HMSbVmList; $vms = @($vms) } catch { $err = $_.Exception.Message; $vmErr = $err } }
     $vols = @()
-    try { $vols = Get-HMSbVolumeList; $vols = @($vols) } catch { if (-not $err) { $err = $_.Exception.Message } }
-    return [pscustomobject]@{ HyperV = $hv; VMs = $vms; Volumes = $vols; Error = $err }
+    try { $vols = Get-HMSbVolumeList; $vols = @($vols) } catch { $volErr = $_.Exception.Message; if (-not $err) { $err = $volErr } }
+    # VmError/VolError getrennt: Speichern/Planen/Starten duerfen eine nicht gelesene Liste nie als "keine" verwenden
+    return [pscustomobject]@{ HyperV = $hv; VMs = $vms; Volumes = $vols; Error = $err; VmError = $vmErr; VolError = $volErr }
 }
 
 # Virtuelle Computer des Hosts mit Groesse der virtuellen Festplatten
@@ -149,11 +150,20 @@ function Get-HMSbDriveList([switch]$KeepHumigOffline) {
     $msgs = @()
     $marks = @(Get-HMSbOfflineMarks)
     $marksNew = @($marks)
+    # direkt an eine VM durchgereichte Platten (Pass-Through) sind am Host offline und duerfen nie online geschaltet werden.
+    # Eine von HUMig selbst offline geschaltete Platte (Markierung) ist nachweislich die eigene: keine Pruefung, wie bisher.
+    # Die VM-Liste wird nur fuer offline Platten OHNE Markierung gelesen, mit Zeitgrenze (haengender Hyper-V-Dienst).
+    $pt = @(); $ptKnown = $true; $ptRead = $false
     foreach ($d in @(Get-Disk -ErrorAction SilentlyContinue | Where-Object { "$($_.BusType)" -match '^(USB|7)$' })) {
         $k = Get-HMSbDiskKey $d
         $m = $null
         if ($k) { $m = @($marks | Where-Object { "$_".Split('|')[0] -eq $k })[0] }
         if (-not $d.IsOffline) { if ($m) { $marksNew = @($marksNew | Where-Object { $_ -ne $m }) }; continue }
+        if (-not $m) {
+            if (-not $ptRead) { $ptRead = $true; $pt = Get-HMSbPassThroughDisks -TimeoutSec $script:SbPassThroughTimeoutSec; $ptKnown = ($null -ne $pt); if (-not $ptKnown) { $pt = @() } }
+            if (@($pt) -contains [int]$d.Number) { $msgs += "USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) ist direkt an eine VM durchgereicht (Pass-Through) - bleibt offline und ist kein Sicherungsziel"; continue }
+            if (-not $ptKnown) { $msgs += "Hinweis: Hyper-V-VM-Liste nicht lesbar oder zu langsam - ob die offline USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) an eine VM durchgereicht ist, war nicht pruefbar; sie wird wie bisher online geschaltet" }
+        }
         if ($KeepHumigOffline -and $m) { $msgs += "USB-Platte $("$m".Split('|')[1]) (Datentraeger $($d.Number)) wurde nach der Sicherung von HUMig offline geschaltet und bleibt offline - ""Aktualisieren"" schaltet sie wieder online."; continue }
         try {
             Set-Disk -Number $d.Number -IsOffline $false -ErrorAction Stop
@@ -182,26 +192,117 @@ function Get-HMSbDriveList([switch]$KeepHumigOffline) {
 # Datentraeger-Nummern, auf denen Dateien von Hyper-V-VMs liegen (Konfiguration, Snapshots, Smart Paging, virtuelle Platten).
 # Zuordnung ueber die Zugriffspfade der Partitionen (Laufwerksbuchstabe, Bereitstellungspunkt, \\?\Volume{...}\) - laengster passender Pfad.
 # Ist Hyper-V installiert, aber die VM-Liste nicht lesbar: Fehler (nie "keine VMs" annehmen). Ohne Hyper-V: leere Liste.
+# Datentraeger-Nummern, die als physische Platte direkt an eine VM durchgereicht sind (Pass-Through, DiskNumber gesetzt).
+# Ohne Hyper-V: leere Liste. VM-Liste nicht lesbar oder Zeitgrenze ueberschritten: $null (der Aufrufer entscheidet und meldet).
+# -TimeoutSec > 0: Abfrage in einem eigenen Runspace; nach der Zeitgrenze wartet niemand auf einen haengenden Hyper-V-Dienst.
+# Ergebnis als Text 'OK:<Nummern>' bzw. 'ERR' (laesst sich aus dem Runspace ohne Umwandlungsfragen zurueckgeben)
+$script:SbPassThroughTimeoutSec = 30
+$script:SbPassThroughScript = {
+    if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return 'OK:' }
+    $n = @()
+    try {
+        foreach ($vm in @(Get-VM -ErrorAction Stop)) {
+            foreach ($hd in @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)) {
+                if ($null -ne $hd.DiskNumber -and "$($hd.DiskNumber)" -match '^\d+$' -and $n -notcontains [int]$hd.DiskNumber) { $n += [int]$hd.DiskNumber }
+            }
+        }
+    } catch { return 'ERR' }
+    return ('OK:' + ($n -join ','))
+}
+function ConvertFrom-HMSbPassThroughText([string]$Text) {
+    if ("$Text" -notmatch '^OK:([\d,]*)$') { return $null }
+    $l = @($Matches[1] -split ',' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
+    return ,$l
+}
+function Get-HMSbPassThroughDisks([int]$TimeoutSec = 0) {
+    if ($TimeoutSec -le 0) { return (ConvertFrom-HMSbPassThroughText (& $script:SbPassThroughScript)) }
+    $r = Invoke-HMSbWithTimeout $script:SbPassThroughScript $TimeoutSec
+    if (-not $r.Done) { return $null }
+    return (ConvertFrom-HMSbPassThroughText "$($r.Output)")
+}
+# Skriptblock in einem eigenen Runspace mit Zeitgrenze. Done = rechtzeitig fertig, Output = erste Ausgabe als Text.
+# Nach Ueberschreiten wird der Runspace nicht abgewartet (Stop im Hintergrund), der Aufrufer laeuft sofort weiter.
+function Invoke-HMSbWithTimeout([scriptblock]$Script, [int]$TimeoutSec) {
+    $res = [pscustomobject]@{ Done = $false; Output = '' }
+    $ps = [System.Management.Automation.PowerShell]::Create()
+    try {
+        [void]$ps.AddScript($Script.ToString())
+        $h = $ps.BeginInvoke()
+        if (-not $h.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds($TimeoutSec))) {
+            try { [void]$ps.BeginStop($null, $null) } catch { }
+            return $res
+        }
+        $out = @($ps.EndInvoke($h))
+        $res.Done = $true
+        if ($out.Count) { $res.Output = "$($out[0])" }
+        try { $ps.Dispose() } catch { }
+        return $res
+    } catch { try { $ps.Dispose() } catch { }; return $res }
+}
 function Get-HMSbVmDiskNumbers {
     if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return }
     $paths = @()
+    $nums = @()
     try {
         foreach ($vm in @(Get-VM -ErrorAction Stop)) {
             $paths += @("$($vm.Path)", "$($vm.ConfigurationLocation)", "$($vm.SnapshotFileLocation)", "$($vm.SmartPagingFilePath)")
-            $paths += @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop | ForEach-Object { "$($_.Path)" })
+            foreach ($hd in @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)) {
+                $paths += "$($hd.Path)"
+                # Pass-Through: physische Platte direkt an der VM (DiskNumber gesetzt, Path ist dann kein Dateipfad)
+                if ($null -ne $hd.DiskNumber -and "$($hd.DiskNumber)" -match '^\d+$' -and $nums -notcontains [int]$hd.DiskNumber) { $nums += [int]$hd.DiskNumber }
+            }
         }
     } catch { throw "VM-Liste nicht lesbar ($($_.Exception.Message)) - zur Sicherheit abgebrochen (Platten mit VM-Dateien waeren nicht erkennbar)" }
     $map = @()
     foreach ($p in @(Get-Partition -ErrorAction Stop)) {
         foreach ($ap in @($p.AccessPaths)) { if ("$ap") { $map += [pscustomobject]@{ Path = "$ap".TrimEnd('\') + '\'; Disk = [int]$p.DiskNumber } } }
     }
-    $nums = @()
     foreach ($x in @($paths | Where-Object { "$_".Trim() } | Select-Object -Unique)) {
         $f = "$x".TrimEnd('\') + '\'
         $hit = @($map | Where-Object { $f.StartsWith($_.Path, [StringComparison]::OrdinalIgnoreCase) } | Sort-Object { $_.Path.Length } -Descending)[0]
         if ($hit -and $nums -notcontains $hit.Disk) { $nums += $hit.Disk }
     }
     return $nums
+}
+# Zusatz fuer den Fehlertext "keine Platte": Meldungen zu durchgereichten Platten ('' = keine)
+function Get-HMSbPassThroughNote([string[]]$Messages) {
+    $pt = @($Messages | Where-Object { "$_" -match 'Pass-Through' })
+    if (-not $pt.Count) { return '' }
+    return (' - ' + ($pt -join '; '))
+}
+# Bezeichnung und Seriennummer, die jetzt unter dem Laufwerksbuchstaben stecken (fuer "trotzdem sichern")
+function Get-HMSbDriveNow([string]$Letter) {
+    $L = "$Letter".TrimEnd(':', '\').ToUpper()
+    $lab = ''; $sn = ''
+    try { $lab = "$((Get-Volume -DriveLetter $L -ErrorAction Stop).FileSystemLabel)".Trim() } catch { }
+    try { $sn = "$((Get-Partition -DriveLetter $L -ErrorAction Stop | Get-Disk -ErrorAction Stop).SerialNumber)".Trim() } catch { }
+    return [pscustomobject]@{ Label = $lab; Serial = $sn }
+}
+# Entscheidung beim Start in HUMig, wenn der Buchstabe nicht mehr zur gewaehlten Platte passt:
+# Start = weiter, Drive = Ziel mit der Bezeichnung/Seriennummer, die jetzt dort steckt, Note = Warnung fuer Bericht/Verlauf
+function Resolve-HMSbStartDrive($Drive, [string]$Mismatch, [string]$Answer, $Now) {
+    if (-not $Mismatch) { return [pscustomobject]@{ Start = $true; Drive = $Drive; Note = '' } }
+    if ($Answer -ne 'Yes') { return [pscustomobject]@{ Start = $false; Drive = $Drive; Note = $Mismatch } }
+    $d = [pscustomobject]@{}
+    foreach ($p in @($Drive.PSObject.Properties)) { $d | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value }
+    if ($Now) { $d.Label = "$($Now.Label)"; $d.Serial = "$($Now.Serial)" }
+    return [pscustomobject]@{ Start = $true; Drive = $d; Note = $Mismatch }
+}
+# Gehoert der Laufwerksbuchstabe noch zur erwarteten Platte (Bezeichnung, Seriennummer beim Lesen der Liste)?
+# '' = passt oder nicht pruefbar, sonst Beschreibung der Abweichung. Seriennummer nur, wenn beide bekannt sind
+# (viele USB-Gehaeuse melden keine). $Volume/$Disk nur fuer Tests, sonst live gelesen.
+function Get-HMSbDriveMismatch([string]$Letter, [string]$Label, [string]$Serial, $Volume = $null, $Disk = $null) {
+    $L = "$Letter".TrimEnd(':', '\').ToUpper()
+    if (-not $L) { return '' }
+    if ($null -eq $Volume) { try { $Volume = Get-Volume -DriveLetter $L -ErrorAction Stop } catch { return "Laufwerk ${L}: ist nicht mehr vorhanden" } }
+    $now = "$($Volume.FileSystemLabel)".Trim()
+    if ("$Label".Trim() -and $now -ne "$Label".Trim()) { return "Laufwerk ${L}: traegt jetzt die Bezeichnung '$(if ($now) { $now } else { '(ohne)' })' statt '$("$Label".Trim())' - wohl eine andere Platte" }
+    if ("$Serial".Trim()) {
+        if ($null -eq $Disk) { try { $Disk = Get-Partition -DriveLetter $L -ErrorAction Stop | Get-Disk -ErrorAction Stop } catch { return '' } }
+        $sn = "$($Disk.SerialNumber)".Trim()
+        if ($sn -and $sn -ne "$Serial".Trim()) { return "Laufwerk ${L}: ist eine andere Platte (Seriennummer $sn statt $("$Serial".Trim()), gleiche Bezeichnung '$now')" }
+    }
+    return ''
 }
 # Merkmale einer Platte zum Wiedererkennen (Nummern koennen nach dem Umstecken wechseln)
 function Get-HMSbDiskIdentity($d) { return ('{0}|{1}|{2}|{3}' -f "$($d.UniqueId)".Trim(), "$($d.SerialNumber)".Trim(), [long]$d.Size, "$($d.FriendlyName)".Trim()) }
@@ -296,25 +397,29 @@ function Get-HMSbHealthVerdict($H, $Prev = $null) {
     return [pscustomobject]@{ Level = $lvl; Text = $txt; Detail = ($det -join ', ') }
 }
 # Messwerte je Platte (Bezeichnung) merken: Config\ServerBackup\disk-health.json - letzte 30 Messungen je Platte
-function Read-HMSbHealthStore([string]$Path) {
+function ConvertTo-HMSbHealthTable($J) {
     $h = @{}
-    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $h }
-    try {
-        $j = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-        foreach ($p in @($j.PSObject.Properties)) { $v = $p.Value; $h[$p.Name] = @($v) }
-    } catch { }
+    if ($null -eq $J) { return $h }
+    foreach ($p in @($J.PSObject.Properties)) { $v = $p.Value; $h[$p.Name] = @($v) }
     return $h
+}
+function Read-HMSbHealthStore([string]$Path) {
+    $s = Read-HMSbJsonState $Path
+    if ($s.State -eq 'Corrupt' -and -not $script:SbCorruptSeen.ContainsKey($Path)) {
+        $script:SbCorruptSeen[$Path] = $true
+        Add-HMSbStateNote "Zustandsdatei $Path ist beschaedigt ($($s.Error)) - sie wird bei der naechsten Messung beiseitegelegt (Name mit Datum) und neu begonnen"
+    }
+    if ($s.State -ne 'Ok') { return @{} }
+    return (ConvertTo-HMSbHealthTable $s.Data)
 }
 function Add-HMSbHealthStore([string]$Path, [string]$Label, $H) {
     if (-not $Path -or -not "$Label".Trim() -or -not $H) { return }
-    $store = Read-HMSbHealthStore $Path
+    $store = ConvertTo-HMSbHealthTable (Read-HMSbJsonForWrite $Path)
     $list = @(@($store[$Label]) | Where-Object { $_ })
     $list = @($list + @($H) | Select-Object -Last 30)
     $store[$Label] = $list
     $o = [ordered]@{}; foreach ($k in @($store.Keys | Sort-Object)) { $o[$k] = @($store[$k]) }
-    $dir = Split-Path $Path -Parent
-    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-    ([pscustomobject]$o | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $Path -Encoding UTF8 -Force
+    Write-HMSbJsonFile $Path ([pscustomobject]$o | ConvertTo-Json -Depth 6)
 }
 # Letzte Messung + Bewertung je Bezeichnung (fuer Anzeige): @{ Label = @{ Last; Verdict } }
 function Get-HMSbHealthSummary([hashtable]$Store) {
@@ -545,7 +650,8 @@ function Get-HMSbBlockOverlap($Windows, [datetime]$Start, [datetime]$End) {
 #   - Groesse / langsamstes gemessenes Tempo der letzten 5 Laeufe (neue Platte = Vollsicherung)
 # ohne Verlauf: Groesse / 30 MB/s, ohne Groesse: 6 h
 function Get-HMSbEstimateMinutes($History, [string]$ProfileName, [long]$SizeBytes = 0) {
-    $runs = @(@($History) | Where-Object { $_ -and "$($_.Profile)" -eq $ProfileName -and [double]"0$($_.Minutes)" -gt 0 } | Sort-Object { "$($_.Date)" } | Select-Object -Last 5)
+    # abgebrochene Laeufe (Neustart, Absturz) zaehlen nicht: ihre Dauer ist die Zeit bis zur Erkennung, nicht die Laufzeit
+    $runs = @(@($History) | Where-Object { $_ -and "$($_.Profile)" -eq $ProfileName -and [double]"0$($_.Minutes)" -gt 0 -and $_.Aborted -ne $true } | Sort-Object { "$($_.Date)" } | Select-Object -Last 5)
     $cand = @()
     if ($runs.Count) { $cand += [double](@($runs | ForEach-Object { [double]$_.Minutes } | Measure-Object -Maximum).Maximum) }
     $rates = @($runs | ForEach-Object { [double]"0$($_.MBs)" } | Where-Object { $_ -gt 0 })
@@ -694,6 +800,11 @@ function Get-HMSbErrorLogReasons([string[]]$Files, [int]$Max = 6) {
     return $out.ToArray()
 }
 
+# Hat waehrend des Laufs die Sperrzeit des Profils begonnen? Einmal warnen
+function Invoke-HMSbBlockCheck {
+    if (-not $script:SbBlockWindows -or $script:SbBlockWarned) { return }
+    try { $nowB = Get-Date; $ovB = Get-HMSbBlockOverlap $script:SbBlockWindows $nowB $nowB.AddMinutes(1); if ($ovB) { $script:SbBlockWarned = $true; Write-HMSbLog "  ACHTUNG: Die Sperrzeit $(Format-HMSbBlockWindow $ovB.Window) hat begonnen - die Sicherung laeuft noch" 'Warning' } } catch { }
+}
 # wbadmin ausfuehren (stdout+stderr), Fortschritt in $Job, Zeilen ins Log
 function Invoke-HMSbWbadmin {
     param([string]$Arguments, [string]$Phase = '', [double]$PBase = 0, [double]$PSpan = 100, [string]$LogFile = '', [switch]$Quiet)
@@ -715,7 +826,7 @@ function Invoke-HMSbWbadmin {
     # geschriebene Menge = Summe der Zunahmen des belegten Platzes (verwirft Windows waehrenddessen aeltere Versionen,
     # sinkt der belegte Platz - das zaehlt nicht als "weniger geschrieben")
     $usedPrev = $used0; $written = [long]0
-    $t0 = Get-Date; $lastLog = $t0; $lastPctTxt = ''
+    $t0 = Get-Date; $lastLog = $t0; $lastPctTxt = ''; $lastBlockChk = $t0
     while ($true) {
         $rl = $p.StandardOutput.ReadLineAsync()
         while (-not $rl.Wait(5000)) {
@@ -723,12 +834,14 @@ function Invoke-HMSbWbadmin {
                 $lastLog = Get-Date
                 $uNow = if ($tgt -and $null -ne $usedPrev) { Get-HMSbDriveUsedBytes $tgt } else { $null }
                 if ($null -ne $uNow) { if ([long]$uNow -gt [long]$usedPrev) { $written += ([long]$uNow - [long]$usedPrev) }; $usedPrev = $uNow }
-                if ($script:SbBlockWindows -and -not $script:SbBlockWarned) { try { $nowB = Get-Date; $ovB = Get-HMSbBlockOverlap $script:SbBlockWindows $nowB $nowB.AddMinutes(1); if ($ovB) { $script:SbBlockWarned = $true; Write-HMSbLog "  ACHTUNG: Die Sperrzeit $(Format-HMSbBlockWindow $ovB.Window) hat begonnen - die Sicherung laeuft noch" 'Warning' } } catch { } }
+                Invoke-HMSbBlockCheck
                 Write-HMSbLog ('  ' + (Format-HMSbAliveLine -Phase $Phase -Elapsed ((Get-Date) - $t0) -PctText $lastPctTxt -UsedStart $(if ($null -ne $used0) { [long]0 } else { $null }) -UsedNow $(if ($null -ne $used0) { $written } else { $null })))
             }
         }
         $line = $rl.Result
         if ($null -eq $line) { break }
+        # gibt wbadmin laufend Fortschritt aus, kommt die Schleife oben nie dran: Sperrzeit trotzdem jede Minute pruefen
+        if (-not $Quiet -and ((Get-Date) - $lastBlockChk).TotalMinutes -ge 1) { $lastBlockChk = Get-Date; Invoke-HMSbBlockCheck }
         $t = $line.Trim()
         if (-not $t) { continue }
         $lines.Add($t)
@@ -807,19 +920,48 @@ function Wait-HMSbIdle($Job, [int]$MaxMin = 480) {
     }
 }
 # wbadmin start ... mit Vorab-Pruefung, Warten und bis zu 2 Wiederholungen, wenn wbadmin 'weiterer Vorgang laeuft' meldet
+# Ergebnis zusaetzlich: Started = eigenes wbadmin wurde gestartet, WbSec = Laufzeit nur von wbadmin (ohne Warten, fuer das Schreibtempo)
 function Invoke-HMSbStart {
     param([string]$Arguments, [string]$Phase = '', [double]$PBase = 0, [double]$PSpan = 100, [string]$LogFile = '', $Job)
+    $wbSec = 0.0
     for ($try = 1; $try -le 3; $try++) {
         if (-not (Wait-HMSbIdle $Job)) {
-            return [pscustomobject]@{ ExitCode = -3; Lines = @(); Text = 'Ein weiterer Sicherungs- oder Wiederherstellungsvorgang wird ausgefuehrt (Wartezeit abgelaufen oder abgebrochen).'; LogFiles = @(); Busy = $true }
+            return [pscustomobject]@{ ExitCode = -3; Lines = @(); Text = 'Ein weiterer Sicherungs- oder Wiederherstellungsvorgang wird ausgefuehrt (Wartezeit abgelaufen oder abgebrochen).'; LogFiles = @(); Busy = $true; Started = $false; WbSec = $wbSec }
         }
+        # Abbrechen im Fenster zwischen Warten und Start: eigene Sicherung gar nicht erst starten
+        if ($Job.Cancel) { return [pscustomobject]@{ ExitCode = -3; Lines = @(); Text = 'Abgebrochen vor dem Start.'; LogFiles = @(); Busy = $false; Started = $false; WbSec = $wbSec } }
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $r = Invoke-HMSbWbadmin -Arguments $Arguments -Phase $Phase -PBase $PBase -PSpan $PSpan -LogFile $LogFile
+        $wbSec += $sw.Elapsed.TotalSeconds
         $busy = ($r.ExitCode -ne 0 -and "$($r.Text)" -match '(?i)weiterer Sicherungs|anderer Sicherungs|another backup or recovery|operation is already in progress|bereits ausgef')
         $r | Add-Member -NotePropertyName Busy -NotePropertyValue $busy -Force
+        $r | Add-Member -NotePropertyName Started -NotePropertyValue $true -Force
+        $r | Add-Member -NotePropertyName WbSec -NotePropertyValue $wbSec -Force
         if (-not $busy -or $Job.Cancel -or $try -eq 3) { return $r }
         Write-HMSbLog "wbadmin meldet einen anderen laufenden Vorgang - HUMig wartet und versucht es erneut ($($try + 1). Versuch)" 'Warning'
         for ($i = 0; $i -lt 60; $i++) { if ($Job.Cancel) { return $r }; Start-Sleep -Seconds 2 }
     }
+}
+# Abbrechen: 'wbadmin stop job' nur, wenn der EIGENE Vorgang noch lief (gestartet, nicht wegen eines anderen Vorgangs
+# abgewiesen, nicht fertig). Abbrechen waehrend des Wartens auf einen anderen Vorgang beendet nie diese fremde Sicherung.
+function Test-HMSbOwnJobRunning($R) {
+    if (-not $R) { return $false }
+    return ([bool]$R.Started -and -not [bool]$R.Busy -and "$($R.ExitCode)" -ne '0')
+}
+function Stop-HMSbOwnJob($R) {
+    if (Test-HMSbOwnJobRunning $R) {
+        Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
+        [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+        return $true
+    }
+    Write-HMSbLog "Abbruch: $(Get-HMSbCancelText $R)" 'Warning'
+    return $false
+}
+# Wortlaut beim Abbrechen ohne eigenen laufenden Vorgang (je Fall)
+function Get-HMSbCancelText($R) {
+    if ($R -and [bool]$R.Started -and -not [bool]$R.Busy) { return 'die eigene Sicherung war schon beendet - nichts zu stoppen' }
+    if ($R -and [bool]$R.Busy) { return 'HUMig wartete auf einen anderen Vorgang am Host und hat keine eigene Sicherung gestartet - der andere Vorgang wird nicht beendet' }
+    return 'vor dem Start abgebrochen - keine Sicherung gestartet'
 }
 $script:HMSbBusyFix = 'Es lief bereits eine andere Sicherung/Wiederherstellung am Host (die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig). Laufenden Vorgang in wbadmin.msc bzw. mit "wbadmin get status" pruefen, Zeitplaene verschiedener Profile am selben Host zeitlich trennen und die Sicherung spaeter erneut starten.'
 
@@ -850,6 +992,13 @@ function Get-HMSbVersions([string]$Target) {
     return [pscustomobject]@{ Versions = $sorted; ExitCode = $r.ExitCode; Text = $r.Text }
 }
 
+# Entstand eine Version (When = Ortszeit aus der Versions-ID, minutengenau) waehrend des Laufs ab $Start?
+# Unbekannte Zeit = $false (lieber keine ID als die eines frueheren Laufs)
+function Test-HMSbVersionFromRun($V, [datetime]$Start) {
+    if ($null -eq $V) { return $false }
+    try { if ($V.When -is [datetime] -and $V.When -gt [datetime]::MinValue) { return ($V.When -ge $Start.AddMinutes(-2)) } } catch { }
+    return $false
+}
 # Anzahl Versionen aus einem Get-HMSbVersions-Ergebnis - -1 = nicht feststellbar (wbadmin-Fehler, busy, Platte kurz weg).
 # Eine leere Liste zaehlt nur als 0, wenn wbadmin ohne Fehler endete oder ausdruecklich "keine Sicherungen" meldet (B42).
 function Get-HMSbVersionCount($Result) {
@@ -1064,33 +1213,139 @@ function New-HMSbNotifyMessage {
     return [pscustomobject]@{ Title = "Server-Backup '$ProfileName' auf $Computer $stTxt"; Lines = @($lines.ToArray()); Level = $level }
 }
 
-# Verlauf (JSON-Array) lesen / ergaenzen
-function Read-HMSbHistory([string]$Path) {
-    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return ,@() }
+# ----------------------------------------------------------------------------
+# Zustandsdateien (Verlauf, Profile auf der Platte, Plattenzustand, Laufend-Markierung) sicher lesen und schreiben
+#   Lesen: State Missing (keine Datei), Empty (leer), Ok, Corrupt (gelesen, aber kein JSON), Unreadable (gesperrt/nicht lesbar)
+#   Schreiben: erst vollstaendig in eine Hilfsdatei mit eindeutigem Namen (Oberflaeche und SYSTEM-Lauf schreiben dieselbe
+#   Datei), dann ersetzen. Eine defekte Datei wird vor dem Schreiben beiseitegelegt (<Name>.defekt-<Zeit>.json) und gemeldet;
+#   eine nicht lesbare Datei wird nie ueberschrieben (Fehler an den Aufrufer). Reines Lesen benennt nie etwas um.
+#   Eigene Namen (HMSb): die Engine laeuft auch allein (geplante Aufgabe, Hintergrund-Runspaces).
+# ----------------------------------------------------------------------------
+$script:SbStateNotes = New-Object System.Collections.Generic.List[string]
+$script:SbCorruptSeen = @{}
+function Add-HMSbStateNote([string]$Text) { if ($Text -and -not $script:SbStateNotes.Contains($Text)) { $script:SbStateNotes.Add($Text) } }
+# Meldungen zu beschaedigten Zustandsdateien abholen (danach leer)
+function Get-HMSbStateNotes {
+    $a = @($script:SbStateNotes.ToArray())
+    $script:SbStateNotes.Clear()
+    return $a
+}
+function Format-HMSbShortError([string]$Text) { $t = ("$Text" -replace '\s+', ' ').Trim(); if ($t.Length -gt 160) { $t = $t.Substring(0, 160) + ' ...' }; return $t }
+function Read-HMSbJsonState([string]$Path) {
+    $r = [pscustomobject]@{ State = 'Missing'; Data = $null; Error = '' }
+    if (-not $Path -or -not [System.IO.File]::Exists($Path)) { return $r }
+    $txt = $null
+    for ($i = 1; $i -le 3; $i++) {
+        try {
+            # Teilen inkl. Loeschen: ein gleichzeitiges Ersetzen durch den anderen Prozess wird nicht blockiert
+            $fs = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+            try { $sr = New-Object System.IO.StreamReader($fs, (New-Object System.Text.UTF8Encoding($false)), $true); $txt = $sr.ReadToEnd() } finally { $fs.Dispose() }
+            break
+        } catch {
+            if (-not [System.IO.File]::Exists($Path)) { return $r }
+            $r.Error = Format-HMSbShortError $_.Exception.Message
+            if ($i -lt 3) { Start-Sleep -Milliseconds 300 }
+        }
+    }
+    if ($null -eq $txt) { $r.State = 'Unreadable'; return $r }
+    $r.Error = ''
+    $tt = $txt.Trim([char[]]@(' ', "`t", "`r", "`n", [char]0, [char]0xFEFF))
+    if (-not $tt) { $r.State = 'Empty'; return $r }
+    # abgeschnittene Datei (Absturz beim Schreiben): PowerShell 7 liest unvollstaendiges JSON sonst still als Teilstand
+    if (-not (($tt.StartsWith('[') -and $tt.EndsWith(']')) -or ($tt.StartsWith('{') -and $tt.EndsWith('}')))) { $r.State = 'Corrupt'; $r.Error = 'unvollstaendig (Anfang oder Ende fehlt)'; return $r }
+    try { $r.Data = ConvertFrom-Json -InputObject $tt -ErrorAction Stop; $r.State = 'Ok' }
+    catch { $r.State = 'Corrupt'; $r.Error = Format-HMSbShortError $_.Exception.Message }
+    return $r
+}
+# Elemente eines gelesenen JSON-Arrays (leer bei $null)
+function Get-HMSbJsonItems($Data) {
+    if ($null -eq $Data) { return ,@() }
+    $arr = @($Data | ForEach-Object { $_ } | Where-Object { $_ })
+    return ,$arr
+}
+function Move-HMSbCorruptFile([string]$Path) {
+    $dir = [System.IO.Path]::GetDirectoryName($Path)
+    $base = [System.IO.Path]::GetFileNameWithoutExtension($Path); $ext = [System.IO.Path]::GetExtension($Path)
+    $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+    $dst = [System.IO.Path]::Combine($dir, "$base.defekt-$stamp$ext"); $i = 2
+    while ([System.IO.File]::Exists($dst)) { $dst = [System.IO.Path]::Combine($dir, "$base.defekt-$stamp-$i$ext"); $i++ }
+    [System.IO.File]::Move($Path, $dst)
+    return $dst
+}
+# Lesen vor dem Schreiben: nicht lesbar = Fehler (nichts schreiben), defekt = beiseitelegen, melden, mit leerem Stand weiter
+function Read-HMSbJsonForWrite([string]$Path) {
+    $s = Read-HMSbJsonState $Path
+    if ($s.State -eq 'Unreadable') { throw "$Path ist nicht lesbar ($($s.Error)) - nichts geschrieben, Datei unveraendert" }
+    if ($s.State -ne 'Corrupt') { return $s.Data }
+    $dst = ''
+    try { $dst = Move-HMSbCorruptFile $Path } catch { throw "$Path ist beschaedigt und konnte nicht beiseitegelegt werden ($(Format-HMSbShortError $_.Exception.Message)) - nichts geschrieben, Datei unveraendert" }
+    $txt = "Zustandsdatei $Path war beschaedigt ($($s.Error)) - beiseitegelegt als $([System.IO.Path]::GetFileName($dst)), neu begonnen"
+    Write-HMSbLog $txt 'Warning'
+    Add-HMSbStateNote $txt
+    Write-HMSbEvent 'Warning' "HUMig Server-Backup auf ${env:COMPUTERNAME}: $txt"
+    return $null
+}
+function Write-HMSbJsonFile([string]$Path, [string]$Text) {
+    $dir = [System.IO.Path]::GetDirectoryName($Path)
+    if ($dir -and -not [System.IO.Directory]::Exists($dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $tmp = "$Path.humig-$([guid]::NewGuid().ToString('N')).tmp"
     try {
-        $j = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-        $arr = @($j | ForEach-Object { $_ } | Where-Object { $_ })
-        return ,$arr
-    } catch { return ,@() }
+        [System.IO.File]::WriteAllText($tmp, $Text, (New-Object System.Text.UTF8Encoding($true)))
+        for ($i = 1; $true; $i++) {
+            try {
+                if ([System.IO.File]::Exists($Path)) { [System.IO.File]::Replace($tmp, $Path, [NullString]::Value) } else { [System.IO.File]::Move($tmp, $Path) }
+                break
+            } catch {
+                if ($i -lt 5) { Start-Sleep -Milliseconds 200; continue }
+                # manche Datentraeger/Freigaben koennen Replace nicht: alte Datei beiseite, neue an ihren Platz, alte loeschen
+                # (scheitert der zweite Schritt, kommt die alte Datei zurueck - nie ohne Datei)
+                if (-not [System.IO.File]::Exists($Path)) { throw }
+                $old = "$Path.humig-$([guid]::NewGuid().ToString('N')).alt"
+                [System.IO.File]::Move($Path, $old)
+                try { [System.IO.File]::Move($tmp, $Path) } catch { [System.IO.File]::Move($old, $Path); throw }
+                try { [System.IO.File]::Delete($old) } catch { }
+                break
+            }
+        }
+    } catch {
+        try { if ([System.IO.File]::Exists($tmp)) { [System.IO.File]::Delete($tmp) } } catch { }
+        throw
+    }
+}
+function Write-HMSbJsonList([string]$Path, $Items) { Write-HMSbJsonFile $Path (ConvertTo-Json -InputObject @($Items) -Depth 5) }
+
+# Verlauf (JSON-Array) lesen / ergaenzen
+# Lesen fuer die Anzeige: beschaedigte Datei = leer + einmalige Meldung (beiseitegelegt wird erst beim naechsten Schreiben)
+function Read-HMSbHistory([string]$Path) {
+    $s = Read-HMSbJsonState $Path
+    if ($s.State -eq 'Corrupt' -and -not $script:SbCorruptSeen.ContainsKey($Path)) {
+        $script:SbCorruptSeen[$Path] = $true
+        $txt = "Zustandsdatei $Path ist beschaedigt ($($s.Error)) - sie wird beim naechsten Eintrag beiseitegelegt (Name mit Datum) und neu begonnen"
+        Write-HMSbLog $txt 'Warning'
+        Add-HMSbStateNote $txt
+    }
+    if ($s.State -ne 'Ok') { return ,@() }
+    $arr = Get-HMSbJsonItems $s.Data
+    return ,$arr
 }
 function Add-HMSbHistory([string]$Path, $Entry) {
-    $old = Read-HMSbHistory $Path
+    $old = Read-HMSbJsonForWrite $Path
+    $old = Get-HMSbJsonItems $old
     $arr = @($old) + @($Entry)
     if ($arr.Count -gt 1000) { $arr = @($arr[($arr.Count - 1000)..($arr.Count - 1)]) }
-    $dir = Split-Path $Path -Parent
-    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-    ConvertTo-Json -InputObject @($arr) -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8
+    Write-HMSbJsonList $Path $arr
 }
 
 # Eintraege aus einem Verlauf entfernen (Schluessel Datum|Host|Platte), Rueckgabe = Anzahl entfernt
 function Remove-HMSbHistory([string]$Path, [string[]]$Keys) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return 0 }
     $k = @{}; foreach ($x in @($Keys)) { if ($x) { $k[$x.ToUpperInvariant()] = $true } }
-    $old = Read-HMSbHistory $Path
-    $old = @($old)
+    $old = Read-HMSbJsonForWrite $Path
+    $old = Get-HMSbJsonItems $old
     $keep = @($old | Where-Object { -not $k.ContainsKey(("$($_.Date)|$($_.Host)|$($_.Disk)").ToUpperInvariant()) })
     $n = $old.Count - $keep.Count
-    if ($n -gt 0) { ConvertTo-Json -InputObject @($keep) -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8 }
+    # beschaedigte Datei wurde beiseitegelegt: neu beginnen heisst ein gueltiger, leerer Verlauf
+    if ($n -gt 0 -or -not [System.IO.File]::Exists($Path)) { Write-HMSbJsonList $Path $keep }
     return $n
 }
 
@@ -1240,7 +1495,8 @@ function Set-HMSbRunMarker($Ctx, [string]$Report, [datetime]$Started) {
             Started = $Started.ToString('o'); Pid = $PID; ProcStart = $ps; Boot = (Get-HMSbBootTime)
             VMs = (@($Ctx.VMs) -join ', '); Volumes = (@($Ctx.Volumes) -join ', '); Version = "$($Ctx.Version)"; Kind = $(if ($Ctx.Scheduled) { 'Zeitplan' } else { 'Oberflaeche' })
         }
-        Set-Content -LiteralPath (Get-HMSbRunMarkerPath $dir "$($Ctx.Profile)") -Value ($m | ConvertTo-Json) -Encoding UTF8
+        # ueber eine Hilfsdatei: ein anderer Prozess (Resolve-HMSbAbortedRuns) liest nie eine halb geschriebene Markierung
+        Write-HMSbJsonFile (Get-HMSbRunMarkerPath $dir "$($Ctx.Profile)") ($m | ConvertTo-Json)
     } catch { Write-HMSbLog "Laufend-Markierung nicht geschrieben: $($_.Exception.Message)" 'Debug' }
 }
 function Clear-HMSbRunMarker($Ctx) {
@@ -1512,7 +1768,7 @@ function Sync-HMSbDiskLabel([string]$Letter, [string]$Label, [string]$LocalHisto
         $keys["$($e.Date)|$($e.Host)|$($e.Profile)"] = $true
         if ("$($e.Disk)" -ne $Label) { $e.Disk = $Label; $n++ }
     }
-    if ($n) { ConvertTo-Json -InputObject @($disk) -Depth 5 | Set-Content -LiteralPath $f -Encoding UTF8 }
+    if ($n) { Write-HMSbJsonList $f $disk }
     if ($LocalHistory -and (Test-Path -LiteralPath $LocalHistory)) {
         $loc = Read-HMSbHistory $LocalHistory
         $loc = @($loc)
@@ -1520,7 +1776,7 @@ function Sync-HMSbDiskLabel([string]$Letter, [string]$Label, [string]$LocalHisto
         foreach ($e in $loc) {
             if ($keys.ContainsKey("$($e.Date)|$($e.Host)|$($e.Profile)") -and "$($e.Disk)" -ne $Label) { $e.Disk = $Label; $m++ }
         }
-        if ($m) { ConvertTo-Json -InputObject @($loc) -Depth 5 | Set-Content -LiteralPath $LocalHistory -Encoding UTF8 }
+        if ($m) { Write-HMSbJsonList $LocalHistory $loc }
         $n += $m
     }
     return $n
@@ -1533,23 +1789,23 @@ function Read-HMSbDiskProfiles([string]$Dir) {
 }
 function Save-HMSbDiskProfile([string]$Dir, $Profile) {
     $f = Join-Path $Dir 'profiles.json'
-    $old = Read-HMSbHistory $f
+    $old = Read-HMSbJsonForWrite $f
+    $old = Get-HMSbJsonItems $old
     $name = "$($Profile.Name)"
     $arr = @(@($old) | Where-Object { "$($_.Name)" -ne $name }) + @($Profile)
-    if (-not (Test-Path -LiteralPath $Dir)) { New-Item -ItemType Directory -Path $Dir -Force | Out-Null }
-    ConvertTo-Json -InputObject @($arr) -Depth 5 | Set-Content -LiteralPath $f -Encoding UTF8
+    Write-HMSbJsonList $f $arr
 }
 # Profil umbenennen in Verlauf/Profil-Dateien (Tool-Ordner oder Platte); Rueckgabe: Anzahl geaenderter Eintraege
 function Rename-HMSbProfileInFile([string]$Path, [string]$Old, [string]$New) {
     if (-not (Test-Path -LiteralPath $Path)) { return 0 }
-    $arr = Read-HMSbHistory $Path
-    $arr = @($arr)
+    $arr = Read-HMSbJsonForWrite $Path
+    $arr = Get-HMSbJsonItems $arr
     $n = 0
     foreach ($e in $arr) {
         if ($e.PSObject.Properties['Profile'] -and "$($e.Profile)" -eq $Old) { $e.Profile = $New; $n++ }
         if ($e.PSObject.Properties['DiskPrefix'] -and $e.PSObject.Properties['Name'] -and "$($e.Name)" -eq $Old) { $e.Name = $New; $n++ }
     }
-    if ($n) { ConvertTo-Json -InputObject @($arr) -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8 }
+    if ($n -or -not [System.IO.File]::Exists($Path)) { Write-HMSbJsonList $Path $arr }
     return $n
 }
 
@@ -2204,6 +2460,18 @@ function Start-HMSbExport {
     if ($st -eq 'Error') { $Job.Error = (@($r.Notes) -join '; ') }
 }
 
+# Fehler vor dem Anlegen des Berichtsordners (Ziel fehlt, VM unbekannt, wbadmin fehlt ...): Start-HMServerBackup wirft,
+# ohne Verlauf. Damit der Lauf trotzdem im Verlauf (Tool-Ordner) steht. Nur wenn $Job.SbStarted nicht gesetzt ist.
+function Add-HMSbEarlyError($Ctx, [string]$Msg) {
+    if (-not $Ctx -or -not "$($Ctx.LocalHistory)") { return }
+    try {
+        Add-HMSbHistory "$($Ctx.LocalHistory)" ([pscustomobject][ordered]@{
+            Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Profile = "$($Ctx.Profile)"; Host = $env:COMPUTERNAME; Disk = "$($Ctx.DiskLabel)"; DiskSerial = "$($Ctx.DiskSerial)"
+            VMs = ''; VmsFailed = (@($Ctx.VMs) -join ', '); Volumes = (@($Ctx.Volumes) -join ', '); VolVersionId = ''; Status = 'Error'; Minutes = 0; SizeGB = 0; VersionId = ''
+            HostConfig = $false; HostSystem = $false; HostVersionId = ''; Note = "Nicht gestartet: $Msg"; Tool = "HUMig $($Ctx.Version)"
+        })
+    } catch { Write-HMSbLog "Verlauf nicht gespeichert: $($_.Exception.Message)" 'Warning' }
+}
 # ----------------------------------------------------------------------------
 # Hauptablauf (Hintergrund-Runspace)
 #   Ctx: Profile, DiskPrefix, Drive (Buchstabe), DiskLabel, DiskSerial, VMs (Namen), HostConfig, HostSystem, Verify, LocalHistory, LocalReportDir, Version
@@ -2229,6 +2497,15 @@ function Start-HMServerBackup {
     if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\wbadmin.exe'))) { throw 'wbadmin.exe fehlt - Feature "Windows Server-Sicherung" installieren' }
     if (-not (Test-Path -LiteralPath "$target\")) { throw "Ziel-Laufwerk $target nicht vorhanden" }
     if ("$env:SystemDrive".TrimEnd(':').ToUpper() -eq $L) { throw 'Ziel darf nicht das System-Laufwerk sein' }
+    # Buchstabe noch bei der erwarteten Platte? (Platte zwischen Lesen der Liste und Start getauscht) - Warnung im Ergebnis, kein Abbruch
+    $mm = ''; try { $mm = Get-HMSbDriveMismatch $L "$($Ctx.DiskLabel)" "$($Ctx.DiskSerial)" } catch { }
+    # in HUMig bestaetigt ("trotzdem sichern"): Ctx traegt schon die neue Platte, die Abweichung kommt als DiskNote
+    if (-not $mm -and "$($Ctx.DiskNote)") { $mm = "$($Ctx.DiskNote)" }
+    if ($mm) {
+        Write-HMSbLog "ACHTUNG Ziel-Platte: $mm" 'Warning'
+        $status = 'Warning'; $notes += "Ziel-Platte: $mm"
+        $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Ziel-Platte passt nicht mehr zur gewaehlten: $mm."; Fix = 'Im Bericht und unter "Versionen auf der Platte" pruefen, auf welche Platte gesichert wurde; vor dem naechsten Lauf "Aktualisieren".' }
+    }
     $info = @()
     if ($vms.Count) {
         $all = Get-HMSbVmList
@@ -2274,6 +2551,8 @@ function Start-HMServerBackup {
     }
 
     # Ab hier existiert der Berichtsordner: Abbruch/Fehler wird trotzdem in Verlauf und Bericht festgehalten
+    # (davor: Aufrufer schreibt mit Add-HMSbEarlyError einen Verlaufseintrag)
+    $Job.SbStarted = $true
     # Laufend-Markierung: endet der Vorgang ohne Aufraeumen (Neustart, Absturz), meldet der naechste Start den Abbruch
     Set-HMSbRunMarker $Ctx $rep $t0
     # Neustart ausstehend? Windows Update startet sonst evtl. mitten in der Sicherung neu (z. B. nachts ausserhalb der Nutzungszeit)
@@ -2327,12 +2606,10 @@ function Start-HMServerBackup {
             $Job.Status = 'VMs: Schattenkopie wird erstellt ...'
             Write-HMSbLog "wbadmin: VMs sichern -> $target (Online-Sicherung ueber VSS, VMs laufen weiter)" 'Header'
             $argList = "start backup -backupTarget:$target -hyperv:""$($vms -join ',')"" -quiet"
-            $swWb = [System.Diagnostics.Stopwatch]::StartNew()
             $r = Invoke-HMSbStart -Arguments $argList -Phase 'VMs' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-VMs.log') -Job $Job
-            $wbSec += $swWb.Elapsed.TotalSeconds
+            $wbSec += [double]$r.WbSec   # nur wbadmin, ohne Warten auf andere Vorgaenge (Schreibtempo)
             if ($Job.Cancel) {
-                Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
-                [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+                [void](Stop-HMSbOwnJob $r)
                 throw 'Abgebrochen'
             }
             foreach ($lf in @($r.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
@@ -2380,6 +2657,12 @@ function Start-HMServerBackup {
             try {
                 $vv = Get-HMSbVersions $target
                 $last = @($vv.Versions) | Select-Object -Last 1
+                # fehlgeschlagener Lauf: die neueste Version ist nur dann von diesem Lauf, wenn sie nach dem Start entstand
+                # (sonst stuende die Version eines frueheren Laufs im Verlauf)
+                if ($last -and $r.ExitCode -ne 0 -and -not (Test-HMSbVersionFromRun $last $t0)) {
+                    Write-HMSbLog "Neueste Version auf der Platte ($($last.Time)) stammt von einem frueheren Lauf - nicht als Version dieses Laufs eingetragen" 'Info'
+                    $last = $null
+                }
                 if ($last) {
                     $verId = "$($last.Id)"; $res.VersionId = $verId
                     Write-HMSbLog "Versionen auf der Platte: $(@($vv.Versions).Count) - neueste: $($last.Time) (ID $verId)" 'Info'
@@ -2405,13 +2688,11 @@ function Start-HMServerBackup {
         if ($vols.Count) {
             $Job.Status = 'Laufwerke: Schattenkopie wird erstellt ...'
             Write-HMSbLog "wbadmin: Laufwerke sichern ($($vols -join ', ')) -> $target" 'Header'
-            $swWb = [System.Diagnostics.Stopwatch]::StartNew()
             $r3 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -include:$($vols -join ',') -quiet" -Phase 'Laufwerke' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-Laufwerke.log') -Job $Job
-            $wbSec += $swWb.Elapsed.TotalSeconds
+            $wbSec += [double]$r3.WbSec
             $pb += $span
             if ($Job.Cancel) {
-                Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
-                [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+                [void](Stop-HMSbOwnJob $r3)
                 throw 'Abgebrochen'
             }
             foreach ($lf in @($r3.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
@@ -2455,8 +2736,7 @@ function Start-HMServerBackup {
             } catch { }
             $r2 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -allCritical -quiet" -Phase 'Host-System' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-HostSystem.log') -Job $Job
             if ($Job.Cancel) {
-                Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
-                [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+                [void](Stop-HMSbOwnJob $r2)
                 throw 'Abgebrochen'
             }
             foreach ($lf in @($r2.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
