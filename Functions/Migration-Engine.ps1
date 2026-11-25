@@ -28,6 +28,28 @@ function Write-HMLog {
 
 function Test-HMCancel($Job) { return ($Job -and $Job.Cancel) }
 
+# Gesamtstatus eines Laufs (Backup und Restore) aus der Ergebnisliste: Modul-Ergebnisse und Lauf-Eintraege (Add-HMRunResult).
+# Rein (keine Seiteneffekte). Abbruch geht vor; sonst Error vor Warning vor OK - Skip und andere Werte zaehlen nicht.
+function Get-HMOverallStatus([object[]]$Results, [bool]$Cancelled) {
+    if ($Cancelled) { return 'Cancelled' }
+    $st = @(@($Results) | Where-Object { $_ } | ForEach-Object { "$($_.Status)" })
+    if ($st -contains 'Error') { return 'Error' }
+    if ($st -contains 'Warning') { return 'Warning' }
+    return 'OK'
+}
+
+# Lauf-Eintrag (gleiche Form wie ein Modul-Ergebnis, damit Statusbildung und Bericht ihn zeigen): protokolliert und
+# haengt ihn an $Ctx.RunResults an. Fuer Fehler ausserhalb der Module (USMT beim Restore, kein Profil, Nacharbeiten, Quelle nicht erreichbar).
+function Add-HMRunResult {
+    param([hashtable]$Ctx, $Job, [string]$Id, [string]$Name, [ValidateSet('OK', 'Warning', 'Error')][string]$Status, [string]$Msg, [switch]$NoLog)
+    $lvl = switch ($Status) { 'OK' { 'Success' } 'Warning' { 'Warning' } default { 'Error' } }
+    # -NoLog: der Grund steht schon als eigene Zeile im Protokoll
+    if (-not $NoLog) { Write-HMLog $Job ("   {0}: {1}" -f $Name, $Msg) $lvl }
+    $e = [pscustomobject]@{ Id = $Id; Name = $Name; Status = $Status; Bytes = [long]0; Items = @([pscustomobject]@{ Name = 'Hinweis'; Status = $Status; Msg = $Msg; Bytes = [long]0; Source = '' }); Process = $null; Service = $null; RunEntry = $true }
+    if ($null -eq $Ctx.RunResults) { $Ctx.RunResults = New-Object System.Collections.Generic.List[object] }
+    [void]$Ctx.RunResults.Add($e)
+}
+
 # Benutzer-Modus (ohne Administratorrechte): nur Module des eigenen Profils (+ Zusaetzliche Ordner)
 function Test-HMModuleUserOk($Module) {
     if ($Module.Id -eq 'ExtraFolders') { return $true }
@@ -1248,9 +1270,21 @@ function Exit-HMModule([hashtable]$Ctx, $Job, [hashtable]$State) {
         } @(, @($State.Stopped)))
         foreach ($x in $r) {
             if ($x.Ok) { Write-HMLog $Job "   Dienst $($x.Name) wieder gestartet" 'Info' }
-            else { Write-HMLog $Job "   Dienst $($x.Name) konnte NICHT wieder gestartet werden: $($x.Msg) - bitte von Hand starten!" 'Error' }
+            else {
+                Write-HMLog $Job "   Dienst $($x.Name) konnte NICHT wieder gestartet werden: $($x.Msg) - bitte von Hand starten!" 'Error'
+                $State.RestartFailed = @($State.RestartFailed) + @("Dienst $($x.Name) konnte nicht wieder gestartet werden ($($x.Msg)) - bitte von Hand starten")
+            }
         }
-    } catch { Write-HMLog $Job "   Dienste NICHT wieder gestartet ($($_.Exception.Message)) - bitte von Hand starten: $(@($State.Stopped) -join ', ')" 'Error' }
+    } catch {
+        Write-HMLog $Job "   Dienste NICHT wieder gestartet ($($_.Exception.Message)) - bitte von Hand starten: $(@($State.Stopped) -join ', ')" 'Error'
+        $State.RestartFailed = @($State.RestartFailed) + @("Dienste nicht wieder gestartet ($($_.Exception.Message)) - bitte von Hand starten: $(@($State.Stopped) -join ', ')")
+    }
+}
+# Nach Exit-HMModule: nicht wieder gestartete Dienste als Warnung im Modul-Ergebnis (Rueckgabe: Eintraege fuer die Liste)
+function Get-HMServiceRestartItems([hashtable]$State) {
+    if (-not $State) { return @() }
+    # Name 'Hinweis' wie die uebrigen Vorab-Warnungen: zaehlt nicht als gefundener Eintrag in der Katalog-Statistik
+    return @(@($State.RestartFailed) | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Name = 'Hinweis'; Status = 'Warning'; Msg = "$_"; Bytes = [long]0; Source = '' } })
 }
 
 # ============================================================================
@@ -1918,19 +1952,31 @@ function Add-HMListStats($Stats, [string]$Text, [string]$RootReach, [string]$Mod
 function Test-HMBackupIntegrity {
     param([hashtable]$Ctx, $Job, [object[]]$Map, [int]$Samples = 30)
     $diffFiles = 0; $diffBytes = [long]0
+    # Vergleich nicht moeglich (Robocopy-Fehler ab Code 8, Zusammenfassung nicht erkannt): Ordner merken -> "Pruefung nicht moeglich"
+    $noCompare = New-Object System.Collections.Generic.List[string]
+    # nur Hinweise (Status bleibt): Zusammenfassung in anderer Sprache, keine geeignete Datei fuer die Stichprobe
+    $notes = New-Object System.Collections.Generic.List[string]
+    $unparsed = 0
     $Ctx.ListOnly = $true
     try {
         foreach ($m in @($Map)) {
             if (Test-HMCancel $Job) { break }
-            $Job.Status = "Pruefung: $($m.Module) / $($m.Name)"
+            if ($Job) { $Job.Status = "Pruefung: $($m.Module) / $($m.Name)" }
             $rc = Invoke-HMRobocopy -Job $Job -Source $m.Src -Dest $m.Dst -Files $m.Files -XD $m.XD -XF $m.XF -NoHidden:$m.NoHidden -NoRecurse:$m.NoRecurse -ListOnly -Threads $Ctx.Threads
+            if (Test-HMCancel $Job) { break }
+            if (-not $rc -or [int]$rc.ExitCode -ge 8) { $noCompare.Add("$($m.Module)/$($m.Name) (Robocopy-Code $(if ($rc) { $rc.ExitCode } else { '?' }))"); continue }
+            # Exitcode unter 8, nur die Zusammenfassung nicht lesbar (Windows in anderer Sprache): kein Problem, nur Hinweis
+            if (-not $rc.HaveDirs) { $unparsed++; $notes.Add("$($m.Module)/$($m.Name): Zusammenfassung nicht auswertbar - Robocopy meldet keinen Kopierfehler (Code $($rc.ExitCode)), Unterschiede wurden nicht gezaehlt"); continue }
             $diffFiles += $rc.FilesCopied; $diffBytes += $rc.BytesCopied
         }
     } finally { $Ctx.ListOnly = $false }
     # Hash-Stichprobe: zufaellige Dateien (max. 50 MB je Datei, 500 MB gesamt) Backup <-> Quelle
     $cand = New-Object System.Collections.Generic.List[object]
+    $srcGone = New-Object System.Collections.Generic.List[string]
     foreach ($m in @($Map)) {
         if (-not (Test-Path -LiteralPath $m.Dst)) { continue }
+        $sThere = $false; try { $sThere = [bool](Test-Path -LiteralPath $m.Src -ErrorAction Stop) } catch { $sThere = $false }
+        if (-not $sThere) { $srcGone.Add("$($m.Module)/$($m.Name)"); continue }
         $n = 0
         try {
             $opt = if ($m.NoRecurse) { [System.IO.SearchOption]::TopDirectoryOnly } else { [System.IO.SearchOption]::AllDirectories }
@@ -1941,6 +1987,8 @@ function Test-HMBackupIntegrity {
         } catch { }
     }
     $checked = 0; $bad = New-Object System.Collections.Generic.List[string]; $sum = [long]0
+    # geeignet = Quelle vorhanden, hoechstens 50 MB, seit dem Kopieren unveraendert; davon nicht lesbar = Pruefung gescheitert
+    $eligible = 0; $unreadable = 0
     if ($cand.Count) {
         $pick = @($cand | Get-Random -Count ([Math]::Min($cand.Count, $Samples * 3)))
         $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -1952,18 +2000,25 @@ function Test-HMBackupIntegrity {
                     $fs = New-Object System.IO.FileInfo $c.Src
                     # nur Dateien, die sich seit dem Kopieren nicht geaendert haben (sonst ist ein Unterschied normal)
                     if ($fi.Length -gt 50MB -or -not $fs.Exists -or $fs.Length -ne $fi.Length -or [Math]::Abs($fs.LastWriteTimeUtc.Ticks - $fi.LastWriteTimeUtc.Ticks) -gt 20000000) { continue }
+                    $eligible++
                     $h1 = $null; $h2 = $null
                     $s1 = [System.IO.File]::OpenRead($c.Dst); try { $h1 = [BitConverter]::ToString($sha.ComputeHash($s1)) } finally { $s1.Dispose() }
                     $s2 = [System.IO.File]::Open($c.Src, 'Open', 'Read', 'ReadWrite'); try { $h2 = [BitConverter]::ToString($sha.ComputeHash($s2)) } finally { $s2.Dispose() }
                     $checked++; $sum += $fi.Length
                     if ($h1 -ne $h2) { $bad.Add((ConvertFrom-HMPath $c.Src)) }
-                } catch { }
+                } catch { if ($eligible -gt ($checked + $unreadable)) { $unreadable++ } }
             }
         } finally { $sha.Dispose() }
     }
     # Geaenderte/neue Dateien seit dem Kopieren sind normal (Benutzer aktiv) -> nur Hinweis; Hash-Abweichung = Warnung
-    $st = if ($bad.Count) { 'Warning' } else { 'OK' }
-    return [pscustomobject]@{ Status = $st; DiffFiles = $diffFiles; DiffBytes = $diffBytes; Sampled = $checked; HashMismatch = @($bad) }
+    # Pruefung nicht moeglich (kein Vergleich, keine einzige Stichprobe trotz Kandidaten) = Warnung mit Grund (Problem)
+    $prob = @()
+    if ($noCompare.Count) { $prob += "Vergleich nicht moeglich: $((@($noCompare) | Select-Object -First 5) -join '; ')$(if ($noCompare.Count -gt 5) { " (+$($noCompare.Count - 5))" })" }
+    if ($srcGone.Count) { $prob += "Quelle nicht erreichbar: $((@($srcGone) | Select-Object -First 5) -join '; ')" }
+    if ($unreadable -gt 0 -and $checked -eq 0 -and -not (Test-HMCancel $Job)) { $prob += "keine Stichprobe geprueft ($unreadable geeignete Datei(en) nicht lesbar)" }
+    elseif ($cand.Count -and $eligible -eq 0 -and -not (Test-HMCancel $Job)) { $notes.Add("keine geeignete Datei fuer die Stichprobe (nur Dateien ueber 50 MB, seit dem Kopieren geaenderte oder an der Quelle geloeschte)") }
+    $st = if ($bad.Count -or $prob.Count) { 'Warning' } else { 'OK' }
+    return [pscustomobject]@{ Status = $st; DiffFiles = $diffFiles; DiffBytes = $diffBytes; Sampled = $checked; HashMismatch = @($bad); Problem = ($prob -join ' | '); Note = (@($notes) -join ' | '); Unparsed = $unparsed }
 }
 
 # ============================================================================
@@ -2065,13 +2120,88 @@ $script:HMPlaceholderScan = {
     [pscustomobject]@{ Dirs = $out.ToArray(); Timeout = $timeout }
 }
 
+# Ist ein Ordner erreichbar? '' = ja, sonst der Grund (nicht gefunden, Zugriff verweigert, Netzwerkfehler ...)
+function Get-HMPathUnreachableReason([string]$Path) {
+    if (-not $Path) { return 'kein Pfad' }
+    try {
+        $i = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if (-not $i.PSIsContainer) { return 'kein Ordner' }
+        [void]@(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop | Select-Object -First 1)
+        return ''
+    } catch [System.Management.Automation.ItemNotFoundException] { return 'nicht gefunden'
+    } catch [System.UnauthorizedAccessException] { return 'Zugriff verweigert'
+    } catch {
+        $e = $_.Exception
+        if ($e -is [System.UnauthorizedAccessException] -or $e.InnerException -is [System.UnauthorizedAccessException]) { return 'Zugriff verweigert' }
+        return "$($e.Message)".Trim()
+    }
+}
+
+# Sichert ein gewaehltes Modul Daten aus dem Benutzerprofil? (Benutzer-Module, Profil-Platzhalter in Pfaden, HKCU, Zusaetzliche Ordner im Profil)
+function Test-HMModulesUseProfile([hashtable]$Ctx) {
+    $prof = "$($Ctx.ProfilePath)".TrimEnd('\')
+    foreach ($m in @($Ctx.Modules | Where-Object { $_ })) {
+        if ("$($m.Scope)" -eq 'User') { return $true }
+        foreach ($it in @($m.Items | Where-Object { $_ })) {
+            if ("$($it.Path)" -match '\{(PROFILE|APPDATA|LOCALAPPDATA)\}') { return $true }
+            if ($it.Type -eq 'Reg' -and "$($it.Key)" -match '^HK(CU|EY_CURRENT_USER)') { return $true }
+            if ($it.Type -eq 'Builtin' -and $it.Handler -eq 'ExtraFolders' -and $prof) {
+                if (@(@($Ctx.Options.ExtraFolders) | Where-Object { $_ -and (Test-HMPathUnder "$_" $prof) }).Count) { return $true }
+            }
+        }
+    }
+    return $false
+}
+
+# Einmal je Backup: Wurzel der Quelle (Laufwerk bzw. Freigabe \\PC\C$) und Profilordner des Benutzers erreichbar?
+# Nicht erreichbar -> Lauf-Eintrag Error, betroffene Pfade in $Ctx.SourceUnreachable (Ordner darunter gelten dann nicht als "nicht vorhanden")
+function Test-HMBackupSource([hashtable]$Ctx, $Job) {
+    $Ctx.SourceUnreachable = @()
+    $prof = "$($Ctx.ProfilePath)".TrimEnd('\')
+    $drv = if ($prof -match '^([A-Za-z]):') { "$($Matches[1].ToUpper()):\" } else { 'C:\' }
+    $rootReach = Convert-HMPath $Ctx $drv
+    if ($Ctx.IsRemote) { $rootReach = "$rootReach".TrimEnd('\') }
+    $why = Get-HMPathUnreachableReason $rootReach
+    if ($why) {
+        $Ctx.SourceUnreachable = @($drv)
+        Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'Source' -Name 'Quelle' -Status 'Error' -Msg "Quelle nicht erreichbar: $rootReach ($why) - Ordner auf $drv wurden nicht gesichert. Verbindung, Freigabe und Rechte pruefen, dann Backup wiederholen"
+        return
+    }
+    if (-not $prof) { return }
+    # Profilordner nur pruefen, wenn ein gewaehltes Modul Benutzer-Daten sichert (Modulliste unbekannt: pruefen)
+    if ($null -ne $Ctx.Modules -and -not (Test-HMModulesUseProfile $Ctx)) { Write-HMLog $Job '   Quelle: nur Computer-Module gewaehlt - Profilordner nicht geprueft' 'Debug'; return }
+    $pReach = Convert-HMPath $Ctx $prof
+    $why = Get-HMPathUnreachableReason $pReach
+    $pThere = $false; try { $pThere = [bool](Test-Path -LiteralPath $pReach -PathType Container -ErrorAction Stop) } catch { $pThere = $false }
+    if ($why -and $pThere) {
+        # Ordner da, aber nicht auflistbar (z. B. Rechte nur auf Unterordnern): kein Gesamtfehler - Unterordner werden einzeln gesichert und gemeldet
+        Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'Source' -Name 'Quelle' -Status 'Warning' -Msg "Profilordner $pReach nicht auflistbar ($why) - die Ordner darin werden einzeln gesichert; was dort nicht lesbar ist, steht als Fehler beim jeweiligen Modul. Rechte des Profilordners pruefen"
+        return
+    }
+    if ($why) {
+        $Ctx.SourceUnreachable = @($prof)
+        Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'Source' -Name 'Quelle' -Status 'Error' -Msg "Quelle nicht erreichbar: $pReach ($why) - der Profilordner steht in der Profilliste, ist aber nicht lesbar; Ordner im Profil wurden nicht gesichert. Ist oben noch der richtige PC verbunden? Verbindung und Rechte pruefen, dann Backup wiederholen"
+    }
+}
+
 function Backup-HMFolderItem {
     param([hashtable]$Ctx, $Job, $Module, $Item, [hashtable]$TEnv, [string]$DestOverride)
     $srcLocal = Resolve-HMToken $TEnv $Item.Path
     $src = Convert-HMPath $Ctx $srcLocal
     $dst = if ($DestOverride) { $DestOverride } else { Get-HMItemTargetPath $Ctx.BackupPath $Module $Item }
     $mk = { param($st, $msg) [pscustomobject]@{ Name = $Item.Name; Status = $st; Msg = $msg; Bytes = 0; BytesCopied = 0; Source = $srcLocal } }
-    if (-not (Test-Path -LiteralPath $src)) { return (& $mk 'Skip' "nicht vorhanden: $srcLocal") }
+    # Test-Path kann bei verweigertem Zugriff selbst eine Ausnahme werfen, wenn der Aufrufer ErrorActionPreference Stop setzt (z. B. die CI-Tests) - dann gilt der Ordner als nicht vorhanden/lesbar
+    $srcThere = $false; try { $srcThere = [bool](Test-Path -LiteralPath $src -ErrorAction Stop) } catch { $srcThere = $false }
+    if (-not $srcThere) {
+        # liegt der Ordner unter einer nicht erreichbaren Quelle (Test-HMBackupSource), ist "nicht vorhanden" nicht belegt -> Fehler
+        $ur = @(@($Ctx.SourceUnreachable) | Where-Object { $_ -and (Test-HMPathUnder $srcLocal $_) }) | Select-Object -First 1
+        if ($ur) { return (& $mk 'Error' "Quelle nicht erreichbar: $srcLocal (siehe Eintrag Quelle) - nicht gesichert") }
+        # Zugriff verweigert ist nicht "nicht vorhanden" -> Warnung mit Grund (Unreadable: ist im Modul gar nichts gesichert, wird das Modul Fehler);
+        # alles andere (auch fehlendes Laufwerk) bleibt wie bisher
+        $nr = Get-HMPathUnreachableReason $src
+        if ($nr -eq 'Zugriff verweigert') { $ro = & $mk 'Warning' "nicht lesbar: $srcLocal ($nr) - nicht gesichert. Rechte pruefen und Backup wiederholen"; $ro | Add-Member -NotePropertyName Unreadable -NotePropertyValue $true; return $ro }
+        return (& $mk 'Skip' "nicht vorhanden: $srcLocal")
+    }
     foreach ($p in @($Ctx.Options.ExcludePaths | Where-Object { $_ })) { if (Test-HMPathUnder $srcLocal $p) { return (& $mk 'Skip' "ausgeschlossen: $srcLocal") } }
     $roots = @($Ctx.SyncRoots | Where-Object { $_ })
     $xfPat = @()
@@ -2407,16 +2537,32 @@ function Backup-HMBuiltin {
                 if (-not $svc -or $svc.Status -ne 'Running') { return 'NOWLAN' }
                 $t = Join-Path $env:windir "Temp\HMwlan_$([guid]::NewGuid().ToString('N'))"
                 New-Item -ItemType Directory -Path $t -Force | Out-Null
-                if ($clear) { & netsh.exe wlan export profile "folder=$t" key=clear | Out-Null } else { & netsh.exe wlan export profile "folder=$t" | Out-Null }
-                $t
+                if ($clear) { $o = & netsh.exe wlan export profile "folder=$t" key=clear 2>&1 } else { $o = & netsh.exe wlan export profile "folder=$t" 2>&1 }
+                $code = $LASTEXITCODE
+                # Zahl der gespeicherten WLAN-Profile sprachunabhaengig (Profil-Dateien des WLAN-Dienstes); -1 = nicht lesbar
+                $pc = -1
+                try { $pc = @(Get-ChildItem -LiteralPath (Join-Path $env:ProgramData 'Microsoft\Wlansvc\Profiles\Interfaces') -Recurse -Filter *.xml -ErrorAction Stop).Count } catch { $pc = -1 }
+                [pscustomobject]@{ Dir = $t; Code = $code; Text = ((@($o) | Select-Object -Last 2) -join ' '); Profiles = $pc }
             } @([bool]$Ctx.Settings.WlanExportClearKey)
             if ("$r" -eq 'NOWLAN') { return (& $res 'Skip' 'WLAN-Dienst laeuft nicht (kein WLAN-Adapter)') }
-            $src = Convert-HMPath $Ctx "$r"
+            $wr = @($r)[-1]
+            $src = Convert-HMPath $Ctx "$($wr.Dir)"
             $files = @(Get-ChildItem -LiteralPath $src -Filter *.xml -ErrorAction SilentlyContinue)
-            foreach ($f in $files) { Copy-Item -LiteralPath $f.FullName -Destination $dir -Force }
+            $wBad = @()
+            foreach ($f in $files) { try { Copy-Item -LiteralPath $f.FullName -Destination $dir -Force -ErrorAction Stop } catch { $wBad += $f.Name } }
             Remove-Item -LiteralPath $src -Recurse -Force -ErrorAction SilentlyContinue
             $hint = if ($Ctx.Settings.WlanExportClearKey) { ' (Schluessel im Klartext!)' } else { '' }
-            return (& $res 'OK' "$($files.Count) Profile$hint")
+            # keine WLAN-Profile am PC (bzw. nicht feststellbar und nichts exportiert): kein Fehler
+            $pcn = if ($wr.PSObject.Properties['Profiles'] -and "$($wr.Profiles)" -ne '') { [int]"$($wr.Profiles)" } else { -1 }
+            # Skip nur, wenn sicher keine Profile da sind, oder wenn die Zahl nicht feststellbar ist und netsh ohne Fehler nichts exportiert hat
+            if (-not $files.Count -and $pcn -eq 0) { return (& $res 'Skip' 'keine WLAN-Profile gefunden') }
+            if (-not $files.Count -and $pcn -lt 0 -and "$($wr.Code)" -eq '0') { return (& $res 'Skip' 'keine WLAN-Profile gefunden') }
+            $wSt = 'OK'; $wMsg = "$($files.Count - $wBad.Count) Profile$hint"
+            if (-not $files.Count -and $pcn -gt 0) { $wSt = 'Warning'; $wMsg += " | $pcn WLAN-Profil(e) am PC, aber keines exportiert" }
+            if ($pcn -lt 0 -and ("$($wr.Code)" -ne '0' -or $wBad.Count)) { $wMsg += ' | Zahl der WLAN-Profile am PC nicht feststellbar' }
+            if ("$($wr.Code)" -ne '0') { $wSt = 'Warning'; $wMsg += " | netsh Code $($wr.Code)$(if ("$($wr.Text)".Trim()) { ": $("$($wr.Text)".Trim())" }) - WLAN-Profile evtl. unvollstaendig" }
+            if ($wBad.Count) { $wSt = 'Warning'; $wMsg += " | $($wBad.Count) Profil(e) nicht ins Backup kopiert: $($wBad -join ', ')" }
+            return (& $res $wSt $wMsg)
         }
 
         'Shares' {
@@ -2630,12 +2776,25 @@ function Backup-HMUsmt {
     $uver = ''; try { $uver = (Get-Item -LiteralPath (Join-Path $usmt 'scanstate.exe')).VersionInfo.ProductVersion } catch { }
     Write-HMLog $Job "   USMT: $usmt$(if ($uver) { " (Version $uver)" })" 'Debug'
     $remoteDir = $null
+    # vorhandenes USMT.MIG eines frueheren Laufs merken (wird nicht geloescht) - als Ergebnis zaehlt nur ein neu geschriebenes
+    $old = Get-ChildItem -LiteralPath $store -Filter 'USMT.MIG' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    $oldInfo = if ($old) { [pscustomobject]@{ Path = $old.FullName; Length = [long]$old.Length; WriteUtc = $old.LastWriteTimeUtc } } else { $null }
+    # stammt der vorhandene Stand aus einem Lauf, dessen USMT-Ergebnis ein Fehler war (z. B. halbe Rueckkopie), ist er kein brauchbarer alter Stand
+    $oldUsable = ($null -ne $oldInfo -and $Ctx.PrevUsmtUsable -ne $false)
+    $copyBack = $null
     if ($Ctx.IsRemote) {
         # USMT + XML auf den Ziel-PC kopieren und dort ausfuehren
         $remoteDir = Join-Path (Invoke-HMTarget $Ctx { $env:windir }) "Temp\HMusmt_$([guid]::NewGuid().ToString('N'))"
         $rReach = Convert-HMPath $Ctx $remoteDir
-        [void](Invoke-HMRobocopy -Job $Job -Source $usmt -Dest (Join-Path $rReach 'BIN') -Threads 16)
-        [void](Invoke-HMRobocopy -Job $Job -Source $xmlDir -Dest (Join-Path $rReach 'XML') -Threads 4)
+        foreach ($cp in @(@($usmt, 'BIN', 16, 'USMT-Programm'), @($xmlDir, 'XML', 4, 'USMT-Regeln (XML)'))) {
+            $rc = Invoke-HMRobocopy -Job $Job -Source $cp[0] -Dest (Join-Path $rReach $cp[1]) -Threads $cp[2]
+            if (-not $rc -or $rc.Level -in @('Error', 'Cancel') -or [int]$rc.FilesFailed -gt 0) {
+                Remove-Item -LiteralPath $rReach -Recurse -Force -ErrorAction SilentlyContinue
+                # aelterer Stand vorhanden: Warnung (bleibt im Restore waehlbar), sonst Fehler
+                $was = if ($oldUsable) { " Vorhandener USMT-Stand vom $($oldInfo.WriteUtc.ToLocalTime().ToString('dd.MM.yyyy HH:mm')) bleibt, ist aber nicht aktuell - ein Restore spielt diesen aelteren Stand ein." } else { '' }
+                return [pscustomobject]@{ Name = 'Usmt'; Status = $(if ($oldUsable) { 'Warning' } else { 'Error' }); Msg = ("{0} konnte nicht nach {1} kopiert werden (Robocopy-Code {2}) - ScanState nicht gestartet.{3} Verbindung pruefen und Backup wiederholen" -f $cp[3], $Ctx.Computer, $(if ($rc) { $rc.ExitCode } else { '?' }), $was); Bytes = $(if ($oldUsable) { [long]$oldInfo.Length } else { 0 }); Source = $usmt }
+            }
+        }
         $exeDir = Join-Path $remoteDir 'BIN'; $xDir = Join-Path $remoteDir 'XML'; $sDir = Join-Path $remoteDir 'STORE'
     } else {
         $exeDir = $usmt; $xDir = $xmlDir; $sDir = $store
@@ -2648,15 +2807,52 @@ function Backup-HMUsmt {
         $p.ExitCode
     } @($exeDir, ($scanArgs -join ' '), $sDir)
     $code = [int]"$r"
+    $remoteMig = $false
     if ($Ctx.IsRemote) {
-        [void](Invoke-HMRobocopy -Job $Job -Source (Join-Path $rReach 'STORE') -Dest $store -Threads $Ctx.Threads -LogFile $Ctx.RoboLog)
+        # Ablage am Ziel-PC liegt in einem frisch angelegten Ordner: ein USMT.MIG dort stammt sicher aus diesem Lauf
+        $remoteMig = [bool](Get-ChildItem -LiteralPath (Join-Path $rReach 'STORE') -Filter 'USMT.MIG' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)
+        $copyBack = Invoke-HMRobocopy -Job $Job -Source (Join-Path $rReach 'STORE') -Dest $store -Threads $Ctx.Threads -LogFile $Ctx.RoboLog
         Remove-Item -LiteralPath $rReach -Recurse -Force -ErrorAction SilentlyContinue
     }
     $mig = Get-ChildItem -LiteralPath $store -Filter 'USMT.MIG' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($code -eq 0 -and $mig) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'OK'; Msg = "ScanState OK, $(Format-HMSize $mig.Length)"; Bytes = $mig.Length; Source = $usmt } }
+    $newInfo = if ($mig) { [pscustomobject]@{ Path = $mig.FullName; Length = [long]$mig.Length; WriteUtc = $mig.LastWriteTimeUtc } } else { $null }
+    $fresh = Test-HMUsmtMigFresh -Old $oldInfo -New $newInfo -Remote ([bool]$Ctx.IsRemote) -RemoteMig $remoteMig -CopyBack $copyBack
     $why = Get-HMUsmtCodeText $code $uver
-    if ($mig) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'Warning'; Msg = "ScanState Code $code$why (Details: $store\scanstate.log)"; Bytes = $mig.Length; Source = $usmt } }
-    return [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; Msg = "ScanState Code $code$why, kein USMT.MIG (Log: $store\scanstate.log)"; Bytes = 0; Source = $usmt }
+    if ($fresh.Fresh -and $code -eq 0) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'OK'; Msg = "ScanState OK, $(Format-HMSize $mig.Length)"; Bytes = $mig.Length; Source = $usmt } }
+    if ($fresh.Fresh) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'Warning'; Msg = "ScanState Code $code$why (Details: $store\scanstate.log)"; Bytes = $mig.Length; Source = $usmt } }
+    # liegt ein MIG vor, das weder neu noch der unveraenderte alte Stand ist (z. B. halbe Rueckkopie vom Ziel-PC): nicht verwendbar -> Fehler
+    $oldSame = ($oldInfo -and $newInfo -and $oldInfo.Length -eq $newInfo.Length -and $oldInfo.WriteUtc -eq $newInfo.WriteUtc)
+    if ($mig -and (-not $oldSame -or -not $oldUsable)) {
+        return [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; MigState = 'Unusable'; Msg = "USMT.MIG in der Ablage ist nicht verwendbar (ScanState Code $code$why$(if ($fresh.Why) { "; $($fresh.Why)" })) - kein gueltiger Stand. Log: $store\scanstate.log - Ursache beheben und Backup wiederholen"; Bytes = 0; Source = $usmt }
+    }
+    if ($mig) {
+        # nur der unveraenderte aeltere Stand liegt vor: Warnung, damit der brauchbare
+        # alte Stand im Restore waehlbar bleibt (Read-HMBackupInfo nimmt nur Module mit OK/Warning)
+        $dt = $newInfo.WriteUtc.ToLocalTime().ToString('dd.MM.yyyy HH:mm')
+        return [pscustomobject]@{ Name = 'Usmt'; Status = 'Warning'; Msg = "USMT-Stand stammt vom $dt, dieser Lauf hat keinen neuen erzeugt - ein Restore spielt diesen aelteren Stand ein (ScanState Code $code$why$(if ($fresh.Why) { "; $($fresh.Why)" })). Log: $store\scanstate.log - Ursache beheben und Backup wiederholen"; Bytes = $mig.Length; Source = $usmt }
+    }
+    return [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; Msg = "ScanState Code $code$why, kein USMT.MIG$(if ($fresh.Why) { " ($($fresh.Why))" }) (Log: $store\scanstate.log)"; Bytes = 0; Source = $usmt }
+}
+
+# Stammt das USMT.MIG in der Ablage aus diesem Lauf? (rein, testbar)
+# Lokal: vorher keines, oder Laenge bzw. Schreibzeit anders als vor dem Lauf (keine Uhrzeit-Vergleiche: Netzlaufwerke mit anderer Uhr).
+# Fernzugriff: ScanState schrieb in einen frisch angelegten Ordner am Ziel-PC (RemoteMig) und die Rueckkopie war fehlerfrei -
+# die Uhr des Ziel-PCs (Zeitstempel kopiert Robocopy mit) spielt keine Rolle.
+function Test-HMUsmtMigFresh {
+    param($Old, $New, [bool]$Remote, [bool]$RemoteMig, $CopyBack)
+    if (-not $New) { return [pscustomobject]@{ Fresh = $false; Why = '' } }
+    if ($Remote) {
+        if (-not $RemoteMig) { return [pscustomobject]@{ Fresh = $false; Why = 'am Ziel-PC kein neues USMT.MIG' } }
+        if (-not $CopyBack -or $CopyBack.Level -in @('Error', 'Cancel') -or [int]$CopyBack.FilesFailed -gt 0) {
+            return [pscustomobject]@{ Fresh = $false; Why = "Rueckkopie vom Ziel-PC fehlgeschlagen (Robocopy-Code $(if ($CopyBack) { $CopyBack.ExitCode } else { '?' }))" }
+        }
+        return [pscustomobject]@{ Fresh = $true; Why = '' }
+    }
+    # vorher kein USMT.MIG: das jetzt vorhandene kann nur aus diesem Lauf stammen (Uhr eines Netzlaufwerks spielt keine Rolle)
+    if (-not $Old) { return [pscustomobject]@{ Fresh = $true; Why = '' } }
+    # vorher schon eines: nur wenn es sich seit dem Start veraendert hat (Laenge oder Schreibzeit), hat dieser Lauf es geschrieben
+    if ($Old.Length -eq $New.Length -and $Old.WriteUtc -eq $New.WriteUtc) { return [pscustomobject]@{ Fresh = $false; Why = '' } }
+    return [pscustomobject]@{ Fresh = $true; Why = '' }
 }
 
 # ----------------------------------------------------------------------------
@@ -2672,6 +2868,9 @@ function Start-HMBackup {
     $Ctx.SyncRootLog = New-Object System.Collections.Generic.List[object]
     $Ctx.SyncRoots = @()
     $Ctx.ListOnly = $false
+    # Lauf-Eintraege ausserhalb der Module (Quelle nicht erreichbar, Verbindung, Pruefung) - zaehlen fuer den Status, stehen im Bericht
+    $Ctx.RunResults = New-Object System.Collections.Generic.List[object]
+    $Ctx.SourceUnreachable = @()
     $target = $Ctx.BackupPath
 
     # Inkrementell: vorhandenes Backup desselben Benutzers weiterfuehren (Robocopy kopiert nur Neues/Geaendertes)
@@ -2684,6 +2883,10 @@ function Start-HMBackup {
         if ($prev) { $Ctx.BackupPath = $Ctx.ExistingBackup }
     }
     # Ausschluesse des letzten Laufs (neu ausgeschlossene Pfade werden beiseitegelegt); $null = unbekannt (aeltere Backups)
+    # USMT im weitergefuehrten Backup als unbrauchbar markiert (MigState, z. B. halbe Rueckkopie): dort liegendes USMT.MIG ist kein brauchbarer alter Stand.
+    # Andere Fehler (z. B. USMT nicht gefunden) lassen einen alten Stand unberuehrt und werten ihn nicht ab.
+    $Ctx.PrevUsmtUsable = $true
+    if ($prev) { $pu = @(@($prev.Modules) | Where-Object { $_ -and "$($_.Id)" -eq 'Usmt' })[0]; if ($pu -and $pu.PSObject.Properties['MigState'] -and "$($pu.MigState)" -eq 'Unusable') { $Ctx.PrevUsmtUsable = $false } }
     $Ctx.PrevExcludePaths = $null
     if ($prev -and $prev.PSObject.Properties['ExcludePaths']) { $Ctx.PrevExcludePaths = @($prev.ExcludePaths | Where-Object { $_ }) }
     Write-HMLog $Job "BACKUP  $($Ctx.Computer) \ $($Ctx.UserFolder)  ->  $target" 'Header'
@@ -2696,8 +2899,10 @@ function Start-HMBackup {
     try {
         if ($Ctx.IsRemote -and $Ctx.Credential) {
             $shareRoot = "\\$($Ctx.Computer)\C$"
-            if (-not (Connect-HMShare $shareRoot $Ctx.Credential)) { Write-HMLog $Job "Verbindung zu $shareRoot mit den angegebenen Anmeldedaten fehlgeschlagen" 'Warning' }
+            if (-not (Connect-HMShare $shareRoot $Ctx.Credential)) { Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'Connect' -Name 'Verbindung' -Status 'Warning' -Msg "Verbindung zu $shareRoot mit den angegebenen Anmeldedaten fehlgeschlagen - es wird mit der bestehenden Verbindung weitergemacht. Anmeldedaten pruefen" }
         }
+        # Quelle erreichbar? (sonst gelten nicht lesbare Ordner nicht als "nicht vorhanden")
+        Test-HMBackupSource $Ctx $Job
         # Hive laden (Registry-Module, Handler mit Benutzer-Registry, Profil-Modul fuer OneDrive-Erkennung)
         $needHive = @($Ctx.Modules | ForEach-Object { $_.Items } | Where-Object {
             ($_.Type -eq 'Reg' -and $_.Key -match '^HK(CU|EY_CURRENT_USER)') -or ($_.Type -eq 'Builtin' -and $_.Handler -in @('PrinterConnections', 'Wallpaper')) -or ($_.Exceptions -eq 'Profile') }).Count -gt 0
@@ -2780,6 +2985,10 @@ function Start-HMBackup {
         elseif ($acl.Skipped) { Write-HMLog $Job "Backup-Ordner-Rechte: $($acl.Error) - wer das Backup lesen darf, regeln die Rechte der Freigabe am Server" 'Info' }
         else { Write-HMLog $Job "Backup-Ordner-Rechte NICHT gesetzt ($($acl.Error)) - das Backup (u. a. Browser-Daten) ist fuer alle lesbar, die auf diesen Speicherort zugreifen koennen. Fuer ein geschuetztes Backup ein NTFS-Ziel verwenden." 'Warning' }
         $Job.LogFile = Join-Path $Ctx.BackupPath 'HUMig.log'
+        # Lauf-Eintraege von vor dem Anlegen des Ordners (Quelle, Verbindung) auch ins HUMig.log
+        foreach ($re in @($Ctx.RunResults.ToArray())) {
+            try { Add-Content -LiteralPath $Job.LogFile -Value ('{0} [{1}] {2}: {3}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), "$($re.Status)".ToUpper(), $re.Name, (@($re.Items)[0].Msg)) -Encoding UTF8 } catch { }
+        }
         $Ctx.RoboLog = Join-Path $Ctx.BackupPath 'Robocopy.log'
         try {
             Add-Content -LiteralPath $Ctx.RoboLog -Encoding UTF8 -Value @(
@@ -2826,6 +3035,8 @@ function Start-HMBackup {
             Write-HMLog $Job $mod.Name 'Info'
             $Job.Status = $mod.Name
             $mres = [ordered]@{ Id = $mod.Id; Name = $mod.Name; Status = 'OK'; Bytes = [long]0; Items = @() }
+            # nicht lesbare Eintraege und gesicherte Eintraege zaehlen: nichts gesichert, aber etwas nicht lesbar -> Modul Fehler
+            $mUnread = 0; $mSaved = 0
             # Programm-Katalog: Programm schliessen / Dienst stoppen (Dienste werden im finally immer wieder gestartet)
             $pre = Enter-HMModule $Ctx $Job $mod $tenv 'Backup'
             foreach ($w in @($pre.Warn)) { Write-HMLog $Job "   $w" 'Warning'; $mres.Items += [pscustomobject]@{ Name = 'Hinweis'; Status = 'Warning'; Msg = $w; Bytes = [long]0; Source = '' } }
@@ -2872,6 +3083,12 @@ function Start-HMBackup {
                 $lvl = switch ($r.Status) { 'OK' { 'Success' } 'Skip' { 'Debug' } 'Warning' { 'Warning' } default { 'Error' } }
                 Write-HMLog $Job ("   {0}: {1}" -f $r.Name, ("$($r.Msg)" -replace "`r?`n", "`n      ")) $lvl
                 $mres.Items += [pscustomobject]@{ Name = $r.Name; Status = $r.Status; Msg = $r.Msg; Bytes = [long]$r.Bytes; Source = $r.Source }
+                # USMT: unbrauchbarer Stand in der Ablage merken (auch weitergeben, wenn dieser Lauf ihn nicht ersetzt hat) - der naechste Lauf vertraut ihm dann nicht
+                if ("$($it.Handler)" -eq 'Usmt') {
+                    if ($r.PSObject.Properties['MigState'] -and "$($r.MigState)") { $mres.MigState = "$($r.MigState)" }
+                    elseif ("$($r.Status)" -eq 'Error' -and $Ctx.PrevUsmtUsable -eq $false) { $mres.MigState = 'Unusable' }
+                }
+                if ($r.PSObject.Properties['Unreadable'] -and $r.Unreadable) { $mUnread++ } elseif ("$($r.Status)" -in @('OK', 'Warning')) { $mSaved++ }
                 $mres.Bytes += [long]$r.Bytes
                 if ($r.Status -in @('Error', 'Cancel')) { $mres.Status = 'Error' } elseif ($r.Status -eq 'Warning' -and $mres.Status -eq 'OK') { $mres.Status = 'Warning' }
                 $done++; $wDone += $wIt; $Job.ItemBytes = 0
@@ -2880,6 +3097,8 @@ function Start-HMBackup {
                 if ($p -gt [int]$Job.Progress) { $Job.Progress = $p }
             }
             } finally { $Ctx.LockedHint = $false; Exit-HMModule $Ctx $Job $pre }
+            foreach ($sw in @(Get-HMServiceRestartItems $pre)) { $mres.Items += $sw; if ($mres.Status -eq 'OK') { $mres.Status = 'Warning' } }
+            if ($mUnread -gt 0 -and $mSaved -eq 0) { $mres.Status = 'Error' }
             if (@($mres.Items | Where-Object { $_.Status -ne 'Skip' }).Count -eq 0) { $mres.Status = 'Skip' }
             $allBytes += $mres.Bytes
             $Ctx.Manifest.Modules += [pscustomobject]$mres
@@ -2932,9 +3151,15 @@ function Start-HMBackup {
                 $Ctx.Manifest.Verify = $verify
                 Write-HMLog $Job ("   Pruefsummen: {0} Dateien verglichen, {1} Abweichung(en)" -f $verify.Sampled, @($verify.HashMismatch).Count) $(if (@($verify.HashMismatch).Count) { 'Warning' } else { 'Success' })
                 foreach ($b in @($verify.HashMismatch | Select-Object -First 10)) { Write-HMLog $Job "      ABWEICHUNG: $b" 'Warning' }
+                if ($verify.Note) { Write-HMLog $Job "   Hinweis zur Pruefung: $($verify.Note)" 'Info' }
+                if ($verify.Problem) { Write-HMLog $Job "   Pruefung nicht moeglich: $($verify.Problem) - ob das Backup vollstaendig ist, ist nicht belegt" 'Warning' }
                 if ($verify.DiffFiles) { Write-HMLog $Job ("   Seit dem Kopieren neu/geaendert: {0} Dateien ({1}) - normal, wenn der Benutzer angemeldet ist" -f $verify.DiffFiles, (Format-HMSize $verify.DiffBytes)) 'Info' }
-                else { Write-HMLog $Job '   Vergleich: Backup ist vollstaendig (keine fehlenden/abweichenden Dateien)' 'Success' }
-            } catch { Write-HMLog $Job "   Pruefung fehlgeschlagen: $($_.Exception.Message)" 'Warning' }
+                elseif (-not $verify.Problem -and -not $verify.Unparsed) { Write-HMLog $Job '   Vergleich: Backup ist vollstaendig (keine fehlenden/abweichenden Dateien)' 'Success' }
+            } catch {
+                Write-HMLog $Job "   Pruefung fehlgeschlagen: $($_.Exception.Message)" 'Warning'
+                $verify = [pscustomobject]@{ Status = 'Warning'; DiffFiles = 0; DiffBytes = [long]0; Sampled = 0; HashMismatch = @(); Problem = "Pruefung fehlgeschlagen: $($_.Exception.Message)" }
+                $Ctx.Manifest.Verify = $verify
+            }
         }
 
         # ---- Fortlaufend: Module, die diesmal nicht gesichert wurden (alter Stand bleibt im Backup-Ordner, wird nicht zurueckgespielt) ----
@@ -2997,10 +3222,14 @@ function Start-HMBackup {
     $Ctx.Manifest.Finished = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
     $Ctx.Manifest.Duration = Format-HMDuration $dur
     $Ctx.Manifest.SizeBytes = $allBytes
-    $errs = @($Ctx.Manifest.Modules | Where-Object { $_.Status -eq 'Error' -and -not $_.FromPrevious }).Count
-    $warns = @($Ctx.Manifest.Modules | Where-Object { $_.Status -eq 'Warning' -and -not $_.FromPrevious }).Count
-    if ($verify -and $verify.Status -ne 'OK') { $warns++ }
-    $Ctx.Manifest.Status = if (Test-HMCancel $Job) { 'Cancelled' } elseif ($errs) { 'Error' } elseif ($warns) { 'Warning' } else { 'OK' }
+    # Ergebnisliste fuer den Status: Module dieses Laufs (nicht aus frueheren Durchlaeufen), Lauf-Eintraege, Pruefung
+    # Lauf-Eintraege stehen nicht in Manifest.Modules (sonst als Modul im Restore waehlbar und im naechsten Lauf mitgefuehrt), sondern in Manifest.RunIssues
+    $Ctx.Manifest.RunIssues = @($Ctx.RunResults.ToArray())
+    $stList = @(@($Ctx.Manifest.Modules | Where-Object { $_ -and -not $_.FromPrevious }) + @($Ctx.RunResults.ToArray()))
+    if ($verify -and $verify.Status -ne 'OK') { $stList += [pscustomobject]@{ Name = 'Pruefung'; Status = 'Warning' } }
+    $errs = @($stList | Where-Object { $_.Status -eq 'Error' }).Count
+    $warns = @($stList | Where-Object { $_.Status -eq 'Warning' }).Count
+    $Ctx.Manifest.Status = Get-HMOverallStatus $stList ([bool](Test-HMCancel $Job))
     Save-HMManifest $Ctx.Manifest $Ctx.BackupPath
     $Job.Progress = 100
     $sumLvl = switch ($Ctx.Manifest.Status) { 'OK' { 'Success' } 'Warning' { 'Warning' } default { 'Error' } }
@@ -3015,7 +3244,7 @@ function Start-HMBackup {
         'Inkrementell' = $(if ($m.Incremental) { "ja - erstes Backup $($m.FirstCreated), $(@($m.Increments).Count + 1). Durchlauf" } else { '' })
         'Betriebssystem' = $m.SourceOS; 'Modell' = $m.SourceModel; 'Seriennummer' = $m.SourceSerial; 'Domaene' = $m.SourceDomain
         'Cloud-Ordner' = $(if (@($m.SyncRoots).Count) { (@($m.SyncRoots | ForEach-Object { "$($_.Path) ($(if ($_.Mode -eq 'Local') { 'lokale Dateien gesichert' } else { 'ausgelassen' }))" }) -join '; ') } else { '' })
-        'Pruefung' = $(if ($verify) { "$($verify.Sampled) Dateien per Pruefsumme verglichen, $(@($verify.HashMismatch).Count) Abweichung(en)" } else { '' })
+        'Pruefung' = $(if ($verify) { "$($verify.Sampled) Dateien per Pruefsumme verglichen, $(@($verify.HashMismatch).Count) Abweichung(en)$(if ($verify.Problem) { " - Pruefung nicht moeglich: $($verify.Problem)" })" } else { '' })
         'Pruefsummen-Katalog' = $(if ($m.Catalog) { "$($m.Catalog.Files) Dateien (SHA-256) - spaeter pruefbar: Reiter Restore > Backup pruefen" } else { '' })
         'Erstellt von' = "$($m.CreatedBy) an $($m.CreatedOn)"
     }
@@ -3023,7 +3252,7 @@ function Start-HMBackup {
     if ($m.OneDriveFolders) { $notes += 'Bekannte Ordner (Desktop/Dokumente/Bilder) liegen in OneDrive: ' + (@($m.OneDriveFolders) -join '; ') }
     if ($verify -and @($verify.HashMismatch).Count) { $notes += 'Pruefsummen-Abweichung: ' + (@($verify.HashMismatch | Select-Object -First 10) -join '; ') }
     foreach ($mm in @($m.Modules | Where-Object { $_.FromPrevious })) { $notes += "Modul '$($mm.Name)' stammt aus dem Durchlauf vom $($mm.FromPrevious)" }
-    [void](New-HMReport -Ctx $Ctx -Kind Backup -OutFile (Join-Path $Ctx.BackupPath 'Bericht_Backup.html') -Modules @($m.Modules) -Facts $facts -Notes $notes -Status $m.Status)
+    [void](New-HMReport -Ctx $Ctx -Kind Backup -OutFile (Join-Path $Ctx.BackupPath 'Bericht_Backup.html') -Modules (@($m.RunIssues) + @($m.Modules)) -Facts $facts -Notes $notes -Status $m.Status)
     $Job.Result = $Ctx.Manifest
 }
 
@@ -4125,8 +4354,12 @@ function Restore-HMFolderItem {
     # Kontrolle: liegt jede Datei aus dem Backup jetzt am Ziel? (nur Liste, nichts wird kopiert - Robocopy /L)
     if ($Ctx.Options.VerifyAfter -and $st -ne 'Cancel' -and -not (Test-HMCancel $Job)) {
         $v = Test-HMRestoredItem -Ctx $Ctx -Job $Job -Src $src -Dst $dst -DstLocal $dstLocal -Files $files -XD $xd -NoRecurse:$noRec
-        if ($v.Error) { $msg += " | Kontrolle nicht moeglich ($($v.Error))" }
-        elseif ($v.Missing -gt 0) {
+        if ($v.Error) {
+            $msg += " | Kontrolle nicht moeglich ($($v.Error)) - ob alle Dateien am Ziel liegen, ist nicht geprueft"
+            if ($st -eq 'OK') { $st = 'Warning' }
+            $Ctx.VerifyFailed = @($Ctx.VerifyFailed) + @("$dstLocal")
+        } else { $Ctx.VerifiedDirs = [int]$Ctx.VerifiedDirs + 1 }
+        if (-not $v.Error -and $v.Missing -gt 0) {
             $msg += " | KONTROLLE: $($v.Missing) Datei(en) fehlen am Ziel (Liste: Restore_*_Fehlende.txt)"
             if ($st -eq 'OK') { $st = 'Warning' }
         }
@@ -4170,9 +4403,25 @@ function Restore-HMRegItem {
 # Aktionen, die erst bei der naechsten Anmeldung des Benutzers laufen koennen (Drucker, Explorer-Neustart ...)
 function Add-HMLogonAction([hashtable]$Ctx, [string]$Code) { $Ctx.LogonActions += $Code }
 
+# Anmelde-Aktion nicht eingerichtet: Module, deren Ergebnis davon abhaengt (Drucker verbinden, Symbolpositionen), duerfen nicht
+# "OK - wird bei der Anmeldung ..." melden -> Eintrag und Modul auf Warnung
+function Set-HMLogonDependentsWarning([hashtable]$Ctx, $Job) {
+    $ids = @(@($Ctx.LogonDependents) | Where-Object { $_ } | Select-Object -Unique)
+    if (-not $ids.Count -or $null -eq $Ctx.RunResults) { return }
+    foreach ($m in @($Ctx.RunResults | Where-Object { $_ -and -not $_.RunEntry -and $ids -contains "$($_.Id)" })) {
+        foreach ($i in @($m.Items | Where-Object { $_ -and "$($_.Name)" -in @('PrinterConnections', 'DesktopIconPositions') -and "$($_.Status)" -eq 'OK' })) {
+            $i.Status = 'Warning'
+            $i.Msg = "$($i.Msg) - NICHT eingerichtet (Anmelde-Aktion fehlt, siehe Anmelde-Aktionen): nach der Anmeldung von Hand nachholen oder Restore dieses Moduls wiederholen"
+            Write-HMLog $Job "   $($m.Name) / $($i.Name): $($i.Msg)" 'Warning'
+        }
+        if ("$($m.Status)" -eq 'OK' -and @($m.Items | Where-Object { $_ -and "$($_.Status)" -eq 'Warning' }).Count) { $m.Status = 'Warning' }
+    }
+}
+
+# Rueckgabe: $true = eingerichtet (oder nichts zu tun), $false = nicht eingerichtet (Lauf-Eintrag "Anmelde-Aktionen" angelegt)
 function Register-HMLogonTask {
     param([hashtable]$Ctx, $Job)
-    if (-not $Ctx.LogonActions -or $Ctx.LogonActions.Count -eq 0) { return }
+    if (-not $Ctx.LogonActions -or $Ctx.LogonActions.Count -eq 0) { return $true }
     if ($Ctx.UserMode) {
         # Benutzer-Modus: der Benutzer ist angemeldet -> Aktionen sofort in seiner Sitzung ausfuehren (keine geplante Aufgabe noetig)
         try {
@@ -4180,10 +4429,13 @@ function Register-HMLogonTask {
             Set-Content -LiteralPath $f -Encoding UTF8 -Value (($Ctx.LogonActions -join "`r`n") + "`r`nRemove-Item -LiteralPath `$MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue")
             Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$f`"")
             Write-HMLog $Job 'Anmelde-Aktionen (Drucker, Explorer) in der aktuellen Sitzung gestartet' 'Success'
-        } catch { Write-HMLog $Job "Anmelde-Aktionen nicht moeglich: $($_.Exception.Message)" 'Warning' }
-        return
+        } catch {
+            Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'LogonActions' -Name 'Anmelde-Aktionen' -Status 'Warning' -Msg "nicht moeglich: $($_.Exception.Message) - Benutzer ab- und wieder anmelden, Drucker bei Bedarf von Hand verbinden"
+            return $false
+        }
+        return $true
     }
-    if (-not $Ctx.Account) { Write-HMLog $Job 'Anmelde-Aktionen nicht moeglich: Kontoname unbekannt' 'Warning'; return }
+    if (-not $Ctx.Account) { Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'LogonActions' -Name 'Anmelde-Aktionen' -Status 'Warning' -Msg 'nicht moeglich: Kontoname unbekannt - Drucker und Symbolpositionen werden nicht automatisch uebernommen'; return $false }
     $name = 'HUMig_FirstLogon_' + (ConvertTo-HMSafeName $Ctx.UserFolder)
     # Schutz: Skript laeuft nur einmal (Marker), auch falls die Aufgabe nicht geloescht werden kann
     $runId = [guid]::NewGuid().ToString('N')
@@ -4216,9 +4468,10 @@ function Register-HMLogonTask {
         if ($logged -contains $acct) { Start-ScheduledTask -TaskName $n; return 'STARTED' }
         'OK'
     } @($name, $Ctx.Account, $body, $runId)
-    } catch { Write-HMLog $Job "Anmelde-Aktionen nicht eingerichtet: $($_.Exception.Message)" 'Warning'; return }
+    } catch { Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'LogonActions' -Name 'Anmelde-Aktionen' -Status 'Warning' -Msg "nicht eingerichtet: $($_.Exception.Message) - Drucker und Symbolpositionen werden nicht automatisch uebernommen"; return $false }
     if ("$r" -eq 'STARTED') { Write-HMLog $Job "Anmelde-Aktionen ausgefuehrt (Benutzer ist angemeldet)" 'Success' }
     else { Write-HMLog $Job "Anmelde-Aktionen werden bei der naechsten Anmeldung von $($Ctx.Account) ausgefuehrt (Aufgabe $name)" 'Info' }
+    return $true
 }
 
 function Restore-HMBuiltin {
@@ -4231,6 +4484,7 @@ function Restore-HMBuiltin {
             $lines = @(Get-HMDesktopIconLines $dir)
             if (-not $lines.Count) { return (& $res 'Skip' 'keine Symbolpositionen im Backup') }
             $Ctx.DesktopIconLines = $lines
+            $Ctx.LogonDependents = @($Ctx.LogonDependents) + @("$($Module.Id)")
             return (& $res 'OK' "$($lines.Count) Symbolpositionen werden nach dem Explorer-Neustart gesetzt")
         }
 
@@ -4339,6 +4593,7 @@ function Restore-HMBuiltin {
                 $code += "try { Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Windows' -Name LegacyDefaultPrinterMode -Value 1 -Type DWord; `$pr = Get-CimInstance Win32_Printer | Where-Object { `$_.Name -eq '$($def -replace "'", "''")' }; if (`$pr) { Invoke-CimMethod -InputObject `$pr -MethodName SetDefaultPrinter | Out-Null } } catch { }`r`n"
             }
             Add-HMLogonAction $Ctx $code
+            $Ctx.LogonDependents = @($Ctx.LogonDependents) + @("$($Module.Id)")
             return (& $res 'OK' ("{0} Drucker werden bei der Anmeldung verbunden{1}" -f $list.Count, $(if ($def) { ", Standard: $def" } else { '' })))
         }
 
@@ -4370,9 +4625,9 @@ function Restore-HMBuiltin {
             $new = @(Get-ChildItem -LiteralPath $fdir -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.ttf', '.ttc', '.otf', '.fon') -and -not $ex.ContainsKey($_.Name.ToLower()) })
             if (-not $new.Count) { return (& $res 'OK' 'alle Schriftarten bereits vorhanden') }
             $winFonts = Convert-HMPath $Ctx (Join-Path $TEnv.WINDIR 'Fonts')
-            $reg = @()
+            $reg = @(); $fBad = @()
             foreach ($f in $new) {
-                try { Copy-Item -LiteralPath $f.FullName -Destination $winFonts -Force -ErrorAction Stop } catch { continue }
+                try { Copy-Item -LiteralPath $f.FullName -Destination $winFonts -Force -ErrorAction Stop } catch { $fBad += $f.Name; continue }
                 $n = if ($map.ContainsKey($f.Name.ToLower())) { $map[$f.Name.ToLower()] } else { "$($f.BaseName) $(if ($f.Extension -eq '.otf') { '(OpenType)' } else { '(TrueType)' })" }
                 $reg += [pscustomobject]@{ Name = $n; File = $f.Name }
             }
@@ -4380,6 +4635,7 @@ function Restore-HMBuiltin {
                 param($items)
                 foreach ($i in $items) { New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts' -Name $i.Name -Value $i.File -PropertyType String -Force | Out-Null }
             } @(, $reg))
+            if ($fBad.Count) { return (& $res 'Warning' ("{0} Schriftarten installiert (wirksam nach Neuanmeldung), {1} nicht kopiert (Datei in Verwendung oder keine Rechte): {2}" -f $reg.Count, $fBad.Count, ((@($fBad) | Select-Object -First 10) -join ', '))) }
             return (& $res 'OK' "$($reg.Count) Schriftarten installiert (wirksam nach Neuanmeldung)")
         }
 
@@ -4411,14 +4667,16 @@ function Restore-HMBuiltin {
             $ddir = if ($Ctx.Backup.Legacy) { $dir } else { Join-Path $dir 'DRIVERS' }
             if (-not (Test-Path -LiteralPath $ddir)) { return (& $res 'Skip' 'keine Treiber im Backup') }
             $tmpL = Join-Path (Invoke-HMTarget $Ctx { $env:windir }) "Temp\HMdrv_$([guid]::NewGuid().ToString('N'))"
-            [void](Invoke-HMRobocopy -Job $Job -Source $ddir -Dest (Convert-HMPath $Ctx $tmpL) -Threads $Ctx.Threads)
+            $rcD = Invoke-HMRobocopy -Job $Job -Source $ddir -Dest (Convert-HMPath $Ctx $tmpL) -Threads $Ctx.Threads
             $r = Invoke-HMTarget $Ctx {
                 param($t)
                 $o = & pnputil.exe /add-driver "$t\*.inf" /subdirs /install 2>&1
+                $c = $LASTEXITCODE
                 Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue
-                ($o | Select-Object -Last 4) -join ' '
+                [pscustomobject]@{ Code = $c; Text = (($o | Select-Object -Last 4) -join ' ') }
             } @($tmpL)
-            return (& $res 'OK' "pnputil: $r")
+            $dr = Get-HMDriverRestoreResult $rcD @($r)[-1]
+            return (& $res $dr.Status $dr.Msg)
         }
 
         'Wallpaper' {
@@ -4460,20 +4718,45 @@ function Restore-HMBuiltin {
     }
 }
 
+# Treiber-Restore: Robocopy-Ergebnis (Kopie zum Ziel-PC) und pnputil-Exitcode auswerten. 0 und 3010 (Neustart noetig) = OK,
+# 259 (ERROR_NO_MORE_ITEMS: kein passendes Geraet bzw. Geraet hat schon einen besseren/neueren Treiber - laut Microsoft kein Fehler) = OK, sonst Warnung
+function Get-HMDriverRestoreResult($Copy, $Pnp) {
+    $txt = if ($Pnp) { "$($Pnp.Text)" } else { '' }
+    $code = $null; if ($Pnp -and "$($Pnp.Code)" -ne '') { $code = [int]"$($Pnp.Code)" }
+    $msg = "pnputil: $txt"
+    $st = 'OK'
+    if (-not $Copy -or $Copy.Level -in @('Error', 'Cancel') -or [int]$Copy.FilesFailed -gt 0) {
+        $st = 'Warning'
+        $msg += " | Kopie der Treiber zum Ziel-PC unvollstaendig (Robocopy-Code $(if ($Copy) { $Copy.ExitCode } else { '?' })$(if ($Copy -and [int]$Copy.FilesFailed -gt 0) { ", $($Copy.FilesFailed) Datei(en) fehlgeschlagen" })) - fehlende Treiber von Hand installieren"
+    }
+    if ($null -eq $code) { $st = 'Warning'; $msg += ' | pnputil-Ergebnis unbekannt - Geraete-Manager pruefen' }
+    elseif ($code -eq 3010) { $msg += ' | Neustart noetig' }
+    elseif ($code -eq 259) { $msg += ' | kein passendes Geraet oder schon ein neuerer Treiber vorhanden' }
+    elseif ($code -ne 0) { $st = 'Warning'; $msg += " | pnputil Code $code - nicht alle Treiber installiert, Geraete-Manager pruefen" }
+    return [pscustomobject]@{ Status = $st; Msg = $msg }
+}
+
+# Rueckgabe: Ergebnis fuer den Lauf-Eintrag "Windows-Einstellungen (USMT)" (Status OK/Warning/Error, Msg) - protokolliert wird beim Eintragen
 function Restore-HMUsmt {
     param([hashtable]$Ctx, $Job)
+    $mk = { param($st, $msg) [pscustomobject]@{ Status = $st; Msg = $msg } }
     $usmt = Find-HMUsmt $Ctx
-    if (-not $usmt) { Write-HMLog $Job 'USMT nicht gefunden - Windows-Einstellungen werden uebersprungen' 'Error'; return $false }
+    if (-not $usmt) { return (& $mk 'Error' 'USMT nicht gefunden - Windows-Einstellungen nicht uebernommen (Einstellungen > USMT-Pfad oder Werkzeuge > USMT einrichten, dann Restore nur mit diesem Modul wiederholen)') }
     $store = if ($Ctx.Backup.Legacy) { $Ctx.Backup.Path } else { Join-Path (Join-Path $Ctx.Backup.Path 'Usmt') 'STORE' }
-    if (-not (Get-ChildItem -LiteralPath $store -Filter 'USMT.MIG' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) { Write-HMLog $Job "Kein USMT.MIG im Backup ($store)" 'Error'; return $false }
+    if (-not (Get-ChildItem -LiteralPath $store -Filter 'USMT.MIG' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) { return (& $mk 'Error' "Kein USMT.MIG im Backup ($store) - Windows-Einstellungen nicht uebernommen") }
     $srcAcct = if ($Ctx.Backup.Account) { $Ctx.Backup.Account } else { $null }
     $xmlDir = Join-Path $Ctx.ToolRoot 'Config\USMT'
     if ($Ctx.IsRemote) {
         $rl = Join-Path (Invoke-HMTarget $Ctx { $env:windir }) "Temp\HMusmt_$([guid]::NewGuid().ToString('N'))"
         $rr = Convert-HMPath $Ctx $rl
-        [void](Invoke-HMRobocopy -Job $Job -Source $usmt -Dest (Join-Path $rr 'BIN') -Threads 16)
-        [void](Invoke-HMRobocopy -Job $Job -Source $xmlDir -Dest (Join-Path $rr 'XML') -Threads 4)
-        [void](Invoke-HMRobocopy -Job $Job -Source $store -Dest (Join-Path $rr 'STORE') -Threads $Ctx.Threads)
+        # USMT, XML und Ablage auf den Ziel-PC kopieren - scheitert eine Kopie, LoadState nicht starten
+        foreach ($cp in @(@($usmt, 'BIN', 16, 'USMT-Programm'), @($xmlDir, 'XML', 4, 'USMT-Regeln (XML)'), @($store, 'STORE', $Ctx.Threads, 'USMT-Ablage aus dem Backup'))) {
+            $rc = Invoke-HMRobocopy -Job $Job -Source $cp[0] -Dest (Join-Path $rr $cp[1]) -Threads $cp[2]
+            if (-not $rc -or $rc.Level -in @('Error', 'Cancel') -or [int]$rc.FilesFailed -gt 0) {
+                Remove-Item -LiteralPath $rr -Recurse -Force -ErrorAction SilentlyContinue
+                return (& $mk 'Error' ("{0} konnte nicht nach {1} kopiert werden (Robocopy-Code {2}{3}) - LoadState nicht gestartet. Verbindung und freien Platz am Ziel-PC pruefen, dann Restore nur mit diesem Modul wiederholen" -f $cp[3], $Ctx.Computer, $(if ($rc) { $rc.ExitCode } else { '?' }), $(if ($rc -and [int]$rc.FilesFailed -gt 0) { ", $($rc.FilesFailed) Datei(en) fehlgeschlagen" } else { '' })))
+            }
+        }
         $exeDir = Join-Path $rl 'BIN'; $xDir = Join-Path $rl 'XML'; $sDir = Join-Path $rl 'STORE'
     } else { $exeDir = $usmt; $xDir = $xmlDir; $sDir = $store }
     $a = @('"' + $sDir + '"') + (Get-HMUsmtXmlArgs $xDir) + @('/c', '/ue:*\*', '/v:5', ('/l:"' + (Join-Path $env:TEMP 'HUMig_loadstate.log') + '"'))
@@ -4485,9 +4768,15 @@ function Restore-HMUsmt {
         (Start-Process -FilePath (Join-Path $exe 'loadstate.exe') -ArgumentList $argString -WorkingDirectory $exe -WindowStyle Hidden -Wait -PassThru).ExitCode
     } @($exeDir, ($a -join ' '))
     if ($Ctx.IsRemote) { Remove-Item -LiteralPath $rr -Recurse -Force -ErrorAction SilentlyContinue }
-    if ([int]"$code" -eq 0) { Write-HMLog $Job '   LoadState OK' 'Success'; return $true }
-    Write-HMLog $Job "   LoadState Code $code$(Get-HMUsmtCodeText $code '') (Log am Ziel-PC: %TEMP%\HUMig_loadstate.log)" 'Warning'
-    return $true
+    return (ConvertFrom-HMLoadStateCode $code)
+}
+# LoadState-Exitcode -> Ergebnis: 0 = OK, 3 = Warnung (Teil uebersprungen, Rest uebernommen), sonst Fehler (mit Erklaerung)
+function ConvertFrom-HMLoadStateCode($Code) {
+    $n = 0
+    if (-not [int]::TryParse("$(@($Code)[-1])".Trim(), [ref]$n)) { return [pscustomobject]@{ Status = 'Error'; Msg = "LoadState lieferte keinen Exitcode ('$Code') - Log am Ziel-PC pruefen: %TEMP%\HUMig_loadstate.log" } }
+    if ($n -eq 0) { return [pscustomobject]@{ Status = 'OK'; Msg = 'LoadState OK' } }
+    $st = if ($n -eq 3) { 'Warning' } else { 'Error' }
+    return [pscustomobject]@{ Status = $st; Msg = "LoadState Code $n$(Get-HMUsmtCodeText $n '') (Log am Ziel-PC: %TEMP%\HUMig_loadstate.log)" }
 }
 
 function Invoke-HMPostRestore {
@@ -4543,15 +4832,15 @@ function Invoke-HMPostRestore {
         $unsafe = ''
         if (Test-Path -LiteralPath $ps) { $unsafe = Get-HMWritableByNonAdmins $ps }
         if ($unsafe) {
-            Write-HMLog $Job "   Nach-Skript NICHT ausgefuehrt: $ps ist fuer Nicht-Administratoren beschreibbar ($unsafe) - wuerde mit Administratorrechten laufen. Datei an einen Ort legen, den nur Administratoren aendern koennen." 'Error'
+            Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'PostScript' -Name 'Nach-Skript' -Status 'Error' -Msg "NICHT ausgefuehrt: $ps ist fuer Nicht-Administratoren beschreibbar ($unsafe) - wuerde mit Administratorrechten laufen. Datei an einen Ort legen, den nur Administratoren aendern koennen."
         } elseif (Test-Path -LiteralPath $ps) {
             Write-HMLog $Job "   Nach-Skript: $ps" 'Info'
             try {
                 $code = Get-Content -LiteralPath $ps -Raw
                 $out = Invoke-HMTarget $Ctx { param($c) & ([scriptblock]::Create($c)) 2>&1 | Out-String } @($code)
                 foreach ($l in ("$out" -split "`r?`n" | Where-Object { $_.Trim() })) { Write-HMLog $Job "      $l" 'Debug' }
-            } catch { Write-HMLog $Job "   Nach-Skript FEHLER: $($_.Exception.Message)" 'Error' }
-        } else { Write-HMLog $Job "   Nach-Skript nicht gefunden: $ps" 'Warning' }
+            } catch { Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'PostScript' -Name 'Nach-Skript' -Status 'Error' -Msg "FEHLER: $($_.Exception.Message) - Skript pruefen und von Hand ausfuehren" }
+        } else { Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'PostScript' -Name 'Nach-Skript' -Status 'Warning' -Msg "nicht gefunden: $ps - nicht ausgefuehrt" }
     }
 }
 
@@ -4689,6 +4978,12 @@ function Start-HMRestore {
     param([hashtable]$Ctx, $Job)
     $Ctx.RestoredUserDirs = New-Object System.Collections.Generic.List[string]
     $Ctx.MissingAfter = New-Object System.Collections.Generic.List[string]
+    # Ergebnisliste in der Reihenfolge des Ablaufs: Modul-Ergebnisse und Lauf-Eintraege (USMT, kein Profil, Nacharbeiten ...)
+    $Ctx.RunResults = New-Object System.Collections.Generic.List[object]
+    # Module, deren Ergebnis von der Anmelde-Aktion abhaengt (Drucker verbinden, Symbolpositionen)
+    $Ctx.LogonDependents = @()
+    # Kontrolle nach dem Restore: Anzahl kontrollierter Ordner und Ordner, bei denen sie nicht moeglich war
+    $Ctx.VerifiedDirs = 0; $Ctx.VerifyFailed = @()
     $start = Get-Date
     $Ctx.IsRemote = -not (Test-HMIsLocal $Ctx.Computer)
     if (-not $Ctx.IsRemote) { $Ctx.Computer = $env:COMPUTERNAME }
@@ -4709,14 +5004,18 @@ function Start-HMRestore {
     if ($Ctx.Options.VerifyAfter) { Write-HMLog $Job 'Nach jedem Ordner wird kontrolliert, ob alle Dateien aus dem Backup am Ziel liegen' 'Debug' }
 
     $shareRoot = $null
-    $results = @()
     try {
         if ($Ctx.IsRemote -and $Ctx.Credential) { $shareRoot = "\\$($Ctx.Computer)\C$"; [void](Connect-HMShare $shareRoot $Ctx.Credential) }
 
         # 1. USMT zuerst (legt ggf. das Profil an)
         $usmtMod = @($Ctx.Modules | Where-Object { $_.Id -eq 'Usmt' })
         if ($usmtMod.Count -and -not (Test-HMCancel $Job)) {
-            [void](Restore-HMUsmt $Ctx $Job)
+            $uName = if ("$($usmtMod[0].Name)") { "$($usmtMod[0].Name)" } else { 'Windows-Einstellungen (USMT)' }
+            $ur = $null
+            try { $ur = Restore-HMUsmt $Ctx $Job }
+            catch { $ur = [pscustomobject]@{ Status = 'Error'; Msg = "LoadState nicht ausgefuehrt: $($_.Exception.Message) - die uebrigen Module laufen weiter. USMT-Ordner pruefen (Werkzeuge > USMT einrichten) und Restore nur mit diesem Modul wiederholen" } }
+            if (-not $ur -or -not "$($ur.Status)") { $ur = [pscustomobject]@{ Status = 'Error'; Msg = 'LoadState lieferte kein Ergebnis - Restore nur mit diesem Modul wiederholen' } }
+            Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'Usmt' -Name $uName -Status "$($ur.Status)" -Msg "$($ur.Msg)"
             # Profil neu ermitteln (LoadState kann es angelegt haben)
             if (-not $Ctx.ProfilePath -or -not $Ctx.UserSid) {
                 $acc = $Ctx.Account
@@ -4726,12 +5025,26 @@ function Start-HMRestore {
         }
         $userMods = @($Ctx.Modules | Where-Object { $_.Scope -eq 'User' -and $_.Id -ne 'Usmt' })
         if ($userMods.Count -and (-not $Ctx.ProfilePath -or -not $Ctx.UserSid)) {
-            Write-HMLog $Job "Zielbenutzer hat am Ziel-PC noch kein Profil. Entweder einmal anmelden lassen oder das Modul 'Windows-Einstellungen (USMT)' mitwaehlen. Benutzer-Module werden uebersprungen." 'Error'
+            Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'NoProfile' -Name 'Benutzer-Module' -Status 'Error' -Msg ("nicht zurueckgespielt (Zielbenutzer hat am Ziel-PC noch kein Profil): {0}. Benutzer einmal anmelden lassen (oder 'Windows-Einstellungen (USMT)' mitwaehlen) und Restore mit diesen Modulen wiederholen" -f (@($userMods | ForEach-Object { "$($_.Name)" }) -join ', '))
             $Ctx.Modules = @($Ctx.Modules | Where-Object { $_.Scope -ne 'User' })
         }
         $Ctx.HiveReady = $false
         if ($Ctx.UserSid) {
-            try { $Ctx.HiveReady = Mount-HMHive $Ctx $Job $Ctx.UserSid $Ctx.ProfilePath } catch { Write-HMLog $Job "Registry des Zielbenutzers nicht verfuegbar: $($_.Exception.Message)" 'Warning' }
+            $hiveWhy = ''
+            try { $Ctx.HiveReady = [bool](Mount-HMHive $Ctx $Job $Ctx.UserSid $Ctx.ProfilePath) } catch { $hiveWhy = "$($_.Exception.Message)" }
+            if (-not $Ctx.HiveReady) {
+                # Warnung nur, wenn ein gewaehltes Modul die Benutzer-Registry braucht (gleiche Bedingung wie beim Backup)
+                $needHive = @($Ctx.Modules | ForEach-Object { $_.Items } | Where-Object {
+                    ($_.Type -eq 'Reg' -and $_.Key -match '^HK(CU|EY_CURRENT_USER)') -or ($_.Type -eq 'Builtin' -and $_.Handler -in @('PrinterConnections', 'Wallpaper')) -or ($_.Exceptions -eq 'Profile') -or
+                    # Pfade in AppData: umgeleitete AppData-Ordner liest Get-HMTargetEnv aus der Benutzer-Registry
+                    ("$($_.Path)" -match '\{(APPDATA|LOCALAPPDATA)\}') }).Count -gt 0
+                # Nacharbeiten mit Benutzer-Registry (NumLock, Explorer-Favoriten)
+                if ($Ctx.PostOptions -and ($Ctx.PostOptions.NumLockOn -or $Ctx.PostOptions.ExplorerFavorites)) { $needHive = $true }
+                if ($needHive) {
+                    # ohne Ausnahme hat Mount-HMHive den Grund schon protokolliert -> Eintrag ohne zweite Zeile
+                    Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'UserRegistry' -Name 'Benutzer-Registry' -Status 'Warning' -Msg "am Ziel-PC nicht verfuegbar ($(if ($hiveWhy) { $hiveWhy } else { 'NTUSER.DAT nicht ladbar, Grund im Protokoll' })) - Registry-Teile und Anmelde-Aktionen des Benutzers entfallen. Benutzer abmelden bzw. PC neu starten und Restore wiederholen" -NoLog:(-not $hiveWhy)
+                } else { Write-HMLog $Job "Benutzer-Registry am Ziel nicht verfuegbar$(if ($hiveWhy) { ": $hiveWhy" }) - kein gewaehltes Modul braucht sie" 'Debug' }
+            }
         }
         $tenv = Get-HMTargetEnv $Ctx $Ctx.UserSid $Ctx.ProfilePath
 
@@ -4747,7 +5060,7 @@ function Start-HMRestore {
             if (@($Ctx.SkipUntrustedMachine) -contains "$($mod.Id)") {
                 $sm = 'ausgelassen: Backup wurde nicht von einem Administrator angelegt (Uebernahme nicht bestaetigt)'
                 Write-HMLog $Job "   $sm" 'Warning'
-                $results += [pscustomobject]@{ Id = $mod.Id; Name = $mod.Name; Status = 'Warning'; Items = @([pscustomobject]@{ Name = 'Hinweis'; Status = 'Warning'; Msg = $sm }); Process = $null; Service = $null }
+                [void]$Ctx.RunResults.Add([pscustomobject]@{ Id = $mod.Id; Name = $mod.Name; Status = 'Warning'; Items = @([pscustomobject]@{ Name = 'Hinweis'; Status = 'Warning'; Msg = $sm }); Process = $null; Service = $null })
                 $done += @($mod.Items).Count
                 $Job.Progress = [int](100 * $done / $total)
                 continue
@@ -4791,8 +5104,9 @@ function Start-HMRestore {
                 $Job.Progress = [int](100 * $done / $total)
             }
             } finally { Exit-HMModule $Ctx $Job $pre }
+            foreach ($sw in @(Get-HMServiceRestartItems $pre)) { $itemLog += $sw; if ($worst -eq 'OK') { $worst = 'Warning' } }
             if (@($itemLog | Where-Object { $_.Status -ne 'Skip' }).Count -eq 0 -and $worst -eq 'OK') { $worst = 'Skip' }
-            $results += [pscustomobject]@{ Id = $mod.Id; Name = $mod.Name; Status = $worst; Items = $itemLog; Process = $pre.ProcAction; Service = $pre.ServiceAction }
+            [void]$Ctx.RunResults.Add([pscustomobject]@{ Id = $mod.Id; Name = $mod.Name; Status = $worst; Items = $itemLog; Process = $pre.ProcAction; Service = $pre.ServiceAction })
         }
 
         # Explorer-/Taskleisten-Einstellungen greifen erst nach Explorer-Neustart
@@ -4805,18 +5119,28 @@ function Start-HMRestore {
         # Besitzer der wiederhergestellten Profil-Ordner = Zielbenutzer (auch nach Abbruch fuer das bereits Kopierte)
         try { Repair-HMRestoredOwner $Ctx $Job $tenv } catch { Write-HMLog $Job "Besitzer/Rechte: $($_.Exception.Message)" 'Warning' }
         if (-not (Test-HMCancel $Job)) {
-            if ($Ctx.HiveReady) { Register-HMLogonTask $Ctx $Job }
+            $logonOk = $true
+            if ($Ctx.HiveReady) {
+                try { $logonOk = [bool](Register-HMLogonTask $Ctx $Job) }
+                catch { $logonOk = $false; Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'LogonActions' -Name 'Anmelde-Aktionen' -Status 'Warning' -Msg "nicht eingerichtet: $($_.Exception.Message)" }
+            } elseif (@($Ctx.LogonActions).Count) {
+                $logonOk = $false
+                Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'LogonActions' -Name 'Anmelde-Aktionen' -Status 'Warning' -Msg 'nicht eingerichtet: Benutzer-Registry am Ziel nicht bereit - Drucker, Symbolpositionen und Explorer-Neustart werden nicht automatisch uebernommen. Restore wiederholen, wenn der Benutzer abgemeldet ist'
+            }
+            if (-not $logonOk) { Set-HMLogonDependentsWarning $Ctx $Job }
             Write-HMLog $Job 'Nacharbeiten' 'Info'
-            Invoke-HMPostRestore $Ctx $Job
+            try { Invoke-HMPostRestore $Ctx $Job }
+            catch { Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'PostRestore' -Name 'Nacharbeiten' -Status 'Warning' -Msg "nicht vollstaendig ausgefuehrt: $($_.Exception.Message) - Einstellungen unter Nacharbeiten von Hand pruefen" }
         }
     } finally {
         try { Dismount-HMHive $Ctx $Job } catch { }
         if ($shareRoot) { Disconnect-HMShare $shareRoot }
     }
     $dur = Format-HMDuration ((Get-Date) - $start)
+    $results = @($Ctx.RunResults.ToArray())
     $errs = @($results | Where-Object { $_.Status -eq 'Error' }).Count
     $warns = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-    $st = if (Test-HMCancel $Job) { 'Cancelled' } elseif ($errs) { 'Error' } elseif ($warns) { 'Warning' } else { 'OK' }
+    $st = Get-HMOverallStatus $results ([bool](Test-HMCancel $Job))
     $Job.Progress = 100
     Write-HMLog $Job ("RESTORE {0} in {1} - Fehler: {2}, Warnungen: {3}. Empfehlung: Benutzer ab- und wieder anmelden bzw. Neustart." -f $st, $dur, $errs, $warns) $(if ($st -eq 'OK') { 'Success' } elseif ($st -eq 'Warning') { 'Warning' } else { 'Error' })
     $mf = $Ctx.Backup.Manifest
@@ -4837,13 +5161,19 @@ function Start-HMRestore {
         } catch { $missList = '' }
         Write-HMLog $Job ("KONTROLLE: {0} Datei(en) aus dem Backup fehlen am Ziel{1}" -f $Ctx.MissingAfter.Count, $(if ($missList) { " - Liste: $missList" } else { '' })) 'Warning'
     } elseif ($Ctx.Options.VerifyAfter -and -not (Test-HMCancel $Job)) {
-        if ($Ctx.LinkSkipped -and $Ctx.LinkSkipped.Count) { Write-HMLog $Job "Kontrolle: alle zurueckgespielten Dateien liegen am Ziel - wegen einer Verknuepfung nicht (ganz) zurueckgespielt: $($Ctx.LinkSkipped -join ', ') (siehe oben)" 'Warning' }
-        else { Write-HMLog $Job 'Kontrolle: alle Dateien aus dem Backup liegen am Ziel' 'Success' }
+        # nur sagen, was wirklich kontrolliert wurde: Anzahl der kontrollierten Ordner, nicht kontrollierbare getrennt
+        $vf = @(@($Ctx.VerifyFailed) | Where-Object { $_ })
+        $vn = [int]$Ctx.VerifiedDirs
+        if ($vf.Count) { Write-HMLog $Job ("Kontrolle bei {0} Ordner(n) nicht moeglich: {1} - ob dort alle Dateien am Ziel liegen, ist nicht geprueft{2}" -f $vf.Count, ($vf -join ', '), $(if ($vn) { "; in den $vn kontrollierten Ordner(n) fehlt nichts" } else { '' })) 'Warning' }
+        elseif (-not $vn) { Write-HMLog $Job 'Kontrolle: kein Ordner kontrolliert (nichts zurueckgespielt, das kontrolliert wird)' 'Info' }
+        elseif ($Ctx.LinkSkipped -and $Ctx.LinkSkipped.Count) { Write-HMLog $Job "Kontrolle: alle zurueckgespielten Dateien der $vn kontrollierten Ordner liegen am Ziel - wegen einer Verknuepfung nicht (ganz) zurueckgespielt: $($Ctx.LinkSkipped -join ', ') (siehe oben)" 'Warning' }
+        else { Write-HMLog $Job "Kontrolle: in den $vn kontrollierten Ordner(n) liegen alle Dateien aus dem Backup am Ziel" 'Success' }
     }
     $notes = @('Benutzer ab- und wieder anmelden bzw. Neustart, damit alle Einstellungen wirken.')
     if ($Ctx.MissingAfter -and $Ctx.MissingAfter.Count) { $notes += "Kontrolle: $($Ctx.MissingAfter.Count) Datei(en) aus dem Backup fehlen am Ziel$(if ($missList) { " - Liste: $(Split-Path $missList -Leaf) im Backup-Ordner" })." }
+    if (@($Ctx.VerifyFailed | Where-Object { $_ }).Count) { $notes += "Kontrolle bei $(@($Ctx.VerifyFailed | Where-Object { $_ }).Count) Ordner(n) nicht moeglich - dort ist nicht geprueft, ob alle Dateien am Ziel liegen." }
     if ($skipApps.Count) { $notes += "Programm-Einstellungen ausgelassen (Programm fehlt am Ziel): $($skipApps -join ', ') - Programm installieren, dann Restore nur mit diesen Programm-Modulen wiederholen." }
-    if (@($Ctx.LogonActions).Count) { $notes += 'Einige Einstellungen werden bei der naechsten Anmeldung des Benutzers automatisch uebernommen (einmalige Aufgabe).' }
+    if (@($Ctx.LogonActions).Count -and -not @($results | Where-Object { "$($_.Id)" -eq 'LogonActions' }).Count) { $notes += 'Einige Einstellungen werden bei der naechsten Anmeldung des Benutzers automatisch uebernommen (einmalige Aufgabe).' }
     $rep = New-HMReport -Ctx $Ctx -Kind Restore -OutFile (Join-Path $Ctx.Backup.Path ("Bericht_Restore_{0}_{1}.html" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))) -Modules $results -Facts $facts -Notes $notes -Status $st
     $Job.Result = [pscustomobject]@{ Status = $st; Duration = $dur; Modules = $results; Report = $rep; MissingFiles = $(if ($Ctx.MissingAfter) { $Ctx.MissingAfter.Count } else { 0 }); MissingList = $missList }
 }
