@@ -151,14 +151,14 @@ function Get-HMSbDriveList([switch]$KeepHumigOffline) {
     $marks = @(Get-HMSbOfflineMarks)
     $marksNew = @($marks)
     # direkt an eine VM durchgereichte Platten (Pass-Through) sind am Host offline und duerfen nie online geschaltet werden
-    $pt = Get-HMSbPassThroughDisks
-    $ptKnown = ($null -ne $pt)
-    if (-not $ptKnown) { $pt = @() }
+    # (VM-Liste nur lesen, wenn es eine offline USB-Platte gibt - der uebliche Weg bleibt wie bisher)
+    $pt = @(); $ptKnown = $true; $ptRead = $false
     foreach ($d in @(Get-Disk -ErrorAction SilentlyContinue | Where-Object { "$($_.BusType)" -match '^(USB|7)$' })) {
         $k = Get-HMSbDiskKey $d
         $m = $null
         if ($k) { $m = @($marks | Where-Object { "$_".Split('|')[0] -eq $k })[0] }
         if (-not $d.IsOffline) { if ($m) { $marksNew = @($marksNew | Where-Object { $_ -ne $m }) }; continue }
+        if (-not $ptRead) { $ptRead = $true; $pt = Get-HMSbPassThroughDisks; $ptKnown = ($null -ne $pt); if (-not $ptKnown) { $pt = @() } }
         if (@($pt) -contains [int]$d.Number) { $msgs += "USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) ist direkt an eine VM durchgereicht (Pass-Through) - bleibt offline und ist kein Sicherungsziel"; continue }
         if (-not $ptKnown -and -not $m) { $msgs += "Hinweis: Hyper-V-VM-Liste nicht lesbar - ob die offline USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) an eine VM durchgereicht ist, war nicht pruefbar; sie wird wie bisher online geschaltet" }
         if ($KeepHumigOffline -and $m) { $msgs += "USB-Platte $("$m".Split('|')[1]) (Datentraeger $($d.Number)) wurde nach der Sicherung von HUMig offline geschaltet und bleibt offline - ""Aktualisieren"" schaltet sie wieder online."; continue }
@@ -892,7 +892,8 @@ function Stop-HMSbOwnJob($R) {
         [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
         return $true
     }
-    Write-HMSbLog 'Abbruch: HUMig hatte noch keine eigene Sicherung laufen - ein anderer Vorgang am Host laeuft unveraendert weiter' 'Warning'
+    if ($R -and [bool]$R.Started -and -not [bool]$R.Busy) { Write-HMSbLog 'Abbruch: die eigene Sicherung war schon beendet - nichts zu stoppen' 'Warning' }
+    else { Write-HMSbLog 'Abbruch: HUMig hatte noch keine eigene Sicherung laufen - ein anderer Vorgang am Host laeuft unveraendert weiter' 'Warning' }
     return $false
 }
 $script:HMSbBusyFix = 'Es lief bereits eine andere Sicherung/Wiederherstellung am Host (die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig). Laufenden Vorgang in wbadmin.msc bzw. mit "wbadmin get status" pruefen, Zeitplaene verschiedener Profile am selben Host zeitlich trennen und die Sicherung spaeter erneut starten.'

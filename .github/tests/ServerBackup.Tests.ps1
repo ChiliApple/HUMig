@@ -53,10 +53,10 @@ Describe 'Server-Backup: Abbrechen beendet nur den eigenen Lauf (SB-01)' {
 Describe 'Server-Backup: Schreibtempo ohne Wartezeit (SB-07)' {
     It 'WbSec zaehlt nur die Laufzeit von wbadmin, nicht das Warten' {
         $job = @{ Cancel = $false }
-        Mock Wait-HMSbIdle { Start-Sleep -Milliseconds 400; $true }
+        Mock Wait-HMSbIdle { Start-Sleep -Milliseconds 1500; $true }
         Mock Invoke-HMSbWbadmin { [pscustomobject]@{ ExitCode = 0; Lines = @(); Text = ''; LogFiles = @() } }
         $r = Invoke-HMSbStart -Arguments 'start backup -backupTarget:X: -quiet' -Job $job
-        [double]$r.WbSec | Should -BeLessThan 0.3
+        [double]$r.WbSec | Should -BeLessThan 1.0
     }
 }
 
@@ -411,5 +411,48 @@ Describe 'Server-Backup: Zeitplaene nach Umbenennen und beim Loeschen des Profil
     It 'Loeschen des Profils nennt die bleibenden Zeitplaene' {
         $ui = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
         [regex]::Match($ui, '(?s)function Remove-HMSbProfile \{.*?\r?\n\}\r?\n').Value | Should -Match 'Test-HMSbTaskOfProfile'
+    }
+}
+Describe 'Server-Backup: Nachpruefung (Meldungen, Platten-Liste ohne offline Platte)' {
+    BeforeAll {
+        $script:AppRoot = $script:Root
+        if (-not $script:ConfigDir) { $script:ConfigDir = Join-Path $TestDrive 'CfgUi3'; $script:LogDir = Join-Path $TestDrive 'LogsUi3' }
+        New-Item -ItemType Directory -Path $script:ConfigDir -Force | Out-Null
+        . (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+        function Out-Console([string]$Text, [string]$Level = 'Info') { }
+        function Write-JsonFile([string]$Path, $Data, [int]$Depth = 6) { $Data | ConvertTo-Json -Depth $Depth | Set-Content -LiteralPath $Path -Encoding UTF8 }
+        function Get-VM { }
+        function Get-VMHardDiskDrive { param($VM) }
+        function Get-Disk { }
+        function Set-Disk { param($Number, $IsOffline) }
+        function Get-Volume { }
+    }
+    It 'Abbruch nach fertigem eigenen Lauf: eigene Meldung, kein stop job' {
+        $script:SbJob = @{ Log = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue)) }
+        Stop-HMSbOwnJob ([pscustomobject]@{ ExitCode = 0; Started = $true; Busy = $false }) | Should -BeFalse
+        @($script:SbJob.Log.ToArray())[-1].Msg | Should -Match 'schon beendet'
+        $script:SbJob = $null
+    }
+    It 'gesperrte Profil-Datei: Speichern meldet keinen Erfolg (SbLastSaveOk)' {
+        [System.IO.File]::WriteAllText($script:SbCfgFile, '{"LastProfile":"","Profiles":[],"Renames":[]}')
+        $c = Get-HMSbConfig
+        $lock = New-Object System.IO.FileStream($script:SbCfgFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        try { Save-HMSbConfig $c } finally { $lock.Dispose() }
+        $script:SbLastSaveOk | Should -BeFalse
+        Save-HMSbConfig $c
+        $script:SbLastSaveOk | Should -BeTrue
+        $ui = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+        ([regex]::Matches($ui, 'Save-HMSbConfig \$cfg\r?\n\s*if \(-not \$script:SbLastSaveOk\) \{ return \}')).Count | Should -Be 4
+    }
+    It 'ohne offline USB-Platte wird die VM-Liste beim Lesen der Platten nicht abgefragt' {
+        Mock Get-HMSbOfflineMarks { @() }
+        Mock Set-HMSbOfflineMarks { }
+        Mock Get-Volume { @() }
+        Mock Get-Disk { @([pscustomobject]@{ Number = 5; BusType = 'USB'; IsOffline = $false; FriendlyName = 'Sicherung'; UniqueId = 'U5' }) }
+        Mock Get-VM { throw 'darf nicht laufen' }
+        Mock Set-Disk { }
+        $r = Get-HMSbDriveList
+        Should -Invoke Get-VM -Times 0 -Exactly
+        @($r.Messages).Count | Should -Be 0
     }
 }

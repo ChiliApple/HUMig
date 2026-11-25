@@ -92,8 +92,11 @@ function Get-HMSbConfig {
 }
 function Save-HMSbConfig($Cfg) {
     # vorher pruefen: nicht lesbar = nicht speichern (nichts ueberschreiben), beschaedigt = beiseitelegen (Name mit Datum) und melden
+    # $script:SbLastSaveOk: Aufrufer melden "gespeichert" nur, wenn hier nicht abgebrochen wurde
+    $script:SbLastSaveOk = $false
     try { [void](Read-HMSbJsonForWrite $script:SbCfgFile) }
     catch { Out-Console "Server-Backup: Profile NICHT gespeichert - $($_.Exception.Message)" 'Error'; return }
+    $script:SbLastSaveOk = $true
     Show-HMSbStateNotes
     $o = [ordered]@{ LastProfile = "$($Cfg.LastProfile)"; Profiles = @($Cfg.Profiles); Renames = @($Cfg.Renames) }
     if ($Cfg.PSObject.Properties['ConflictWords'] -and $null -ne $Cfg.ConflictWords) { $o.ConflictWords = @($Cfg.ConflictWords) }
@@ -206,6 +209,7 @@ function New-HMSbProfile {
     $cfg.Profiles = @($cfg.Profiles) + @($prof)
     $cfg.LastProfile = $n
     Save-HMSbConfig $cfg
+    if (-not $script:SbLastSaveOk) { return }
     Out-Console "Profil '$n' angelegt: Platten $pre-1 bis $pre-$cnt, $(@($prof.VMs).Count) VM(s)" 'Success'
     Update-HMSbProfileList $n
 }
@@ -247,6 +251,7 @@ function Save-HMSbProfile {
         }
     }
     Save-HMSbConfig $cfg
+    if (-not $script:SbLastSaveOk) { return }
     Out-Console "Profil '$($p.Name)' gespeichert: $nVm VM(s)$(if ($keepVms) { ' (unveraendert, Liste nicht lesbar)' }), $nVol Laufwerk(e)$(if ($keepVols) { ' (unveraendert, Liste nicht lesbar)' })" 'Success'
     Update-HMSbHistory
 }
@@ -298,6 +303,7 @@ function Edit-HMSbProfile {
     if ($n -ne $p.Name) { $cfg.Renames = @(@($cfg.Renames) | Where-Object { $_.Old -ne $n }) + @([pscustomobject]@{ Old = $p.Name; New = $n }) }
     if ($cfg.LastProfile -eq $p.Name) { $cfg.LastProfile = $n }
     Save-HMSbConfig $cfg
+    if (-not $script:SbLastSaveOk) { return }
     if ($n -ne $p.Name) {
         # Verlauf und Profil-Kopien mitnehmen: Tool-Ordner + alle angesteckten Platten
         $cnt2 = 0
@@ -327,6 +333,7 @@ function Remove-HMSbProfile {
     $cfg.Profiles = @($cfg.Profiles | Where-Object { $_.Name -ne $p.Name })
     if ($cfg.LastProfile -eq $p.Name) { $cfg.LastProfile = '' }
     Save-HMSbConfig $cfg
+    if (-not $script:SbLastSaveOk) { return }
     Out-Console "Profil '$($p.Name)' geloescht" 'Info'
     Update-HMSbProfileList
 }
