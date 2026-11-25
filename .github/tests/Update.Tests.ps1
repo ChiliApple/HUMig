@@ -293,3 +293,48 @@ Describe 'Signieren: Abgleich mit dem lokalen Stand (UP-01)' {
         [array]::IndexOf($ps, 'OnMismatch') | Should -BeGreaterThan $ix
     }
 }
+
+Describe 'Signieren: Invoke-HMReleaseSigning im Ganzen (ohne Zertifikat, ohne Netz)' {
+    BeforeAll {
+        function New-HMSha2([byte[]]$B) { $s = [System.Security.Cryptography.SHA256]::Create(); try { -join ($s.ComputeHash($B) | ForEach-Object { $_.ToString('x2') }) } finally { $s.Dispose() } }
+        $script:S = Join-Path $TestDrive 'SignLokal'
+        New-HMTestFile "$script:S\Config\version.json" '{ "version": "9.0.5" }'
+        New-HMTestFile "$script:S\HUMig.ps1" 'H'
+        $script:SignMan = [Text.Encoding]::UTF8.GetBytes("# HUMig-Release v9.0.5`n" + (New-HMSha2 ([Text.Encoding]::UTF8.GetBytes('H'))) + "  HUMig.ps1`n" + (New-HMSha2 ([Text.Encoding]::UTF8.GetBytes('{ "version": "9.0.5" }'))) + "  Config/version.json`n")
+    }
+    BeforeEach {
+        Mock Get-HMSigningCert { [pscustomobject]@{ Thumbprint = 'AB' } }
+        Mock Get-HMReleases { @([pscustomobject]@{ Version = [Version]'9.0.5'; Tag = 'v9.0.5'; ManifestUrl = 'm'; ManifestApi = 'm'; SignatureUrl = ''; SignatureApi = '' }) }
+        Mock Get-HMReleaseAsset { , $script:SignMan }
+        Mock New-HMManifestSignature { , ([byte[]](1, 2, 3)) }
+        Mock Test-HMManifestSignature { '' }
+        Mock Publish-HMReleaseSignature { }
+    }
+    It 'gleicher lokaler Stand: signiert, Ergebnis nennt den Abgleich' {
+        $r = @(Invoke-HMReleaseSigning 'o' 'r' 'AB' 't' @() -LocalRoot $script:S)
+        $r[0].Ok | Should -BeTrue
+        $r[0].Text | Should -Match 'lokal abgeglichen'
+        Should -Invoke Publish-HMReleaseSignature -Times 1 -Exactly
+    }
+    It 'Aufruf wie in der Oberflaeche (fuenf Werte), lokaler Stand weicht ab: nicht signiert, nichts hochgeladen' {
+        New-HMTestFile "$script:S\HUMig.ps1" 'H anders'
+        try {
+            $r = @(Invoke-HMReleaseSigning 'o' 'r' 'AB' 't' @('v9.0.5') -LocalRoot $script:S)
+            $r[0].Ok | Should -BeFalse
+            $r[0].Text | Should -Match 'nicht signiert'
+            $r[0].Text | Should -Not -Match 'Schreibrecht'
+            Should -Invoke Publish-HMReleaseSignature -Times 0 -Exactly
+            # mit -OnMismatch Sign: signiert, der Grund steht im Ergebnis
+            $r = @(Invoke-HMReleaseSigning 'o' 'r' 'AB' 't' @('v9.0.5') -LocalRoot $script:S -OnMismatch Sign)
+            $r[0].Ok | Should -BeTrue
+            $r[0].Text | Should -Match 'OHNE lokalen Abgleich'
+            Should -Invoke Publish-HMReleaseSignature -Times 1 -Exactly
+        } finally { New-HMTestFile "$script:S\HUMig.ps1" 'H' }
+    }
+    It 'ohne -LocalRoot gilt der Programmordner von Core-Update.ps1 (hier: andere Version = nicht abgleichbar, nicht signiert)' {
+        $r = @(Invoke-HMReleaseSigning 'o' 'r' 'AB' 't' @('v9.0.5'))
+        $r[0].Ok | Should -BeFalse
+        $r[0].Text | Should -Match 'kein Abgleich moeglich'
+        Should -Invoke Publish-HMReleaseSignature -Times 0 -Exactly
+    }
+}
