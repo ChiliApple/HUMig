@@ -8,6 +8,8 @@
 - **"Zeitpläne ansehen ..." hängt nicht mehr:** Hatte der Zeitplan auf dem PC schon einmal ein Protokoll geschrieben, rechnete der PC beim Lesen endlos mit voller Last. Jetzt kommt das Ergebnis mit den letzten 80 Protokollzeilen sofort.
 ### 🛠️ Werkzeuge
 - **Autologon abschalten löscht das Kennwort wirklich:** Beim Abschalten wird das gespeicherte Kennwort entfernt. Bisher blieb ein leeres Kennwort gespeichert und der Status meldete weiter "als LSA-Geheimnis gespeichert".
+### ⚠️ Nach dem Update
+- **Autologon einmal erneut abschalten:** Wer Autologon mit einer früheren Version abgeschaltet hat, schaltet es einmal erneut ab, damit das leer gespeicherte Kennwort entfernt wird.
 
 ## v2.1.19 - 2026-11-01
 ### Restore
