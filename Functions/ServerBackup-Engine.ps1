@@ -807,19 +807,40 @@ function Wait-HMSbIdle($Job, [int]$MaxMin = 480) {
     }
 }
 # wbadmin start ... mit Vorab-Pruefung, Warten und bis zu 2 Wiederholungen, wenn wbadmin 'weiterer Vorgang laeuft' meldet
+# Ergebnis zusaetzlich: Started = eigenes wbadmin wurde gestartet, WbSec = Laufzeit nur von wbadmin (ohne Warten, fuer das Schreibtempo)
 function Invoke-HMSbStart {
     param([string]$Arguments, [string]$Phase = '', [double]$PBase = 0, [double]$PSpan = 100, [string]$LogFile = '', $Job)
+    $wbSec = 0.0
     for ($try = 1; $try -le 3; $try++) {
         if (-not (Wait-HMSbIdle $Job)) {
-            return [pscustomobject]@{ ExitCode = -3; Lines = @(); Text = 'Ein weiterer Sicherungs- oder Wiederherstellungsvorgang wird ausgefuehrt (Wartezeit abgelaufen oder abgebrochen).'; LogFiles = @(); Busy = $true }
+            return [pscustomobject]@{ ExitCode = -3; Lines = @(); Text = 'Ein weiterer Sicherungs- oder Wiederherstellungsvorgang wird ausgefuehrt (Wartezeit abgelaufen oder abgebrochen).'; LogFiles = @(); Busy = $true; Started = $false; WbSec = $wbSec }
         }
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $r = Invoke-HMSbWbadmin -Arguments $Arguments -Phase $Phase -PBase $PBase -PSpan $PSpan -LogFile $LogFile
+        $wbSec += $sw.Elapsed.TotalSeconds
         $busy = ($r.ExitCode -ne 0 -and "$($r.Text)" -match '(?i)weiterer Sicherungs|anderer Sicherungs|another backup or recovery|operation is already in progress|bereits ausgef')
         $r | Add-Member -NotePropertyName Busy -NotePropertyValue $busy -Force
+        $r | Add-Member -NotePropertyName Started -NotePropertyValue $true -Force
+        $r | Add-Member -NotePropertyName WbSec -NotePropertyValue $wbSec -Force
         if (-not $busy -or $Job.Cancel -or $try -eq 3) { return $r }
         Write-HMSbLog "wbadmin meldet einen anderen laufenden Vorgang - HUMig wartet und versucht es erneut ($($try + 1). Versuch)" 'Warning'
         for ($i = 0; $i -lt 60; $i++) { if ($Job.Cancel) { return $r }; Start-Sleep -Seconds 2 }
     }
+}
+# Abbrechen: 'wbadmin stop job' nur, wenn der EIGENE Vorgang noch lief (gestartet, nicht wegen eines anderen Vorgangs
+# abgewiesen, nicht fertig). Abbrechen waehrend des Wartens auf einen anderen Vorgang beendet nie diese fremde Sicherung.
+function Test-HMSbOwnJobRunning($R) {
+    if (-not $R) { return $false }
+    return ([bool]$R.Started -and -not [bool]$R.Busy -and "$($R.ExitCode)" -ne '0')
+}
+function Stop-HMSbOwnJob($R) {
+    if (Test-HMSbOwnJobRunning $R) {
+        Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
+        [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+        return $true
+    }
+    Write-HMSbLog 'Abbruch: HUMig hatte noch keine eigene Sicherung laufen - ein anderer Vorgang am Host laeuft unveraendert weiter' 'Warning'
+    return $false
 }
 $script:HMSbBusyFix = 'Es lief bereits eine andere Sicherung/Wiederherstellung am Host (die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig). Laufenden Vorgang in wbadmin.msc bzw. mit "wbadmin get status" pruefen, Zeitplaene verschiedener Profile am selben Host zeitlich trennen und die Sicherung spaeter erneut starten.'
 
@@ -2327,12 +2348,10 @@ function Start-HMServerBackup {
             $Job.Status = 'VMs: Schattenkopie wird erstellt ...'
             Write-HMSbLog "wbadmin: VMs sichern -> $target (Online-Sicherung ueber VSS, VMs laufen weiter)" 'Header'
             $argList = "start backup -backupTarget:$target -hyperv:""$($vms -join ',')"" -quiet"
-            $swWb = [System.Diagnostics.Stopwatch]::StartNew()
             $r = Invoke-HMSbStart -Arguments $argList -Phase 'VMs' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-VMs.log') -Job $Job
-            $wbSec += $swWb.Elapsed.TotalSeconds
+            $wbSec += [double]$r.WbSec   # nur wbadmin, ohne Warten auf andere Vorgaenge (Schreibtempo)
             if ($Job.Cancel) {
-                Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
-                [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+                [void](Stop-HMSbOwnJob $r)
                 throw 'Abgebrochen'
             }
             foreach ($lf in @($r.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
@@ -2405,13 +2424,11 @@ function Start-HMServerBackup {
         if ($vols.Count) {
             $Job.Status = 'Laufwerke: Schattenkopie wird erstellt ...'
             Write-HMSbLog "wbadmin: Laufwerke sichern ($($vols -join ', ')) -> $target" 'Header'
-            $swWb = [System.Diagnostics.Stopwatch]::StartNew()
             $r3 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -include:$($vols -join ',') -quiet" -Phase 'Laufwerke' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-Laufwerke.log') -Job $Job
-            $wbSec += $swWb.Elapsed.TotalSeconds
+            $wbSec += [double]$r3.WbSec
             $pb += $span
             if ($Job.Cancel) {
-                Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
-                [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+                [void](Stop-HMSbOwnJob $r3)
                 throw 'Abgebrochen'
             }
             foreach ($lf in @($r3.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
@@ -2455,8 +2472,7 @@ function Start-HMServerBackup {
             } catch { }
             $r2 = Invoke-HMSbStart -Arguments "start backup -backupTarget:$target -allCritical -quiet" -Phase 'Host-System' -PBase $pb -PSpan $span -LogFile (Join-Path $rep 'wbadmin-HostSystem.log') -Job $Job
             if ($Job.Cancel) {
-                Write-HMSbLog 'Abbruch: laufende Sicherung wird beendet (wbadmin stop job) ...' 'Warning'
-                [void](Invoke-HMSbWbadmin -Arguments 'stop job -quiet' -Quiet)
+                [void](Stop-HMSbOwnJob $r2)
                 throw 'Abgebrochen'
             }
             foreach ($lf in @($r2.LogFiles)) { try { Copy-Item -LiteralPath $lf -Destination $rep -Force -ErrorAction Stop } catch { } }
