@@ -427,7 +427,24 @@ function Test-HMAuLocal([string]$Computer) {
     $c = "$Computer".Trim().ToUpper()
     return (-not $c -or $c -in @('.', 'LOCALHOST', '127.0.0.1', "$env:COMPUTERNAME".ToUpper()) -or $c -like "$("$env:COMPUTERNAME".ToUpper()).*")
 }
-function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payload, $Credential = $null, [scriptblock]$OnLine = $null, $Job = $null, [scriptblock]$OnResult = $null, [int]$Throttle = 16) {
+# Abbruch an entfernten PCs: was ist jetzt zu tun? 'First' (erstes Signal), 'Send' (Signal wiederholen, alle 30 s),
+# 'Stop' (nach der Wartezeit Verbindung beenden), '' (nichts)
+function Get-HMAuCancelAction([bool]$Cancel, $CancelAt, $LastSend, [bool]$Stopped, [datetime]$Now, [int]$GraceMin = 20) {
+    if (-not $Cancel -or $Stopped) { return '' }
+    if (-not $CancelAt) { return 'First' }
+    if (($Now - [datetime]$CancelAt).TotalMinutes -ge $GraceMin) { return 'Stop' }
+    if (-not $LastSend -or ($Now - [datetime]$LastSend).TotalSeconds -ge 30) { return 'Send' }
+    return ''
+}
+# Datei "cancel" in die Laufordner dieses Laufs (run_<Kennung>_*) an den PCs legen - kurze eigene Verbindung, Fehler egal
+function Send-HMAuRemoteCancel([string[]]$Computers, [string]$Tag, $Credential = $null) {
+    if (-not @($Computers).Count -or "$Tag" -notmatch '^[0-9a-f]{8,32}$') { return }
+    $p = @{ ComputerName = @($Computers); ArgumentList = @($Tag); ErrorAction = 'SilentlyContinue'; SessionOption = (New-PSSessionOption -OpenTimeout 15000 -OperationTimeout 30000)
+            ScriptBlock = { param($t) foreach ($d in @(Get-ChildItem -LiteralPath (Join-Path $env:ProgramData 'HUMig\AppUpdates') -Directory -Filter "run_$($t)_*" -ErrorAction SilentlyContinue)) { try { New-Item -ItemType File -Path (Join-Path $d.FullName 'cancel') -Force -ErrorAction Stop | Out-Null } catch { } } } }
+    if ($Credential) { $p.Credential = $Credential }
+    try { Invoke-Command @p | Out-Null } catch { }
+}
+function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payload, $Credential = $null, [scriptblock]$OnLine = $null, $Job = $null, [scriptblock]$OnResult = $null, [int]$Throttle = 16, [int]$CancelGraceMin = 20) {
     $txt = [System.IO.File]::ReadAllText($script:HMAuTargetFile) -replace '(?m)^#Requires.*$', ''
     # Schutz-Funktion direkt nach dem param()-Block einfuegen (param muss am Anfang stehen)
     $pi = $txt.IndexOf('param([string]$Op')
@@ -453,6 +470,9 @@ function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payloa
         }
         elseif ($OnLine) { & $OnLine $Key "$($o.V)" }
     }
+    # Kennung dieses Laufs: die Laufordner am Ziel heissen run_<Kennung>_..., damit "Abbrechen" genau sie trifft
+    $tag = [guid]::NewGuid().ToString('N').Substring(0, 16)
+    $Payload = $Payload.Clone(); $Payload.RunTag = $tag
     # entfernte PCs als Hintergrundauftrag starten, waehrenddessen den eigenen PC bearbeiten
     $rj = $null
     if ($rem.Count) {
@@ -467,12 +487,19 @@ function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payloa
         catch { if (-not $out.ContainsKey($lk)) { $out[$lk] = [pscustomobject]@{ Errors = @("Fehler: $($_.Exception.Message)") } } }
     }
     if ($rj) {
-        $stopped = $false
+        $stopped = $false; $cancelAt = $null; $lastSend = $null
         while ($true) {
             $fin = ("$($rj.State)" -notin @('Running', 'NotStarted'))
             foreach ($o in @(Receive-Job -Job $rj -ErrorAction SilentlyContinue)) { & $handle $o "$($o.PSComputerName)".ToUpper() }
             if ($fin) { break }
-            if (-not $stopped -and $Job -and $Job.Cancel) { Stop-Job -Job $rj -ErrorAction SilentlyContinue; $stopped = $true }
+            # Abbrechen wie versprochen "nach dem laufenden Programm": Datei "cancel" in die Laufordner an den PCs legen (alle 30 s
+            # wiederholt, falls dort gerade eine neue Aufgabe beginnt). Erst nach $CancelGraceMin Minuten die Verbindung hart beenden.
+            $act = Get-HMAuCancelAction $(if ($Job) { [bool]$Job.Cancel } else { $false }) $cancelAt $lastSend $stopped (Get-Date) $CancelGraceMin
+            if ($act -eq 'Send' -or $act -eq 'First') {
+                if (-not $cancelAt) { $cancelAt = Get-Date; if ($OnLine) { foreach ($c in $rem) { & $OnLine $c.ToUpper() 'Abbruch angefordert - das laufende Programm wird noch fertig, danach startet nichts mehr' } } }
+                $lastSend = Get-Date
+                Send-HMAuRemoteCancel $rem $tag $Credential
+            } elseif ($act -eq 'Stop') { Stop-Job -Job $rj -ErrorAction SilentlyContinue; $stopped = $true }
             Start-Sleep -Milliseconds 700
         }
         foreach ($cj in @($rj.ChildJobs)) {
@@ -684,6 +711,9 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
     $new = { param($pc, $it) [ordered]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Computer = $pc; Id = "$($it.Id)"; Name = "$($it.Name)"; From = "$($it.Installed)"; To = "$($it.Available)"; Source = "$($it.Source)"; Scope = "$($it.Scope)"; Status = ''; Text = ''; Reboot = $false } }
     $byPc = @{}; $names = @{}; $procMap = @{}
     $restart = @{ Services = [System.Collections.Generic.List[string]]::new(); Apps = [System.Collections.Generic.List[object]]::new() }   # nach dem Update wieder starten
+    # geschlossene Programme/gestoppte Dienste am eigenen PC auch bei einem Fehler unterwegs wieder starten (finally unten)
+    $restarted = $false
+    try {
     foreach ($k in $pcs) {
         $todo = @()
         foreach ($it in @($Ctx.ByPc[$k].Items | Where-Object { $_ })) {
@@ -803,7 +833,11 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
             $res += [pscustomobject]$e
         }
     }
+    $restarted = $true
     Restart-HMAuStopped $Job $restart
+    } finally {
+        if (-not $restarted) { try { Restart-HMAuStopped $Job $restart } catch { } }
+    }
     $Job.Progress = 100
     $ok = @($res | Where-Object { $_.Status -eq 'OK' }).Count
     $err = @($res | Where-Object { $_.Status -eq 'Error' }).Count

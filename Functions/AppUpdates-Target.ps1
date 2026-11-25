@@ -45,6 +45,13 @@ if ($Payload -and $Payload.ByPc) {
 function Out-L([string]$t) { [pscustomobject]@{ HMAu = 'L'; PC = $PC; V = $t } }
 # Ergebnis als JSON (Fernzugriff gibt verschachtelte Objekte sonst nur bis Tiefe 1 zurueck)
 function Out-R($v) { [pscustomobject]@{ HMAu = 'R'; PC = $PC; J = (ConvertTo-Json -InputObject $v -Depth 8 -Compress) } }
+# Abbruch: am eigenen PC ueber $Payload.Job.Cancel, an anderen PCs ueber die Datei "cancel", die HUMig in die Laufordner
+# dieses Laufs legt (Ordnername mit RunTag) - das laufende Programm wird fertig, danach startet nichts mehr
+$script:TCancelled = $false
+$RunTag = if ("$($Payload.RunTag)" -match '^[0-9a-f]{8,32}$') { "$($Payload.RunTag)" } else { '' }
+function Test-TCancel { return [bool]($script:TCancelled -or ($Payload.Job -and $Payload.Job.Cancel)) }
+# Zeitlimit je Programm fuer Laeufe als SYSTEM (Minuten); haengt ein Installer laenger, wird die Aufgabe beendet und mit dem Rest weitergemacht
+$SysItemMin = if ([int]"0$($Payload.ItemTimeoutMin)" -gt 0) { [int]"$($Payload.ItemTimeoutMin)" } else { 60 }
 function Get-TLoggedOnSids {
     @(foreach ($p in @(Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue)) {
             try { "$((Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid -ErrorAction Stop).Sid)" } catch { }
@@ -123,7 +130,8 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec, 
     $script:TDone = @()
     $curId = ''; $curT = $null
     $id = [guid]::NewGuid().ToString('N')
-    $dir = Join-Path $Base "run_$id"
+    $dir = Join-Path $Base $(if ($RunTag) { "run_$($RunTag)_$id" } else { "run_$id" })
+    if (Test-TCancel) { return }   # abgebrochen: keine neue Aufgabe mehr starten
     $name = "HUMig_AppUpdates_$id"
     $sys = ($Who -eq 'SYSTEM')
     try {
@@ -165,7 +173,8 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec, 
                 try { Stop-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction SilentlyContinue } catch { }
                 $script:TTimedOut = $curId; break
             }
-            if (-not $cancelSent -and $Payload.Job -and $Payload.Job.Cancel) { New-Item -ItemType File -Path (Join-Path $dir 'cancel') -Force | Out-Null; $cancelSent = $true }
+            if (-not $cancelSent -and (Test-TCancel)) { New-Item -ItemType File -Path (Join-Path $dir 'cancel') -Force | Out-Null; $cancelSent = $true }
+            if (-not $script:TCancelled -and (Test-Path -LiteralPath (Join-Path $dir 'cancel'))) { $script:TCancelled = $true; $cancelSent = $true }
             $st = ''; try { $st = "$((Get-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction Stop).State)" } catch { }
             if ($st -and $st -ne 'Running' -and $st -ne 'Queued') {
                 if (-not $doneAt) { $doneAt = Get-Date } elseif (((Get-Date) - $doneAt).TotalSeconds -gt 10) {
@@ -464,6 +473,9 @@ try {
             # laufende Programme, die laut Entscheidung in HUMig beendet werden sollen (Proc = Stop): jetzt beenden - laesst sich eines
             # nicht beenden, wird es nicht aktualisiert (sonst bricht der Installer ab und hinterlaesst evtl. ein halb entferntes Programm)
             $rs = @{ Services = @(); Apps = @() }
+            $rsDone = $false
+            # gestoppte Dienste/beendete Programme auch bei Fehler oder Abbruch wieder starten (finally unten, ohne Ausgabe)
+            try {
             $stopIt = @($all | Where-Object { "$($_.Proc)" -eq 'Stop' })
             if ($stopIt.Count) {
                 foreach ($rn in @(Get-TRunning $stopIt)) {
@@ -481,8 +493,22 @@ try {
             $usr = @($all | Where-Object { $Op -ne 'Install' -and "$($_.Scope)" -eq 'User' })
             if ($mach.Count) {
                 Out-L "$($mach.Count) Programm(e) fuer alle Benutzer (als SYSTEM) ..."
-                Invoke-TTask 'SYSTEM' @{ Mode = $Op; Cli = $true; Items = @($mach | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) } $false 10800
-                if ($script:TRes) { $res += @($script:TRes.Results) }
+                # je Programm hoechstens $SysItemMin Minuten; haengt ein Installer, Aufgabe beenden und den Rest in einer neuen Aufgabe
+                $todoM = @($mach)
+                while ($todoM.Count -and -not (Test-TCancel)) {
+                    Invoke-TTask 'SYSTEM' @{ Mode = $Op; Cli = $true; Items = @($todoM | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) } $false 10800 $SysItemMin
+                    if ($script:TRes) { $res += @($script:TRes.Results); break }
+                    $gotM = @()
+                    foreach ($d in @($script:TDone)) {
+                        $res += [pscustomobject]@{ Id = "$($d[1])"; Status = "$($d[2])"; Code = $(if ($d.Count -gt 3) { $d[3] } else { 0 }); InstallerErrorCode = $(if ($d.Count -gt 4) { $d[4] } else { 0 }); ExtendedErrorCode = $(if ($d.Count -gt 5) { $d[5] } else { 0 }); Reboot = ($d.Count -gt 6 -and $d[6] -eq 'True'); Text = '' }
+                        $gotM += "$($d[1])"
+                    }
+                    if (-not $script:TTimedOut) { break }
+                    $res += [pscustomobject]@{ Id = "$($script:TTimedOut)"; Status = 'Exception'; Code = 0; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = "abgebrochen nach $SysItemMin min (Zeitlimit je Programm) - der Installer hing; am PC pruefen und erneut aktualisieren" }
+                    Out-L "$($script:TTimedOut): nach $SysItemMin min abgebrochen (Zeitlimit je Programm) - weiter mit den uebrigen"
+                    $gotM += "$($script:TTimedOut)"
+                    $todoM = @($todoM | Where-Object { $gotM -notcontains "$($_.Id)" })
+                }
             }
             $usid = "$($My.UserSid)"
             $fromSys = @()   # Pakete, die als SYSTEM nicht gefunden wurden und ins Benutzerkonto wanderten (kein zweiter SYSTEM-Versuch, B60)
@@ -501,7 +527,7 @@ try {
                     }
                 }
             }
-            if ($usr.Count) {
+            if ($usr.Count -and -not (Test-TCancel)) {
                 $sids = @(Get-TLoggedOnSids)
                 $sid = $usid
                 if (-not $sid -or $sids -notcontains $sid) { $script:TErr += "Programme nur fuer einen Benutzer: $(if ($sid) { Get-TAccount $sid } else { 'Benutzer' }) ist nicht (mehr) angemeldet" }
@@ -511,7 +537,7 @@ try {
                     # UAC-Bestaetigung, die niemand gibt -> abbrechen, Rest in einer neuen Aufgabe weiter
                     $lim = 15
                     $todo = @($usr)
-                    while ($todo.Count) {
+                    while ($todo.Count -and -not (Test-TCancel)) {
                         Invoke-TTask $sid @{ Mode = 'Update'; Items = @($todo | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) } $false 10800 $lim
                         if ($script:TRes) { $res += @($script:TRes.Results); break }
                         $got = @()
@@ -533,7 +559,7 @@ try {
                 foreach ($x in @($res | Where-Object { "$($_.Status)" -eq 'InternalError' -and $fromSys -contains "$($_.Id)" })) {
                     $x.Status = 'Exception'; $x.Text = 'Store-App: fuer alle Benutzer nicht gefunden, im Benutzerkonto interner WinGet-Fehler - ueber den Microsoft Store aktualisieren'
                 }
-                if ($ie.Count) {
+                if ($ie.Count -and -not (Test-TCancel)) {
                     $ids2 = @($ie | ForEach-Object { "$($_.Id)" })
                     Out-L "$($ids2.Count) Programm(e) im Benutzerkonto gescheitert (interner WinGet-Fehler, meist Store-Apps) - neuer Versuch fuer alle Benutzer (als SYSTEM) ..."
                     $res = @($res | Where-Object { $ids2 -notcontains "$($_.Id)" })
@@ -548,8 +574,11 @@ try {
                     }
                 }
             }
-            if ($rs.Services.Count -or $rs.Apps.Count) { Restart-TStopped $rs }
+            if ($rs.Services.Count -or $rs.Apps.Count) { $rsDone = $true; Restart-TStopped $rs }
             Out-R ([pscustomobject]@{ Results = @($res | Where-Object { $_ }); Errors = $script:TErr })
+            } finally {
+                if (-not $rsDone -and ($rs.Services.Count -or $rs.Apps.Count)) { try { $null = @(Restart-TStopped $rs) } catch { } }
+            }
         }
         'ScheduleSet' {
             Install-TModule
