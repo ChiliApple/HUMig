@@ -20,6 +20,8 @@
     Quellen: learn.microsoft.com - PnPUtil Command Syntax / PnPUtil Return Values / UpdateDriverForPlugAndPlayDevicesW
 #>
 
+# Hinweis zur Geraete-Sperre (Richtlinie DenyDeviceIDs gilt fuer die Hardware-ID, nicht fuer das einzelne Geraet)
+$script:DrvLockNote = 'gilt auch fuer neu angesteckte Geraete mit derselben ID (anderer USB-Anschluss, Dockingstation)'
 function Get-DrvFolder {
     $f = "$($script:Settings.DriverFolder)".Trim()
     if ($f) { return $f }
@@ -196,7 +198,7 @@ function Set-HUDrvLock($Rows, [string]$Pkg) {
     $l = Get-HULocks
     foreach ($r in @($Rows | Where-Object { $_.LockId })) { $l[$r.LockId] = "$Pkg|$($r.Version)|$(Get-Date -Format 'yyyy-MM-dd')" }
     Save-HULocks $l
-    return " | vor Treiber-Updates geschuetzt (Geraete-Sperre: $($ids -join ', '))"
+    return " | vor Treiber-Updates geschuetzt (Geraete-Sperre: $($ids -join ', ')) - gilt auch fuer neu angesteckte Geraete mit dieser ID (anderer USB-Anschluss, Dockingstation)"
 }
 '@
 # Lokal verfuegbar machen (UI: Paket-Info)
@@ -318,6 +320,11 @@ function Confirm-DrvDeploy($Package, [string[]]$Hosts, [bool]$Force) {
 $script:RS_DrvInstallBody = {
     $ErrorActionPreference = 'SilentlyContinue'
     function ConvertTo-HUVer([string]$v) { if ("$v" -match '^\d+(\.\d+){0,3}') { $t = $Matches[0]; if ($t -notmatch '\.') { $t += '.0' }; try { return [version]$t } catch { } }; return $null }
+    # Nachkontrolle: 'NoneNew' = passende Geraete da, keines mit der Paketversion, kein Neustart angekuendigt; sonst 'Ok'
+    function Get-HUDrvVerdict([int]$Matching, [int]$WithNew, [bool]$Reboot) {
+        if ($Matching -gt 0 -and $WithNew -eq 0 -and -not $Reboot) { return 'NoneNew' }
+        return 'Ok'
+    }
     function Format-HUState($rows) {
         $m = @($rows | Where-Object { $_.Match -and -not $_.Ext })
         if ($m.Count -eq 0) { $m = @($rows | Where-Object { $_.Match }) }
@@ -462,6 +469,10 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
         $am = @($after | Where-Object { $_.Match -and -not $_.Ext })
         $newOk = @($am | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
         $notNew = @($am | Where-Object { -not ($_.Version -and (@($map[$_.Hw]) -contains $_.Version)) })
+        # kein passendes Geraet hat die Paketversion und kein Neustart angekuendigt: nicht als "installiert" zaehlen
+        # (vor der Sperren-Buchfuehrung: $lockRestore bleibt gesetzt, finally stellt die vorherigen Sperren wieder her)
+        $nv = Get-HUDrvVerdict $am.Count $newOk.Count $reboot
+        if ($nv -eq 'NoneNew') { return "SKIP|nicht wirksam: kein passendes Geraet hat danach die Paketversion aktiv - aktiv: $(Format-HUState $after). Windows hat einen anderen Treiber behalten (oder er greift erst nach einem Neustart); fuer diese Version 'Treiber erzwingen' einschalten ($dur)$note | Log: $log" }
         $warn = if ($am.Count -gt 0 -and $notNew.Count -gt 0 -and -not $reboot) { " | ACHTUNG: $($notNew.Count) Geraet(e) noch mit anderer Version - Neustart pruefen" } else { '' }
         # Schutz setzen: nur Geraete, auf denen die Paket-Version jetzt aktiv ist
         if ($protect) {
@@ -921,6 +932,7 @@ function Show-DrvPackageDetails($p) {
         $lines.Add("     'Treiber erzwingen' installiert diese Version trotzdem (z.B. aeltere, besser funktionierende Version).")
         $lines.Add("     'Vor Treiber-Updates schuetzen' sperrt danach die Geraete (Windows Pro/Education/Enterprise) -")
         $lines.Add('     Windows Update und andere Treiber-Installationen aendern den Treiber dann nicht mehr.')
+        $lines.Add('     Die Sperre gilt fuer die Hardware-ID, also auch fuer dasselbe Geraet an anderem Anschluss oder Dock.')
         $dw.TxtInfo.Text = ($lines -join "`r`n")
     } finally { $dw.Loading = $false }
 }
@@ -949,7 +961,7 @@ function Save-DrvForm {
         if ("$((Show-HMDialogBox -Owner $dw.Win -Text "Treiber erzwingen: Diese Version wird auf passende Geraete installiert, auch wenn Windows einen neueren oder besser bewerteten Treiber hat.`n`nNur verwenden, wenn genau diese Version gewuenscht ist. Weiter?" -Title 'Treiberverteilung' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return $null }
     }
     if ($set.ProtectDriver -and -not [bool]$p.Settings.ProtectDriver) {
-        if ("$((Show-HMDialogBox -Owner $dw.Win -Text "Vor Treiber-Updates schuetzen:`n`nNach der Installation setzt HUMig am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die betroffenen Geraete. Windows Update (und jede andere Treiber-Installation) aendert den Treiber dieser Geraete dann nicht mehr.`n`n- Nur Windows Pro, Education und Enterprise (bei Home wird nichts gesetzt).`n- Eine GPO/Intune-Richtlinie zur Geraeteinstallation ueberschreibt die lokale Einstellung.`n- Neue Treiber aus HUMig: die Sperre wird dafuer automatisch kurz aufgehoben.`n- Aufheben: 'Sperren am PC ...'.`n`nWeiter?" -Title 'Treiberverteilung' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return $null }
+        if ("$((Show-HMDialogBox -Owner $dw.Win -Text "Vor Treiber-Updates schuetzen:`n`nNach der Installation setzt HUMig am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die betroffenen Geraete. Windows Update (und jede andere Treiber-Installation) aendert den Treiber dieser Geraete dann nicht mehr.`n`n- Nur Windows Pro, Education und Enterprise (bei Home wird nichts gesetzt).`n- Eine GPO/Intune-Richtlinie zur Geraeteinstallation ueberschreibt die lokale Einstellung.`n- Die Sperre gilt fuer die Hardware-ID: dasselbe Geraet an einem anderen USB-Anschluss oder an einer Dockingstation (neue Geraete-Instanz) wird ebenfalls nicht installiert, bis die Sperre aufgehoben ist.`n- Neue Treiber aus HUMig: die Sperre wird dafuer automatisch kurz aufgehoben.`n- Aufheben: 'Sperren am PC ...'.`n`nWeiter?" -Title 'Treiberverteilung' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return $null }
     }
     if (-not (Save-DrvSettings $p $set)) { return $null }
     Out-Console "Treiberverteilung: Einstellungen fuer '$($set.Name)' gespeichert" 'Success'
@@ -1010,7 +1022,7 @@ function Show-DriverWindow {
           <TextBlock Grid.Row="5" Text="Timeout (Minuten):"/> <TextBox x:Name="txtTimeout" Grid.Row="5" Grid.Column="1" Width="80" HorizontalAlignment="Left"/>
           <TextBlock Grid.Row="6" Text="Hardware:"/>          <CheckBox x:Name="chkMatch" Grid.Row="6" Grid.Column="1" Content="nur installieren, wenn passende Hardware vorhanden ist (sonst: in den Treiberspeicher aufnehmen)"/>
           <TextBlock Grid.Row="7" Text="Erzwingen:"/>         <CheckBox x:Name="chkForceDrv" Grid.Row="7" Grid.Column="1" Content="Treiber erzwingen - auch wenn Windows einen neueren/besser bewerteten Treiber hat (nur INF)"/>
-          <TextBlock Grid.Row="8" Text="Schutz:"/>            <CheckBox x:Name="chkProtect" Grid.Row="8" Grid.Column="1" Content="nach der Installation vor Treiber-Updates schuetzen (Geraete-Sperre - nur Windows Pro/Education/Enterprise)" ToolTip="Setzt am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die Geraete mit diesem Treiber. Windows Update ersetzt den Treiber dann nicht mehr. HUMig hebt die Sperre fuer eigene spaetere Installationen selbst auf."/>
+          <TextBlock Grid.Row="8" Text="Schutz:"/>            <CheckBox x:Name="chkProtect" Grid.Row="8" Grid.Column="1" Content="nach der Installation vor Treiber-Updates schuetzen (Geraete-Sperre - nur Windows Pro/Education/Enterprise)" ToolTip="Setzt am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die Geraete mit diesem Treiber. Windows Update ersetzt den Treiber dann nicht mehr. HUMig hebt die Sperre fuer eigene spaetere Installationen selbst auf. Gilt auch fuer neu angesteckte Geraete mit derselben ID (anderer USB-Anschluss, Dockingstation): sie werden nicht installiert, bis die Sperre aufgehoben ist."/>
           <TextBlock Grid.Row="9" Text="Notiz:"/>             <TextBox x:Name="txtNote" Grid.Row="9" Grid.Column="1"/>
         </Grid>
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,6,0,6">

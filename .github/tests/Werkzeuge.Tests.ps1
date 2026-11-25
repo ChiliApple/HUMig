@@ -222,3 +222,98 @@ Describe 'Werkzeuge: Druckspooler und Systemdatei-Reparatur' {
         ${function:Start-HMSystemRepair}.ToString() | Should -Match ([regex]::Escape("(DISM|SFC) Code (-?\d+)' -and `$Matches[2] -ne '0') { `"WARN"))
     }
 }
+
+Describe 'Softwareverteilung: Nachkontrolle mit Mindestversion und Rechte der Paketablage' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Tools-Software.ps1')
+        # verschachtelte Funktion aus dem Text, der am Ziel-PC laeuft, herausloesen
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($script:RS_SwInstall.ToString(), [ref]$null, [ref]$null)
+        $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-HUInstallVerdict' }, $true) | Select-Object -First 1
+        . ([scriptblock]::Create($fn.Extent.Text))
+        $script:Det = { param([bool]$Hit, [string]$Ver) [pscustomobject]@{ Hit = $Hit; Version = $Ver; Missing = 'Name x*' } }
+        $script:NewAcl = {
+            param([string]$Sid, [string]$Rights, [string]$Type = 'Allow')
+            $a = New-Object System.Security.AccessControl.DirectorySecurity
+            $a.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier $Sid), $Rights, 'ContainerInherit,ObjectInherit', 'None', $Type)))
+            return $a
+        }
+    }
+    It 'Update ohne Wirkung (alte Version bleibt, Mindestversion verfehlt) ist FEHLER statt installiert' {
+        $r = Get-HUInstallVerdict 0 @(0) (& $script:Det $true '1.0') (& $script:Det $false '') '2.0' '5 s' ' - App 1.0' '' ''
+        $r | Should -Match '^FEHLER\|'
+        $r | Should -Match 'nur Version 1\.0 gefunden \(Mindestversion 2\.0\)'
+    }
+    It 'Mindestversion erreicht: OK wie bisher' {
+        Get-HUInstallVerdict 0 @(0) (& $script:Det $true '2.1') (& $script:Det $true '2.1') '2.0' '5 s' ' - App 2.1' '' '' | Should -Match '^OK\|installiert \(ExitCode 0'
+    }
+    It 'ohne Mindestversion: Verhalten unveraendert (OK bzw. FEHLER nicht gefunden)' {
+        Get-HUInstallVerdict 0 @(0) (& $script:Det $true '1.0') (& $script:Det $true '1.0') '' '5 s' '' '' '' | Should -Match '^OK\|'
+        Get-HUInstallVerdict 0 @(0) (& $script:Det $false '') (& $script:Det $false '') '' '5 s' '' '' '' | Should -Match '^FEHLER\|ExitCode 0, aber Programm danach nicht gefunden'
+        Get-HUInstallVerdict 0 @(0) $null $null '' '5 s' '' '' '' | Should -Match '^OK\|'
+    }
+    It 'Neustart-Code bleibt OK, sagt aber, dass die Version erst danach pruefbar ist' {
+        $r = Get-HUInstallVerdict 3010 @(0) (& $script:Det $true '1.0') (& $script:Det $false '') '2.0' '5 s' '' '' ''
+        $r | Should -Match '^OK\|installiert - NEUSTART erforderlich'
+        $r | Should -Match 'erst nach dem Neustart pruefbar'
+    }
+    It 'anderer Fehlercode: leer (Fehlercode-Zweig wie bisher)' {
+        Get-HUInstallVerdict 1603 @(0) (& $script:Det $true '1.0') (& $script:Det $false '') '2.0' '5 s' '' '' '' | Should -Be ''
+    }
+    It 'Nachkontrolle am Ziel nutzt die Mindestversion' {
+        $script:RS_SwInstall.ToString() | Should -Match ([regex]::Escape('$chkMin = if ($chk -and $mv) { Get-HUDetect $p $mv } else { $chk }'))
+    }
+    It 'breite Gruppen mit Schreibrecht werden erkannt, Leserechte und Administratoren nicht' {
+        @(Get-SwBroadWriters (& $script:NewAcl 'S-1-5-32-545' 'Modify')) | Should -Be @('Benutzer')
+        @(Get-SwBroadWriters (& $script:NewAcl 'S-1-1-0' 'Write')) | Should -Be @('Jeder')
+        @(Get-SwBroadWriters (& $script:NewAcl 'S-1-5-11' 'Delete')) | Should -Be @('Authentifizierte Benutzer')
+        @(Get-SwBroadWriters (& $script:NewAcl 'S-1-5-21-1111111111-2222222222-3333333333-513' 'Write')) | Should -Be @('Domaenen-Benutzer')
+        @(Get-SwBroadWriters (& $script:NewAcl 'S-1-5-32-545' 'ReadAndExecute')) | Should -BeNullOrEmpty
+        @(Get-SwBroadWriters (& $script:NewAcl 'S-1-5-32-544' 'FullControl')) | Should -BeNullOrEmpty
+        @(Get-SwBroadWriters (& $script:NewAcl 'S-1-5-32-545' 'Modify' 'Deny')) | Should -BeNullOrEmpty
+    }
+    It 'echter Ordner: ohne Freigabe kein Hinweis, mit Aendern fuer Benutzer ein Hinweis' {
+        $d = Join-Path $TestDrive 'Ablage'; New-Item -ItemType Directory -Path $d -Force | Out-Null
+        @(Get-SwPathWriteRisk @($d)) | Should -BeNullOrEmpty
+        $i = Get-Item -LiteralPath $d
+        $acl = $i.GetAccessControl()
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-32-545'), 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
+        if ($i.PSObject.Methods['SetAccessControl']) { $i.SetAccessControl($acl) } else { [System.IO.FileSystemAclExtensions]::SetAccessControl($i, $acl) }
+        $r = @(Get-SwPathWriteRisk @($d))
+        $r.Count | Should -Be 1
+        $r[0] | Should -Match 'aendern duerfen: Benutzer'
+        (Get-SwPackageRiskText ([pscustomobject]@{ SrcPath = $d; ConfigPath = '' }) '') | Should -Match 'laeuft als Administrator'
+        (Get-SwPackageRiskText ([pscustomobject]@{ SrcPath = (Join-Path $TestDrive 'gibtsnicht'); ConfigPath = '' }) '') | Should -Be ''
+    }
+    It 'Warnung steht in der Rueckfrage und im Protokoll (kein Klick mehr)' {
+        ${function:Confirm-SwDeploy}.ToString() | Should -Match 'Get-SwPackageRiskText'
+        ${function:Start-SoftwareDeploy}.ToString() | Should -Match 'Get-SwPackageRiskText'
+        ${function:Start-SwPackageUninstall}.ToString() | Should -Match 'Get-SwPackageRiskText'
+    }
+}
+
+Describe 'Treiberverteilung: Nachkontrolle und Hinweis zur Geraete-Sperre' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Tools-Drivers.ps1')
+        $script:DrvBody = $script:RS_DrvInstallBody.ToString()
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($script:DrvBody, [ref]$null, [ref]$null)
+        $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-HUDrvVerdict' }, $true) | Select-Object -First 1
+        . ([scriptblock]::Create($fn.Extent.Text))
+    }
+    It 'kein Geraet mit der neuen Version und kein Neustart: nicht installiert' {
+        Get-HUDrvVerdict 2 0 $false | Should -Be 'NoneNew'
+        Get-HUDrvVerdict 2 0 $true | Should -Be 'Ok'
+        Get-HUDrvVerdict 2 1 $false | Should -Be 'Ok'
+        Get-HUDrvVerdict 0 0 $false | Should -Be 'Ok'
+    }
+    It 'die Rueckgabe kommt vor der Sperren-Buchfuehrung (finally stellt die alten Sperren her)' {
+        $i1 = $script:DrvBody.IndexOf('if ($nv -eq ''NoneNew'') { return "SKIP|nicht wirksam')
+        $i1 | Should -BeGreaterThan 0
+        $i1 | Should -BeLessThan $script:DrvBody.IndexOf('$lockNote = Set-HUDrvLock $newOk')
+    }
+    It 'Hinweis: Sperre gilt auch fuer neu angesteckte Geraete (Rueckfrage, Ergebnis)' {
+        $script:DrvLockNote | Should -Match 'neu angesteckte'
+        ${function:Confirm-DrvDeploy}.ToString() | Should -Match 'DrvLockNote'
+        $script:DrvLibText | Should -Match 'gilt auch fuer neu angesteckte Geraete'
+        ${function:Confirm-DrvDeploy}.ToString() | Should -Match 'Get-SwPackageRiskText'
+    }
+}
