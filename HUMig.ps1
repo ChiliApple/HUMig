@@ -756,7 +756,8 @@ function Set-Status([string]$Text, [string]$Color = '#FFA6E3A1') {
 # in seiner Farbe sichtbar ($script:ConnectKeepStatus, gesetzt in Connect-Target waehrend OnFinished)
 function Set-ConnectStatus([string]$Text, [string]$Color = '#FFA6E3A1') {
     $k = $script:ConnectKeepStatus
-    if ($k) { Set-Status "$($k.Text) - $Text" $k.Color } else { Set-Status $Text $Color }
+    # laeuft inzwischen ein neuer Vorgang, kein altes Ergebnis voranstellen; ein Verbindungsfehler bleibt rot
+    if ($k -and -not $script:JobRunning) { Set-Status "$($k.Text) - $Text" $(if ($Color -eq '#FFF38BA8') { $Color } else { $k.Color }) } else { Set-Status $Text $Color }
 }
 function Confirm-Action([string]$Message, [string]$Title = 'HUMig') {
     return ((Show-HMDialogBox -Owner $script:Window -Text $Message -Title $Title -Mode 'YesNo' -Icon 'Warning') -eq 'Yes')
