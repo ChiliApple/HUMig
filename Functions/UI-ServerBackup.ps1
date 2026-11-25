@@ -42,7 +42,7 @@ function ConvertTo-HMSbProfile($p) {
         if ($p.DiskAfter -is [System.Collections.IDictionary]) { foreach ($k in @($p.DiskAfter.Keys)) { if ("$($p.DiskAfter[$k])" -match '^(Eject|Offline)$') { $da["$k".ToUpper()] = "$($p.DiskAfter[$k])" } } }
         else { foreach ($pp in @($p.DiskAfter.PSObject.Properties)) { if ("$($pp.Value)" -match '^(Eject|Offline)$') { $da[$pp.Name.ToUpper()] = "$($pp.Value)" } } }
     }
-    return [pscustomobject][ordered]@{
+    $o = [pscustomobject][ordered]@{
         Name = $name; DiskPrefix = $pre; Disks = $(if ($n -gt 0) { $n } else { 2 })
         VMs = @($p.VMs | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
         Volumes = @($p.Volumes | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim().ToUpper() })
@@ -58,19 +58,44 @@ function ConvertTo-HMSbProfile($p) {
         RebootPendingSkip = ($p.RebootPendingSkip -eq $true)
         BlockText = "$($p.BlockText)".Trim()
     }
+    # Felder, die diese Version nicht kennt (z. B. aus einer neueren HUMig-Version), beim Speichern nicht verwerfen
+    if ($p -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($pp in @($p.PSObject.Properties)) { if (-not $o.PSObject.Properties[$pp.Name]) { $o | Add-Member -NotePropertyName $pp.Name -NotePropertyValue $pp.Value } }
+    }
+    return $o
 }
+# Meldungen zu beschaedigten Zustandsdateien (Verlauf, Profile, Plattenzustand) in der Konsole zeigen
+function Show-HMSbStateNotes { foreach ($n in @(Get-HMSbStateNotes)) { if ($n) { Out-Console "Server-Backup: $n" 'Warning' } } }
 function Get-HMSbConfig {
-    $c = Read-JsonFile $script:SbCfgFile
+    # beschaedigte Datei: nicht still als leer behandeln - Meldung, beiseitegelegt wird sie beim naechsten Speichern (Save-HMSbConfig)
+    $c = $null
+    $st = Read-HMSbJsonState $script:SbCfgFile
+    if ($st.State -eq 'Ok') { $c = $st.Data }
+    elseif ($st.State -eq 'Corrupt' -and -not $script:SbCorruptSeen.ContainsKey($script:SbCfgFile)) {
+        $script:SbCorruptSeen[$script:SbCfgFile] = $true
+        Out-Console "Server-Backup: Profile (Config\serverbackup.json) sind beschaedigt ($($st.Error)) - es werden keine Profile angezeigt. Beim naechsten Speichern wird die Datei beiseitegelegt (Name mit Datum) und neu begonnen; eine angesteckte Sicherungsplatte bietet ihre gespeicherten Profile zum Uebernehmen an." 'Error'
+    } elseif ($st.State -eq 'Unreadable' -and -not $script:SbCorruptSeen.ContainsKey("$($script:SbCfgFile)|u")) {
+        $script:SbCorruptSeen["$($script:SbCfgFile)|u"] = $true
+        Out-Console "Server-Backup: Profile (Config\serverbackup.json) gerade nicht lesbar ($($st.Error)) - Speichern ist erst wieder moeglich, wenn die Datei lesbar ist." 'Error'
+    }
     $list = @()
     if ($c -and $c.Profiles) { foreach ($p in @($c.Profiles)) { if ($p -and "$($p.Name)".Trim()) { $list += (ConvertTo-HMSbProfile $p) } } }
     $ren = @()
     if ($c -and $c.Renames) { foreach ($r in @($c.Renames)) { if ($r -and "$($r.Old)" -and "$($r.New)") { $ren += [pscustomobject]@{ Old = "$($r.Old)"; New = "$($r.New)" } } } }
     $cw = if ($c -and $c.PSObject.Properties['ConflictWords'] -and $null -ne $c.ConflictWords) { @($c.ConflictWords | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() }) } else { $null }
-    return [pscustomobject]@{ LastProfile = "$($c.LastProfile)"; Profiles = $list; Renames = $ren; ConflictWords = $cw }
+    $extra = [ordered]@{}
+    if ($c -and $c -is [System.Management.Automation.PSCustomObject]) { foreach ($pp in @($c.PSObject.Properties)) { if ($pp.Name -notin @('LastProfile', 'Profiles', 'Renames', 'ConflictWords')) { $extra[$pp.Name] = $pp.Value } } }
+    return [pscustomobject]@{ LastProfile = "$($c.LastProfile)"; Profiles = $list; Renames = $ren; ConflictWords = $cw; Extra = $extra }
 }
 function Save-HMSbConfig($Cfg) {
+    # vorher pruefen: nicht lesbar = nicht speichern (nichts ueberschreiben), beschaedigt = beiseitelegen (Name mit Datum) und melden
+    try { [void](Read-HMSbJsonForWrite $script:SbCfgFile) }
+    catch { Out-Console "Server-Backup: Profile NICHT gespeichert - $($_.Exception.Message)" 'Error'; return }
+    Show-HMSbStateNotes
     $o = [ordered]@{ LastProfile = "$($Cfg.LastProfile)"; Profiles = @($Cfg.Profiles); Renames = @($Cfg.Renames) }
     if ($Cfg.PSObject.Properties['ConflictWords'] -and $null -ne $Cfg.ConflictWords) { $o.ConflictWords = @($Cfg.ConflictWords) }
+    # Felder, die diese Version nicht kennt (neuere HUMig-Version), unveraendert mitschreiben
+    if ($Cfg.PSObject.Properties['Extra'] -and $Cfg.Extra) { foreach ($k in @($Cfg.Extra.Keys)) { if (-not $o.Contains($k)) { $o[$k] = $Cfg.Extra[$k] } } }
     Write-JsonFile $script:SbCfgFile ([pscustomobject]$o) -Depth 6
 }
 # Umbenennungen (alter -> neuer Profilname) auf Verlaufseintraege nicht angesteckter Platten anwenden
@@ -736,6 +761,7 @@ function Update-HMSbHistory {
     $p = Get-HMSbProfile
     $all = Get-HMSbAllHistory
     $all = @($all)
+    Show-HMSbStateNotes
     $rows = @()
     if (-not $p) { $ui.dgSbHistory.ItemsSource = $rows; Show-HMSbDiskStatus $null; $ui.lblSbHostSystem.Text = ''; return }
     $mine = @($all | Where-Object { "$($_.Profile)" -eq $p.Name })

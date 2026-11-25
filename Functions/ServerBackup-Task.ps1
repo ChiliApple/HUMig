@@ -69,8 +69,11 @@ try { foreach ($x in @(Remove-HMSbStaleOnceTasks)) { Write-HMSbLog "Erledigte Hi
 
 # --- Profil (auch nach Umbenennung)
 $prof = $null
+$cfgState = $null
 try {
-    $cfg = Get-Content -LiteralPath (Join-Path $cfgDir 'serverbackup.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    # nur lesen (nie beiseitelegen - das macht die Oberflaeche beim Speichern), aber den Grund nennen
+    $cfgState = Read-HMSbJsonState (Join-Path $cfgDir 'serverbackup.json')
+    $cfg = $cfgState.Data
     $name = $ProfileName
     for ($i = 0; $i -lt 20; $i++) {
         $r = @(@($cfg.Renames) | Where-Object { $_ -and "$($_.Old)" -eq $name })[0]
@@ -80,7 +83,12 @@ try {
     $prof = @(@($cfg.Profiles) | Where-Object { $_ -and "$($_.Name)" -eq $name })[0]
     if ($prof) { $ProfileName = $name }
 } catch { }
-if (-not $prof) { Add-HMSbTaskError "Profil '$ProfileName' nicht gefunden (Config\serverbackup.json)"; exit 2 }
+if (-not $prof) {
+    $why = if ($cfgState -and $cfgState.State -eq 'Corrupt') { "Config\serverbackup.json ist beschaedigt ($($cfgState.Error)) - in HUMig > Server-Backup pruefen" }
+    elseif ($cfgState -and $cfgState.State -eq 'Unreadable') { "Config\serverbackup.json ist nicht lesbar ($($cfgState.Error))" }
+    else { "Profil '$ProfileName' nicht gefunden (Config\serverbackup.json)" }
+    Add-HMSbTaskError $why; exit 2
+}
 # laeuft dieses Profil schon (Oberflaeche, Hintergrund, anderer Zeitplan)? Dann nicht doppelt
 try {
     $live = @(Get-HMSbAliveRuns (Split-Path $localHist -Parent) $ProfileName)

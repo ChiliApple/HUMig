@@ -296,25 +296,29 @@ function Get-HMSbHealthVerdict($H, $Prev = $null) {
     return [pscustomobject]@{ Level = $lvl; Text = $txt; Detail = ($det -join ', ') }
 }
 # Messwerte je Platte (Bezeichnung) merken: Config\ServerBackup\disk-health.json - letzte 30 Messungen je Platte
-function Read-HMSbHealthStore([string]$Path) {
+function ConvertTo-HMSbHealthTable($J) {
     $h = @{}
-    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $h }
-    try {
-        $j = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-        foreach ($p in @($j.PSObject.Properties)) { $v = $p.Value; $h[$p.Name] = @($v) }
-    } catch { }
+    if ($null -eq $J) { return $h }
+    foreach ($p in @($J.PSObject.Properties)) { $v = $p.Value; $h[$p.Name] = @($v) }
     return $h
+}
+function Read-HMSbHealthStore([string]$Path) {
+    $s = Read-HMSbJsonState $Path
+    if ($s.State -eq 'Corrupt' -and -not $script:SbCorruptSeen.ContainsKey($Path)) {
+        $script:SbCorruptSeen[$Path] = $true
+        Add-HMSbStateNote "Zustandsdatei $Path ist beschaedigt ($($s.Error)) - sie wird bei der naechsten Messung beiseitegelegt (Name mit Datum) und neu begonnen"
+    }
+    if ($s.State -ne 'Ok') { return @{} }
+    return (ConvertTo-HMSbHealthTable $s.Data)
 }
 function Add-HMSbHealthStore([string]$Path, [string]$Label, $H) {
     if (-not $Path -or -not "$Label".Trim() -or -not $H) { return }
-    $store = Read-HMSbHealthStore $Path
+    $store = ConvertTo-HMSbHealthTable (Read-HMSbJsonForWrite $Path)
     $list = @(@($store[$Label]) | Where-Object { $_ })
     $list = @($list + @($H) | Select-Object -Last 30)
     $store[$Label] = $list
     $o = [ordered]@{}; foreach ($k in @($store.Keys | Sort-Object)) { $o[$k] = @($store[$k]) }
-    $dir = Split-Path $Path -Parent
-    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-    ([pscustomobject]$o | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $Path -Encoding UTF8 -Force
+    Write-HMSbJsonFile $Path ([pscustomobject]$o | ConvertTo-Json -Depth 6)
 }
 # Letzte Messung + Bewertung je Bezeichnung (fuer Anzeige): @{ Label = @{ Last; Verdict } }
 function Get-HMSbHealthSummary([hashtable]$Store) {
@@ -1085,33 +1089,138 @@ function New-HMSbNotifyMessage {
     return [pscustomobject]@{ Title = "Server-Backup '$ProfileName' auf $Computer $stTxt"; Lines = @($lines.ToArray()); Level = $level }
 }
 
-# Verlauf (JSON-Array) lesen / ergaenzen
-function Read-HMSbHistory([string]$Path) {
-    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return ,@() }
+# ----------------------------------------------------------------------------
+# Zustandsdateien (Verlauf, Profile auf der Platte, Plattenzustand, Laufend-Markierung) sicher lesen und schreiben
+#   Lesen: State Missing (keine Datei), Empty (leer), Ok, Corrupt (gelesen, aber kein JSON), Unreadable (gesperrt/nicht lesbar)
+#   Schreiben: erst vollstaendig in eine Hilfsdatei mit eindeutigem Namen (Oberflaeche und SYSTEM-Lauf schreiben dieselbe
+#   Datei), dann ersetzen. Eine defekte Datei wird vor dem Schreiben beiseitegelegt (<Name>.defekt-<Zeit>.json) und gemeldet;
+#   eine nicht lesbare Datei wird nie ueberschrieben (Fehler an den Aufrufer). Reines Lesen benennt nie etwas um.
+#   Eigene Namen (HMSb): die Engine laeuft auch allein (geplante Aufgabe, Hintergrund-Runspaces).
+# ----------------------------------------------------------------------------
+$script:SbStateNotes = New-Object System.Collections.Generic.List[string]
+$script:SbCorruptSeen = @{}
+function Add-HMSbStateNote([string]$Text) { if ($Text -and -not $script:SbStateNotes.Contains($Text)) { $script:SbStateNotes.Add($Text) } }
+# Meldungen zu beschaedigten Zustandsdateien abholen (danach leer)
+function Get-HMSbStateNotes {
+    $a = @($script:SbStateNotes.ToArray())
+    $script:SbStateNotes.Clear()
+    return $a
+}
+function Format-HMSbShortError([string]$Text) { $t = ("$Text" -replace '\s+', ' ').Trim(); if ($t.Length -gt 160) { $t = $t.Substring(0, 160) + ' ...' }; return $t }
+function Read-HMSbJsonState([string]$Path) {
+    $r = [pscustomobject]@{ State = 'Missing'; Data = $null; Error = '' }
+    if (-not $Path -or -not [System.IO.File]::Exists($Path)) { return $r }
+    $txt = $null
+    for ($i = 1; $i -le 3; $i++) {
+        try {
+            # Teilen inkl. Loeschen: ein gleichzeitiges Ersetzen durch den anderen Prozess wird nicht blockiert
+            $fs = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+            try { $sr = New-Object System.IO.StreamReader($fs, (New-Object System.Text.UTF8Encoding($false)), $true); $txt = $sr.ReadToEnd() } finally { $fs.Dispose() }
+            break
+        } catch {
+            if (-not [System.IO.File]::Exists($Path)) { return $r }
+            $r.Error = Format-HMSbShortError $_.Exception.Message
+            if ($i -lt 3) { Start-Sleep -Milliseconds 300 }
+        }
+    }
+    if ($null -eq $txt) { $r.State = 'Unreadable'; return $r }
+    $r.Error = ''
+    $tt = $txt.Trim([char[]]@(' ', "`t", "`r", "`n", [char]0, [char]0xFEFF))
+    if (-not $tt) { $r.State = 'Empty'; return $r }
+    # abgeschnittene Datei (Absturz beim Schreiben): PowerShell 7 liest unvollstaendiges JSON sonst still als Teilstand
+    if (-not (($tt.StartsWith('[') -and $tt.EndsWith(']')) -or ($tt.StartsWith('{') -and $tt.EndsWith('}')))) { $r.State = 'Corrupt'; $r.Error = 'unvollstaendig (Anfang oder Ende fehlt)'; return $r }
+    try { $r.Data = ConvertFrom-Json -InputObject $txt -ErrorAction Stop; $r.State = 'Ok' }
+    catch { $r.State = 'Corrupt'; $r.Error = Format-HMSbShortError $_.Exception.Message }
+    return $r
+}
+# Elemente eines gelesenen JSON-Arrays (leer bei $null)
+function Get-HMSbJsonItems($Data) {
+    if ($null -eq $Data) { return ,@() }
+    $arr = @($Data | ForEach-Object { $_ } | Where-Object { $_ })
+    return ,$arr
+}
+function Move-HMSbCorruptFile([string]$Path) {
+    $dir = [System.IO.Path]::GetDirectoryName($Path)
+    $base = [System.IO.Path]::GetFileNameWithoutExtension($Path); $ext = [System.IO.Path]::GetExtension($Path)
+    $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+    $dst = [System.IO.Path]::Combine($dir, "$base.defekt-$stamp$ext"); $i = 2
+    while ([System.IO.File]::Exists($dst)) { $dst = [System.IO.Path]::Combine($dir, "$base.defekt-$stamp-$i$ext"); $i++ }
+    [System.IO.File]::Move($Path, $dst)
+    return $dst
+}
+# Lesen vor dem Schreiben: nicht lesbar = Fehler (nichts schreiben), defekt = beiseitelegen, melden, mit leerem Stand weiter
+function Read-HMSbJsonForWrite([string]$Path) {
+    $s = Read-HMSbJsonState $Path
+    if ($s.State -eq 'Unreadable') { throw "$Path ist nicht lesbar ($($s.Error)) - nichts geschrieben, Datei unveraendert" }
+    if ($s.State -ne 'Corrupt') { return $s.Data }
+    $dst = ''
+    try { $dst = Move-HMSbCorruptFile $Path } catch { throw "$Path ist beschaedigt und konnte nicht beiseitegelegt werden ($(Format-HMSbShortError $_.Exception.Message)) - nichts geschrieben, Datei unveraendert" }
+    $txt = "Zustandsdatei $Path war beschaedigt ($($s.Error)) - beiseitegelegt als $([System.IO.Path]::GetFileName($dst)), neu begonnen"
+    Write-HMSbLog $txt 'Warning'
+    Add-HMSbStateNote $txt
+    Write-HMSbEvent 'Warning' "HUMig Server-Backup auf ${env:COMPUTERNAME}: $txt"
+    return $null
+}
+function Write-HMSbJsonFile([string]$Path, [string]$Text) {
+    $dir = [System.IO.Path]::GetDirectoryName($Path)
+    if ($dir -and -not [System.IO.Directory]::Exists($dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $tmp = "$Path.humig-$([guid]::NewGuid().ToString('N')).tmp"
     try {
-        $j = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-        $arr = @($j | ForEach-Object { $_ } | Where-Object { $_ })
-        return ,$arr
-    } catch { return ,@() }
+        [System.IO.File]::WriteAllText($tmp, $Text, (New-Object System.Text.UTF8Encoding($true)))
+        for ($i = 1; $true; $i++) {
+            try {
+                if ([System.IO.File]::Exists($Path)) { [System.IO.File]::Replace($tmp, $Path, [NullString]::Value) } else { [System.IO.File]::Move($tmp, $Path) }
+                break
+            } catch {
+                if ($i -lt 5) { Start-Sleep -Milliseconds 200; continue }
+                # manche Datentraeger/Freigaben koennen Replace nicht: alte Datei beiseite, neue an ihren Platz, alte loeschen
+                # (scheitert der zweite Schritt, kommt die alte Datei zurueck - nie ohne Datei)
+                if (-not [System.IO.File]::Exists($Path)) { throw }
+                $old = "$Path.humig-$([guid]::NewGuid().ToString('N')).alt"
+                [System.IO.File]::Move($Path, $old)
+                try { [System.IO.File]::Move($tmp, $Path) } catch { [System.IO.File]::Move($old, $Path); throw }
+                try { [System.IO.File]::Delete($old) } catch { }
+                break
+            }
+        }
+    } catch {
+        try { if ([System.IO.File]::Exists($tmp)) { [System.IO.File]::Delete($tmp) } } catch { }
+        throw
+    }
+}
+function Write-HMSbJsonList([string]$Path, $Items) { Write-HMSbJsonFile $Path (ConvertTo-Json -InputObject @($Items) -Depth 5) }
+
+# Verlauf (JSON-Array) lesen / ergaenzen
+# Lesen fuer die Anzeige: beschaedigte Datei = leer + einmalige Meldung (beiseitegelegt wird erst beim naechsten Schreiben)
+function Read-HMSbHistory([string]$Path) {
+    $s = Read-HMSbJsonState $Path
+    if ($s.State -eq 'Corrupt' -and -not $script:SbCorruptSeen.ContainsKey($Path)) {
+        $script:SbCorruptSeen[$Path] = $true
+        $txt = "Zustandsdatei $Path ist beschaedigt ($($s.Error)) - sie wird beim naechsten Eintrag beiseitegelegt (Name mit Datum) und neu begonnen"
+        Write-HMSbLog $txt 'Warning'
+        Add-HMSbStateNote $txt
+    }
+    if ($s.State -ne 'Ok') { return ,@() }
+    $arr = Get-HMSbJsonItems $s.Data
+    return ,$arr
 }
 function Add-HMSbHistory([string]$Path, $Entry) {
-    $old = Read-HMSbHistory $Path
+    $old = Read-HMSbJsonForWrite $Path
+    $old = Get-HMSbJsonItems $old
     $arr = @($old) + @($Entry)
     if ($arr.Count -gt 1000) { $arr = @($arr[($arr.Count - 1000)..($arr.Count - 1)]) }
-    $dir = Split-Path $Path -Parent
-    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-    ConvertTo-Json -InputObject @($arr) -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8
+    Write-HMSbJsonList $Path $arr
 }
 
 # Eintraege aus einem Verlauf entfernen (Schluessel Datum|Host|Platte), Rueckgabe = Anzahl entfernt
 function Remove-HMSbHistory([string]$Path, [string[]]$Keys) {
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return 0 }
     $k = @{}; foreach ($x in @($Keys)) { if ($x) { $k[$x.ToUpperInvariant()] = $true } }
-    $old = Read-HMSbHistory $Path
-    $old = @($old)
+    $old = Read-HMSbJsonForWrite $Path
+    $old = Get-HMSbJsonItems $old
     $keep = @($old | Where-Object { -not $k.ContainsKey(("$($_.Date)|$($_.Host)|$($_.Disk)").ToUpperInvariant()) })
     $n = $old.Count - $keep.Count
-    if ($n -gt 0) { ConvertTo-Json -InputObject @($keep) -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8 }
+    if ($n -gt 0) { Write-HMSbJsonList $Path $keep }
     return $n
 }
 
@@ -1261,7 +1370,8 @@ function Set-HMSbRunMarker($Ctx, [string]$Report, [datetime]$Started) {
             Started = $Started.ToString('o'); Pid = $PID; ProcStart = $ps; Boot = (Get-HMSbBootTime)
             VMs = (@($Ctx.VMs) -join ', '); Volumes = (@($Ctx.Volumes) -join ', '); Version = "$($Ctx.Version)"; Kind = $(if ($Ctx.Scheduled) { 'Zeitplan' } else { 'Oberflaeche' })
         }
-        Set-Content -LiteralPath (Get-HMSbRunMarkerPath $dir "$($Ctx.Profile)") -Value ($m | ConvertTo-Json) -Encoding UTF8
+        # ueber eine Hilfsdatei: ein anderer Prozess (Resolve-HMSbAbortedRuns) liest nie eine halb geschriebene Markierung
+        Write-HMSbJsonFile (Get-HMSbRunMarkerPath $dir "$($Ctx.Profile)") ($m | ConvertTo-Json)
     } catch { Write-HMSbLog "Laufend-Markierung nicht geschrieben: $($_.Exception.Message)" 'Debug' }
 }
 function Clear-HMSbRunMarker($Ctx) {
@@ -1533,7 +1643,7 @@ function Sync-HMSbDiskLabel([string]$Letter, [string]$Label, [string]$LocalHisto
         $keys["$($e.Date)|$($e.Host)|$($e.Profile)"] = $true
         if ("$($e.Disk)" -ne $Label) { $e.Disk = $Label; $n++ }
     }
-    if ($n) { ConvertTo-Json -InputObject @($disk) -Depth 5 | Set-Content -LiteralPath $f -Encoding UTF8 }
+    if ($n) { Write-HMSbJsonList $f $disk }
     if ($LocalHistory -and (Test-Path -LiteralPath $LocalHistory)) {
         $loc = Read-HMSbHistory $LocalHistory
         $loc = @($loc)
@@ -1541,7 +1651,7 @@ function Sync-HMSbDiskLabel([string]$Letter, [string]$Label, [string]$LocalHisto
         foreach ($e in $loc) {
             if ($keys.ContainsKey("$($e.Date)|$($e.Host)|$($e.Profile)") -and "$($e.Disk)" -ne $Label) { $e.Disk = $Label; $m++ }
         }
-        if ($m) { ConvertTo-Json -InputObject @($loc) -Depth 5 | Set-Content -LiteralPath $LocalHistory -Encoding UTF8 }
+        if ($m) { Write-HMSbJsonList $LocalHistory $loc }
         $n += $m
     }
     return $n
@@ -1554,23 +1664,23 @@ function Read-HMSbDiskProfiles([string]$Dir) {
 }
 function Save-HMSbDiskProfile([string]$Dir, $Profile) {
     $f = Join-Path $Dir 'profiles.json'
-    $old = Read-HMSbHistory $f
+    $old = Read-HMSbJsonForWrite $f
+    $old = Get-HMSbJsonItems $old
     $name = "$($Profile.Name)"
     $arr = @(@($old) | Where-Object { "$($_.Name)" -ne $name }) + @($Profile)
-    if (-not (Test-Path -LiteralPath $Dir)) { New-Item -ItemType Directory -Path $Dir -Force | Out-Null }
-    ConvertTo-Json -InputObject @($arr) -Depth 5 | Set-Content -LiteralPath $f -Encoding UTF8
+    Write-HMSbJsonList $f $arr
 }
 # Profil umbenennen in Verlauf/Profil-Dateien (Tool-Ordner oder Platte); Rueckgabe: Anzahl geaenderter Eintraege
 function Rename-HMSbProfileInFile([string]$Path, [string]$Old, [string]$New) {
     if (-not (Test-Path -LiteralPath $Path)) { return 0 }
-    $arr = Read-HMSbHistory $Path
-    $arr = @($arr)
+    $arr = Read-HMSbJsonForWrite $Path
+    $arr = Get-HMSbJsonItems $arr
     $n = 0
     foreach ($e in $arr) {
         if ($e.PSObject.Properties['Profile'] -and "$($e.Profile)" -eq $Old) { $e.Profile = $New; $n++ }
         if ($e.PSObject.Properties['DiskPrefix'] -and $e.PSObject.Properties['Name'] -and "$($e.Name)" -eq $Old) { $e.Name = $New; $n++ }
     }
-    if ($n) { ConvertTo-Json -InputObject @($arr) -Depth 5 | Set-Content -LiteralPath $Path -Encoding UTF8 }
+    if ($n) { Write-HMSbJsonList $Path $arr }
     return $n
 }
 
