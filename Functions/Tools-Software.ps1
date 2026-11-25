@@ -437,6 +437,22 @@ $script:RS_SwInstall = {
         if (-not $r.Display) { $r.Display = $r.Text }
         return $r
     }
+    # Ergebnis nach dem Installer: $Chk = Erkennung ohne, $ChkMin = mit Mindestversion. Rueckgabe Ergebniszeile oder '' (= Fehlercode-Zweig)
+    function Get-HUInstallVerdict($Rc, $OkCodes, $Chk, $ChkMin, [string]$MinVer, [string]$Dur, [string]$Ver, [string]$DeskNote, [string]$Log) {
+        $lg = if ($Log) { " | Log: $Log" } else { '' }
+        $reboot = ($Rc -eq 3010 -or $Rc -eq 1641)
+        if (@($OkCodes) -contains $Rc) {
+            if ($Chk -and -not $Chk.Hit) { return "FEHLER|ExitCode $Rc, aber Programm danach nicht gefunden (Erkennung '$($Chk.Missing)' pruefen) ($Dur)$lg" }
+            if ($MinVer -and $ChkMin -and -not $ChkMin.Hit) { return "FEHLER|ExitCode $Rc, aber danach nur Version $(if ($Chk.Version) { $Chk.Version } else { '?' }) gefunden (Mindestversion $MinVer) - Update nicht wirksam ($Dur)$lg" }
+            return "OK|installiert (ExitCode $Rc, $Dur)$Ver$DeskNote"
+        }
+        if ($reboot) {
+            # Neustart noetig: die neue Version ist evtl. erst danach sichtbar - OK bleibt, aber ehrlich gesagt
+            $vn = if ($MinVer -and $Chk -and $Chk.Hit -and $ChkMin -and -not $ChkMin.Hit) { " - Version $MinVer erst nach dem Neustart pruefbar (jetzt $($Chk.Version))" } else { '' }
+            return "OK|installiert - NEUSTART erforderlich (ExitCode $Rc, $Dur)$Ver$vn$DeskNote"
+        }
+        return ''
+    }
     # Neue Desktop-Verknuepfungen (Allgemein, eigener, Default) entfernen - einige Setups legen sie erst nach dem Ende an
     function Remove-HUNewLinks([string[]]$Dirs, [string[]]$Before, [int]$Rounds = 15, [int]$DelaySec = 2) {
         $n = 0
@@ -519,14 +535,13 @@ $script:RS_SwInstall = {
         $deskNote = ''
         if ($noDesk) { $nl = Remove-HUNewLinks $deskDirs $deskBefore; if ($nl) { $deskNote = " - $nl Desktop-Verknuepfung(en) entfernt" } }
         $chk = if ($dn -or $dc -or $dk -or $df) { Get-HUDetect $p '' } else { $null }
+        # Nachkontrolle mit Mindestversion: ein gescheitertes Update (alte Version bleibt) gilt nicht als installiert
+        $chkMin = if ($chk -and $mv) { Get-HUDetect $p $mv } else { $chk }
         $after = if ($chk -and $chk.App) { $chk.App } else { $null }
         $ver = if ($after) { " - $($after.DisplayName) $($after.DisplayVersion)" } elseif ($chk -and $chk.Hit -and $chk.Display) { " - $($chk.Display)" } else { '' }
         $dur = "$(if ($sw.Elapsed.TotalSeconds -lt 60) { '{0} s' -f [int]$sw.Elapsed.TotalSeconds } else { '{0} min {1} s' -f [int][Math]::Floor($sw.Elapsed.TotalMinutes), $sw.Elapsed.Seconds })"
-        if ($okCodes -contains $rc) {
-            if ($chk -and -not $chk.Hit) { return "FEHLER|ExitCode $rc, aber Programm danach nicht gefunden (Erkennung '$($chk.Missing)' pruefen) ($dur)$(if ($log) { " | Log: $log" })" }
-            return "OK|installiert (ExitCode $rc, $dur)$ver$deskNote"
-        }
-        if ($rc -eq 3010 -or $rc -eq 1641) { return "OK|installiert - NEUSTART erforderlich (ExitCode $rc, $dur)$ver$deskNote" }
+        $v = Get-HUInstallVerdict $rc $okCodes $chk $chkMin $mv $dur $ver $deskNote $log
+        if ($v) { return $v }
         $hint = switch ($rc) { 1603 { ' = schwerer Fehler (MSI-Log)' } 1618 { ' = andere Installation laeuft gerade' } 1619 { ' = Paket nicht lesbar' } 1620 { ' = Paket ungueltig' } 1633 { ' = falsche Plattform (32/64 Bit)' } 1638 { ' = andere Version bereits installiert' } default { '' } }
         return "FEHLER|ExitCode $rc$hint ($dur)$(if ($log) { " | Log: $log" })"
     } catch { return "FEHLER|$($_.Exception.Message -replace '[\r\n|]+', ' ')" }
