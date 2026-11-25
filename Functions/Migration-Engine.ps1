@@ -1966,7 +1966,7 @@ function Test-HMBackupIntegrity {
             if (Test-HMCancel $Job) { break }
             if (-not $rc -or [int]$rc.ExitCode -ge 8) { $noCompare.Add("$($m.Module)/$($m.Name) (Robocopy-Code $(if ($rc) { $rc.ExitCode } else { '?' }))"); continue }
             # Exitcode unter 8, nur die Zusammenfassung nicht lesbar (Windows in anderer Sprache): kein Problem, nur Hinweis
-            if (-not $rc.HaveDirs) { $unparsed++; $notes.Add("$($m.Module)/$($m.Name): Zusammenfassung nicht auswertbar, Vergleich nach Exitcode in Ordnung (Code $($rc.ExitCode))"); continue }
+            if (-not $rc.HaveDirs) { $unparsed++; $notes.Add("$($m.Module)/$($m.Name): Zusammenfassung nicht auswertbar, Vergleich ohne Fehler laut Exitcode (Code $($rc.ExitCode), Unterschiede nicht gezaehlt)"); continue }
             $diffFiles += $rc.FilesCopied; $diffBytes += $rc.BytesCopied
         }
     } finally { $Ctx.ListOnly = $false }
@@ -2173,7 +2173,7 @@ function Test-HMBackupSource([hashtable]$Ctx, $Job) {
     $why = Get-HMPathUnreachableReason $pReach
     if ($why -and (Test-Path -LiteralPath $pReach -PathType Container)) {
         # Ordner da, aber nicht auflistbar (z. B. Rechte nur auf Unterordnern): kein Gesamtfehler - Unterordner werden einzeln gesichert und gemeldet
-        Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'Source' -Name 'Quelle' -Status 'Warning' -Msg "Profilordner $pReach nicht auflistbar ($why) - die Ordner darin werden einzeln gesichert; was dort nicht lesbar ist, steht beim jeweiligen Modul. Rechte des Profilordners pruefen"
+        Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'Source' -Name 'Quelle' -Status 'Warning' -Msg "Profilordner $pReach nicht auflistbar ($why) - die Ordner darin werden einzeln gesichert; was dort nicht lesbar ist, steht als Fehler beim jeweiligen Modul. Rechte des Profilordners pruefen"
         return
     }
     if ($why) {
@@ -2192,6 +2192,9 @@ function Backup-HMFolderItem {
         # liegt der Ordner unter einer nicht erreichbaren Quelle (Test-HMBackupSource), ist "nicht vorhanden" nicht belegt -> Fehler
         $ur = @(@($Ctx.SourceUnreachable) | Where-Object { $_ -and (Test-HMPathUnder $srcLocal $_) }) | Select-Object -First 1
         if ($ur) { return (& $mk 'Error' "Quelle nicht erreichbar: $srcLocal (siehe Eintrag Quelle) - nicht gesichert") }
+        # "nicht vorhanden" nur, wenn es den Ordner wirklich nicht gibt - sonst (z. B. Zugriff verweigert) Fehler mit Grund
+        $nr = Get-HMPathUnreachableReason $src
+        if ($nr -and $nr -ne 'nicht gefunden') { return (& $mk 'Error' "nicht lesbar: $srcLocal ($nr) - nicht gesichert. Rechte pruefen und Backup wiederholen") }
         return (& $mk 'Skip' "nicht vorhanden: $srcLocal")
     }
     foreach ($p in @($Ctx.Options.ExcludePaths | Where-Object { $_ })) { if (Test-HMPathUnder $srcLocal $p) { return (& $mk 'Skip' "ausgeschlossen: $srcLocal") } }
@@ -2768,6 +2771,8 @@ function Backup-HMUsmt {
     # vorhandenes USMT.MIG eines frueheren Laufs merken (wird nicht geloescht) - als Ergebnis zaehlt nur ein neu geschriebenes
     $old = Get-ChildItem -LiteralPath $store -Filter 'USMT.MIG' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     $oldInfo = if ($old) { [pscustomobject]@{ Path = $old.FullName; Length = [long]$old.Length; WriteUtc = $old.LastWriteTimeUtc } } else { $null }
+    # stammt der vorhandene Stand aus einem Lauf, dessen USMT-Ergebnis ein Fehler war (z. B. halbe Rueckkopie), ist er kein brauchbarer alter Stand
+    $oldUsable = ($null -ne $oldInfo -and $Ctx.PrevUsmtUsable -ne $false)
     $copyBack = $null
     if ($Ctx.IsRemote) {
         # USMT + XML auf den Ziel-PC kopieren und dort ausfuehren
@@ -2778,8 +2783,8 @@ function Backup-HMUsmt {
             if (-not $rc -or $rc.Level -in @('Error', 'Cancel') -or [int]$rc.FilesFailed -gt 0) {
                 Remove-Item -LiteralPath $rReach -Recurse -Force -ErrorAction SilentlyContinue
                 # aelterer Stand vorhanden: Warnung (bleibt im Restore waehlbar), sonst Fehler
-                $was = if ($oldInfo) { " Vorhandener USMT-Stand vom $($oldInfo.WriteUtc.ToLocalTime().ToString('dd.MM.yyyy HH:mm')) bleibt, ist aber nicht aktuell - ein Restore spielt diesen aelteren Stand ein." } else { '' }
-                return [pscustomobject]@{ Name = 'Usmt'; Status = $(if ($oldInfo) { 'Warning' } else { 'Error' }); Msg = ("{0} konnte nicht nach {1} kopiert werden (Robocopy-Code {2}) - ScanState nicht gestartet.{3} Verbindung pruefen und Backup wiederholen" -f $cp[3], $Ctx.Computer, $(if ($rc) { $rc.ExitCode } else { '?' }), $was); Bytes = $(if ($oldInfo) { [long]$oldInfo.Length } else { 0 }); Source = $usmt }
+                $was = if ($oldUsable) { " Vorhandener USMT-Stand vom $($oldInfo.WriteUtc.ToLocalTime().ToString('dd.MM.yyyy HH:mm')) bleibt, ist aber nicht aktuell - ein Restore spielt diesen aelteren Stand ein." } else { '' }
+                return [pscustomobject]@{ Name = 'Usmt'; Status = $(if ($oldUsable) { 'Warning' } else { 'Error' }); Msg = ("{0} konnte nicht nach {1} kopiert werden (Robocopy-Code {2}) - ScanState nicht gestartet.{3} Verbindung pruefen und Backup wiederholen" -f $cp[3], $Ctx.Computer, $(if ($rc) { $rc.ExitCode } else { '?' }), $was); Bytes = $(if ($oldUsable) { [long]$oldInfo.Length } else { 0 }); Source = $usmt }
             }
         }
         $exeDir = Join-Path $remoteDir 'BIN'; $xDir = Join-Path $remoteDir 'XML'; $sDir = Join-Path $remoteDir 'STORE'
@@ -2809,7 +2814,7 @@ function Backup-HMUsmt {
     if ($fresh.Fresh) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'Warning'; Msg = "ScanState Code $code$why (Details: $store\scanstate.log)"; Bytes = $mig.Length; Source = $usmt } }
     # liegt ein MIG vor, das weder neu noch der unveraenderte alte Stand ist (z. B. halbe Rueckkopie vom Ziel-PC): nicht verwendbar -> Fehler
     $oldSame = ($oldInfo -and $newInfo -and $oldInfo.Length -eq $newInfo.Length -and $oldInfo.WriteUtc -eq $newInfo.WriteUtc)
-    if ($mig -and -not $oldSame) {
+    if ($mig -and (-not $oldSame -or -not $oldUsable)) {
         return [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; Msg = "USMT.MIG in der Ablage ist nicht verwendbar (ScanState Code $code$why$(if ($fresh.Why) { "; $($fresh.Why)" })) - kein gueltiger Stand. Log: $store\scanstate.log - Ursache beheben und Backup wiederholen"; Bytes = 0; Source = $usmt }
     }
     if ($mig) {
@@ -2870,6 +2875,9 @@ function Start-HMBackup {
         if ($prev) { $Ctx.BackupPath = $Ctx.ExistingBackup }
     }
     # Ausschluesse des letzten Laufs (neu ausgeschlossene Pfade werden beiseitegelegt); $null = unbekannt (aeltere Backups)
+    # USMT-Ergebnis des weitergefuehrten Backups: war es ein Fehler, gilt ein dort liegendes USMT.MIG nicht als brauchbarer alter Stand
+    $Ctx.PrevUsmtUsable = $true
+    if ($prev) { $pu = @(@($prev.Modules) | Where-Object { $_ -and "$($_.Id)" -eq 'Usmt' })[0]; if ($pu -and "$($pu.Status)" -notin @('OK', 'Warning')) { $Ctx.PrevUsmtUsable = $false } }
     $Ctx.PrevExcludePaths = $null
     if ($prev -and $prev.PSObject.Properties['ExcludePaths']) { $Ctx.PrevExcludePaths = @($prev.ExcludePaths | Where-Object { $_ }) }
     Write-HMLog $Job "BACKUP  $($Ctx.Computer) \ $($Ctx.UserFolder)  ->  $target" 'Header'
@@ -5010,6 +5018,8 @@ function Start-HMRestore {
                 # Warnung nur, wenn ein gewaehltes Modul die Benutzer-Registry braucht (gleiche Bedingung wie beim Backup)
                 $needHive = @($Ctx.Modules | ForEach-Object { $_.Items } | Where-Object {
                     ($_.Type -eq 'Reg' -and $_.Key -match '^HK(CU|EY_CURRENT_USER)') -or ($_.Type -eq 'Builtin' -and $_.Handler -in @('PrinterConnections', 'Wallpaper')) -or ($_.Exceptions -eq 'Profile') }).Count -gt 0
+                # Nacharbeiten mit Benutzer-Registry (NumLock, Explorer-Favoriten)
+                if ($Ctx.PostOptions -and ($Ctx.PostOptions.NumLockOn -or $Ctx.PostOptions.ExplorerFavorites)) { $needHive = $true }
                 if ($needHive) {
                     # ohne Ausnahme hat Mount-HMHive den Grund schon protokolliert -> Eintrag ohne zweite Zeile
                     Add-HMRunResult -Ctx $Ctx -Job $Job -Id 'UserRegistry' -Name 'Benutzer-Registry' -Status 'Warning' -Msg "am Ziel-PC nicht verfuegbar ($(if ($hiveWhy) { $hiveWhy } else { 'NTUSER.DAT nicht ladbar, Grund im Protokoll' })) - Registry-Teile und Anmelde-Aktionen des Benutzers entfallen. Benutzer abmelden bzw. PC neu starten und Restore wiederholen" -NoLog:(-not $hiveWhy)

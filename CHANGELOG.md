@@ -10,11 +10,11 @@
 - **Nicht erreichbare Quelle ist ein Fehler:** Ist der PC, die Freigabe oder der Profilordner nicht lesbar, meldet das Backup "Quelle nicht erreichbar" mit Grund. Die Ordner darunter gelten nicht mehr als "nicht vorhanden".
   - Was trotzdem erreichbar ist, wird weiter gesichert.
   - Der Profilordner wird nur geprüft, wenn ein gewähltes Modul Daten des Benutzers sichert. Ist er vorhanden, aber nicht auflistbar, ist das eine Warnung.
-  - Ordner, die es am PC wirklich nicht gibt, bleiben wie bisher "nicht vorhanden".
+  - Ordner, die es am PC wirklich nicht gibt, bleiben wie bisher "nicht vorhanden". Ein Ordner ohne Leserechte ist ein Fehler "nicht lesbar".
 - **Gescheiterte Anmeldung an der Freigabe steht im Ergebnis:** als Warnung, nicht mehr nur als Zeile im Protokoll.
 - **Windows-Einstellungen (USMT) nur mit neuem Stand OK:** Erzeugt ScanState keinen neuen Stand, meldet das Backup eine Warnung mit dem Datum des vorhandenen alten Stands. Der alte Stand bleibt im Restore wählbar, ein Restore spielt ihn ein. HUMig löscht ihn dafür nicht vorher.
   - Scheitert beim Fernzugriff die Kopie von USMT zum PC oder zurück, wird das gemeldet, statt einen alten Stand als neues Ergebnis zu nehmen.
-  - Gibt es gar keinen USMT-Stand, ist das wie bisher ein Fehler.
+  - Gibt es gar keinen USMT-Stand, ist das wie bisher ein Fehler. Ebenso, wenn der vorhandene Stand unvollständig ist (z. B. nach einer abgebrochenen Rückkopie vom PC) oder aus einem Lauf mit USMT-Fehler stammt.
 - **WLAN-Profile:** Meldet der Export einen Fehler oder lässt sich ein Profil nicht ins Backup kopieren, ist das Ergebnis eine Warnung. Gibt es am PC keine gespeicherten WLAN-Profile, steht "keine WLAN-Profile gefunden", ohne Warnung.
 - **Prüfung nach dem Backup:** Konnte der Vergleich nicht laufen, war die Quelle nicht erreichbar oder waren die Dateien der Stichprobe nicht lesbar, steht "Prüfung nicht möglich" mit Grund und das Backup endet mit Warnung, statt "vollständig" zu melden.
   - Gibt es keine geeignete Datei für die Stichprobe (nur sehr große oder gerade geänderte Dateien) oder ist die Robocopy-Zusammenfassung auf einem Windows in anderer Sprache nicht auswertbar, steht nur ein Hinweis im Protokoll.

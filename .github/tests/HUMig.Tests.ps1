@@ -3950,6 +3950,12 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             Start-HMRestore -Ctx $ctx -Job $j
             @($j.Result.Modules | Where-Object { $_.Id -eq 'UserRegistry' }).Count | Should -Be 0
             $j.Result.Status | Should -Be 'OK'
+            # Nacharbeiten mit Benutzer-Registry (NumLock) brauchen sie: dann Warnung
+            $ctx2 = New-TRestoreCtx @((New-TMod 'Drivers' 'Treiber' 'Computer' 'Drivers')) (New-TDir 'prof') 'S-1-5-21-1-2-3-1001'
+            $ctx2.PostOptions = @{ NumLockOn = $true }
+            $j2 = New-TJob
+            Start-HMRestore -Ctx $ctx2 -Job $j2
+            @($j2.Result.Modules | Where-Object { $_.Id -eq 'UserRegistry' -and $_.Status -eq 'Warning' }).Count | Should -Be 1
         }
         It 'Punkt 4: Anmelde-Aufgabe nicht registriert - Drucker auf Warnung' {
             Mock Register-HMLogonTask { $false }
@@ -4071,6 +4077,16 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             $r.Status | Should -Be 'Error'
             $r.Msg | Should -Match 'nicht verwendbar'
         }
+        It 'Punkt 5 (Backup): alter Stand aus einem Lauf mit USMT-Fehler gilt nicht als brauchbar' {
+            Mock Find-HMUsmt { (Join-Path $TestDrive 'usmtbin') }; New-Item -ItemType Directory -Path (Join-Path $TestDrive 'usmtbin') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $TestDrive 'usmtbin\scanstate.exe') -Value 'x'
+            $bb = New-TDir 'BB'
+            $st = Join-Path $bb 'Usmt\STORE\USMT'; New-Item -ItemType Directory -Path $st -Force | Out-Null; [System.IO.File]::WriteAllText((Join-Path $st 'USMT.MIG'), 'halb')
+            Mock Invoke-HMTarget { 5 }
+            $ctx = @{ BackupPath = $bb; Account = 'DOM\u'; ToolRoot = $TestDrive; IsRemote = $false; Settings = @{}; Threads = 2; PrevUsmtUsable = $false }
+            $r = Backup-HMUsmt $ctx (New-TJob) ([pscustomobject]@{ Id = 'Usmt' })
+            $r.Status | Should -Be 'Error'
+            $r.Msg | Should -Match 'nicht verwendbar'
+        }
         It 'Punkt 5 (Backup): kein USMT-Stand und ScanState gescheitert bleibt Fehler' {
             Mock Find-HMUsmt { (Join-Path $TestDrive 'usmtbin') }; New-Item -ItemType Directory -Path (Join-Path $TestDrive 'usmtbin') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $TestDrive 'usmtbin\scanstate.exe') -Value 'x'
             Mock Invoke-HMTarget { 5 }
@@ -4128,6 +4144,19 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             @($ok.RunResults | Where-Object { $_ }).Count | Should -Be 0
             @($ok.SourceUnreachable | Where-Object { $_ }).Count | Should -Be 0
         }
+        It 'Punkt 6: Ordner in einem gesperrten Profil ist Fehler "nicht lesbar", nicht "nicht vorhanden" (echte Sperre in TestDrive)' {
+            $prof = New-TDir 'profZu'; New-Item -ItemType Directory -Path (Join-Path $prof 'Documents') -Force | Out-Null
+            $me = '*' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            $null = & icacls.exe $prof /deny "${me}:(OI)(CI)F"
+            try {
+                $ctx = @{ IsRemote = $false; SourceUnreachable = @(); Options = @{}; SyncRoots = @(); BackupPath = (New-TDir 'BF') }
+                $it = [pscustomobject]@{ Name = 'Docs'; Type = 'Folder'; Path = (Join-Path $prof 'Documents') }
+                $r = Backup-HMFolderItem $ctx (New-TJob) ([pscustomobject]@{ Id = 'Profile'; Name = 'Profil' }) $it @{}
+            } finally { $null = & icacls.exe $prof /remove:d $me }
+            $r.Status | Should -Be 'Error'
+            $r.Msg | Should -Match 'nicht lesbar'
+            $r.Msg | Should -Not -Match 'nicht vorhanden'
+        }
         It 'Punkt 6: nur Computer-Module gewaehlt - Profilordner wird nicht geprueft' {
             $mods = @([pscustomobject]@{ Id = 'DataC'; Name = 'Daten auf C:'; Scope = 'Machine'; Items = @([pscustomobject]@{ Name = 'C'; Type = 'Folder'; Path = '{SYSTEMDRIVE}\' }) })
             $ctx = @{ IsRemote = $false; ProfilePath = (Join-Path $TestDrive 'gibtEsNicht2'); Modules = $mods; Options = @{} }
@@ -4141,6 +4170,7 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
         }
         It 'Punkt 6: Profilordner vorhanden, aber nicht auflistbar - Warnung, kein Gesamtfehler' {
             $prof = New-TDir 'profGesperrt'
+            Mock Get-HMPathUnreachableReason { '' }
             Mock Get-HMPathUnreachableReason { 'Zugriff verweigert' } -ParameterFilter { $Path -eq $prof }
             $ctx = @{ IsRemote = $false; ProfilePath = $prof; Modules = @([pscustomobject]@{ Id = 'Profile'; Name = 'Profil'; Scope = 'User'; Items = @() }); Options = @{} }
             Test-HMBackupSource $ctx (New-TJob)
