@@ -1,5 +1,30 @@
 ﻿# Changelog
 
+## v2.1.22 - 2026-11-25
+### 🗄️ Server-Backup: Sicherung
+- **Abbrechen beendet nur den eigenen Lauf:** Wer abbricht, während HUMig auf eine andere laufende Windows-Sicherung wartet, beendet diese andere Sicherung nicht mehr.
+- **Ziel-Platte wird vor dem Start geprüft:** Gehört der Laufwerksbuchstabe nicht mehr zur gewählten Platte, fragt HUMig vor dem Start nach.
+  - Im Zeitplan und im Hintergrund läuft die Sicherung weiter und meldet die Abweichung als Warnung in Bericht, Verlauf und Teams.
+- **Früher Fehler steht im Verlauf:** Startet eine Sicherung gar nicht erst (Ziel fehlt, VM unbekannt), steht das jetzt als Fehler im Verlauf.
+  - Im Zeitplan führen auch unerwartete Fehler vor dem Start zu Verlaufseintrag, Ereignis und Teams-Meldung.
+- **Sperrzeit-Warnung zuverlässig:** Die Warnung "Sperrzeit hat begonnen" kommt auch, wenn die Windows-Sicherung laufend Fortschritt meldet.
+- **Laufzeit-Schätzung ohne abgebrochene Läufe:** Durch Neustart abgebrochene Läufe verfälschen die erwartete Dauer nicht mehr.
+- **Schreibtempo ohne Wartezeit:** Die Zeit, in der HUMig auf eine andere Sicherung wartet, zählt nicht mehr zum Schreibtempo.
+- **Keine fremde Version im Verlauf:** Schlägt die VM-Sicherung fehl, trägt HUMig nicht mehr die Version eines früheren Laufs ein.
+### 💾 Server-Backup: Platten
+- **Auswerfen und Einrichten fragen bei laufender Sicherung nach:** Läuft eine Sicherung auf der Platte, auch im Hintergrund oder als Zeitplan, fragt HUMig vor dem Auswerfen, Offline-Schalten und Einrichten nach.
+- **Durchgereichte Platten bleiben unberührt:** Platten, die direkt an eine VM durchgereicht sind, schaltet HUMig nicht mehr online und bietet sie nicht zum Einrichten an.
+- **Einrichten mit zwei Fenstern sicher:** Passt die markierte Zeile nicht mehr zur Platte, bricht HUMig ab und löscht nichts.
+### 📋 Server-Backup: Profile und Verlauf
+- **Keine leere VM-Liste mehr im Profil:** Während VMs und Laufwerke gelesen werden, speichert, plant oder startet HUMig nichts.
+  - Ist die Liste nicht lesbar, bleibt beim Speichern die gespeicherte Auswahl unverändert.
+- **Beschädigte Dateien werden nicht mehr überschrieben:** Ein beschädigter Verlauf, beschädigte Profile oder Plattenwerte werden mit Datum im Namen beiseitegelegt und gemeldet, danach beginnt HUMig neu.
+  - Eine gerade gesperrte Datei wird nie überschrieben.
+- **Zeitpläne nach Umbenennen sichtbar:** Nach dem Umbenennen eines Profils zeigt der Reiter dessen Zeitpläne weiter an. Beim Löschen eines Profils nennt die Rückfrage die Zeitpläne, die bestehen bleiben.
+- **Neuere Einstellungen bleiben erhalten:** Profilfelder aus einer neueren HUMig-Version gehen beim Speichern nicht mehr verloren.
+### ✅ Qualität
+- **Tests:** 67 neue Tests für das Server-Backup.
+
 ## v2.1.21 - 2026-11-25
 ### 🪟 Hauptfenster
 - **Statuszeile zeigt das echte Ergebnis:** Nach einem Vorgang steht dort z. B. "Backup erfolgreich", "Backup mit Warnungen" oder "Restore mit Fehlern", passend gefärbt: grün nur bei Erfolg, gelb bei Warnungen, rot bei Fehlern, zu wenig Platz und Abbruch.
