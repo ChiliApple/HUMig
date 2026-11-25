@@ -13,6 +13,12 @@ BeforeAll {
         if (-not $f) { throw "Funktion $Name fehlt in HUMig.ps1" }
         return $f.Extent.Text
     }
+    # Klick-Handler eines Knopfs ($ui.<Name>.Add_Click({ ... })) als Scriptblock
+    function Get-ZielHandler([string]$Name) {
+        $m = @($script:MainAst.FindAll({ param($x) $x -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and "$($x.Member)" -eq 'Add_Click' -and $x.Expression.Extent.Text -eq "`$ui.$Name" }, $true))[0]
+        if (-not $m) { throw "Handler $Name fehlt" }
+        return [scriptblock]::Create($m.Arguments[0].ScriptBlock.EndBlock.Extent.Text)
+    }
     $code = [regex]::Match($script:MainSrc, '(?s)#region HMZiel.*?#endregion HMZiel').Value
     if (-not $code) { throw 'Region HMZiel fehlt in HUMig.ps1' }
     . ([scriptblock]::Create($code))
@@ -22,24 +28,37 @@ BeforeAll {
 }
 
 Describe 'Ziel: Computernamen vergleichen' {
-    It 'lokal, gross/klein, FQDN gegen kurzen Namen, IP-Adressen' {
-        Test-HMSameComputer 'pc01' 'PC01' 'EIGEN' 'a.local' | Should -BeTrue
-        Test-HMSameComputer '' 'EIGEN' 'EIGEN' 'a.local' | Should -BeTrue
-        Test-HMSameComputer 'localhost' '.' 'EIGEN' 'a.local' | Should -BeTrue
-        Test-HMSameComputer 'PC01.schule.local' 'PC01' 'EIGEN' 'a.local' | Should -BeTrue
-        Test-HMSameComputer 'PC01' 'PC02' 'EIGEN' 'a.local' | Should -BeFalse
-        Test-HMSameComputer 'PC01' 'EIGEN' 'EIGEN' 'a.local' | Should -BeFalse
-        Test-HMSameComputer '203.0.113.5' '203' 'EIGEN' 'a.local' | Should -BeFalse
-        Test-HMSameComputer '203.0.113.5' '203.0.113.5' 'EIGEN' 'a.local' | Should -BeTrue
+    BeforeAll {
+        $ea = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\Migration-Engine.ps1'), [ref]$null, [ref]$null)
+        . ([scriptblock]::Create(@($ea.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq 'Test-HMIsLocal' }, $true))[0].Extent.Text))
     }
-    It 'FQDN mit anderer Domaene ist ein anderer PC, auch beim eigenen Namen' {
-        Test-HMSameComputer 'PC01.a.local' 'PC01.b.local' 'EIGEN' 'a.local' | Should -BeFalse
-        Test-HMSameComputer 'PC01.a.local' 'pc01.A.LOCAL' 'EIGEN' 'a.local' | Should -BeTrue
-        Test-HMSameComputer 'eigen.a.local' 'EIGEN' 'EIGEN' 'a.local' | Should -BeTrue
-        Test-HMSameComputer 'eigen.b.local' 'EIGEN' 'EIGEN' 'a.local' | Should -BeFalse
-        Test-HMSameComputer 'eigen.a.local' 'eigen.b.local' 'EIGEN' 'a.local' | Should -BeFalse
-        # Arbeitsgruppe (keine Domaene bekannt): eigener Name mit Domaene gilt als lokal
-        Test-HMSameComputer 'eigen.fritz.box' '' 'EIGEN' '' | Should -BeTrue
+    It 'lokal, gross/klein, FQDN gegen kurzen Namen, IP-Adressen' {
+        Test-HMSameComputer 'pc01' 'PC01' 'EIGEN' | Should -BeTrue
+        Test-HMSameComputer '' 'EIGEN' 'EIGEN' | Should -BeTrue
+        Test-HMSameComputer 'localhost' '.' 'EIGEN' | Should -BeTrue
+        Test-HMSameComputer 'PC01.schule.local' 'PC01' 'EIGEN' | Should -BeTrue
+        Test-HMSameComputer 'PC01' 'PC02' 'EIGEN' | Should -BeFalse
+        Test-HMSameComputer 'PC01' 'EIGEN' 'EIGEN' | Should -BeFalse
+        Test-HMSameComputer '203.0.113.5' '203' 'EIGEN' | Should -BeFalse
+        Test-HMSameComputer '203.0.113.5' '203.0.113.5' 'EIGEN' | Should -BeTrue
+    }
+    It 'zwei fremde FQDN mit anderer Domaene sind verschiedene PCs' {
+        Test-HMSameComputer 'PC01.a.local' 'PC01.b.local' 'EIGEN' | Should -BeFalse
+        Test-HMSameComputer 'PC01.a.local' 'pc01.A.LOCAL' 'EIGEN' | Should -BeTrue
+    }
+    It 'eigener PC: dieselbe Regel wie Test-HMIsLocal der Engine (Anzeige = Ausfuehrung)' {
+        foreach ($n in @('', ' ', '.', 'localhost', 'LOCALHOST', '127.0.0.1', $env:COMPUTERNAME, $env:COMPUTERNAME.ToLower(), "$($env:COMPUTERNAME).a.local", "$($env:COMPUTERNAME).andere.domaene", 'PC-FREMD', 'pc-fremd.a.local', '203.0.113.5', '::1')) {
+            ((Get-HMComputerKey $n) -eq '.') | Should -Be (Test-HMIsLocal $n) -Because "Name '$n'"
+        }
+        Test-HMSameComputer "$($env:COMPUTERNAME).andere.domaene" $env:COMPUTERNAME | Should -BeTrue
+    }
+    It 'Gedaechtnis PC -> Benutzer: je PC ein Eintrag, anderer PC findet nichts' {
+        $m = @{}
+        Set-HMUserMemoryEntry $m 'PC01' (New-ZielProfile 'S-B' 'PC01\bert') 'EIGEN'
+        (Get-HMUserMemoryEntry $m 'pc01' 'EIGEN').SID | Should -Be 'S-B'
+        Get-HMUserMemoryEntry $m 'PC02' 'EIGEN' | Should -BeNullOrEmpty
+        Set-HMUserMemoryEntry $m 'PC01' $null 'EIGEN'
+        (Get-HMUserMemoryEntry $m 'PC01' 'EIGEN').Account | Should -Be 'PC01\bert'
     }
 }
 Describe 'Ziel: Feld gegen verbundenen PC' {
@@ -147,6 +166,9 @@ Describe 'Ziel: Verbinden verwirft veraltete Antworten und behaelt die Auswahl' 
         . ([scriptblock]::Create((Get-ZielFn 'Get-HMFieldComputer')))
         . ([scriptblock]::Create((Get-ZielFn 'Get-TargetComputer')))
         . ([scriptblock]::Create((Get-ZielFn 'Connect-Target')))
+        . ([scriptblock]::Create((Get-ZielFn 'Save-HMUserMemory')))
+        . ([scriptblock]::Create((Get-ZielFn 'Select-HMFieldTarget')))
+        function Update-RestoreTargetLabel { }
         function Set-ConnectStatus { param($t, $c) $script:LastStatus = $t }
         function Out-Console { param($m, $l) $script:Lines.Add("$l|$m") }
         function Update-HMTargetLabel { }
@@ -161,7 +183,7 @@ Describe 'Ziel: Verbinden verwirft veraltete Antworten und behaelt die Auswahl' 
     BeforeEach {
         $script:Calls = New-Object System.Collections.Generic.List[object]
         $script:Lines = New-Object System.Collections.Generic.List[string]
-        $script:Target = $null; $script:ConnectSeq = 0; $script:Profiles = @(); $script:UserMode = $false
+        $script:Target = $null; $script:ConnectSeq = 0; $script:Profiles = @(); $script:UserMode = $false; $script:HMUserMemory = @{}
         $script:BackupChecks = @{}; $script:JobEndStatus = $null; $script:Engine = 'x'; $script:RemoteCred = $null
         $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC02' }; cmbUser = [pscustomobject]@{ Items = (New-Object System.Collections.ArrayList); SelectedIndex = -1; Text = '' }; lblSid = [pscustomobject]@{ Text = '' } }
     }
@@ -205,6 +227,31 @@ Describe 'Ziel: Verbinden verwirft veraltete Antworten und behaelt die Auswahl' 
         Connect-Target
         & $script:Calls[1].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[1].State
         & $script:Calls[2].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[2].State
+        $ui.cmbUser.SelectedIndex | Should -Be 1
+    }
+    It 'BLOCKIEREND behoben: PC01 mit bert, PC02 zweimal verbinden - auf PC02 gilt die Vorauswahl, nicht bert' {
+        $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
+        & $script:Calls[0].OnComplete ([pscustomobject]@{ Profiles = @((New-ZielProfile 'S-A' 'DOM\anna' $true), (New-ZielProfile 'S-B' 'DOM\bert')); Error = $null; WinRM = $null }) $script:Calls[0].State
+        $ui.cmbUser.SelectedIndex = 1   # bert
+        $ui.cmbComputer.Text = 'PC02'; Connect-Target -FromField
+        $ui.cmbUser.SelectedIndex = -1
+        Connect-Target -FromField
+        $p2 = @((New-ZielProfile 'S-C' 'DOM\cara' $true), (New-ZielProfile 'S-B' 'DOM\bert'))
+        & $script:Calls[1].OnComplete ([pscustomobject]@{ Profiles = $p2; Error = $null; WinRM = $null }) $script:Calls[1].State
+        & $script:Calls[2].OnComplete ([pscustomobject]@{ Profiles = $p2; Error = $null; WinRM = $null }) $script:Calls[2].State
+        $ui.cmbUser.SelectedIndex | Should -Be 0
+        (($script:Lines -join "`n") -match 'kein Profil mehr') | Should -BeFalse
+    }
+    It 'Werkzeugklick mit Tippfehler schaltet still um; zurueck auf PC01 ist derselbe Benutzer wieder gewaehlt' {
+        $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
+        $p = @((New-ZielProfile 'S-A' 'DOM\anna' $true), (New-ZielProfile 'S-B' 'DOM\bert'))
+        & $script:Calls[0].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[0].State
+        $ui.cmbUser.SelectedIndex = 1
+        $ui.cmbComputer.Text = 'PC0l'; Select-HMFieldTarget "'Laufwerke (C$)'"
+        $script:Target.Computer | Should -Be 'PC0l'
+        $ui.cmbUser.SelectedIndex = -1
+        $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
+        & $script:Calls[1].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[1].State
         $ui.cmbUser.SelectedIndex | Should -Be 1
     }
     It 'anderer PC: eingetipptes Konto des bisherigen PCs wird geleert, gleicher PC behaelt es' {
@@ -258,12 +305,13 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
         . ([scriptblock]::Create((Get-ZielFn 'Get-HMFieldComputer')))
         . ([scriptblock]::Create((Get-ZielFn 'Confirm-HMTarget')))
         . ([scriptblock]::Create((Get-ZielFn 'Test-HMBackupRestoreRunning')))
+        . ([scriptblock]::Create((Get-ZielFn 'Get-HMBackupRestoreTitle')))
         function Out-Console { }
         function Update-HMTargetLabel { }
         function Connect-Target([switch]$FromField) { $script:Connected = "FromField=$([bool]$FromField)" }
         function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Asked = @{ Text = $Text; Mode = $Mode; Default = $Default }; return $script:Answer }
     }
-    BeforeEach { $script:Asked = $null; $script:Connected = $null; $script:UserMode = $false; $script:JobRunning = $false; $script:JobTitle = ''; $script:Target = @{ Computer = 'PC01'; Connected = $true }; $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC02' } } }
+    BeforeEach { $script:Asked = $null; $script:Connected = $null; $script:UserMode = $false; $script:JobRunning = $false; $script:JobTitle = ''; $script:RestoreAfterInstall = $null; $script:Target = @{ Computer = 'PC01'; Connected = $true }; $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC02' } } }
     It 'Feld passt: keine Rueckfrage' {
         $ui.cmbComputer.Text = 'pc01'
         Confirm-HMTarget 'Backup' | Should -BeTrue
@@ -293,6 +341,12 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
         $script:JobTitle = 'Groesse ermitteln'
         Confirm-HMTarget "'Netzwerktest'" | Should -BeFalse
         $script:Asked.Text | Should -Not -Match 'Waehrend'
+        $script:Asked.Text | Should -Match 'Fuer PC02: Nein, nach dem laufenden Vorgang im Feld Enter oder Verbinden\.$'
+        # Phase 'erst Programme installieren, dann Restore' zaehlt zum Restore
+        $script:JobRunning = $false; $script:RestoreAfterInstall = @{ Computer = 'PC01' }
+        Confirm-HMTarget "'Netzwerktest'" | Should -BeFalse
+        $script:Asked.Text | Should -Match "Waehrend 'Restore \(vorher Programme installieren\)' laeuft"
+        $script:RestoreAfterInstall = $null; $script:JobRunning = $true
         $script:Answer = 'Yes'; $script:JobTitle = 'Restore'
         Confirm-HMTarget "'Netzwerktest'" | Should -BeTrue
         $ui.cmbComputer.Text | Should -Be 'PC01'
@@ -318,6 +372,10 @@ Describe 'Ziel: Werkzeuge (Busy, nur PC, Benutzer)' {
         . ([scriptblock]::Create((Get-ZielFn 'Test-HMBackupRestoreRunning')))
         . ([scriptblock]::Create((Get-ZielFn 'Select-HMFieldTarget')))
         . ([scriptblock]::Create((Get-ZielFn 'Use-HMPcTarget')))
+        . ([scriptblock]::Create((Get-ZielFn 'Get-HMBackupRestoreTitle')))
+        . ([scriptblock]::Create((Get-ZielFn 'Open-HMLink')))
+        . ([scriptblock]::Create((Get-ZielFn 'Get-TargetComputer')))
+        function Save-HMUserMemory { }
         function Out-Console { }
         function Update-HMTargetLabel { }
         function Update-RestoreTargetLabel { }
@@ -326,7 +384,7 @@ Describe 'Ziel: Werkzeuge (Busy, nur PC, Benutzer)' {
         function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Asked = @{ Text = $Text; Mode = $Mode; Default = $Default }; return $script:Answer }
     }
     BeforeEach {
-        $script:Asked = $null; $script:TargetAsked = $null; $script:TargetOk = $true; $script:JobRunning = $false; $script:JobTitle = ''; $script:UserMode = $false; $script:LastStatus = $null
+        $script:Asked = $null; $script:TargetAsked = $null; $script:TargetOk = $true; $script:JobRunning = $false; $script:JobTitle = ''; $script:UserMode = $false; $script:LastStatus = $null; $script:RestoreAfterInstall = $null
         $script:Target = @{ Computer = 'PC01'; Connected = $true }; $script:ConnectSeq = 4; $script:Profiles = @(New-ZielProfile 'S-A' 'PC01\anna')
         $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC01' }; cmbUser = [pscustomobject]@{ Items = (New-Object System.Collections.ArrayList); Text = 'PC01\anna' }; lblSid = [pscustomobject]@{ Text = 'C:\Users\anna' } }
         [void]$ui.cmbUser.Items.Add('PC01\anna')
@@ -390,6 +448,38 @@ Describe 'Ziel: Werkzeuge (Busy, nur PC, Benutzer)' {
             Test-HMToolStart @{ Kind = 'Pc'; Busy = $true; Name = 'Neustart / Herunterfahren' } | Should -BeTrue
             $script:Asked | Should -BeNullOrEmpty
         }
+    }
+    It 'Busy waehrend der Installationsphase vor dem Restore' {
+        $script:RestoreAfterInstall = @{ Computer = 'PC01' }; $script:Answer = 'No'
+        Test-HMToolStart @{ Kind = 'Pc'; Busy = $true; Name = 'Neustart / Herunterfahren' } | Should -BeFalse
+        $script:Asked.Text | Should -Match '^Es laeuft gerade: Restore \(vorher Programme installieren\)\.'
+        # nur PC: waehrend dieser Phase kein stilles Umschalten
+        $ui.cmbComputer.Text = 'PC02'
+        Test-HMToolStart @{ Kind = 'Pc'; Busy = $false; Name = 'Netzwerktest' } | Should -BeTrue
+        $script:TargetAsked | Should -Be "'Netzwerktest'"
+        $script:Target.Computer | Should -Be 'PC01'
+    }
+    It 'reiner Web-Link: weder umschalten noch fragen; Link mit {COMPUTER}: wie nur PC' {
+        function Open-HMLinkNow { param($u, $c, $s, $p) $script:Opened = "$u|$p" }
+        $ui.cmbComputer.Text = 'PC02'
+        Open-HMLink 'https://beispiel.invalid/hilfe' $false
+        $script:Target.Computer | Should -Be 'PC01'
+        $script:Opened | Should -Be 'https://beispiel.invalid/hilfe|'
+        Open-HMLink 'https://beispiel.invalid/?pc={COMPUTER}' $false
+        $script:Target.Computer | Should -Be 'PC02'
+        $script:Opened | Should -Be 'https://beispiel.invalid/?pc={COMPUTER}|PC02'
+    }
+    It 'Gespeicherte Anmeldedaten: nur dieser PC, kein Umschalten; Neu installieren: nur PC, still umschalten' {
+        function Show-HMCredentials { $script:Ran = 'cred' }
+        function Start-HMAppReinstall { $script:Ran = 'reinst' }
+        $ui.cmbComputer.Text = 'PC02'
+        & (Get-ZielHandler 'btnToolCredList')
+        $script:Ran | Should -Be 'cred'
+        $script:Target.Computer | Should -Be 'PC01'
+        & (Get-ZielHandler 'btnReinstall')
+        $script:Ran | Should -Be 'reinst'
+        $script:Target.Computer | Should -Be 'PC02'
+        $script:TargetAsked | Should -BeNullOrEmpty
     }
     It 'Zuordnung der Werkzeuge (Busy, Benutzer, ohne Ziel) und Weitergabe an Links- und Rechtsklick' {
         $f = Get-ZielFn 'Add-ToolButton'
@@ -468,10 +558,11 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
     Context 'Rueckfrage im Hauptfenster' {
         BeforeAll {
             . ([scriptblock]::Create((Get-ZielFn 'Confirm-HMBackupNotInUse')))
+            . ([scriptblock]::Create((Get-ZielFn 'Get-HMUsedBackupConflict')))
             function Out-Console { }
             function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Asked = @{ Text = $Text; Mode = $Mode; Default = $Default }; return $script:Answer }
         }
-        BeforeEach { $script:Asked = $null; $script:JobRunning = $true; $script:JobTitle = 'Restore'; $script:JobCtx = @{ Backup = [pscustomobject]@{ Path = 'X:\B\r' } } }
+        BeforeEach { $script:Asked = $null; $script:JobRunning = $true; $script:JobTitle = 'Restore'; $script:JobCtx = @{ Backup = [pscustomobject]@{ Path = 'X:\B\r' } }; $script:RestoreAfterInstall = $null }
         It 'Restore laeuft aus diesem Backup: Warnung mit Standard Nein' {
             $script:Answer = 'No'
             Confirm-HMBackupNotInUse @('X:\B\r') 'r' | Should -BeFalse
@@ -485,6 +576,11 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
             $script:JobRunning = $false
             Confirm-HMBackupNotInUse @('X:\B\r') 'r' | Should -BeTrue
             $script:Asked | Should -BeNullOrEmpty
+        }
+        It 'Installationsphase vor dem Restore: dessen Backup gilt als benutzt' {
+            $script:JobRunning = $false; $script:RestoreAfterInstall = @{ Backup = [pscustomobject]@{ Path = 'X:\B\inst' } }; $script:Answer = 'No'
+            Confirm-HMBackupNotInUse @('X:\B\inst') 'inst' | Should -BeFalse
+            $script:Asked.Text | Should -Match "vom laufenden Vorgang 'Restore' benutzt \(der Restore liest daraus\)"
         }
     }
     Context 'Vorgang starten, waehrend das Backup geloescht wird; Start scheitert' {
@@ -532,6 +628,7 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
             . (Join-Path $script:Root 'Functions\UI-Quality.ps1')
             . ([scriptblock]::Create((Get-ZielFn 'Add-HMDeleting')))
             . ([scriptblock]::Create((Get-ZielFn 'Remove-HMDeleting')))
+            . ([scriptblock]::Create((Get-ZielFn 'Get-HMUsedBackupConflict')))
             function Out-Console { }
             function Update-BackupList { }
             function Update-BackupRootInfo { }
@@ -541,7 +638,7 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
         }
         BeforeEach {
             $script:Async = $null; $script:Texts = New-Object System.Collections.Generic.List[string]; $script:Answers = New-Object System.Collections.Queue
-            $script:CurRoot = 'X:\B'; $script:BackupInfos = @(); $script:JobRunning = $false; $script:JobCtx = $null; $script:JobTitle = ''
+            $script:CurRoot = 'X:\B'; $script:BackupInfos = @(); $script:JobRunning = $false; $script:JobCtx = $null; $script:JobTitle = ''; $script:RestoreAfterInstall = $null
             $script:HMDeleting = New-Object System.Collections.Generic.List[string]; $script:Engine = 'x'
             $script:Win = [pscustomobject]@{ Closed = $false } | Add-Member -MemberType ScriptMethod -Name Close -Value { $this.Closed = $true } -PassThru
         }
@@ -570,5 +667,47 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
             & $script:Async.OnComplete @('OK X:\B\alt1') $script:Async.State
             $script:HMDeleting.Count | Should -Be 0
         }
+    }
+}
+
+Describe 'Ziel: Im Backup suchen - An Originalort zurueck' {
+    BeforeAll {
+        $sa = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\Tools-School.ps1'), [ref]$null, [ref]$null)
+        . ([scriptblock]::Create(@($sa.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq 'Restore-HMSearchHitsToOrigin' }, $true))[0].Extent.Text))
+        function Confirm-HMTarget([string]$Action) { $script:TargetAsked = $Action; return $script:TargetOk }
+        function Get-TargetComputer { 'PC02' }
+        function Test-HMIsLocal($c) { $false }
+        function Get-SelectedProfile { $script:Sel }
+        function Get-HMOriginalPath($b, $p) { $script:Mapped++; 'C:\Users\alt\Desktop\a.txt' }
+        function Get-HMProtectedTargetRoot { $null }
+        function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Asked = $Text; return 'No' }
+    }
+    BeforeEach { $script:TargetAsked = $null; $script:TargetOk = $true; $script:Asked = $null; $script:Mapped = 0; $script:Sel = $null }
+    It 'anderer PC im Feld und abgelehnt: nichts' {
+        $script:TargetOk = $false
+        Restore-HMSearchHitsToOrigin @([pscustomobject]@{ Pfad = 'x' }) ([pscustomobject]@{ Path = 'X:\B\b'; ProfilePath = 'C:\Users\alt' }) $null
+        $script:TargetAsked | Should -Be "'An Originalort zurueck'"
+        $script:Mapped | Should -Be 0
+        $script:Asked | Should -BeNullOrEmpty
+    }
+    It 'kein Benutzer gewaehlt (z.B. nach stillem Umschalten): Rueckfrage sagt klar, wohin Profildateien gehen' {
+        Restore-HMSearchHitsToOrigin @([pscustomobject]@{ Pfad = 'x' }) ([pscustomobject]@{ Path = 'X:\B\b'; ProfilePath = 'C:\Users\alt' }) $null
+        $script:Asked | Should -Match 'ACHTUNG: An PC02 ist kein Benutzer gewaehlt\. 1 Datei\(en\) aus dem Profil gehen an den Profilpfad aus dem Backup \(C:\\Users\\alt\)\.'
+    }
+    It 'Benutzer gewaehlt: Profildateien gehen in dessen Profil, keine Warnung' {
+        $script:Sel = New-ZielProfile 'S-N' 'PC02\neu'
+        Restore-HMSearchHitsToOrigin @([pscustomobject]@{ Pfad = 'x' }) ([pscustomobject]@{ Path = 'X:\B\b'; ProfilePath = 'C:\Users\alt' }) $null
+        $script:Asked | Should -Match 'C:\\Users\\neu\\Desktop\\a\.txt'
+        $script:Asked | Should -Not -Match 'kein Benutzer gewaehlt'
+    }
+}
+
+Describe 'Ziel: Hinweistexte nach stillem Umschalten' {
+    It 'Tooltip der Anzeige nennt beide Faelle' {
+        $l = Get-HMTargetLabel (Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connected = $true } 'EIGEN')
+        $l.Tip | Should -Match 'Werkzeuge, die nur den PC brauchen, laufen auf PC02; Backup, Restore und Werkzeuge mit Benutzer fragen nach\.'
+        $l.Tip | Should -Not -Match 'jeder Vorgang'
+        $x = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'XAML\MainWindow.xaml') -Encoding UTF8
+        $x | Should -Match 'x:Name="lblConnected"[^>]*Werkzeuge, die nur den PC brauchen, nehmen den PC im Feld'
     }
 }

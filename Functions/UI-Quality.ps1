@@ -635,10 +635,10 @@ function Remove-HMBackupFolders($Win, [string]$Root, [string[]]$Names) {
     if ("$((Show-HMDialogBox -Owner $Win -Text ("$($Names.Count) Backup(s) endgueltig loeschen?`n`n$list") -Title 'Backups loeschen' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
     $paths = @($Names | ForEach-Object { Join-Path $Root $_ })
     # laeuft ein Vorgang mit einem dieser Backups (Restore daraus, Backup hinein): deutliche Warnung, Standard Nein
-    if ($script:JobRunning) {
-        $hit = Get-HMPathConflict $paths @(Get-HMCtxPaths $script:JobCtx)
-        if ($hit -and "$((Show-HMDialogBox -Owner $Win -Text (Get-HMDeleteWarning (Split-Path $hit -Leaf) "$($script:JobTitle)") -Title 'Backup wird benutzt' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { return }
-        if ($hit) { Out-Console "Backup '$(Split-Path $hit -Leaf)' wird trotz laufendem Vorgang '$($script:JobTitle)' geloescht (bestaetigt)." 'Warning' }
+    $uc = Get-HMUsedBackupConflict $paths
+    if ($uc) {
+        if ("$((Show-HMDialogBox -Owner $Win -Text (Get-HMDeleteWarning (Split-Path $uc.Hit -Leaf) $uc.Title) -Title 'Backup wird benutzt' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { return }
+        Out-Console "Backup '$(Split-Path $uc.Hit -Leaf)' wird trotz laufendem Vorgang '$($uc.Title)' geloescht (bestaetigt)." 'Warning'
     }
     $Win.Close()
     Out-Console "Loesche $($paths.Count) Backup(s) ..." 'Warning'
