@@ -15,8 +15,9 @@
 function Invoke-HMTool {
     param(
         [string]$Title, [scriptblock]$Script, [object[]]$ArgumentList = @(), [string]$Computer = '',
-        [int]$TimeoutSec = 180, [scriptblock]$OnResult, [object]$State = $null, [switch]$ProtectData
+        [int]$TimeoutSec = 180, [scriptblock]$OnResult, [object]$State = $null, [switch]$ProtectData, [scriptblock]$OnError
     )
+    # -OnError: statt der Fehlerzeile aufgerufen, wenn der Aufruf selbst scheitert (Verbindung, Zeitlimit): param($Fehlertext, $Computer, $State)
     if (-not $Computer) { $Computer = Get-TargetComputer }
     # -ProtectData: am Ziel vorher %ProgramData%\HUMig absichern (Functions\Core-Protect.ps1); schlaegt das fehl, laeuft das Werkzeug nicht
     $text = $Script.ToString()
@@ -34,9 +35,12 @@ function Invoke-HMTool {
                 Invoke-Command @p
             }
         } catch { "FEHLER: $($_.Exception.Message)" }
-    } -ArgumentList @($Computer, $script:RemoteCred, $text, @($ArgumentList)) -TimeoutSec $TimeoutSec -State @{ Title = $Title; Computer = $Computer; On = $OnResult; State = $State } -OnComplete {
+    } -ArgumentList @($Computer, $script:RemoteCred, $text, @($ArgumentList)) -TimeoutSec $TimeoutSec -State @{ Title = $Title; Computer = $Computer; On = $OnResult; State = $State; OnErr = $OnError } -OnComplete {
         param($r, $st)
-        if ("$r" -match '^FEHLER: ' -and -not ($r -is [System.Array])) { Out-Console (Format-RemoteError "$r") 'Error'; return }
+        if ("$r" -match '^FEHLER: ' -and -not ($r -is [System.Array])) {
+            if ($st.OnErr) { & $st.OnErr "$r" $st.Computer $st.State; return }
+            Out-Console (Format-RemoteError "$r") 'Error'; return
+        }
         if ($st.On) { & $st.On $r $st.Computer $st.State; return }
         Write-HMToolResult $r
     }
@@ -229,7 +233,8 @@ function Start-HMNetworkConfig {
         $idx = [int]("$($f.Adapter)".Split(' ')[0])
         if ($f.Mode -eq 'DHCP') {
             if (-not (Confirm-Action "DHCP auf $comp (Adapter $idx) aktivieren und DNS zuruecksetzen?`n`nDie IP-Adresse kann sich aendern.")) { return }
-            $body = "Remove-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -Confirm:`$false -ErrorAction SilentlyContinue`r`nRemove-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -PrefixOrigin Manual -Confirm:`$false -ErrorAction SilentlyContinue`r`nSet-NetIPInterface -InterfaceIndex $idx -Dhcp Enabled`r`nSet-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses`r`nipconfig.exe /renew | Out-Null"
+            $name = "HUMig_Netzwerk_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+            $body = New-HMNetChangeScript -Index $idx -Mode 'DHCP' -Name $name
         } else {
             $ip = "$($f.IP)"; $mk = "$($f.Mask)"
             if ($ip -match '^(.+)/(\d{1,2})$') { $ip = $Matches[1]; $mk = $Matches[2] }
@@ -241,26 +246,169 @@ function Start-HMNetworkConfig {
             $dns = @("$($f.Dns)" -split '[,; ]+' | Where-Object { $_ })
             foreach ($x in $dns) { if (-not (Test-HMIPv4 $x)) { Out-Console "Ungueltiger DNS-Server: '$x'" 'Warning'; return } }
             if (-not (Confirm-Action "Statische IP auf $comp setzen:`n`n  Adapter: $idx`n  IP:      $ip/$pfx`n  Gateway: $gw`n  DNS:     $($dns -join ', ')`n`nBei falschen Werten verliert der PC die Netzwerkverbindung. Fortfahren?")) { return }
-            $gwPart = if ($gw) { " -DefaultGateway '$gw'" } else { '' }
-            $dnsPart = if ($dns.Count) { "Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses @('" + ($dns -join "','") + "')" } else { '' }
-            $body = "Set-NetIPInterface -InterfaceIndex $idx -Dhcp Disabled -ErrorAction SilentlyContinue`r`nRemove-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -Confirm:`$false -ErrorAction SilentlyContinue`r`nRemove-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -Confirm:`$false -ErrorAction SilentlyContinue`r`nNew-NetIPAddress -InterfaceIndex $idx -IPAddress '$ip' -PrefixLength $pfx$gwPart | Out-Null`r`n$dnsPart"
+            $name = "HUMig_Netzwerk_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+            $body = New-HMNetChangeScript -Index $idx -Mode 'Static' -Ip $ip -Prefix $pfx -Gateway $gw -Dns $dns -Name $name
         }
-        Invoke-HMTool -Title "Netzwerk ($($f.Mode))" -Computer $comp -ArgumentList @($body) -Script {
-            param($b)
-            try {
-                $name = "HUMig_Netzwerk_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
-                $full = "Start-Sleep -Seconds 3`r`ntry {`r`n$b`r`n} finally { Unregister-ScheduledTask -TaskName '$name' -Confirm:`$false -ErrorAction SilentlyContinue }"
-                $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($full))
-                $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand $enc"
-                $p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-                $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
-                Register-ScheduledTask -TaskName $name -Action $a -Principal $p -Settings $s -Force -ErrorAction Stop | Out-Null
-                Start-ScheduledTask -TaskName $name -ErrorAction Stop
-                'OK Aenderung wird in ca. 3 Sekunden angewendet (SYSTEM-Aufgabe)'
-            } catch { "FEHLER: $($_.Exception.Message)" }
+        # Die Aufgabe prueft das Ergebnis selbst, stellt bei Fehlschlag den alten Zustand her und schreibt das Ergebnis nach
+        # %ProgramData%\HUMig\Netzwerk\<Name>.txt. HUMig wartet darauf; bricht die Verbindung ab (neue Adresse), ist das Ergebnis offen.
+        Invoke-HMTool -Title "Netzwerk ($($f.Mode))" -Computer $comp -ArgumentList @($body, $name) -Script $script:RS_NetApply -ProtectData -State $name -OnError {
+            param($r, $c2, $n2)
+            Out-Console "   Verbindung zu $c2 waehrend der Aenderung abgebrochen - das ist zu erwarten, wenn sich die Adresse geaendert hat. Ob die Aenderung gelungen ist, steht am PC in %ProgramData%\HUMig\Netzwerk\$n2.txt (nach dem Neu-Verbinden zeigt 'IP-Adresse' den aktuellen Stand)." 'Warning'
+            Out-Console "   $(Format-RemoteError "$r")" 'Debug'
         }
     }
 }
+# Am Ziel-PC: Aufgabe als SYSTEM anlegen und starten, dann bis 75 s auf das Ergebnis warten
+$script:RS_NetApply = {
+    param($body, $name)
+    try {
+        $dir = Join-Path $env:ProgramData 'HUMig\Netzwerk'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } | Remove-Item -Force -ErrorAction SilentlyContinue
+        $ps1 = Join-Path $dir "$name.ps1"; $res = Join-Path $dir "$name.txt"
+        $full = "Start-Sleep -Seconds 3`r`ntry {`r`n$body`r`n} finally { Unregister-ScheduledTask -TaskName '$name' -Confirm:`$false -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '$ps1' -Force -ErrorAction SilentlyContinue }"
+        [System.IO.File]::WriteAllText($ps1, $full, (New-Object System.Text.UTF8Encoding($true)))
+        $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ps1`""
+        $p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+        Register-ScheduledTask -TaskName $name -Action $a -Principal $p -Settings $s -Force -ErrorAction Stop | Out-Null
+        Start-ScheduledTask -TaskName $name -ErrorAction Stop
+        $t0 = Get-Date
+        while (((Get-Date) - $t0).TotalSeconds -lt 75) {
+            if (Test-Path -LiteralPath $res) { return @(Get-Content -LiteralPath $res -Encoding UTF8 | ForEach-Object { "$_" }) }
+            Start-Sleep -Seconds 1
+        }
+        "WARN Ergebnis liegt nach 75 Sekunden noch nicht vor - die Aenderung laeuft evtl. noch. Ergebnis am PC: $res"
+    } catch { "FEHLER - Aufgabe nicht ausfuehrbar: $($_.Exception.Message)" }
+}
+# Text der SYSTEM-Aufgabe fuer "IP-Adresse": alten Zustand merken, aendern, Ergebnis pruefen, bei Fehlschlag alten Zustand
+# wiederherstellen, Ergebnis (Zeilen OK/WARN/FEHLER) in eine Datei schreiben. -ResultFile nur fuer Tests (sonst ProgramData\HUMig\Netzwerk).
+function New-HMNetChangeScript {
+    param([int]$Index, [ValidateSet('DHCP', 'Static')][string]$Mode, [string]$Ip = '', [int]$Prefix = 0, [string]$Gateway = '', [string[]]$Dns = @(),
+          [string]$Name = 'HUMig_Netzwerk', [string]$ResultFile = '', [int]$WaitAddrSec = 15, [int]$WaitDhcpSec = 30)
+    $q = { param($s) "'" + ("$s" -replace "'", "''") + "'" }
+    $res = if ($ResultFile) { & $q $ResultFile } else { "(Join-Path `$env:ProgramData " + (& $q "HUMig\Netzwerk\$Name.txt") + ')' }
+    $dnsList = (@($Dns | Where-Object { "$_".Trim() } | ForEach-Object { & $q "$_".Trim() }) -join ', ')
+    $t = $script:HMNetChangeTemplate
+    $t = $t.Replace('__IDX__', "$Index").Replace('__MODE__', (& $q $Mode)).Replace('__IP__', (& $q $Ip)).Replace('__PFX__', "$Prefix")
+    $t = $t.Replace('__GW__', (& $q $Gateway)).Replace('__DNS__', $dnsList).Replace('__RES__', $res).Replace('__WA__', "$WaitAddrSec").Replace('__WD__', "$WaitDhcpSec")
+    return $t
+}
+$script:HMNetChangeTemplate = @'
+$ErrorActionPreference = 'Stop'
+$idx = __IDX__; $mode = __MODE__; $ip = __IP__; $pfx = __PFX__; $gw = __GW__; $dns = @(__DNS__); $res = __RES__
+$out = New-Object System.Collections.Generic.List[string]
+function Get-HUNetState {
+    $if = Get-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4
+    $guid = "$((Get-NetAdapter -InterfaceIndex $idx).InterfaceGuid)"
+    $ns = ''
+    if ($guid) { try { $ns = "$((Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\$guid" -Name NameServer -ErrorAction Stop).NameServer)".Trim() } catch { $ns = '' } }
+    [pscustomobject]@{
+        Dhcp      = ("$($if.Dhcp)" -eq 'Enabled')
+        Ips       = @(Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { "$($_.PrefixOrigin)" -eq 'Manual' } | ForEach-Object { [pscustomobject]@{ Ip = "$($_.IPAddress)"; Pfx = [int]$_.PrefixLength } })
+        Gw        = @(Get-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | ForEach-Object { "$($_.NextHop)" } | Where-Object { $_ -and $_ -ne '0.0.0.0' })
+        Dns       = @(@(Get-DnsClientServerAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue) | ForEach-Object { $_.ServerAddresses } | Where-Object { $_ })
+        DnsStatic = [bool]$ns
+    }
+}
+function Clear-HUNet([bool]$ManualOnly) {
+    Remove-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue
+    if ($ManualOnly) { Remove-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -PrefixOrigin Manual -Confirm:$false -ErrorAction SilentlyContinue }
+    else { Remove-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue }
+}
+# wartet, bis die Adresse nicht mehr "Tentative" ist (Pruefung auf doppelte Adresse im Netz); Rueckgabe Zustand oder ''
+function Wait-HUAddr([string]$a, [int]$sec) {
+    $x = $null
+    for ($i = 0; $i -le $sec; $i++) {
+        $x = @(Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { "$($_.IPAddress)" -eq $a })[0]
+        if ($x -and "$($x.AddressState)" -ne 'Tentative') { return "$($x.AddressState)" }
+        if ($i -lt $sec) { Start-Sleep -Seconds 1 }
+    }
+    if ($x) { return "$($x.AddressState)" }
+    return ''
+}
+# wartet auf eine Adresse vom DHCP-Server (Herkunft Dhcp, nicht die automatische 169.254-Adresse)
+function Wait-HUDhcp([int]$sec) {
+    for ($i = 0; $i -le $sec; $i++) {
+        $x = @(Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { "$($_.PrefixOrigin)" -eq 'Dhcp' -and "$($_.AddressState)" -eq 'Preferred' })[0]
+        if ($x) { return "$($x.IPAddress)" }
+        if ($i -lt $sec) { Start-Sleep -Seconds 1 }
+    }
+    return ''
+}
+function Format-HUOld($o) {
+    if ($o.Dhcp) { return 'DHCP' }
+    $t = (@($o.Ips | ForEach-Object { "$($_.Ip)/$($_.Pfx)" }) -join ', ')
+    if (@($o.Gw).Count) { $t += ", Gateway $(@($o.Gw)[0])" }
+    if ($o.DnsStatic -and @($o.Dns).Count) { $t += ", DNS $(@($o.Dns) -join ', ')" }
+    return $t
+}
+$old = $null
+try {
+    $old = Get-HUNetState
+    if ($mode -eq 'DHCP') {
+        Clear-HUNet $true
+        Set-NetIPInterface -InterfaceIndex $idx -Dhcp Enabled
+        Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses
+        ipconfig.exe /renew | Out-Null
+        $got = Wait-HUDhcp __WD__
+        if (-not $got) { throw 'DHCP ist eingeschaltet, aber innerhalb von __WD__ Sekunden kam keine Adresse vom DHCP-Server' }
+        $now = Get-HUNetState
+        if (-not $now.Dhcp) { throw 'DHCP ist danach nicht eingeschaltet' }
+        $out.Add("OK DHCP aktiv, Adresse vom DHCP-Server: $got")
+    } else {
+        Set-NetIPInterface -InterfaceIndex $idx -Dhcp Disabled
+        Clear-HUNet $false
+        $p = @{ InterfaceIndex = $idx; IPAddress = $ip; PrefixLength = $pfx }
+        if ($gw) { $p.DefaultGateway = $gw }
+        New-NetIPAddress @p | Out-Null
+        if ($dns.Count) { Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses $dns }
+        $st = Wait-HUAddr $ip __WA__
+        if ($st -eq 'Duplicate') { throw "die Adresse $ip wird im Netz bereits verwendet" }
+        if (-not $st) { throw "die Adresse $ip ist danach nicht am Adapter" }
+        $now = Get-HUNetState
+        if ($now.Dhcp) { throw 'DHCP ist danach noch eingeschaltet' }
+        if ($gw -and @($now.Gw) -notcontains $gw) { throw "das Gateway $gw ist danach nicht eingetragen" }
+        if ($dns.Count -and ((@($now.Dns) -join ',') -ne ($dns -join ','))) { throw "die DNS-Server sind danach '$(@($now.Dns) -join ', ')' statt '$($dns -join ', ')'" }
+        $out.Add("OK statische Adresse $ip/$pfx aktiv$(if ($gw) { ", Gateway $gw" })$(if ($dns.Count) { ", DNS $($dns -join ', ')" })")
+        if ($st -ne 'Preferred') { $out.Add("WARN Zustand der Adresse: $st (noch nicht bestaetigt)") }
+    }
+} catch {
+    $why = "$($_.Exception.Message)"
+    if (-not $old) { $out.Add("FEHLER - $why - nichts geaendert") }
+    else {
+        try {
+            Clear-HUNet $false
+            if ($old.Dhcp) { Set-NetIPInterface -InterfaceIndex $idx -Dhcp Enabled }
+            else {
+                Set-NetIPInterface -InterfaceIndex $idx -Dhcp Disabled
+                $first = $true
+                foreach ($a in @($old.Ips)) {
+                    $p = @{ InterfaceIndex = $idx; IPAddress = $a.Ip; PrefixLength = $a.Pfx }
+                    if ($first -and @($old.Gw).Count) { $p.DefaultGateway = @($old.Gw)[0] }
+                    New-NetIPAddress @p | Out-Null
+                    $first = $false
+                }
+            }
+            if ($old.DnsStatic -and @($old.Dns).Count) { Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses @($old.Dns) }
+            else { Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses }
+            if ($old.Dhcp) { ipconfig.exe /renew | Out-Null }
+            $chk = Get-HUNetState
+            $have = @($chk.Ips | ForEach-Object { $_.Ip })
+            $miss = @($old.Ips | Where-Object { $have -notcontains $_.Ip } | ForEach-Object { $_.Ip })
+            if ($chk.Dhcp -ne $old.Dhcp -or $miss.Count) { throw "nicht vollstaendig$(if ($miss.Count) { " (fehlt: $($miss -join ', '))" })" }
+            $out.Add("FEHLER - $why - alter Zustand wiederhergestellt ($(Format-HUOld $old))")
+        } catch {
+            $out.Add("FEHLER - $why")
+            $out.Add("FEHLER - alter Zustand nicht wiederhergestellt: $($_.Exception.Message) - vorher war eingestellt: $(Format-HUOld $old)")
+        }
+    }
+}
+try {
+    [System.IO.File]::WriteAllLines("$res.tmp", [string[]]$out.ToArray(), (New-Object System.Text.UTF8Encoding($true)))
+    Move-Item -LiteralPath "$res.tmp" -Destination $res -Force
+} catch { }
+'@
 
 # ============================================================================
 # 3. LOKALE GRUPPEN: Administratoren / Netzwerkkonfigurations-Operatoren (per SID, sprachunabhaengig)
