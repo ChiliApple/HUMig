@@ -416,7 +416,7 @@ Describe 'Treiberverteilung: Nachkontrolle und Hinweis zur Geraete-Sperre' {
     }
 }
 
-Describe 'App-Updates: Abbrechen, Doppelstart, Zeitplan-Status, Zeitlimit' {
+Describe 'App-Updates: Doppelstart, Zeitplan-Status, Zeitlimit' {
     BeforeAll {
         . (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1')
         # einzelne Funktionen aus Dateien laden, die sonst die Oberflaeche brauchen bzw. eigenstaendig laufen
@@ -434,121 +434,6 @@ Describe 'App-Updates: Abbrechen, Doppelstart, Zeitplan-Status, Zeitlimit' {
         $script:Target = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\AppUpdates-Target.ps1'))
         $script:Worker = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\AppUpdates-Worker.ps1'))
         $script:Auto = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\AppUpdates-Auto.ps1'))
-        # Ersatz fuer den Nachlauf-Text (eigener Prozess): Aufgabenzustand aus HM_T_STATE, gestartete Dienste nach HM_T_SVC,
-        # die Uhr springt beim Zustand Running nach dem ersten Blick ueber die 240 Minuten
-        $script:AfterStubs = @'
-function Get-ScheduledTask { [pscustomobject]@{ State = $env:HM_T_STATE } }
-function Start-Sleep { }
-function Start-Service { param($Name, $ErrorAction) if ($Name -eq "O'Dienst") { throw 'gibt es nicht' }; Add-Content -LiteralPath $env:HM_T_SVC -Value $Name }
-function Unregister-ScheduledTask { }
-$global:T_N = 0
-function Get-Date { $global:T_N++; if ($env:HM_T_STATE -eq 'Running' -and $global:T_N -gt 1) { return [datetime]'2030-01-01' }; return [datetime]'2026-01-01' }
-'@
-    }
-    It 'Abbrechen: Markierung nur an PCs, deren Teilauftrag noch laeuft, danach sofort Stop-Job (Oberflaeche frei)' {
-        $rj = [pscustomobject]@{ ChildJobs = @([pscustomobject]@{ State = 'Running'; Location = 'PC-A' }, [pscustomobject]@{ State = 'Completed'; Location = 'PC-B' }, [pscustomobject]@{ State = 'NotStarted'; Location = 'PC-C' }) }
-        @(Get-HMAuRunningChildren $rj) | Should -Be @('PC-A', 'PC-C')
-        $t = ${function:Invoke-HMAuTarget}.ToString()
-        $t.IndexOf('Send-HMAuRemoteCancel $cancelSent $tag $Credential') | Should -BeLessThan $t.IndexOf('Stop-Job -Job $rj')
-        $t | Should -Not -Match 'CancelGraceMin'
-        ${function:Start-HMAppUpdate}.ToString() | Should -Match 'AfterCancel = \$after'
-    }
-    It 'Nachlauf nach Abbruch: wartet, bis das Programm fertig ist, startet dann die Dienste und raeumt auf' {
-        & $script:LoadFn 'Functions\AppUpdates-Target.ps1' @('New-TAfterRunText')
-        $d = Join-Path $TestDrive 'run_x'; New-Item -ItemType Directory -Path $d -Force | Out-Null
-        [IO.File]::WriteAllLines((Join-Path $d 'log.txt'), [string[]]@('START|A', 'DONE|A|Cli|0|0|0|False'))
-        $m = Join-Path $TestDrive 'cancel_x'; [IO.File]::WriteAllText($m, '')
-        $lg = Join-Path $TestDrive 'nachlauf_x.txt'
-        $txt = New-TAfterRunText 'HUMig_AppUpdates_t' $d @('Spooler', "O'Dienst") $true $m $lg 'HUMig_AppUpdates_Nachlauf_t'
-        @(Get-UnstubbedCommands $txt (@('Get-ScheduledTask', 'Start-Sleep', 'Start-Service', 'Unregister-ScheduledTask', 'Test-Path', 'Get-Content', 'Remove-Item') + $script:SafeCmds)) | Should -BeNullOrEmpty
-        $env:HM_T_STATE = 'Ready'; $env:HM_T_SVC = Join-Path $TestDrive 'svc.txt'
-        try { $null = Invoke-InChild $script:AfterStubs $txt } finally { Remove-Item Env:\HM_T_STATE -ErrorAction SilentlyContinue }
-        $r = @(Get-Content -LiteralPath $lg)
-        $r | Should -Contain 'INFO abgebrochen - 1 Programm(e) fertig, danach nichts mehr gestartet'
-        $r | Should -Contain 'OK Dienst Spooler wieder gestartet'
-        ($r -join ' ') | Should -Match "WARN Dienst O'Dienst nicht startbar"
-        ($r -join ' ') | Should -Match 'beendete Programme werden nach einem Abbruch nicht neu gestartet'
-        Test-Path $d | Should -BeFalse
-        Test-Path $m | Should -BeFalse
-    }
-    It 'Nachlauf: laeuft das Programm noch, bleiben die Dienste gestoppt (Meldung statt Start)' {
-        & $script:LoadFn 'Functions\AppUpdates-Target.ps1' @('New-TAfterRunText')
-        $d = Join-Path $TestDrive 'run_y'; New-Item -ItemType Directory -Path $d -Force | Out-Null
-        $lg = Join-Path $TestDrive 'nachlauf_y.txt'; $svc = Join-Path $TestDrive 'svc_y.txt'
-        $txt = New-TAfterRunText 'HUMig_AppUpdates_t' $d @('Spooler') $false (Join-Path $TestDrive 'cancel_y') $lg 'me'
-        $env:HM_T_STATE = 'Running'; $env:HM_T_SVC = $svc
-        try { $null = Invoke-InChild $script:AfterStubs $txt } finally { Remove-Item Env:\HM_T_STATE -ErrorAction SilentlyContinue }
-        (Get-Content -LiteralPath $lg) -join ' ' | Should -Match 'Dienste bleiben gestoppt: Spooler'
-        Test-Path $svc | Should -BeFalse
-        Test-Path $d | Should -BeTrue
-    }
-    It 'Ziel: nach hartem Abbruch mit noch laufendem Programm Nachlauf statt Dienste-Neustart, sonst Ergebnis fuer HUMig ablegen' {
-        $script:Target | Should -Match ([regex]::Escape('if (-not $loopDone -and $still -eq ''Running'' -and -not $script:TRes) { $script:TStill = @{ Task = $name; Dir = $dir } }'))
-        $i1 = $script:Target.IndexOf('if ($script:TStill) {'); $i2 = $script:Target.IndexOf('try { Register-TAfterRun $script:TStill')
-        $i1 | Should -BeGreaterThan 0; $i2 | Should -BeGreaterThan $i1
-        $script:Target | Should -Match ([regex]::Escape('"nachlauf_$RunTag.txt"'))
-        $script:Target | Should -Match ([regex]::Escape("`$_.Name -like 'cancel_*' -and `$_.LastWriteTime -lt (Get-Date).AddDays(-1)"))
-    }
-    It 'Oberflaeche holt das Nachlauf-Ergebnis im Hintergrund ab' {
-        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\UI-AppUpdates.ps1'), [ref]$null, [ref]$null)
-        $as = $ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and "$($x.Left)" -eq '$script:RS_AuAfterCancelPoll' }, $true) | Select-Object -First 1
-        $sb = [scriptblock]::Create($as.Right.Extent.Text.Trim().TrimStart('{').TrimEnd('}'))
-        Mock Invoke-Command { if ($ComputerName -eq 'PC-A') { @('INFO abgebrochen - 1 Programm(e) fertig', 'OK Dienst Spooler wieder gestartet', 'ENDE') } else { throw 'weg' } }
-        Mock Start-Sleep { }
-        $r = @(& $sb @('PC-A|aaaaaaaaaaaaaaaa', 'PC-B|bbbbbbbbbbbbbbbb') $null 1)
-        $r | Should -Contain 'PC-A|OK Dienst Spooler wieder gestartet'
-        $r | Should -Not -Contain 'PC-A|ENDE'
-        ($r -join ' ') | Should -Match 'PC-B\|WARN Nachlauf'
-    }
-    It 'Abbruch-Signal legt "cancel" nur in die Laufordner dieses Laufs (Kennung), falsche Kennung wird nicht gesendet' {
-        $pd = Join-Path $TestDrive 'pd'
-        $base = Join-Path $pd 'HUMig\AppUpdates'
-        foreach ($d in @('run_aaaaaaaaaaaaaaaa_1', 'run_aaaaaaaaaaaaaaaa_2', 'run_bbbbbbbbbbbbbbbb_1', 'auto')) { New-Item -ItemType Directory -Path (Join-Path $base $d) -Force | Out-Null }
-        $old = $env:ProgramData
-        try {
-            $env:ProgramData = $pd
-            Mock Invoke-Command { & $ScriptBlock @ArgumentList }
-            Send-HMAuRemoteCancel @('PC-A') 'aaaaaaaaaaaaaaaa' $null
-            Should -Invoke Invoke-Command -Times 1 -Exactly
-            Send-HMAuRemoteCancel @('PC-A') 'x;y' $null
-            Send-HMAuRemoteCancel @() 'aaaaaaaaaaaaaaaa' $null
-            Should -Invoke Invoke-Command -Times 1 -Exactly
-        } finally { $env:ProgramData = $old }
-        Test-Path (Join-Path $base 'run_aaaaaaaaaaaaaaaa_1\cancel') | Should -BeTrue
-        Test-Path (Join-Path $base 'run_aaaaaaaaaaaaaaaa_2\cancel') | Should -BeTrue
-        Test-Path (Join-Path $base 'run_bbbbbbbbbbbbbbbb_1\cancel') | Should -BeFalse
-        Test-Path (Join-Path $base 'auto\cancel') | Should -BeFalse
-        Test-Path (Join-Path $base 'cancel_aaaaaaaaaaaaaaaa') | Should -BeTrue
-    }
-    It 'Ziel-PC: Laufordner mit Kennung, kein neuer Schritt nach Abbruch, Abbruch-Datei wird erkannt' {
-        $script:Target | Should -Match ([regex]::Escape('$dir = Join-Path $Base $(if ($RunTag) { "run_$($RunTag)_$id" } else { "run_$id" })'))
-        $script:Target | Should -Match ([regex]::Escape('if (Test-TCancel) { return }'))
-        $script:Target | Should -Match ([regex]::Escape("if (-not `$script:TCancelled -and (Test-Path -LiteralPath (Join-Path `$dir 'cancel'))) { `$script:TCancelled = `$true"))
-        foreach ($g in @('while ($todoM.Count -and -not (Test-TCancel))', 'if ($usr.Count -and -not (Test-TCancel))', 'while ($todo.Count -and -not (Test-TCancel))', 'if ($ie.Count -and -not (Test-TCancel))')) {
-            $script:Target | Should -Match ([regex]::Escape($g))
-        }
-        # Kennung nur aus Hex-Zeichen uebernommen
-        $script:Target | Should -Match ([regex]::Escape("-match '^[0-9a-f]{8,32}$'"))
-    }
-    It 'Ziel-PC: gestoppte Dienste werden auch bei Fehler wieder gestartet (finally ohne Ausgabe)' {
-        $i = $script:Target.IndexOf('$rsDone = $false')
-        $f = $script:Target.IndexOf('if (-not $rsDone -and ($rs.Services.Count -or $rs.Apps.Count)) { try { $ln = @(Restart-TStopped $rs | ForEach-Object')
-        $i | Should -BeGreaterThan 0
-        $f | Should -BeGreaterThan $i
-        $script:Target.Substring($f - 900, 900) | Should -Match '\} finally \{'
-    }
-    It 'eigener PC: geschlossene Programme werden im finally wieder gestartet' {
-        $t = ${function:Start-HMAppUpdate}.ToString()
-        $t | Should -Match ([regex]::Escape('if (-not $restarted) { try { Restart-HMAuStopped $Job $restart } catch { } }'))
-    }
-    It 'Worker: unveraendert, Abbruch nur ueber die Datei "cancel" (ein verschwundener Ordner bricht nicht ab)' {
-        ([regex]::Matches($script:Worker, [regex]::Escape("if (Test-Path -LiteralPath (Join-Path `$Dir 'cancel')) { Write-WLog 'CANCEL'; break }"))).Count | Should -Be 2
-        $script:Worker | Should -Not -Match ([regex]::Escape('-not (Test-Path -LiteralPath $Dir)'))
-    }
-    It 'Abbruch: nur bei Aktualisieren/Installieren geht die Markierung raus, sie wird am Ziel geprueft und entfernt' {
-        ${function:Invoke-HMAuTarget}.ToString() | Should -Match ([regex]::Escape("if (`$Op -in @('Update', 'Install')) {"))
-        $script:Target | Should -Match ([regex]::Escape('if ($RunTag -and (Test-Path -LiteralPath (Join-Path $Base "cancel_$RunTag")))'))
-        $script:Target | Should -Match ([regex]::Escape('if ($RunTag) { Remove-Item -LiteralPath (Join-Path $Base "cancel_$RunTag")'))
     }
     It 'Zeitlimit je Programm als SYSTEM (Standard 120 min, Rest laeuft weiter)' {
         $script:Target | Should -Match ([regex]::Escape('$SysItemMin = 120; $simTmp = 0; if ([int]::TryParse("$($Payload.ItemTimeoutMin)", [ref]$simTmp) -and $simTmp -gt 0)'))

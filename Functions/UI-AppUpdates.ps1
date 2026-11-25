@@ -299,7 +299,6 @@ function Start-HMAuUpdate([switch]$All) {
         Start-EngineJob -Command 'Start-HMAppUpdate -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'App-Updates' -ScriptFiles @($script:Engine, $script:AuEngine) -OnFinished {
             param($j)
             if ($j.Result -and $j.Result.Items) { Add-HMAuHistory @($j.Result.Items); Update-HMAuAfterRun @($j.Result.Items) }
-            if ($j.Result -and @($j.Result.AfterCancel).Count) { Start-HMAuAfterCancelPoll @($j.Result.AfterCancel) }
             if ($j.Result -and $j.Result.Reboot) { Out-Console 'App-Updates: mindestens ein Programm braucht einen Neustart.' 'Warning' }
         }
     }
@@ -445,39 +444,6 @@ function Start-HMAuSchedule {
         $ctx = @{ Op = 'ScheduleSet'; Computers = $pcs; Payload = $pl; Credential = $script:RemoteCred }
     }
     Start-EngineJob -Command 'Start-HMAuScheduleJob -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'App-Updates Zeitplan' -ScriptFiles @($script:Engine, $script:AuEngine) -OnFinished { param($j) }
-}
-# Nach "Abbrechen": an den PCs laeuft das gerade laufende Programm noch fertig (Nachlauf-Aufgabe). Deren Ergebnis im Hintergrund
-# abholen (alle 30 s, bis 30 min) und in der Konsole melden - die Oberflaeche ist dabei frei.
-function Start-HMAuAfterCancelPoll($Pcs) {
-    $list = @($Pcs | Where-Object { $_ -and "$($_.Computer)" -and "$($_.RunTag)" -match '^[0-9a-f]{8,32}$' })
-    if (-not $list.Count) { return }
-    Out-Console "App-Updates: Abbruch an $($list.Count) PC(s) gemeldet - das laufende Programm wird dort noch fertig, das Ergebnis kommt spaeter hier." 'Info'
-    Invoke-AsyncCommand -ScriptBlock $script:RS_AuAfterCancelPoll -ArgumentList @(@($list | ForEach-Object { "$($_.Computer)|$($_.RunTag)" }), $script:RemoteCred, 1800) -TimeoutSec 1900 -OnComplete {
-        param($r)
-        if ("$r" -match '^FEHLER: ' -and -not ($r -is [System.Array])) { Out-Console "App-Updates (Nachlauf): $r" 'Warning'; return }
-        foreach ($l in @($r)) {
-            $lvl = if ("$l" -match '\|WARN ') { 'Warning' } elseif ("$l" -match '\|OK ') { 'Success' } else { 'Info' }
-            Out-Console "   App-Updates (nach Abbruch) $("$l" -replace '\|(OK|WARN|INFO) ', ': ')" $lvl
-        }
-    }
-}
-$script:RS_AuAfterCancelPoll = {
-    param([string[]]$Items, $cred, [int]$MaxSec)
-    $open = @{}; foreach ($i in $Items) { $p = "$i".Split('|'); $open[$p[0]] = $p[1] }
-    $out = New-Object System.Collections.Generic.List[string]
-    $t0 = Get-Date
-    while ($open.Count -and ((Get-Date) - $t0).TotalSeconds -lt $MaxSec) {
-        foreach ($pc in @($open.Keys)) {
-            $p = @{ ComputerName = $pc; ArgumentList = @($open[$pc]); ErrorAction = 'Stop'; SessionOption = (New-PSSessionOption -OpenTimeout 5000 -OperationTimeout 15000)
-                    ScriptBlock = { param($tag) $f = Join-Path $env:ProgramData "HUMig\AppUpdates\nachlauf_$tag.txt"; if (Test-Path -LiteralPath $f) { @(Get-Content -LiteralPath $f -Encoding UTF8 | ForEach-Object { "$_" }); Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } else { 'NOCH' } } }
-            if ($cred) { $p.Credential = $cred }
-            $r = $null; try { $r = @(Invoke-Command @p) } catch { continue }
-            if ($r.Count -and "$($r[0])" -ne 'NOCH') { foreach ($l in $r) { if ("$l" -ne 'ENDE') { $out.Add("${pc}|$l") } }; $open.Remove($pc) }
-        }
-        if ($open.Count) { Start-Sleep -Seconds 30 }
-    }
-    foreach ($pc in @($open.Keys)) { $out.Add("${pc}|WARN Nachlauf nach $([int]($MaxSec / 60)) min noch nicht fertig oder PC nicht erreichbar - Ergebnis am PC: %ProgramData%\HUMig\AppUpdates\nachlauf_$($open[$pc]).txt") }
-    return $out.ToArray()
 }
 # Spalte "Ergebnis" im Fenster Zeitplaene: Fehler aus dem letzten Bericht (last.json) gehen vor dem Rueckgabewert der Aufgabe -
 # aeltere Zeitplaene liefern immer 0, auch wenn Programme scheiterten
