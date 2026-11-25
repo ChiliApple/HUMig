@@ -46,8 +46,6 @@ $script:Target     = $null   # @{ Computer; Connected; Connecting; Seq }
 $script:ConnectSeq = 0       # Zaehler je Verbinden: aeltere Antworten werden verworfen
 $script:JobCtx     = $null   # Kontext des laufenden Vorgangs (benutzte Backup-Pfade)
 $script:HMDeleting = New-Object System.Collections.Generic.List[string]   # Backup-Pfade, die gerade geloescht werden
-$script:HMLocalDomain = ''   # DNS-Domaene dieses PCs (eigener FQDN gilt als lokal)
-try { $script:HMLocalDomain = "$([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().DomainName)".Trim() } catch { }
 $script:BackupChecks  = @{}
 $script:RestoreChecks = @{}
 $script:SelectedBackup = $null
@@ -1404,6 +1402,9 @@ function Get-HMDeletingWarning([string]$Name, [string]$Action) {
     return "ACHTUNG: Das Backup '$Name' wird gerade geloescht.`n`n$Action wuerde damit arbeiten, waehrend Dateien verschwinden. Das Ergebnis waere unvollstaendig.`n`nTrotzdem starten?"
 }
 #endregion HMZiel
+# DNS-Domaene dieses PCs (der eigene FQDN gilt nur mit dieser Domaene als lokal, Test-HMSameComputer)
+$script:HMLocalDomain = ''
+try { $script:HMLocalDomain = "$([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().DomainName)".Trim() } catch { }
 
 # Text im Feld Computer (nur fuer Verbinden, Anmeldedaten und die Anzeige - Ziel einer Aktion ist Get-TargetComputer)
 function Get-HMFieldComputer {
