@@ -58,7 +58,7 @@ function Set-NetIPInterface { param($InterfaceIndex, $Dhcp, $ErrorAction)
     if ($global:T_Dhcp -and $global:T_S.Lease) { [void]$global:T_Addrs.Add([pscustomobject]@{ IPAddress = $global:T_S.Lease; PrefixLength = 24; PrefixOrigin = 'Dhcp'; AddressState = 'Preferred' }) } }
 function Set-DnsClientServerAddress { param($InterfaceIndex, $ServerAddresses, [switch]$ResetServerAddresses)
     if ($ResetServerAddresses) { $global:T_Dns = @(); $global:T_DnsStatic = $false } else { $global:T_Dns = @($ServerAddresses); $global:T_DnsStatic = $true } }
-function ipconfig.exe { $global:T_Renew = @($args) }
+function Start-Process { param($FilePath, $ArgumentList, $WindowStyle) $global:T_Renew = @($ArgumentList) }
 function Start-Sleep { }
 function New-NetIPAddress { param($InterfaceIndex, $IPAddress, $PrefixLength, $DefaultGateway)
     if ($global:T_S.FailAll -or ($global:T_S.FailNew -and $IPAddress -eq $global:T_S.NewIp)) { throw 'Testfehler beim Anlegen der Adresse' }
@@ -69,7 +69,7 @@ function New-NetIPAddress { param($InterfaceIndex, $IPAddress, $PrefixLength, $D
         $script:NetEpilog = @'
 [pscustomobject]@{ Dhcp = $global:T_Dhcp; Addrs = @($global:T_Addrs); Gw = @($global:T_Gw); Dns = @($global:T_Dns); DnsStatic = $global:T_DnsStatic; Renew = @($global:T_Renew) } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $env:HM_TEST_OUT -Encoding UTF8
 '@
-        $script:NetStubNames = @('Get-NetIPInterface', 'Get-NetAdapter', 'Get-ItemProperty', 'Get-NetIPAddress', 'Get-NetRoute', 'Get-DnsClientServerAddress', 'Remove-NetRoute', 'Remove-NetIPAddress', 'Set-NetIPInterface', 'Set-DnsClientServerAddress', 'ipconfig.exe', 'Start-Sleep', 'New-NetIPAddress', 'New-NetRoute')
+        $script:NetStubNames = @('Get-NetIPInterface', 'Get-NetAdapter', 'Get-ItemProperty', 'Get-NetIPAddress', 'Get-NetRoute', 'Get-DnsClientServerAddress', 'Remove-NetRoute', 'Remove-NetIPAddress', 'Set-NetIPInterface', 'Set-DnsClientServerAddress', 'Start-Process', 'Start-Sleep', 'New-NetIPAddress', 'New-NetRoute')
         # Fall ausfuehren: Rueckgabe Ergebniszeilen und Endzustand
         $script:RunNet = {
             param([hashtable]$State, [hashtable]$Args1)
@@ -122,7 +122,7 @@ function New-NetIPAddress { param($InterfaceIndex, $IPAddress, $PrefixLength, $D
         $r.Lines[0] | Should -Match '^WARN DHCP ist eingeschaltet, aber nach 2 Sekunden kam noch keine Adresse'
         @($r.Lines | Where-Object { $_ -match '^(OK|FEHLER)' }).Count | Should -Be 0
         $r.End.Dhcp | Should -BeTrue
-        @($r.End.Renew) | Should -Be @('/renew', 'Ethernet Test')
+        @($r.End.Renew) | Should -Be @('/renew', '"Ethernet Test"')
     }
     It 'Rueckbau mit zwei Standardgateways: beide wieder eingetragen, Kontrolle prueft Gateway und DNS' {
         $s = $script:StaticOld.Clone(); $s.FailNew = $true; $s.Gw = @($script:OldGw, (New-TestIp 2))
@@ -151,6 +151,43 @@ function New-NetIPAddress { param($InterfaceIndex, $IPAddress, $PrefixLength, $D
         $r = & $script:RunNet $s @{ Index = 7; Mode = 'Static'; Ip = $script:NewIp; Prefix = 24 }
         @($r.Lines | Where-Object { $_ -match '^FEHLER: ' }).Count | Should -Be 0
         $script:RS_NetApply.ToString() | Should -Not -Match '"FEHLER: '
+    }
+    It 'Start am Ziel unabhaengig von der Ausfuehrungsrichtlinie (Befehl statt Skriptdatei), Rueckgabe sofort nach dem Start' {
+        $t = $script:RS_NetApply.ToString()
+        $t | Should -Match ([regex]::Escape('[scriptblock]::Create([System.IO.File]::ReadAllText('))
+        $t | Should -Match ([regex]::Escape('-Command `"$cmd`"'))
+        $t | Should -Not -Match ([regex]::Escape('-File `"'))
+        $t | Should -Match ([regex]::Escape('"STARTED|$res"'))
+        $t | Should -Not -Match 'while \('
+    }
+    It 'Abholen: Verbindung bricht ab -> Hinweis (INFO) statt Fehler, Nachkontrolle per Ping auf die neue Adresse' {
+        Mock Invoke-Command { throw 'WinRM: Verbindung getrennt' }
+        Mock Test-Connection { $true }
+        Mock Start-Sleep { }
+        $r = @(& $script:RS_NetPoll 'PC-ANDERS' $null 'C:\ProgramData\HUMig\Netzwerk\x.txt' 1 $script:NewIp $false)
+        $r[0] | Should -Match '^INFO Verbindung getrennt, wie bei einer Adressaenderung zu erwarten'
+        $r[1] | Should -Match "^INFO Nachkontrolle: die neue Adresse $([regex]::Escape($script:NewIp)) antwortet \(Ping\)"
+        @($r | Where-Object { $_ -match '^(FEHLER|WARN)' }).Count | Should -Be 0
+        Should -Invoke Invoke-Command -ParameterFilter { $ComputerName -eq $script:NewIp }
+    }
+    It 'Abholen: erst noch nicht fertig, dann Ergebnis -> Ergebniszeilen des Ziels' {
+        $script:Calls = 0
+        Mock Invoke-Command { $script:Calls++; if ($script:Calls -lt 2) { 'NOCH-NICHT' } else { @('OK statische Adresse ...') } }
+        Mock Start-Sleep { }
+        $r = @(& $script:RS_NetPoll 'PC-ANDERS' $null 'x.txt' 30 '' $false)
+        $r | Should -Be @('OK statische Adresse ...')
+    }
+    It 'Abholen: DHCP ohne Antwort und ohne neue Adresse -> "Ergebnis offen", kein Ping' {
+        Mock Invoke-Command { throw 'weg' }
+        Mock Test-Connection { $true }
+        Mock Start-Sleep { }
+        $r = @(& $script:RS_NetPoll 'PC-ANDERS' $null 'x.txt' 1 '' $false)
+        ($r -join ' ') | Should -Match 'Ergebnis offen'
+        Should -Invoke Test-Connection -Times 0
+    }
+    It 'Abholen am eigenen PC: liest die Datei direkt' {
+        $f = Join-Path $TestDrive 'netres.txt'; [IO.File]::WriteAllLines($f, [string[]]@('OK DHCP aktiv, Adresse vom DHCP-Server: x'))
+        @(& $script:RS_NetPoll $env:COMPUTERNAME $null $f 5 '' $true) | Should -Be @('OK DHCP aktiv, Adresse vom DHCP-Server: x')
     }
 }
 

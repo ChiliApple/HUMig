@@ -15,9 +15,8 @@
 function Invoke-HMTool {
     param(
         [string]$Title, [scriptblock]$Script, [object[]]$ArgumentList = @(), [string]$Computer = '',
-        [int]$TimeoutSec = 180, [scriptblock]$OnResult, [object]$State = $null, [switch]$ProtectData, [scriptblock]$OnError
+        [int]$TimeoutSec = 180, [scriptblock]$OnResult, [object]$State = $null, [switch]$ProtectData
     )
-    # -OnError: statt der Fehlerzeile aufgerufen, wenn der Aufruf selbst scheitert (Verbindung, Zeitlimit): param($Fehlertext, $Computer, $State)
     if (-not $Computer) { $Computer = Get-TargetComputer }
     # -ProtectData: am Ziel vorher %ProgramData%\HUMig absichern (Functions\Core-Protect.ps1); schlaegt das fehl, laeuft das Werkzeug nicht
     $text = $Script.ToString()
@@ -35,12 +34,9 @@ function Invoke-HMTool {
                 Invoke-Command @p
             }
         } catch { "FEHLER: $($_.Exception.Message)" }
-    } -ArgumentList @($Computer, $script:RemoteCred, $text, @($ArgumentList)) -TimeoutSec $TimeoutSec -State @{ Title = $Title; Computer = $Computer; On = $OnResult; State = $State; OnErr = $OnError } -OnComplete {
+    } -ArgumentList @($Computer, $script:RemoteCred, $text, @($ArgumentList)) -TimeoutSec $TimeoutSec -State @{ Title = $Title; Computer = $Computer; On = $OnResult; State = $State } -OnComplete {
         param($r, $st)
-        if ("$r" -match '^FEHLER: ' -and -not ($r -is [System.Array])) {
-            if ($st.OnErr) { & $st.OnErr "$r" $st.Computer $st.State; return }
-            Out-Console (Format-RemoteError "$r") 'Error'; return
-        }
+        if ("$r" -match '^FEHLER: ' -and -not ($r -is [System.Array])) { Out-Console (Format-RemoteError "$r") 'Error'; return }
         if ($st.On) { & $st.On $r $st.Computer $st.State; return }
         Write-HMToolResult $r
     }
@@ -191,7 +187,7 @@ function Start-HMRenameComputer {
 }
 
 # ============================================================================
-# 2. IP-ADRESSE STATISCH / DHCP (als SYSTEM-Aufgabe am Ziel - Verbindungsabbruch egal)
+# 2. IP-ADRESSE STATISCH / DHCP (als SYSTEM-Aufgabe am Ziel, Ergebnis wird danach abgeholt - Verbindungsabbruch durch die neue Adresse ist erwartet)
 # ============================================================================
 $script:RS_NetInfo = {
     # ohne Get-NetIPConfiguration: das bricht auf manchen PCs ab ("Exception setting NetAdapter ... Object[]", z.B. bei
@@ -249,40 +245,81 @@ function Start-HMNetworkConfig {
             $name = "HUMig_Netzwerk_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
             $body = New-HMNetChangeScript -Index $idx -Mode 'Static' -Ip $ip -Prefix $pfx -Gateway $gw -Dns $dns -Name $name
         }
-        # Die Aufgabe prueft das Ergebnis selbst, stellt bei Fehlschlag den alten Zustand her und schreibt das Ergebnis nach
-        # %ProgramData%\HUMig\Netzwerk\<Name>.txt. HUMig wartet darauf; bricht die Verbindung ab (neue Adresse), ist das Ergebnis offen.
-        Invoke-HMTool -Title "Netzwerk ($($f.Mode))" -Computer $comp -TimeoutSec 100 -ArgumentList @($body, $name) -Script $script:RS_NetApply -ProtectData -State $name -OnError {
-            param($r, $c2, $n2)
-            # der echte Fehler zuerst (Verbindung, Anmeldung, Absicherung ...), dann der Hinweis fuer den Fall, dass die Aufgabe lief
-            Out-Console (Format-RemoteError "$r") 'Error'
-            Out-Console "   Falls die Aufgabe schon lief und sich die Adresse geaendert hat, ist ein Abbruch der Verbindung zu erwarten - das Ergebnis steht dann am PC in %ProgramData%\HUMig\Netzwerk\$n2.txt (nach dem Neu-Verbinden zeigt 'IP-Adresse' den aktuellen Stand)." 'Info'
+        # Ablauf in zwei Schritten: (1) am Ziel die SYSTEM-Aufgabe anlegen und starten - scheitert das, ist es ein echter Fehler;
+        # (2) im Hintergrund das Ergebnis abholen (%ProgramData%\HUMig\Netzwerk\<Name>.txt). Reisst die Verbindung durch die
+        # neue Adresse ab, ist das der erwartete Fall: ehrlicher Hinweis, Nachkontrolle der neuen Adresse, kein Fehler.
+        $newIp = if ($f.Mode -eq 'DHCP') { '' } else { $ip }
+        $wait = if ($f.Mode -eq 'DHCP') { 60 } else { 45 }
+        Invoke-HMTool -Title "Netzwerk ($($f.Mode))" -Computer $comp -TimeoutSec 60 -ArgumentList @($body, $name) -Script $script:RS_NetApply -ProtectData -State @{ NewIp = $newIp; Wait = $wait } -OnResult {
+            param($r, $c2, $s2)
+            $st0 = @(@($r) | Where-Object { "$_" -like 'STARTED|*' })[0]
+            if (-not $st0) { Write-HMToolResult $r; return }
+            Start-HMNetResultPoll -Computer $c2 -ResultPath ("$st0".Substring(8)) -NewIp $s2.NewIp -WaitSec $s2.Wait
         }
     }
 }
-# Am Ziel-PC: Aufgabe als SYSTEM anlegen und starten, dann bis 75 s auf das Ergebnis warten
+# Ergebnis der Netzwerk-Aufgabe im Hintergrund abholen und melden
+function Start-HMNetResultPoll([string]$Computer, [string]$ResultPath, [string]$NewIp, [int]$WaitSec) {
+    Out-Console "   Aenderung laeuft am PC (SYSTEM-Aufgabe) - Ergebnis wird abgeholt (bis $WaitSec s) ..." 'Info'
+    Invoke-AsyncCommand -ScriptBlock $script:RS_NetPoll -ArgumentList @($Computer, $script:RemoteCred, $ResultPath, $WaitSec, $NewIp, [bool](Test-HMIsLocal $Computer)) -TimeoutSec ($WaitSec + 60) -State @{ Computer = $Computer } -OnComplete {
+        param($r, $st)
+        if ("$r" -match '^FEHLER: ' -and -not ($r -is [System.Array])) { Out-Console "   Netzwerk ($($st.Computer)): Ergebnis nicht abholbar ($r) - am PC in %ProgramData%\HUMig\Netzwerk nachsehen" 'Warning'; return }
+        Write-HMToolResult $r
+    }
+}
+# Im Hintergrund: Ergebnisdatei lesen (am eigenen PC direkt, sonst per kurzer Verbindung ueber den Namen und - bei statischer
+# Adresse - ueber die neue Adresse). Bleibt der PC unerreichbar: Hinweis "Verbindung getrennt" und Ping auf die neue Adresse.
+$script:RS_NetPoll = {
+    param($h, $cred, $res, $deadlineSec, $newIp, $isLocal)
+    $t0 = Get-Date; $lost = $false
+    $targets = @($h); if ($newIp -and $newIp -ne $h) { $targets += $newIp }
+    while (((Get-Date) - $t0).TotalSeconds -lt $deadlineSec) {
+        if ($isLocal) {
+            if (Test-Path -LiteralPath $res) { return @(Get-Content -LiteralPath $res -Encoding UTF8 | ForEach-Object { "$_" }) }
+        } else {
+            foreach ($t in $targets) {
+                $p = @{ ComputerName = $t; ArgumentList = @($res); ErrorAction = 'Stop'; SessionOption = (New-PSSessionOption -OpenTimeout 5000 -OperationTimeout 15000)
+                        ScriptBlock = { param($fi) if (Test-Path -LiteralPath $fi) { @(Get-Content -LiteralPath $fi -Encoding UTF8 | ForEach-Object { "$_" }) } else { 'NOCH-NICHT' } } }
+                if ($cred) { $p.Credential = $cred }
+                $r = $null
+                try { $r = @(Invoke-Command @p) } catch { $lost = $true; continue }
+                if ($r.Count -and "$($r[0])" -ne 'NOCH-NICHT') { return $r }
+                break
+            }
+        }
+        Start-Sleep -Seconds 3
+    }
+    if ($isLocal) { return "WARN Ergebnis liegt nach $deadlineSec Sekunden noch nicht vor - die Aenderung laeuft evtl. noch. Ergebnis: $res" }
+    $out = @()
+    if ($lost) { $out += "INFO Verbindung getrennt, wie bei einer Adressaenderung zu erwarten. Ergebnis am PC: $res" }
+    else { $out += "INFO Ergebnis liegt nach $deadlineSec Sekunden noch nicht vor - die Aenderung laeuft evtl. noch. Ergebnis am PC: $res" }
+    if ($newIp) {
+        $ok = $false; try { $ok = [bool](Test-Connection -ComputerName $newIp -Count 2 -Quiet -ErrorAction Stop) } catch { $ok = $false }
+        $out += $(if ($ok) { "INFO Nachkontrolle: die neue Adresse $newIp antwortet (Ping)" } else { "INFO Nachkontrolle: die neue Adresse $newIp antwortet nicht auf Ping (Firewall?) - Ergebnis offen" })
+    } else { $out += 'INFO Ergebnis offen - nach dem Neu-Verbinden zeigt "IP-Adresse" den aktuellen Stand' }
+    return $out
+}
+# Am Ziel-PC: Aufgabe als SYSTEM anlegen und starten. Die Aufgabe laeuft ueber -Command mit einem Skriptblock aus der Textdatei -
+# eine Ausfuehrungsrichtlinie (z. B. AllSigned per Gruppenrichtlinie) gilt nur fuer Skriptdateien, nicht fuer Befehle.
+# Rueckgabe "STARTED|<Ergebnisdatei>" oder "FEHLER - ..."
 $script:RS_NetApply = {
     param($body, $name)
     try {
         $dir = Join-Path $env:ProgramData 'HUMig\Netzwerk'
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } | Remove-Item -Force -ErrorAction SilentlyContinue
-        $ps1 = Join-Path $dir "$name.ps1"; $res = Join-Path $dir "$name.txt"
-        $full = "Start-Sleep -Seconds 3`r`ntry {`r`n$body`r`n} finally { Unregister-ScheduledTask -TaskName '$name' -Confirm:`$false -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '$ps1' -Force -ErrorAction SilentlyContinue }"
-        [System.IO.File]::WriteAllText($ps1, $full, (New-Object System.Text.UTF8Encoding($true)))
-        $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ps1`""
+        $tf = Join-Path $dir "$name.task.txt"; $res = Join-Path $dir "$name.txt"
+        $full = "Start-Sleep -Seconds 3`r`ntry {`r`n$body`r`n} finally { Unregister-ScheduledTask -TaskName '$name' -Confirm:`$false -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '$tf' -Force -ErrorAction SilentlyContinue }"
+        [System.IO.File]::WriteAllText($tf, $full, (New-Object System.Text.UTF8Encoding($true)))
+        $cmd = "& ([scriptblock]::Create([System.IO.File]::ReadAllText('$tf')))"
+        $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -Command `"$cmd`""
         $p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
         $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
         Register-ScheduledTask -TaskName $name -Action $a -Principal $p -Settings $s -Force -ErrorAction Stop | Out-Null
         Start-ScheduledTask -TaskName $name -ErrorAction Stop
-        $t0 = Get-Date
-        while (((Get-Date) - $t0).TotalSeconds -lt 75) {
-            if (Test-Path -LiteralPath $res) { return @(Get-Content -LiteralPath $res -Encoding UTF8 | ForEach-Object { "$_" }) }
-            Start-Sleep -Seconds 1
-        }
-        "WARN Ergebnis liegt nach 75 Sekunden noch nicht vor - die Aenderung laeuft evtl. noch. Ergebnis am PC: $res"
+        "STARTED|$res"
     } catch { "FEHLER - Aufgabe nicht ausfuehrbar: $($_.Exception.Message)" }
-}
-# Text der SYSTEM-Aufgabe fuer "IP-Adresse": alten Zustand merken, aendern, Ergebnis pruefen, bei Fehlschlag alten Zustand
+}# Text der SYSTEM-Aufgabe fuer "IP-Adresse": alten Zustand merken, aendern, Ergebnis pruefen, bei Fehlschlag alten Zustand
 # wiederherstellen, Ergebnis (Zeilen OK/WARN/FEHLER) in eine Datei schreiben. -ResultFile nur fuer Tests (sonst ProgramData\HUMig\Netzwerk).
 function New-HMNetChangeScript {
     param([int]$Index, [ValidateSet('DHCP', 'Static')][string]$Mode, [string]$Ip = '', [int]$Prefix = 0, [string]$Gateway = '', [string[]]$Dns = @(),
@@ -315,7 +352,8 @@ function Get-HUNetState {
 # Adresse vom DHCP-Server nur fuer diesen Adapter erneuern (ohne Namen erneuerte ipconfig alle Adapter und konnte lange blockieren)
 function Invoke-HURenew {
     $n = ''; try { $n = "$((Get-NetAdapter -InterfaceIndex $idx).Name)" } catch { $n = '' }
-    if ($n) { ipconfig.exe /renew $n | Out-Null }
+    # ohne Warten: ipconfig /renew kann lange blockieren, die Antwort kommt ueber Wait-HUDhcp
+    if ($n) { Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\ipconfig.exe') -ArgumentList @('/renew', "`"$n`"") -WindowStyle Hidden }
 }
 function Clear-HUNet([bool]$ManualOnly) {
     Remove-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue
