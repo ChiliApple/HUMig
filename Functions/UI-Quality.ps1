@@ -615,6 +615,11 @@ function Remove-HMBackupFolders($Win, [string]$Root, [string[]]$Names) {
     }
     $Names = @($Names | Where-Object { $_ -and $_ -notmatch '[\\/]' -and $_ -ne '..' })
     if (-not $Names.Count) { return }
+    # Fenster ist nicht modal: inzwischen kann der Backup-Ordner gewechselt worden sein (Liste und Namen gehoeren zum alten)
+    if ("$(Get-BackupRoot)".TrimEnd('\') -ne "$Root".TrimEnd('\')) {
+        [void](Show-HMDialogBox -Owner $Win -Text "Der Backup-Ordner wurde gewechselt, seit dieses Fenster offen ist.`n`nBitte 'Alte loeschen' neu oeffnen." -Title 'Backups loeschen' -Mode 'OK' -Icon 'Information')
+        return
+    }
     # Loeschen ist endgueltig -> immer nachfragen, mit Status je Backup
     $info = @{}; foreach ($b in @($script:BackupInfos)) { if ($b) { $info["$($b.Name)"] = $b } }
     $lines = @($Names | ForEach-Object { if ($info.ContainsKey($_)) { "$_  ($(Format-HMBackupStatus $info[$_]))" } else { $_ } })
@@ -628,11 +633,18 @@ function Remove-HMBackupFolders($Win, [string]$Root, [string[]]$Names) {
     $last = @($newest.Values | Where-Object { $Names -contains "$($_.Name)" } | ForEach-Object { "$($_.Name)" })
     if ($last.Count) { $list += "`n`nACHTUNG - das ist das NEUESTE brauchbare Backup dieses PCs/Benutzers:`n$($last -join "`n")" }
     if ("$((Show-HMDialogBox -Owner $Win -Text ("$($Names.Count) Backup(s) endgueltig loeschen?`n`n$list") -Title 'Backups loeschen' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
-    $Win.Close()
     $paths = @($Names | ForEach-Object { Join-Path $Root $_ })
+    # laeuft ein Vorgang mit einem dieser Backups (Restore daraus, Backup hinein): deutliche Warnung, Standard Nein
+    if ($script:JobRunning) {
+        $hit = Get-HMPathConflict $paths @(Get-HMCtxPaths $script:JobCtx)
+        if ($hit -and "$((Show-HMDialogBox -Owner $Win -Text (Get-HMDeleteWarning (Split-Path $hit -Leaf) "$($script:JobTitle)") -Title 'Backup wird benutzt' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { return }
+        if ($hit) { Out-Console "Backup '$(Split-Path $hit -Leaf)' wird trotz laufendem Vorgang '$($script:JobTitle)' geloescht (bestaetigt)." 'Warning' }
+    }
+    $Win.Close()
     Out-Console "Loesche $($paths.Count) Backup(s) ..." 'Warning'
-    Invoke-AsyncCommand -ScriptBlock { param($eng, $list) . $eng; foreach ($p in $list) { $r = Remove-HMBackupFolder $p; if ($r -eq 'OK') { "OK $p" } else { "$($r -replace '^FEHLER: ', "FEHLER $p : ")" } } } -ArgumentList @($script:Engine, $paths) -TimeoutSec 7200 -OnComplete {
-        param($r) foreach ($l in @($r)) { Out-Console "$l" $(if ("$l" -like 'OK*') { 'Success' } else { 'Error' }) }; $script:SelectedBackup = $null; Update-BackupList; Update-BackupRootInfo; Update-HMBackupOverview -Quiet
+    Add-HMDeleting $paths
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $list) . $eng; foreach ($p in $list) { $r = Remove-HMBackupFolder $p; if ($r -eq 'OK') { "OK $p" } else { "$($r -replace '^FEHLER: ', "FEHLER $p : ")" } } } -ArgumentList @($script:Engine, $paths) -TimeoutSec 7200 -State $paths -OnComplete {
+        param($r, $dp) Remove-HMDeleting $dp; foreach ($l in @($r)) { Out-Console "$l" $(if ("$l" -like 'OK*') { 'Success' } else { 'Error' }) }; $script:SelectedBackup = $null; Update-BackupList; Update-BackupRootInfo; Update-HMBackupOverview -Quiet
     }
 }
 

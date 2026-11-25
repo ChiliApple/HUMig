@@ -252,9 +252,10 @@
                         <ColumnDefinition Width="Auto"/><ColumnDefinition Width="230"/><ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Computer:" Style="{StaticResource Lbl}"/>
+                    <TextBlock x:Name="lblConnected" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="4" Text="nicht verbunden" Foreground="{StaticResource CatSubtext}" FontSize="11" Margin="2,0,4,4" TextTrimming="CharacterEllipsis" ToolTip="Auf diesen Computer und seine Benutzerliste wirken Backup, Restore und Werkzeuge. Steht im Feld ein anderer Name: Enter oder Verbinden"/>
                     <ComboBox x:Name="cmbComputer" Grid.Row="0" Grid.Column="1" IsEditable="True" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Dieser PC (lokal) oder Name/IP eines anderen PCs (Remote-Backup/-Restore ueber C$ und WinRM). Enter = Verbinden"/>
                     <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal">
                         <Button x:Name="btnConnect" Content="Verbinden" Style="{StaticResource BtnBlue}" ToolTip="Links: Benutzerprofile des PCs laden + Verbindung pruefen | Rechts: andere Anmeldedaten fuer diesen PC"/>
@@ -265,14 +266,14 @@
                     <ComboBox x:Name="cmbUser" Grid.Row="0" Grid.Column="4" IsEditable="True" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Benutzerprofil am gewaehlten PC. Fuer Restore auf einen neuen PC ohne Profil: Konto als DOMAENE\Benutzer eintragen (dann USMT mitwaehlen)."/>
                     <TextBlock x:Name="lblSid" Grid.Row="0" Grid.Column="5" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" MaxWidth="420" TextTrimming="CharacterEllipsis" Cursor="Hand"/>
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Backup-Ordner:" Style="{StaticResource Lbl}"/>
-                    <DockPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="4" Margin="0,0,4,0">
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Backup-Ordner:" Style="{StaticResource Lbl}"/>
+                    <DockPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="4" Margin="0,0,4,0">
                         <Button x:Name="btnBrowseRoot" DockPanel.Dock="Right" Content="..." Style="{StaticResource BtnDefault}" Width="34" Margin="4,0,0,0" ToolTip="Links: Ordner waehlen (USB-NVMe, Freigabe ...) | Rechts: Standard (Tool-Ordner\BACKUPS)"/>
                         <Button x:Name="btnOpenRoot" DockPanel.Dock="Right" Content="Oeffnen" Style="{StaticResource BtnDefault}" Margin="4,0,0,0"/>
                         <Button x:Name="btnBitLocker" DockPanel.Dock="Right" Content="Verschluesseln ..." Style="{StaticResource BtnPeach}" Margin="4,0,0,0" Visibility="Collapsed" ToolTip="USB-Laufwerk mit BitLocker To Go verschluesseln (Kennwort + Wiederherstellungsschluessel)"/>
                         <TextBox x:Name="txtBackupRoot" Style="{StaticResource DarkTextBox}" IsReadOnly="True"/>
                     </DockPanel>
-                    <TextBlock x:Name="lblFree" Grid.Row="1" Grid.Column="5" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="lblFree" Grid.Row="2" Grid.Column="5" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center"/>
                 </Grid>
             </Border>
 
