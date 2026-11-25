@@ -275,7 +275,7 @@ Describe 'Softwareverteilung: Nachkontrolle mit Mindestversion und Rechte der Pa
         $d = Join-Path $TestDrive 'Ablage'; New-Item -ItemType Directory -Path $d -Force | Out-Null
         @(Get-SwPathWriteRisk @($d)) | Should -BeNullOrEmpty
         $i = Get-Item -LiteralPath $d
-        $acl = $i.GetAccessControl()
+        $acl = Get-Acl -LiteralPath $d   # GetAccessControl() gibt es unter PowerShell 7 an DirectoryInfo nicht
         $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-32-545'), 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
         if ($i.PSObject.Methods['SetAccessControl']) { $i.SetAccessControl($acl) } else { [System.IO.FileSystemAclExtensions]::SetAccessControl($i, $acl) }
         $r = @(Get-SwPathWriteRisk @($d))
