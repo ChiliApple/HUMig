@@ -516,3 +516,85 @@ Describe 'Restore-Vorschau zeigt, was der Restore nicht zurueckspielt' {
         $r.Counts.Nicht | Should -Be 0
     }
 }
+
+Describe 'Katalog-Editor: eigene Eintraege sicher speichern' {
+    BeforeAll {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\UI-AppEditor.ps1'), [ref]$null, [ref]$null)
+        foreach ($n in @('Write-HMAeLocal', 'Test-HMAeLocalFile', 'Write-HMAeTextAtomic')) {
+            $fn = $ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true) | Select-Object -First 1
+            . ([scriptblock]::Create($fn.Extent.Text.Replace("function $n", "function global:$n")))
+        }
+        function global:Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon) return $global:T_Answer }
+    }
+    AfterAll { Remove-Item Function:\global:Show-HMDialogBox -ErrorAction SilentlyContinue }
+    BeforeEach {
+        $d = Join-Path $TestDrive ("cfg_{0}" -f [guid]::NewGuid().ToString('N').Substring(0, 6))
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+        $global:ConfigDir = $d; $script:ConfigDir = $d
+        $global:Ae = @{ LocalObj = $null; Win = $null; Saved = $false }; $script:Ae = $global:Ae
+        $global:T_Answer = 'No'
+        $script:P = Join-Path $d 'apps.json'
+    }
+    It 'ohne Datei: wird angelegt, keine Sicherung, keine Hilfsdatei bleibt liegen' {
+        Write-HMAeLocal @([pscustomobject]@{ Id = 'App_A'; Name = 'A' })
+        (Get-Content -LiteralPath $script:P -Raw | ConvertFrom-Json).Apps[0].Id | Should -Be 'App_A'
+        Test-Path "$($script:P).bak" | Should -BeFalse
+        @(Get-ChildItem -LiteralPath $global:ConfigDir -Filter '*.tmp-*').Count | Should -Be 0
+    }
+    It 'lesbare Datei: Sicherung aus der alten Datei, neue Datei vollstaendig' {
+        [IO.File]::WriteAllText($script:P, '{"Apps":[{"Id":"App_Alt"}]}')
+        Write-HMAeLocal @([pscustomobject]@{ Id = 'App_Neu'; Name = 'N' })
+        (Get-Content -LiteralPath "$($script:P).bak" -Raw) | Should -Match 'App_Alt'
+        (Get-Content -LiteralPath $script:P -Raw | ConvertFrom-Json).Apps[0].Id | Should -Be 'App_Neu'
+    }
+    It 'beschaedigte Datei, Rueckfrage Nein: nichts geaendert, gute Sicherung bleibt' {
+        [IO.File]::WriteAllText($script:P, '{"Apps":[{"Id":"App_Kaputt"')
+        [IO.File]::WriteAllText("$($script:P).bak", '{"Apps":[{"Id":"App_Gut1"},{"Id":"App_Gut2"}]}')
+        { Write-HMAeLocal @([pscustomobject]@{ Id = 'App_Neu' }) } | Should -Throw '*nicht gespeichert*'
+        [IO.File]::ReadAllText($script:P) | Should -Be '{"Apps":[{"Id":"App_Kaputt"'
+        [IO.File]::ReadAllText("$($script:P).bak") | Should -Match 'App_Gut2'
+        $global:Ae.Saved | Should -BeFalse
+    }
+    It 'beschaedigte Datei, Rueckfrage Ja: defekte Datei bleibt erhalten, Sicherung unveraendert, neue Datei lesbar' {
+        [IO.File]::WriteAllText($script:P, '{"Apps":[{"Id":"App_Kaputt"')
+        [IO.File]::WriteAllText("$($script:P).bak", '{"Apps":[{"Id":"App_Gut1"},{"Id":"App_Gut2"}]}')
+        $global:T_Answer = 'Yes'
+        Write-HMAeLocal @([pscustomobject]@{ Id = 'App_Neu' })
+        @(Get-ChildItem -LiteralPath $global:ConfigDir -Filter 'apps.json.defekt-*').Count | Should -Be 1
+        [IO.File]::ReadAllText("$($script:P).bak") | Should -Match 'App_Gut2'
+        Test-HMAeLocalFile $script:P | Should -Be 'OK'
+    }
+    It 'Zustand der Datei: Fehlt, OK, Defekt (auch leer)' {
+        Test-HMAeLocalFile (Join-Path $global:ConfigDir 'gibtsnicht.json') | Should -Be 'Fehlt'
+        [IO.File]::WriteAllText($script:P, '   '); Test-HMAeLocalFile $script:P | Should -Be 'Defekt'
+        [IO.File]::WriteAllText($script:P, '{}'); Test-HMAeLocalFile $script:P | Should -Be 'OK'
+    }
+}
+
+Describe 'Status-Reiter: nicht lesbare Quellen und Profile ohne Lauf' {
+    BeforeAll { . (Join-Path $script:Root 'Functions\UI-Status.ps1') }
+    It 'nicht lesbare Quelle ergibt einen Hinweis (kein "Alles in Ordnung")' {
+        $s = Get-HMStatusData -Now ([datetime]'2026-11-26 10:00') -Unreadable @('App-Updates-Verlauf', 'App-Updates-Verlauf')
+        @($s.Warnings).Count | Should -Be 1
+        $s.Warnings[0].Text | Should -Be 'Status: App-Updates-Verlauf nicht lesbar - die Angaben dazu fehlen hier'
+        @((Get-HMStatusData -Now ([datetime]'2026-11-26 10:00')).Warnings).Count | Should -Be 0
+    }
+    It 'Server-Backup-Profil ohne jeden Lauf ergibt einen Hinweis' {
+        $p = [pscustomobject]@{ Name = 'Neu'; DiskPrefix = 'HUMIG-NEU'; Disks = 2; WarnDays = 14; ArchiveDisks = 0; ArchiveDays = 30 }
+        $s = Get-HMStatusData -SbProfiles @($p) -SbHistory @() -Now ([datetime]'2026-11-26 10:00')
+        @($s.Warnings | Where-Object { $_.Text -match "Server-Backup 'Neu': noch kein Lauf" }).Count | Should -Be 1
+    }
+    It 'JSON-Datei pruefen: fehlt = lesbar, leer oder beschaedigt = nicht lesbar' {
+        Test-HMStatusJsonFile '' | Should -BeTrue
+        Test-HMStatusJsonFile (Join-Path $TestDrive 'fehlt.json') | Should -BeTrue
+        $f = Join-Path $TestDrive 'st.json'
+        [IO.File]::WriteAllText($f, '{"a":1}'); Test-HMStatusJsonFile $f | Should -BeTrue
+        [IO.File]::WriteAllText($f, '{"a":'); Test-HMStatusJsonFile $f | Should -BeFalse
+        [IO.File]::WriteAllText($f, ''); Test-HMStatusJsonFile $f | Should -BeFalse
+    }
+    It 'Startseite gibt die nicht lesbaren Quellen weiter' {
+        $t = ${function:Update-HMStatusPage}.ToString()
+        $t | Should -Match ([regex]::Escape('-Unreadable $unread'))
+        $t | Should -Match ([regex]::Escape("catch { `$unread += 'App-Updates-Verlauf' }"))
+    }
+}
