@@ -410,7 +410,8 @@ $script:RS_Autologon = {
                 Set-ItemProperty -LiteralPath $k -Name AutoAdminLogon -Value '0' -Type String
                 Remove-ItemProperty -LiteralPath $k -Name DefaultPassword -ErrorAction SilentlyContinue
                 Remove-ItemProperty -LiteralPath $k -Name AutoLogonCount -ErrorAction SilentlyContinue
-                [HMLsa]::Store('DefaultPassword', $null)
+                # null = Geheimnis loeschen ($null kaeme in .NET als leere Zeichenkette an und speicherte ein leeres Kennwort)
+                [HMLsa]::Store('DefaultPassword', [NullString]::Value)
                 'OK Autologon deaktiviert, gespeichertes Kennwort geloescht'
             }
         }

@@ -118,9 +118,20 @@ Step 'PSScriptAnalyzer (Fehler)' {
 
 # 6. Pester
 Step 'Pester-Tests' {
-    Install-HMModule 'Pester' '5.99.99'
-    Import-Module Pester -MaximumVersion 5.99.99 -Force
+    # genau diese Pester-Version (Tests sind fuer Pester 5 geschrieben). Windows bringt Pester 3.4.0 mit, eine neuere
+    # Hauptversion kann ebenfalls installiert sein - beide duerfen nicht geladen werden
+    $pv = [Version]'5.7.1'
+    if (-not (Get-Module -ListAvailable -Name Pester | Where-Object { $_.Version -eq $pv })) {
+        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+        if (-not (Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue)) { Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null }
+        Install-Module -Name Pester -RequiredVersion $pv -Force -Scope CurrentUser -SkipPublisherCheck -AllowClobber
+    }
+    Get-Module Pester | Remove-Module -Force
+    Import-Module Pester -RequiredVersion $pv -Force
     $cfg = New-PesterConfiguration
+    $loaded = @(Get-Module Pester)
+    if ($loaded.Count -ne 1 -or $loaded[0].Version -ne $pv) { throw "falsche Pester-Version geladen: $(@($loaded | ForEach-Object { $_.Version }) -join ', ') (erwartet $pv)" }
+    Write-Host "   Pester $($loaded[0].Version) ($($loaded[0].ModuleBase))"
     $cfg.Run.Path = $PSScriptRoot
     $cfg.Run.PassThru = $true
     $cfg.Output.Verbosity = 'Detailed'

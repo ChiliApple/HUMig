@@ -390,7 +390,9 @@ function Get-HMRemoteVapid([string]$Path = (Get-HMRemotePushFile), [switch]$NoCr
         if ($NoCreate) { return $null }
         $p = New-Object System.Security.Cryptography.CngKeyCreationParameters
         $p.ExportPolicy = [System.Security.Cryptography.CngExportPolicies]::AllowPlaintextExport
-        $key = [System.Security.Cryptography.CngKey]::Create([System.Security.Cryptography.CngAlgorithm]::ECDsaP256, $null, $p)
+        # Name null = fluechtiger Schluessel (nur im Speicher). $null wird an .NET als leere Zeichenkette uebergeben und legte einen
+        # gespeicherten Schluessel ohne Namen im Konto an - jedes weitere Anlegen scheiterte dann ("Das Objekt ist bereits vorhanden")
+        $key = [System.Security.Cryptography.CngKey]::Create([System.Security.Cryptography.CngAlgorithm]::ECDsaP256, [NullString]::Value, $p)
         $blob = $key.Export([System.Security.Cryptography.CngKeyBlobFormat]::EccPrivateBlob)
         $prot = [System.Security.Cryptography.ProtectedData]::Protect($blob, $ent, 'CurrentUser')
         $dir = Split-Path $Path -Parent
