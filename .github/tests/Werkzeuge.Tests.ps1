@@ -276,9 +276,11 @@ Describe 'Softwareverteilung: Nachkontrolle mit Mindestversion und Rechte der Pa
         . (Join-Path $script:Root 'Functions\Tools-Software.ps1')
         # verschachtelte Funktion aus dem Text, der am Ziel-PC laeuft, herausloesen
         $ast = [System.Management.Automation.Language.Parser]::ParseInput($script:RS_SwInstall.ToString(), [ref]$null, [ref]$null)
-        $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-HUInstallVerdict' }, $true) | Select-Object -First 1
-        . ([scriptblock]::Create($fn.Extent.Text))
-        $script:Det = { param([bool]$Hit, [string]$Ver) [pscustomobject]@{ Hit = $Hit; Version = $Ver; Missing = 'Name x*' } }
+        foreach ($nm in @('Get-HUInstallVerdict', 'ConvertTo-HUVer', 'Find-HUApp')) {
+            $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $nm }, $true) | Select-Object -First 1
+            . ([scriptblock]::Create($fn.Extent.Text))
+        }
+        $script:Det ={ param([bool]$Hit, [string]$Ver) [pscustomobject]@{ Hit = $Hit; Version = $Ver; Missing = 'Name x*' } }
         $script:NewAcl = {
             param([string]$Sid, [string]$Rights, [string]$Type = 'Allow')
             $a = New-Object System.Security.AccessControl.DirectorySecurity
@@ -312,6 +314,26 @@ Describe 'Softwareverteilung: Nachkontrolle mit Mindestversion und Rechte der Pa
     }
     It 'anderer Fehlercode: leer (Fehlercode-Zweig wie bisher)' {
         Get-HUInstallVerdict 1603 @(0) (& $script:Det $true '1.0') (& $script:Det $false '') '2.0' '5 s' '' '' '' | Should -Be ''
+    }
+    It 'Versionen werden gleich normalisiert (1.2.3 = 1.2.3.0, v1.2, Anhaenge), Unlesbares ist $null' {
+        (ConvertTo-HUVer '1.2.3') -eq (ConvertTo-HUVer '1.2.3.0') | Should -BeTrue
+        (ConvertTo-HUVer 'v1.2') -eq (ConvertTo-HUVer '1.2.0.0') | Should -BeTrue
+        (ConvertTo-HUVer '1.2.3-beta') -eq (ConvertTo-HUVer '1.2.3') | Should -BeTrue
+        (ConvertTo-HUVer '7') -eq (ConvertTo-HUVer '7.0.0.0') | Should -BeTrue
+        (ConvertTo-HUVer '1.2.3') -lt (ConvertTo-HUVer '1.2.10') | Should -BeTrue
+        ConvertTo-HUVer '' | Should -BeNullOrEmpty
+        ConvertTo-HUVer 'Version unbekannt' | Should -BeNullOrEmpty
+    }
+    It 'Erkennung mit Mindestversion: 1.2.3.0 gegen DisplayVersion 1.2.3 gilt als erreicht' {
+        Mock Get-ItemProperty { [pscustomobject]@{ PSChildName = '{X}'; DisplayName = 'Testprogramm'; DisplayVersion = '1.2.3' } }
+        Find-HUApp 'Testprogramm*' '' '1.2.3.0' | Should -Not -BeNullOrEmpty
+        Find-HUApp 'Testprogramm*' '' '1.2.4' | Should -BeNullOrEmpty
+    }
+    It 'installierte Version leer oder nicht lesbar: OK mit "Version nicht pruefbar" statt Fehler' {
+        $r = Get-HUInstallVerdict 0 @(0) (& $script:Det $true '') (& $script:Det $false '') '2.0' '5 s' '' '' ''
+        $r | Should -Match '^OK\|installiert \(ExitCode 0'
+        $r | Should -Match 'Version nicht pruefbar'
+        Get-HUInstallVerdict 0 @(0) (& $script:Det $true 'neu') (& $script:Det $false '') '2.0' '5 s' '' '' '' | Should -Match '^OK\|.*Version nicht pruefbar'
     }
     It 'Nachkontrolle am Ziel nutzt die Mindestversion' {
         $script:RS_SwInstall.ToString() | Should -Match ([regex]::Escape('$chkMin = if ($chk -and $mv) { Get-HUDetect $p $mv } else { $chk }'))
@@ -352,6 +374,20 @@ Describe 'Treiberverteilung: Nachkontrolle und Hinweis zur Geraete-Sperre' {
         $ast = [System.Management.Automation.Language.Parser]::ParseInput($script:DrvBody, [ref]$null, [ref]$null)
         $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-HUDrvVerdict' }, $true) | Select-Object -First 1
         . ([scriptblock]::Create($fn.Extent.Text))
+    }
+    It 'Treiberversion: INF-Text und Geraeteversion werden normalisiert verglichen, Unlesbares ist nicht vergleichbar' {
+        Test-HUVerIn '1.2.3.0' @('1.02.0003') | Should -BeTrue
+        Test-HUVerIn '1.2.3.0' @('1.2.3') | Should -BeTrue
+        Test-HUVerIn '31.0.15.3623' @('31.0.15.3623') | Should -BeTrue
+        Test-HUVerIn '1.2.4.0' @('1.2.3') | Should -BeFalse
+        Test-HUVerIn '1.2.3.0' @('?') | Should -BeNullOrEmpty
+        Test-HUVerIn '' @('1.2.3') | Should -BeNullOrEmpty
+        Get-HUDrvVerdict 2 0 $false $true | Should -Be 'Ok'
+    }
+    It 'Nachkontrolle und Vorpruefung nutzen den normalisierten Vergleich, Hinweis bei nicht vergleichbarer Version' {
+        ([regex]::Matches($script:DrvBody, [regex]::Escape('(Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true'))).Count | Should -BeGreaterThan 2
+        $script:RS_DrvPreBody.ToString() | Should -Match ([regex]::Escape('Test-HUVerIn $_.Version $map[$_.Hw]'))
+        $script:DrvBody | Should -Match 'Version nicht pruefbar'
     }
     It 'kein Geraet mit der neuen Version und kein Neustart: nicht installiert' {
         Get-HUDrvVerdict 2 0 $false | Should -Be 'NoneNew'

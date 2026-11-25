@@ -409,7 +409,16 @@ $script:RS_SwInstall = {
     # DetectOnly: nur Erkennung (Status je PC), Ausgabe STATUS|1/0/?|Version|Text
     param([string]$Dir, [string]$PkgJson, [bool]$Force, [bool]$DetectOnly = $false)
     $ErrorActionPreference = 'SilentlyContinue'
-    function ConvertTo-HUVer([string]$v) { if ("$v" -match '^\d+(\.\d+){0,3}') { $t = $Matches[0]; if ($t -notmatch '\.') { $t += '.0' }; try { return [version]$t } catch { } }; return $null }
+    # Versionen vergleichbar machen: fuehrendes "v" und Anhaenge weg, auf vier Stellen auffuellen ("1.2.3" = "1.2.3.0"); nicht lesbar = $null
+    function ConvertTo-HUVer([string]$v) {
+        $s = "$v".Trim() -replace '^[vV]\s*', ''
+        if ($s -match '^\d+(\.\d+){0,3}') {
+            $p = @($Matches[0].Split('.') | ForEach-Object { [int64]$_ })
+            while ($p.Count -lt 4) { $p += [int64]0 }
+            try { return New-Object System.Version ([int]$p[0]), ([int]$p[1]), ([int]$p[2]), ([int]$p[3]) } catch { }
+        }
+        return $null
+    }
     # ProductCode gesetzt -> NUR danach (exakt). Sonst DisplayName-Muster + optional Mindestversion (aeltere Version = nicht installiert -> Update)
     function Find-HUApp([string]$Name, [string]$Code, [string]$MinVer) {
         $min = ConvertTo-HUVer $MinVer
@@ -487,6 +496,8 @@ $script:RS_SwInstall = {
         if (@($OkCodes) -contains $Rc) {
             if ($Chk -and -not $Chk.Hit) { return "FEHLER|ExitCode $Rc, aber Programm danach nicht gefunden (Erkennung '$($Chk.Missing)' pruefen) ($Dur)$lg" }
             if ($MinVer -and $ChkMin -and -not $ChkMin.Hit) {
+                # installierte Version nicht lesbar oder nicht vergleichbar: kein Fehler, wie bisher OK mit Hinweis
+                if ($Chk -and $Chk.Hit -and ($null -eq (ConvertTo-HUVer "$($Chk.Version)"))) { return "OK|installiert (ExitCode $Rc, $Dur)$Ver - Version nicht pruefbar (gefunden: '$($Chk.Version)', Mindestversion $MinVer)$DeskNote" }
                 # Neustart-Code als Erfolgscode eingetragen (z. B. "0,3010"): neue Version evtl. erst nach dem Neustart sichtbar - OK bleibt
                 if ($reboot) { return "OK|installiert - NEUSTART erforderlich (ExitCode $Rc, $Dur)$Ver - Version $MinVer erst nach dem Neustart pruefbar (jetzt $($Chk.Version))$DeskNote" }
                 return "FEHLER|ExitCode $Rc, aber danach nur Version $(if ($Chk.Version) { $Chk.Version } else { '?' }) gefunden (Mindestversion $MinVer) - Update nicht wirksam ($Dur)$lg"

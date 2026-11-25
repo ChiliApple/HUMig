@@ -32,6 +32,26 @@ function Get-DrvFolder {
 # Gemeinsamer Code (lokal im UI UND am Ziel-PC): INF lesen, passende Geraete + aktiven Treiber ermitteln
 # ----------------------------------------------------------------------------
 $script:DrvLibText = @'
+# Versionen vergleichbar machen: fuehrendes "v" und Anhaenge weg, auf vier Stellen auffuellen ("1.02.0003" = "1.2.3" = "1.2.3.0");
+# nicht lesbar = $null
+function ConvertTo-HUVer([string]$v) {
+    $s = "$v".Trim() -replace '^[vV]\s*', ''
+    if ($s -match '^\d+(\.\d+){0,3}') {
+        $p = @($Matches[0].Split('.') | ForEach-Object { [int64]$_ })
+        while ($p.Count -lt 4) { $p += [int64]0 }
+        try { return New-Object System.Version ([int]$p[0]), ([int]$p[1]), ([int]$p[2]), ([int]$p[3]) } catch { }
+    }
+    return $null
+}
+# Ist $Ver eine der Versionen in $List? Vergleich ueber ConvertTo-HUVer, sonst Text. Rueckgabe $true / $false / $null (nicht vergleichbar)
+function Test-HUVerIn([string]$Ver, $List) {
+    if (-not "$Ver".Trim()) { return $null }
+    if (@($List) -contains $Ver) { return $true }
+    $a = ConvertTo-HUVer $Ver
+    $bs = @(@($List) | ForEach-Object { ConvertTo-HUVer "$_" })
+    if ($null -eq $a -or -not $bs.Count -or @($bs | Where-Object { $null -eq $_ }).Count) { return $null }
+    return [bool](@($bs | Where-Object { $_ -eq $a }).Count)
+}
 function Resolve-HUInfStr([string]$s, $str) {
     foreach ($m in [regex]::Matches("$s", '%([^%]+)%')) {
         $k = $m.Groups[1].Value.ToUpperInvariant()
@@ -319,9 +339,9 @@ function Confirm-DrvDeploy($Package, [string[]]$Hosts, [bool]$Force) {
 # ----------------------------------------------------------------------------
 $script:RS_DrvInstallBody = {
     $ErrorActionPreference = 'SilentlyContinue'
-    function ConvertTo-HUVer([string]$v) { if ("$v" -match '^\d+(\.\d+){0,3}') { $t = $Matches[0]; if ($t -notmatch '\.') { $t += '.0' }; try { return [version]$t } catch { } }; return $null }
     # Nachkontrolle: 'NoneNew' = passende Geraete da, keines mit der Paketversion, kein Neustart angekuendigt; sonst 'Ok'
-    function Get-HUDrvVerdict([int]$Matching, [int]$WithNew, [bool]$Reboot) {
+    function Get-HUDrvVerdict([int]$Matching, [int]$WithNew, [bool]$Reboot, [bool]$NotComparable = $false) {
+        if ($NotComparable) { return 'Ok' }
         if ($Matching -gt 0 -and $WithNew -eq 0 -and -not $Reboot) { return 'NoneNew' }
         return 'Ok'
     }
@@ -354,7 +374,7 @@ $script:RS_DrvInstallBody = {
         if ($map.Count -gt 0 -and $matched.Count -eq 0 -and [bool]$p.OnlyMatching) { return "SKIP|keine passende Hardware ($(@($parsed).Count) INF, $($map.Count) Hardware-IDs)" }
         $protect = [bool]$p.ProtectDriver
         if (-not $Force -and $main.Count -gt 0) {
-            $same = @($main | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
+            $same = @($main | Where-Object { $_.Version -and (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true })
             if ($same.Count -eq $main.Count) {
                 $ln = ''
                 if ($protect) {
@@ -467,11 +487,13 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
         if ($map.Count -eq 0) { return "OK|installiert$rbTxt ($dur)$note" }
         $after = @(Get-HUDrvState $map @() $extIds)
         $am = @($after | Where-Object { $_.Match -and -not $_.Ext })
-        $newOk = @($am | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
-        $notNew = @($am | Where-Object { -not ($_.Version -and (@($map[$_.Hw]) -contains $_.Version)) })
+        $newOk = @($am | Where-Object { $_.Version -and (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true })
+        $notNew = @($am | Where-Object { -not ($_.Version -and (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true) })
+        # Paket- oder Geraeteversion nicht lesbar/vergleichbar: wie bisher OK, aber mit Hinweis
+        $noCmp = @($am | Where-Object { $null -eq (Test-HUVerIn $_.Version $map[$_.Hw]) })
         # kein passendes Geraet hat die Paketversion und kein Neustart angekuendigt: nicht als "installiert" zaehlen
         # (vor der Sperren-Buchfuehrung: $lockRestore bleibt gesetzt, finally stellt die vorherigen Sperren wieder her)
-        $nv = Get-HUDrvVerdict $am.Count $newOk.Count $reboot
+        $nv = Get-HUDrvVerdict $am.Count $newOk.Count $reboot ($noCmp.Count -gt 0)
         if ($nv -eq 'NoneNew') { return "SKIP|nicht wirksam: kein passendes Geraet hat danach die Paketversion aktiv - aktiv: $(Format-HUState $after). Windows hat einen anderen Treiber behalten (oder er greift erst nach einem Neustart); $(if ("$($p.Mode)" -eq 'Inf') { "fuer diese Version 'Treiber erzwingen' einschalten" } else { 'Setup und Geraete-Manager pruefen' }) ($dur)$note | Log: $log" }
         $warn = if ($am.Count -gt 0 -and $notNew.Count -gt 0 -and -not $reboot) { " | ACHTUNG: $($notNew.Count) Geraet(e) noch mit anderer Version - Neustart pruefen" } else { '' }
         # Schutz setzen: nur Geraete, auf denen die Paket-Version jetzt aktiv ist
@@ -488,7 +510,7 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
             $lockNote = ' | bisherige Geraete-Sperre aufgehoben (Paket ohne Schutz)'
         }
         $lockRestore = $false
-        return "OK|installiert$rbTxt ($dur) - aktiv: $(Format-HUState $after)$warn$note$lockNote"
+        return "OK|installiert$rbTxt ($dur) - aktiv: $(Format-HUState $after)$warn$note$lockNote$(if ($noCmp.Count) { " | Version nicht pruefbar (Paket- oder Geraeteversion nicht vergleichbar)" })"
     } catch { return "FEHLER|$($_.Exception.Message -replace '[\r\n|]+', ' ')" }
     finally {
         # Installation fehlgeschlagen/abgebrochen: vorherige Geraete-Sperren wiederherstellen
@@ -632,7 +654,7 @@ $script:RS_DrvPreBody = {
         $main = @($matched | Where-Object { -not $_.Ext })
         if ($map.Count -gt 0 -and $matched.Count -eq 0 -and [bool]$p.OnlyMatching) { return "SKIP|keine passende Hardware (vor der Kopie geprueft)" }
         if (-not $Force -and $main.Count -gt 0) {
-            $same = @($main | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
+            $same = @($main | Where-Object { $_.Version -and (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true })
             if ($same.Count -eq $main.Count) {
                 $ln = ''
                 if ([bool]$p.ProtectDriver) {
