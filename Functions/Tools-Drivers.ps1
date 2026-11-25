@@ -472,7 +472,7 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
         # kein passendes Geraet hat die Paketversion und kein Neustart angekuendigt: nicht als "installiert" zaehlen
         # (vor der Sperren-Buchfuehrung: $lockRestore bleibt gesetzt, finally stellt die vorherigen Sperren wieder her)
         $nv = Get-HUDrvVerdict $am.Count $newOk.Count $reboot
-        if ($nv -eq 'NoneNew') { return "SKIP|nicht wirksam: kein passendes Geraet hat danach die Paketversion aktiv - aktiv: $(Format-HUState $after). Windows hat einen anderen Treiber behalten (oder er greift erst nach einem Neustart); fuer diese Version 'Treiber erzwingen' einschalten ($dur)$note | Log: $log" }
+        if ($nv -eq 'NoneNew') { return "SKIP|nicht wirksam: kein passendes Geraet hat danach die Paketversion aktiv - aktiv: $(Format-HUState $after). Windows hat einen anderen Treiber behalten (oder er greift erst nach einem Neustart); $(if ("$($p.Mode)" -eq 'Inf') { "fuer diese Version 'Treiber erzwingen' einschalten" } else { 'Setup und Geraete-Manager pruefen' }) ($dur)$note | Log: $log" }
         $warn = if ($am.Count -gt 0 -and $notNew.Count -gt 0 -and -not $reboot) { " | ACHTUNG: $($notNew.Count) Geraet(e) noch mit anderer Version - Neustart pruefen" } else { '' }
         # Schutz setzen: nur Geraete, auf denen die Paket-Version jetzt aktiv ist
         if ($protect) {

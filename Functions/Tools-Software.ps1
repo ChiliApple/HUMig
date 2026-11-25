@@ -486,7 +486,11 @@ $script:RS_SwInstall = {
         $reboot = ($Rc -eq 3010 -or $Rc -eq 1641)
         if (@($OkCodes) -contains $Rc) {
             if ($Chk -and -not $Chk.Hit) { return "FEHLER|ExitCode $Rc, aber Programm danach nicht gefunden (Erkennung '$($Chk.Missing)' pruefen) ($Dur)$lg" }
-            if ($MinVer -and $ChkMin -and -not $ChkMin.Hit) { return "FEHLER|ExitCode $Rc, aber danach nur Version $(if ($Chk.Version) { $Chk.Version } else { '?' }) gefunden (Mindestversion $MinVer) - Update nicht wirksam ($Dur)$lg" }
+            if ($MinVer -and $ChkMin -and -not $ChkMin.Hit) {
+                # Neustart-Code als Erfolgscode eingetragen (z. B. "0,3010"): neue Version evtl. erst nach dem Neustart sichtbar - OK bleibt
+                if ($reboot) { return "OK|installiert - NEUSTART erforderlich (ExitCode $Rc, $Dur)$Ver - Version $MinVer erst nach dem Neustart pruefbar (jetzt $($Chk.Version))$DeskNote" }
+                return "FEHLER|ExitCode $Rc, aber danach nur Version $(if ($Chk.Version) { $Chk.Version } else { '?' }) gefunden (Mindestversion $MinVer) - Update nicht wirksam ($Dur)$lg"
+            }
             return "OK|installiert (ExitCode $Rc, $Dur)$Ver$DeskNote"
         }
         if ($reboot) {

@@ -440,7 +440,13 @@ function Get-HMAuCancelAction([bool]$Cancel, $CancelAt, $LastSend, [bool]$Stoppe
 function Send-HMAuRemoteCancel([string[]]$Computers, [string]$Tag, $Credential = $null) {
     if (-not @($Computers).Count -or "$Tag" -notmatch '^[0-9a-f]{8,32}$') { return }
     $p = @{ ComputerName = @($Computers); ArgumentList = @($Tag); ErrorAction = 'SilentlyContinue'; SessionOption = (New-PSSessionOption -OpenTimeout 15000 -OperationTimeout 30000)
-            ScriptBlock = { param($t) foreach ($d in @(Get-ChildItem -LiteralPath (Join-Path $env:ProgramData 'HUMig\AppUpdates') -Directory -Filter "run_$($t)_*" -ErrorAction SilentlyContinue)) { try { New-Item -ItemType File -Path (Join-Path $d.FullName 'cancel') -Force -ErrorAction Stop | Out-Null } catch { } } } }
+            ScriptBlock = {
+                param($t)
+                $b = Join-Path $env:ProgramData 'HUMig\AppUpdates'
+                # Markierung je Lauf (auch fuer die Luecke zwischen zwei Aufgaben) und "cancel" in jedem Laufordner dieses Laufs
+                if (Test-Path -LiteralPath $b) { try { New-Item -ItemType File -Path (Join-Path $b "cancel_$t") -Force -ErrorAction Stop | Out-Null } catch { } }
+                foreach ($d in @(Get-ChildItem -LiteralPath $b -Directory -Filter "run_$($t)_*" -ErrorAction SilentlyContinue)) { try { New-Item -ItemType File -Path (Join-Path $d.FullName 'cancel') -Force -ErrorAction Stop | Out-Null } catch { } }
+            } }
     if ($Credential) { $p.Credential = $Credential }
     try { Invoke-Command @p | Out-Null } catch { }
 }
@@ -495,7 +501,10 @@ function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payloa
             if ($fin) { break }
             # Abbrechen wie versprochen "nach dem laufenden Programm": Datei "cancel" in die Laufordner an den PCs legen (alle 30 s
             # wiederholt, falls dort gerade eine neue Aufgabe beginnt). Erst nach $CancelGraceMin Minuten die Verbindung hart beenden.
-            $act = Get-HMAuCancelAction $(if ($Job) { [bool]$Job.Cancel } else { $false }) $cancelAt $lastSend $stopped (Get-Date) $CancelGraceMin
+            # nur Aktualisieren/Installieren warten das laufende Programm ab; Suchen, Zeitplan und Pruefen brechen wie bisher sofort ab
+            $graceful = ($Op -in @('Update', 'Install'))
+            $act = Get-HMAuCancelAction $(if ($Job) { [bool]$Job.Cancel } else { $false }) $cancelAt $lastSend $stopped (Get-Date) $(if ($graceful) { $CancelGraceMin } else { 0 })
+            if (-not $graceful -and $act) { $act = 'Stop' }
             if ($act -eq 'Send' -or $act -eq 'First') {
                 if (-not $cancelAt) { $cancelAt = Get-Date; if ($OnLine) { foreach ($c in $rem) { & $OnLine $c.ToUpper() 'Abbruch angefordert - das laufende Programm wird noch fertig, danach startet nichts mehr' } } }
                 $lastSend = Get-Date

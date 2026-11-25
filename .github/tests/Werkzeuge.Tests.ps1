@@ -44,7 +44,8 @@ foreach ($a in @($global:T_S.Addrs)) { [void]$global:T_Addrs.Add([pscustomobject
 $global:T_Gw = New-Object System.Collections.ArrayList; foreach ($g in @($global:T_S.Gw)) { if ($g) { [void]$global:T_Gw.Add($g) } }
 $global:T_Dns = @($global:T_S.Dns | Where-Object { $_ }); $global:T_DnsStatic = [bool]$global:T_S.DnsStatic; $global:T_Dhcp = [bool]$global:T_S.Dhcp
 function Get-NetIPInterface { [pscustomobject]@{ Dhcp = $(if ($global:T_Dhcp) { 'Enabled' } else { 'Disabled' }) } }
-function Get-NetAdapter { [pscustomobject]@{ InterfaceGuid = '{00000000-0000-0000-0000-000000000001}' } }
+function Get-NetAdapter { [pscustomobject]@{ InterfaceGuid = '{00000000-0000-0000-0000-000000000001}'; Name = 'Ethernet Test' } }
+function New-NetRoute { param($InterfaceIndex, $DestinationPrefix, $NextHop, $ErrorAction) [void]$global:T_Gw.Add($NextHop) }
 function Get-ItemProperty { [pscustomobject]@{ NameServer = $(if ($global:T_DnsStatic) { ($global:T_Dns -join ',') } else { '' }) } }
 function Get-NetIPAddress { @($global:T_Addrs) }
 function Get-NetRoute { @($global:T_Gw | ForEach-Object { [pscustomobject]@{ NextHop = $_ } }) }
@@ -57,7 +58,7 @@ function Set-NetIPInterface { param($InterfaceIndex, $Dhcp, $ErrorAction)
     if ($global:T_Dhcp -and $global:T_S.Lease) { [void]$global:T_Addrs.Add([pscustomobject]@{ IPAddress = $global:T_S.Lease; PrefixLength = 24; PrefixOrigin = 'Dhcp'; AddressState = 'Preferred' }) } }
 function Set-DnsClientServerAddress { param($InterfaceIndex, $ServerAddresses, [switch]$ResetServerAddresses)
     if ($ResetServerAddresses) { $global:T_Dns = @(); $global:T_DnsStatic = $false } else { $global:T_Dns = @($ServerAddresses); $global:T_DnsStatic = $true } }
-function ipconfig.exe { }
+function ipconfig.exe { $global:T_Renew = @($args) }
 function Start-Sleep { }
 function New-NetIPAddress { param($InterfaceIndex, $IPAddress, $PrefixLength, $DefaultGateway)
     if ($global:T_S.FailAll -or ($global:T_S.FailNew -and $IPAddress -eq $global:T_S.NewIp)) { throw 'Testfehler beim Anlegen der Adresse' }
@@ -66,9 +67,9 @@ function New-NetIPAddress { param($InterfaceIndex, $IPAddress, $PrefixLength, $D
     if ($DefaultGateway) { [void]$global:T_Gw.Add($DefaultGateway) } }
 '@
         $script:NetEpilog = @'
-[pscustomobject]@{ Dhcp = $global:T_Dhcp; Addrs = @($global:T_Addrs); Gw = @($global:T_Gw); Dns = @($global:T_Dns); DnsStatic = $global:T_DnsStatic } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $env:HM_TEST_OUT -Encoding UTF8
+[pscustomobject]@{ Dhcp = $global:T_Dhcp; Addrs = @($global:T_Addrs); Gw = @($global:T_Gw); Dns = @($global:T_Dns); DnsStatic = $global:T_DnsStatic; Renew = @($global:T_Renew) } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $env:HM_TEST_OUT -Encoding UTF8
 '@
-        $script:NetStubNames = @('Get-NetIPInterface', 'Get-NetAdapter', 'Get-ItemProperty', 'Get-NetIPAddress', 'Get-NetRoute', 'Get-DnsClientServerAddress', 'Remove-NetRoute', 'Remove-NetIPAddress', 'Set-NetIPInterface', 'Set-DnsClientServerAddress', 'ipconfig.exe', 'Start-Sleep', 'New-NetIPAddress')
+        $script:NetStubNames = @('Get-NetIPInterface', 'Get-NetAdapter', 'Get-ItemProperty', 'Get-NetIPAddress', 'Get-NetRoute', 'Get-DnsClientServerAddress', 'Remove-NetRoute', 'Remove-NetIPAddress', 'Set-NetIPInterface', 'Set-DnsClientServerAddress', 'ipconfig.exe', 'Start-Sleep', 'New-NetIPAddress', 'New-NetRoute')
         # Fall ausfuehren: Rueckgabe Ergebniszeilen und Endzustand
         $script:RunNet = {
             param([hashtable]$State, [hashtable]$Args1)
@@ -116,11 +117,21 @@ function New-NetIPAddress { param($InterfaceIndex, $IPAddress, $PrefixLength, $D
         ($r.Lines -join ' ') | Should -Match 'bereits verwendet.*alter Zustand wiederhergestellt'
         @($r.End.Addrs | ForEach-Object { $_.IPAddress }) | Should -Be @($script:OldIp)
     }
-    It 'DHCP ohne Antwort des DHCP-Servers: FEHLER und Rueckbau auf die statische Adresse' {
+    It 'DHCP ohne Antwort des DHCP-Servers: DHCP bleibt eingeschaltet, Warnung statt Rueckbau, nur dieser Adapter erneuert' {
         $r = & $script:RunNet $script:StaticOld @{ Index = 7; Mode = 'DHCP'; WaitDhcpSec = 2 }
-        ($r.Lines -join ' ') | Should -Match 'keine Adresse vom DHCP-Server.*alter Zustand wiederhergestellt'
-        $r.End.Dhcp | Should -BeFalse
-        @($r.End.Addrs | ForEach-Object { $_.IPAddress }) | Should -Be @($script:OldIp)
+        $r.Lines[0] | Should -Match '^WARN DHCP ist eingeschaltet, aber nach 2 Sekunden kam noch keine Adresse'
+        @($r.Lines | Where-Object { $_ -match '^(OK|FEHLER)' }).Count | Should -Be 0
+        $r.End.Dhcp | Should -BeTrue
+        @($r.End.Renew) | Should -Be @('/renew', 'Ethernet Test')
+    }
+    It 'Rueckbau mit zwei Standardgateways: beide wieder eingetragen, Kontrolle prueft Gateway und DNS' {
+        $s = $script:StaticOld.Clone(); $s.FailNew = $true; $s.Gw = @($script:OldGw, (New-TestIp 2))
+        $r = & $script:RunNet $s @{ Index = 7; Mode = 'Static'; Ip = $script:NewIp; Prefix = 24; Gateway = $script:OldGw; Dns = @() }
+        ($r.Lines -join ' ') | Should -Match 'alter Zustand wiederhergestellt'
+        @($r.End.Gw) | Should -Be @($script:OldGw, (New-TestIp 2))
+        $t = New-HMNetChangeScript -Index 7 -Mode Static -Ip $script:NewIp -Prefix 24 -ResultFile 'x'
+        $t | Should -Match ([regex]::Escape('$miss += @($old.Gw | Where-Object { @($chk.Gw) -notcontains $_ }'))
+        $t | Should -Match ([regex]::Escape("`$miss += 'DNS-Server'"))
     }
     It 'DHCP gelungen: OK mit der Adresse vom DHCP-Server' {
         $s = $script:StaticOld.Clone(); $s.Lease = $script:Lease
@@ -256,6 +267,12 @@ Describe 'Softwareverteilung: Nachkontrolle mit Mindestversion und Rechte der Pa
         $r | Should -Match '^OK\|installiert - NEUSTART erforderlich'
         $r | Should -Match 'erst nach dem Neustart pruefbar'
     }
+    It 'Neustart-Code als Erfolgscode eingetragen (0,3010) und Mindestversion erst nach Neustart: OK mit Hinweis wie bisher' {
+        $r = Get-HUInstallVerdict 3010 @(0, 3010) (& $script:Det $true '1.0') (& $script:Det $false '') '2.0' '5 s' '' '' ''
+        $r | Should -Match '^OK\|installiert - NEUSTART erforderlich'
+        $r | Should -Match 'erst nach dem Neustart pruefbar'
+        Get-HUInstallVerdict 3010 @(0, 3010) (& $script:Det $true '2.0') (& $script:Det $true '2.0') '2.0' '5 s' '' '' '' | Should -Match '^OK\|installiert \(ExitCode 3010'
+    }
     It 'anderer Fehlercode: leer (Fehlercode-Zweig wie bisher)' {
         Get-HUInstallVerdict 1603 @(0) (& $script:Det $true '1.0') (& $script:Det $false '') '2.0' '5 s' '' '' '' | Should -Be ''
     }
@@ -364,6 +381,7 @@ Describe 'App-Updates: Abbrechen, Doppelstart, Zeitplan-Status, Zeitlimit' {
         Test-Path (Join-Path $base 'run_aaaaaaaaaaaaaaaa_2\cancel') | Should -BeTrue
         Test-Path (Join-Path $base 'run_bbbbbbbbbbbbbbbb_1\cancel') | Should -BeFalse
         Test-Path (Join-Path $base 'auto\cancel') | Should -BeFalse
+        Test-Path (Join-Path $base 'cancel_aaaaaaaaaaaaaaaa') | Should -BeTrue
     }
     It 'Ziel-PC: Laufordner mit Kennung, kein neuer Schritt nach Abbruch, Abbruch-Datei wird erkannt' {
         $script:Target | Should -Match ([regex]::Escape('$dir = Join-Path $Base $(if ($RunTag) { "run_$($RunTag)_$id" } else { "run_$id" })'))
@@ -386,22 +404,36 @@ Describe 'App-Updates: Abbrechen, Doppelstart, Zeitplan-Status, Zeitlimit' {
         $t = ${function:Start-HMAppUpdate}.ToString()
         $t | Should -Match ([regex]::Escape('if (-not $restarted) { try { Restart-HMAuStopped $Job $restart } catch { } }'))
     }
-    It 'Worker: Abbruch-Datei oder verschwundener Laufordner beendet nach dem laufenden Programm' {
-        ([regex]::Matches($script:Worker, [regex]::Escape("if (-not (Test-Path -LiteralPath `$Dir) -or (Test-Path -LiteralPath (Join-Path `$Dir 'cancel'))) { Write-WLog 'CANCEL'; break }"))).Count | Should -Be 2
+    It 'Worker: unveraendert, Abbruch nur ueber die Datei "cancel" (ein verschwundener Ordner bricht nicht ab)' {
+        ([regex]::Matches($script:Worker, [regex]::Escape("if (Test-Path -LiteralPath (Join-Path `$Dir 'cancel')) { Write-WLog 'CANCEL'; break }"))).Count | Should -Be 2
+        $script:Worker | Should -Not -Match ([regex]::Escape('-not (Test-Path -LiteralPath $Dir)'))
     }
-    It 'Zeitlimit je Programm als SYSTEM (Standard 60 min, Rest laeuft weiter)' {
+    It 'Abbruch: Wartezeit nur bei Aktualisieren/Installieren, Markierung je Lauf wird am Ziel geprueft und entfernt' {
+        ${function:Invoke-HMAuTarget}.ToString() | Should -Match ([regex]::Escape("`$graceful = (`$Op -in @('Update', 'Install'))"))
+        $script:Target | Should -Match ([regex]::Escape('if ($RunTag -and (Test-Path -LiteralPath (Join-Path $Base "cancel_$RunTag")))'))
+        $script:Target | Should -Match ([regex]::Escape('if ($RunTag) { Remove-Item -LiteralPath (Join-Path $Base "cancel_$RunTag")'))
+    }
+    It 'Zeitlimit je Programm als SYSTEM (Standard 120 min, Rest laeuft weiter)' {
         $script:Target | Should -Match ([regex]::Escape('$SysItemMin = if ([int]"0$($Payload.ItemTimeoutMin)" -gt 0)'))
-        $script:Target | Should -Match ([regex]::Escape("} else { 60 }"))
+        $script:Target | Should -Match ([regex]::Escape("} else { 120 }"))
         $script:Target | Should -Match ([regex]::Escape('$false 10800 $SysItemMin'))
+        $script:Auto | Should -Match ([regex]::Escape('$itemMin = if ([int]"0$($cfg.ItemTimeoutMin)" -gt 0) { [int]"$($cfg.ItemTimeoutMin)" } else { 120 }'))
     }
-    It 'Doppelstart: Rueckfrage nur, wenn noch eine Pruefung laeuft' {
+    It 'Doppelstart: Rueckfrage nur, wenn die Vorpruefung eines frueheren Klicks laeuft' {
         $script:AsyncBusy = @{ 'Au' = 0 }; $script:AsyncBusyText = @{ 'Au' = '' }
         Get-HMAuBusyText | Should -Be ''
         $script:AsyncBusy = @{ 'Au' = 1 }; $script:AsyncBusyText = @{ 'Au' = 'Laufende Programme pruefen ...' }
-        Get-HMAuBusyText | Should -Be 'es laeuft noch: Laufende Programme pruefen ...'
+        Get-HMAuBusyText | Should -Match 'Pruefung der laufenden Programme eines frueheren Klicks'
+        $script:AsyncBusy = @{ 'Au' = 1 }; $script:AsyncBusyText = @{ 'Au' = 'Laufende Programme an den PCs pruefen ...' }
+        Get-HMAuBusyText | Should -Not -Be ''
+        # WinGet pruefen oder Quelle hinzufuegen: keine Rueckfrage
+        $script:AsyncBusy = @{ 'Au' = 1 }; $script:AsyncBusyText = @{ 'Au' = 'WinGet wird geprueft ...' }
+        Get-HMAuBusyText | Should -Be ''
         $script:AsyncBusy = @{ 'Au' = 2 }; $script:AsyncBusyText = @{}
-        Get-HMAuBusyText | Should -Match 'eine Pruefung fuer App-Updates'
-        [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\UI-AppUpdates.ps1')) | Should -Match ([regex]::Escape("if (`$busy -and -not (Confirm-Action"))
+        Get-HMAuBusyText | Should -Be ''
+        $ui = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\UI-AppUpdates.ps1'))
+        # Rueckfrage erst, wenn wirklich etwas zu aktualisieren ist
+        $ui.IndexOf("if (`$busy -and -not (Confirm-Action") | Should -BeGreaterThan $ui.IndexOf('if (-not $byPc.Count) { return }')
     }
     It 'Zeitplan: Fehler aus dem letzten Bericht gehen vor dem Rueckgabewert 0' {
         Get-HMAuScheduleResultText $false '0' '26.11.2026 03:00' 5 | Should -Be 'Fehler (5)'
@@ -498,11 +530,24 @@ Describe 'Restore-Vorschau zeigt, was der Restore nicht zurueckspielt' {
         & $script:Mk (Join-Path $ed 'FOLDER1\a.txt'); & $script:Mk (Join-Path $ed 'FOLDER2\b.txt')
         $p1 = 'D:\Projekte'; $p2 = 'D:\Archiv'
         [IO.File]::WriteAllText((Join-Path $ed 'folders.json'), (ConvertTo-Json -InputObject @(@{ Index = 1; Path = $p1 }, @{ Index = 2; Path = $p2 })))
-        $script:Ctx.ExtraTargets = @{ (ConvertTo-HMExtraKey $p1) = ''; (ConvertTo-HMExtraKey $p2) = 'E:\Neu\Archiv' }
+        $neu = "$($env:SystemDrive)\HUMigTestZiel\Archiv"
+        $script:Ctx.ExtraTargets = @{ (ConvertTo-HMExtraKey $p1) = ''; (ConvertTo-HMExtraKey $p2) = $neu }
         $script:Ctx.Modules = @([pscustomobject]@{ Id = 'ExtraFolders'; Name = 'Zusaetzliche Ordner'; Scope = 'Machine'; Items = @([pscustomobject]@{ Type = 'Builtin'; Name = 'ExtraFolders'; Handler = 'ExtraFolders' }) })
         $r = & $script:RunPreview $script:Ctx
         @($r.Rows | Where-Object { $_.Aktion -match 'beim Restore abgewaehlt' -and $_.Ziel -eq $p1 }).Count | Should -Be 1
-        @($r.Rows | Where-Object { $_.Aktion -eq 'Zusaetzlicher Ordner' -and $_.Ziel -match 'E:\\Neu\\Archiv \(statt D:\\Archiv\)' }).Count | Should -Be 1
+        $row = @($r.Rows | Where-Object { $_.Aktion -match '^Zusaetzlicher Ordner' -and $_.Ziel -match ([regex]::Escape("$neu (statt D:\Archiv)")) })
+        $row.Count | Should -Be 1
+        $row[0].Aktion | Should -Match 'Restore leitet noch um'
+    }
+    It 'Zusaetzlicher Ordner auf fehlendem Laufwerk: nicht zurueckgespielt' {
+        if (-not $script:FreeDrive) { Set-ItResult -Skipped -Because 'kein freier Laufwerksbuchstabe'; return }
+        $ed = Join-Path $script:Bk 'ExtraFolders'
+        & $script:Mk (Join-Path $ed 'FOLDER1\a.txt')
+        [IO.File]::WriteAllText((Join-Path $ed 'folders.json'), (ConvertTo-Json -InputObject @(@{ Index = 1; Path = "$($script:FreeDrive):\Projekte" })))
+        $script:Ctx.Modules = @([pscustomobject]@{ Id = 'ExtraFolders'; Name = 'Zusaetzliche Ordner'; Scope = 'Machine'; Items = @([pscustomobject]@{ Type = 'Builtin'; Name = 'ExtraFolders'; Handler = 'ExtraFolders' }) })
+        $r = & $script:RunPreview $script:Ctx
+        @($r.Rows).Count | Should -Be 1
+        $r.Rows[0].Aktion | Should -Match "Laufwerk $($script:FreeDrive): gibt es am Ziel-PC nicht"
     }
     It 'normaler Ordner: Dateivergleich wie bisher (aeltere Zieldatei wird ueberschrieben)' {
         $dst = Join-Path $TestDrive ("ZielN_{0}" -f [guid]::NewGuid().ToString('N').Substring(0, 6))

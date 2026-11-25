@@ -136,7 +136,7 @@ try {
     try { $lf = Join-Path $Dir 'log.txt'; if ((Get-Item -LiteralPath $lf -ErrorAction Stop).Length -gt 400KB) { Get-Content -LiteralPath $lf -Tail 2000 | Set-Content -LiteralPath $lf -Encoding UTF8 } } catch { }
     $cfg = Get-Content -LiteralPath (Join-Path $Dir 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     # Zeitlimit je Programm (Minuten), ueberschreibbar in config.json (ItemTimeoutMin)
-    $itemMin = if ([int]"0$($cfg.ItemTimeoutMin)" -gt 0) { [int]"$($cfg.ItemTimeoutMin)" } else { 60 }
+    $itemMin = if ([int]"0$($cfg.ItemTimeoutMin)" -gt 0) { [int]"$($cfg.ItemTimeoutMin)" } else { 120 }
     try { Import-Module Microsoft.WinGet.Client -ErrorAction Stop } catch { Import-Module (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\Microsoft.WinGet.Client') -ErrorAction Stop }
     $wg = Get-AWingetExe
     if (-not $wg) { throw 'winget.exe nicht gefunden' }
@@ -158,7 +158,7 @@ try {
                 if ($ex) { $excl++; Write-ALog "Ausnahme: $($p.Name) ($($ex.Pattern))"; continue }
                 $todo += [pscustomobject]@{ Id = "$($p.Id)"; Name = "$($p.Name)"; From = "$($p.InstalledVersion)"; To = "$(@($p.AvailableVersions)[0])"; Source = "$src" }
             }
-        } catch { Write-ALog "Quelle ${src}: $($_.Exception.Message)" }
+        } catch { $err++; Write-ALog "Quelle ${src}: $($_.Exception.Message)" }
     }
     Write-ALog "$found Update(s), $excl Ausnahme(n), $($todo.Count) zu aktualisieren"
     $i = 0

@@ -49,9 +49,14 @@ function Out-R($v) { [pscustomobject]@{ HMAu = 'R'; PC = $PC; J = (ConvertTo-Jso
 # dieses Laufs legt (Ordnername mit RunTag) - das laufende Programm wird fertig, danach startet nichts mehr
 $script:TCancelled = $false
 $RunTag = if ("$($Payload.RunTag)" -match '^[0-9a-f]{8,32}$') { "$($Payload.RunTag)" } else { '' }
-function Test-TCancel { return [bool]($script:TCancelled -or ($Payload.Job -and $Payload.Job.Cancel)) }
+function Test-TCancel {
+    if ($script:TCancelled -or ($Payload.Job -and $Payload.Job.Cancel)) { return $true }
+    # Markierung des Laufs (legt HUMig beim Abbrechen an, auch wenn gerade keine Aufgabe laeuft)
+    if ($RunTag -and (Test-Path -LiteralPath (Join-Path $Base "cancel_$RunTag"))) { $script:TCancelled = $true; return $true }
+    return $false
+}
 # Zeitlimit je Programm fuer Laeufe als SYSTEM (Minuten); haengt ein Installer laenger, wird die Aufgabe beendet und mit dem Rest weitergemacht
-$SysItemMin = if ([int]"0$($Payload.ItemTimeoutMin)" -gt 0) { [int]"$($Payload.ItemTimeoutMin)" } else { 60 }
+$SysItemMin = if ([int]"0$($Payload.ItemTimeoutMin)" -gt 0) { [int]"$($Payload.ItemTimeoutMin)" } else { 120 }
 function Get-TLoggedOnSids {
     @(foreach ($p in @(Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue)) {
             try { "$((Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid -ErrorAction Stop).Sid)" } catch { }
@@ -578,6 +583,7 @@ try {
             Out-R ([pscustomobject]@{ Results = @($res | Where-Object { $_ }); Errors = $script:TErr })
             } finally {
                 if (-not $rsDone -and ($rs.Services.Count -or $rs.Apps.Count)) { try { $null = @(Restart-TStopped $rs) } catch { } }
+                if ($RunTag) { Remove-Item -LiteralPath (Join-Path $Base "cancel_$RunTag") -Force -ErrorAction SilentlyContinue }
             }
         }
         'ScheduleSet' {

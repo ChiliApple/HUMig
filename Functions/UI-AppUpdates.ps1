@@ -251,21 +251,17 @@ function Show-HMAuSearchResult($Res) {
 # ----------------------------------------------------------------------------
 # Aktualisieren
 # ----------------------------------------------------------------------------
-# Laeuft gerade eine Hintergrund-Pruefung fuer App-Updates (Zaehler aus Invoke-AsyncCommand -BusyTag 'Au', raeumt sich selbst auf)?
-# Rueckgabe Text fuer die Rueckfrage oder ''
+# Laeuft gerade die Vorpruefung eines frueheren "Aktualisieren" (laufende Programme)? Zaehler aus Invoke-AsyncCommand -BusyTag 'Au'
+# (raeumt sich selbst auf); andere Arbeiten mit derselben Kennung (WinGet pruefen, Quellen) zaehlen nicht. Rueckgabe Text oder ''
 function Get-HMAuBusyText {
     $n = 0; try { $n = [int]$script:AsyncBusy['Au'] } catch { $n = 0 }
     if ($n -le 0) { return '' }
     $t = ''; try { $t = "$($script:AsyncBusyText['Au'])".Trim() } catch { }
-    if (-not $t) { $t = 'eine Pruefung fuer App-Updates' }
-    return "es laeuft noch: $t"
+    if ($t -notmatch '^Laufende Programme') { return '' }
+    return "die Pruefung der laufenden Programme eines frueheren Klicks laeuft noch ($t)"
 }
 function Start-HMAuUpdate([switch]$All) {
     if ($script:JobRunning) { Out-Console 'Es laeuft bereits ein Vorgang.' 'Warning'; return }
-    # Ausnahmefall: eine Pruefung fuer App-Updates laeuft noch (z. B. laufende Programme nach einem ersten Klick) - sonst
-    # starteten zwei Laeufe nebeneinander. Rueckfrage mit Standard Nein, keine Sperre.
-    $busy = Get-HMAuBusyText
-    if ($busy -and -not (Confirm-Action "App-Updates: $busy`n`nDas ist meist der erste Klick auf 'Aktualisieren' - dann startet das Update gleich von selbst.`n`nTrotzdem einen zweiten Lauf starten?" 'App-Updates')) { return }
     if (-not $script:AuDt -or -not $script:AuDt.Rows.Count) { Out-Console 'App-Updates: zuerst "Updates suchen".' 'Warning'; return }
     $ui.dgAu.CommitEdit(); $ui.dgAu.CommitEdit()
     $rows = @(foreach ($r in $script:AuDt.Rows) { if ($r.RowState -ne 'Deleted' -and ($All -or [bool]$r.Sel)) { $r } })
@@ -286,6 +282,10 @@ function Start-HMAuUpdate([switch]$All) {
     }
     if ($noUser.Count) { Out-Console "App-Updates: ohne angemeldeten Benutzer nicht moeglich: $($noUser -join ', ')" 'Warning' }
     if (-not $byPc.Count) { return }
+    # Ausnahmefall: die Vorpruefung (laufende Programme) eines frueheren Klicks laeuft noch - der fruehere Lauf startet danach
+    # von selbst, ein zweiter liefe nebenher. Rueckfrage mit Standard Nein, keine Sperre.
+    $busy = Get-HMAuBusyText
+    if ($busy -and -not (Confirm-Action "App-Updates: $busy`n`nDer fruehere Klick auf 'Aktualisieren' startet danach von selbst.`n`nTrotzdem einen zweiten Lauf starten?" 'App-Updates')) { return }
     $cnt = 0; foreach ($k in $byPc.Keys) { $cnt += $byPc[$k].Items.Count }
     $all2 = @(foreach ($k in @($byPc.Keys | Sort-Object)) { foreach ($i in $byPc[$k].Items) { "  $(if ($byPc.Count -gt 1) { "${k}: " })$($i.Name): $($i.Installed) -> $($i.Available)" } })
     $list = @($all2 | Select-Object -First 25) -join "`n"

@@ -92,8 +92,7 @@ try {
             Sort-Object { try { [version](($_.Name -split '_')[1]) } catch { [version]'0.0' } } -Descending)
         foreach ($d in @(@($vcl | Select-Object -First 1 | ForEach-Object { $_.FullName }) + @(Split-Path $wg -Parent))) { if ($d -and "$env:PATH" -notlike "*$d*") { $env:PATH = "$d;$env:PATH" } }
         foreach ($it in @($req.Items | Where-Object { $_ })) {
-            # Abbruch: Datei "cancel" - oder der Laufordner ist weg (HUMig hat aufgeraeumt, z. B. nach einem harten Abbruch der Verbindung)
-            if (-not (Test-Path -LiteralPath $Dir) -or (Test-Path -LiteralPath (Join-Path $Dir 'cancel'))) { Write-WLog 'CANCEL'; break }
+            if (Test-Path -LiteralPath (Join-Path $Dir 'cancel')) { Write-WLog 'CANCEL'; break }
             Write-WLog "START|$($it.Id)"
             $r = [ordered]@{ Id = "$($it.Id)"; Status = ''; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = ''; Code = 0 }
             try {
@@ -113,8 +112,7 @@ try {
         }
     } else {
         foreach ($it in @($req.Items | Where-Object { $_ })) {
-            # Abbruch: Datei "cancel" - oder der Laufordner ist weg (HUMig hat aufgeraeumt, z. B. nach einem harten Abbruch der Verbindung)
-            if (-not (Test-Path -LiteralPath $Dir) -or (Test-Path -LiteralPath (Join-Path $Dir 'cancel'))) { Write-WLog 'CANCEL'; break }
+            if (Test-Path -LiteralPath (Join-Path $Dir 'cancel')) { Write-WLog 'CANCEL'; break }
             Write-WLog "START|$($it.Id)"
             $r = [ordered]@{ Id = "$($it.Id)"; Status = ''; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = ''; Code = 0 }
             try {

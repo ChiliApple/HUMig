@@ -251,10 +251,11 @@ function Start-HMNetworkConfig {
         }
         # Die Aufgabe prueft das Ergebnis selbst, stellt bei Fehlschlag den alten Zustand her und schreibt das Ergebnis nach
         # %ProgramData%\HUMig\Netzwerk\<Name>.txt. HUMig wartet darauf; bricht die Verbindung ab (neue Adresse), ist das Ergebnis offen.
-        Invoke-HMTool -Title "Netzwerk ($($f.Mode))" -Computer $comp -ArgumentList @($body, $name) -Script $script:RS_NetApply -ProtectData -State $name -OnError {
+        Invoke-HMTool -Title "Netzwerk ($($f.Mode))" -Computer $comp -TimeoutSec 100 -ArgumentList @($body, $name) -Script $script:RS_NetApply -ProtectData -State $name -OnError {
             param($r, $c2, $n2)
-            Out-Console "   Verbindung zu $c2 waehrend der Aenderung abgebrochen - das ist zu erwarten, wenn sich die Adresse geaendert hat. Ob die Aenderung gelungen ist, steht am PC in %ProgramData%\HUMig\Netzwerk\$n2.txt (nach dem Neu-Verbinden zeigt 'IP-Adresse' den aktuellen Stand)." 'Warning'
-            Out-Console "   $(Format-RemoteError "$r")" 'Debug'
+            # der echte Fehler zuerst (Verbindung, Anmeldung, Absicherung ...), dann der Hinweis fuer den Fall, dass die Aufgabe lief
+            Out-Console (Format-RemoteError "$r") 'Error'
+            Out-Console "   Falls die Aufgabe schon lief und sich die Adresse geaendert hat, ist ein Abbruch der Verbindung zu erwarten - das Ergebnis steht dann am PC in %ProgramData%\HUMig\Netzwerk\$n2.txt (nach dem Neu-Verbinden zeigt 'IP-Adresse' den aktuellen Stand)." 'Info'
         }
     }
 }
@@ -311,6 +312,11 @@ function Get-HUNetState {
         DnsStatic = [bool]$ns
     }
 }
+# Adresse vom DHCP-Server nur fuer diesen Adapter erneuern (ohne Namen erneuerte ipconfig alle Adapter und konnte lange blockieren)
+function Invoke-HURenew {
+    $n = ''; try { $n = "$((Get-NetAdapter -InterfaceIndex $idx).Name)" } catch { $n = '' }
+    if ($n) { ipconfig.exe /renew $n | Out-Null }
+}
 function Clear-HUNet([bool]$ManualOnly) {
     Remove-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue
     if ($ManualOnly) { Remove-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -PrefixOrigin Manual -Confirm:$false -ErrorAction SilentlyContinue }
@@ -350,12 +356,13 @@ try {
         Clear-HUNet $true
         Set-NetIPInterface -InterfaceIndex $idx -Dhcp Enabled
         Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses
-        ipconfig.exe /renew | Out-Null
-        $got = Wait-HUDhcp __WD__
-        if (-not $got) { throw 'DHCP ist eingeschaltet, aber innerhalb von __WD__ Sekunden kam keine Adresse vom DHCP-Server' }
+        Invoke-HURenew
         $now = Get-HUNetState
         if (-not $now.Dhcp) { throw 'DHCP ist danach nicht eingeschaltet' }
-        $out.Add("OK DHCP aktiv, Adresse vom DHCP-Server: $got")
+        # keine Antwort vom DHCP-Server ist kein Grund fuer einen Rueckbau (z. B. PC wird vor dem Umzug in ein anderes Netz umgestellt)
+        $got = Wait-HUDhcp __WD__
+        if ($got) { $out.Add("OK DHCP aktiv, Adresse vom DHCP-Server: $got") }
+        else { $out.Add('WARN DHCP ist eingeschaltet, aber nach __WD__ Sekunden kam noch keine Adresse vom DHCP-Server - Netzwerkkabel und DHCP-Server pruefen') }
     } else {
         Set-NetIPInterface -InterfaceIndex $idx -Dhcp Disabled
         Clear-HUNet $false
@@ -392,10 +399,14 @@ try {
             }
             if ($old.DnsStatic -and @($old.Dns).Count) { Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses @($old.Dns) }
             else { Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses }
-            if ($old.Dhcp) { ipconfig.exe /renew | Out-Null }
+            if ($old.Dhcp) { Invoke-HURenew }
+            # weitere Standardgateways (selten) einzeln wieder eintragen
+            if (-not $old.Dhcp) { foreach ($g2 in @($old.Gw | Select-Object -Skip 1)) { New-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -NextHop $g2 -ErrorAction SilentlyContinue | Out-Null } }
             $chk = Get-HUNetState
             $have = @($chk.Ips | ForEach-Object { $_.Ip })
             $miss = @($old.Ips | Where-Object { $have -notcontains $_.Ip } | ForEach-Object { $_.Ip })
+            if (-not $old.Dhcp) { $miss += @($old.Gw | Where-Object { @($chk.Gw) -notcontains $_ } | ForEach-Object { "Gateway $_" }) }
+            if ($old.DnsStatic -and ((@($chk.Dns) -join ',') -ne (@($old.Dns) -join ','))) { $miss += 'DNS-Server' }
             if ($chk.Dhcp -ne $old.Dhcp -or $miss.Count) { throw "nicht vollstaendig$(if ($miss.Count) { " (fehlt: $($miss -join ', '))" })" }
             $out.Add("FEHLER - $why - alter Zustand wiederhergestellt ($(Format-HUOld $old))")
         } catch {
