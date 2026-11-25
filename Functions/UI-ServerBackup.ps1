@@ -314,7 +314,13 @@ function Remove-HMSbProfile {
     $p = Get-HMSbProfile
     if (-not $p) { return }
     # Zeitplaene des Profils bleiben in der Aufgabenplanung und schlagen danach fehl ("Profil nicht gefunden") - nennen
-    $tasks = @(); try { $ren0 = @((Get-HMSbConfig).Renames); $tasks = @(@(Get-HMSbScheduleRows) | Where-Object { $_ -and (Test-HMSbTaskOfProfile "$($_.Name)" $p.Name $ren0) } | ForEach-Object { "$($_.Name)" }) } catch { }
+    $tasks = @()
+    try {
+        $ren0 = @((Get-HMSbConfig).Renames)
+        $srows = Get-HMSbScheduleRows
+        $srows = @($srows)
+        $tasks = @($srows | Where-Object { $_ -and (Test-HMSbTaskOfProfile "$($_.Name)" $p.Name $ren0) } | ForEach-Object { "$($_.Name)" })
+    } catch { }
     $tt = if ($tasks.Count) { "`n`nACHTUNG: Diese Zeitplaene bleiben bestehen und melden danach 'Profil nicht gefunden':`n  " + ($tasks -join "`n  ") + "`nLoeschen: Rechtsklick auf ""Zeitplan ..."", dann markieren und ""Loeschen""." } else { '' }
     if (-not (Confirm-Action "Profil '$($p.Name)' loeschen?`n`nSicherungen und Verlauf auf den Platten bleiben erhalten.$tt")) { return }
     $cfg = Get-HMSbConfig
