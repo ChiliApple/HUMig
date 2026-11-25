@@ -15,6 +15,9 @@ $script:SbHealthFile = Join-Path $script:ConfigDir 'ServerBackup\disk-health.jso
 $script:SbReportDir  = Join-Path $script:LogDir 'ServerBackup'
 $script:SbVms        = @()
 $script:SbVols       = @()
+# Ladezustand der Listen im Reiter: Loading (noch nicht gelesen / wird gelesen), Ok, Error (nicht lesbar)
+$script:SbVmsState   = 'Loading'
+$script:SbVolsState  = 'Loading'
 $script:SbHyperV     = $true
 $script:SbDrives     = @()
 $script:SbInit       = $false
@@ -42,7 +45,7 @@ function ConvertTo-HMSbProfile($p) {
         if ($p.DiskAfter -is [System.Collections.IDictionary]) { foreach ($k in @($p.DiskAfter.Keys)) { if ("$($p.DiskAfter[$k])" -match '^(Eject|Offline)$') { $da["$k".ToUpper()] = "$($p.DiskAfter[$k])" } } }
         else { foreach ($pp in @($p.DiskAfter.PSObject.Properties)) { if ("$($pp.Value)" -match '^(Eject|Offline)$') { $da[$pp.Name.ToUpper()] = "$($pp.Value)" } } }
     }
-    return [pscustomobject][ordered]@{
+    $o = [pscustomobject][ordered]@{
         Name = $name; DiskPrefix = $pre; Disks = $(if ($n -gt 0) { $n } else { 2 })
         VMs = @($p.VMs | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
         Volumes = @($p.Volumes | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim().ToUpper() })
@@ -58,20 +61,54 @@ function ConvertTo-HMSbProfile($p) {
         RebootPendingSkip = ($p.RebootPendingSkip -eq $true)
         BlockText = "$($p.BlockText)".Trim()
     }
+    # Felder, die diese Version nicht kennt (z. B. aus einer neueren HUMig-Version), beim Speichern nicht verwerfen
+    if ($p -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($pp in @($p.PSObject.Properties)) { if (-not $o.PSObject.Properties[$pp.Name]) { $o | Add-Member -NotePropertyName $pp.Name -NotePropertyValue $pp.Value } }
+    }
+    return $o
 }
+# Meldungen zu beschaedigten Zustandsdateien (Verlauf, Profile, Plattenzustand) in der Konsole zeigen
+function Show-HMSbStateNotes { foreach ($n in @(Get-HMSbStateNotes)) { if ($n) { Out-Console "Server-Backup: $n" 'Warning' } } }
 function Get-HMSbConfig {
-    $c = Read-JsonFile $script:SbCfgFile
+    # beschaedigte Datei: nicht still als leer behandeln - Meldung, beiseitegelegt wird sie beim naechsten Speichern (Save-HMSbConfig)
+    $c = $null
+    $st = Read-HMSbJsonState $script:SbCfgFile
+    if ($st.State -eq 'Ok') { $c = $st.Data }
+    elseif ($st.State -eq 'Corrupt' -and -not $script:SbCorruptSeen.ContainsKey($script:SbCfgFile)) {
+        $script:SbCorruptSeen[$script:SbCfgFile] = $true
+        Out-Console "Server-Backup: Profile (Config\serverbackup.json) sind beschaedigt ($($st.Error)) - es werden keine Profile angezeigt. Beim naechsten Speichern wird die Datei beiseitegelegt (Name mit Datum) und neu begonnen; eine angesteckte Sicherungsplatte bietet ihre gespeicherten Profile zum Uebernehmen an." 'Error'
+    } elseif ($st.State -eq 'Unreadable' -and -not $script:SbCorruptSeen.ContainsKey("$($script:SbCfgFile)|u")) {
+        $script:SbCorruptSeen["$($script:SbCfgFile)|u"] = $true
+        Out-Console "Server-Backup: Profile (Config\serverbackup.json) gerade nicht lesbar ($($st.Error)) - Speichern ist erst wieder moeglich, wenn die Datei lesbar ist." 'Error'
+    }
     $list = @()
     if ($c -and $c.Profiles) { foreach ($p in @($c.Profiles)) { if ($p -and "$($p.Name)".Trim()) { $list += (ConvertTo-HMSbProfile $p) } } }
     $ren = @()
     if ($c -and $c.Renames) { foreach ($r in @($c.Renames)) { if ($r -and "$($r.Old)" -and "$($r.New)") { $ren += [pscustomobject]@{ Old = "$($r.Old)"; New = "$($r.New)" } } } }
     $cw = if ($c -and $c.PSObject.Properties['ConflictWords'] -and $null -ne $c.ConflictWords) { @($c.ConflictWords | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() }) } else { $null }
-    return [pscustomobject]@{ LastProfile = "$($c.LastProfile)"; Profiles = $list; Renames = $ren; ConflictWords = $cw }
+    $extra = [ordered]@{}
+    if ($c -and $c -is [System.Management.Automation.PSCustomObject]) { foreach ($pp in @($c.PSObject.Properties)) { if ($pp.Name -notin @('LastProfile', 'Profiles', 'Renames', 'ConflictWords')) { $extra[$pp.Name] = $pp.Value } } }
+    return [pscustomobject]@{ LastProfile = "$($c.LastProfile)"; Profiles = $list; Renames = $ren; ConflictWords = $cw; Extra = $extra; ReadState = "$($st.State)" }
 }
 function Save-HMSbConfig($Cfg) {
+    # vorher pruefen: nicht lesbar = nicht speichern (nichts ueberschreiben), beschaedigt = beiseitelegen (Name mit Datum) und melden
+    # $script:SbLastSaveOk: Aufrufer melden "gespeichert" nur, wenn hier nicht abgebrochen wurde
+    $script:SbLastSaveOk = $false
+    # beim Lesen nicht lesbar: der Stand im Speicher ist leer und wuerde alle Profile ersetzen - nie speichern
+    if ($Cfg.PSObject.Properties['ReadState'] -and "$($Cfg.ReadState)" -eq 'Unreadable') { Out-Console 'Server-Backup: Profile NICHT gespeichert - Config\serverbackup.json war beim Lesen gesperrt. Reiter neu laden ("Aktualisieren") und erneut versuchen.' 'Error'; return }
+    try { [void](Read-HMSbJsonForWrite $script:SbCfgFile) }
+    catch { Out-Console "Server-Backup: Profile NICHT gespeichert - $($_.Exception.Message)" 'Error'; return }
+    Show-HMSbStateNotes
     $o = [ordered]@{ LastProfile = "$($Cfg.LastProfile)"; Profiles = @($Cfg.Profiles); Renames = @($Cfg.Renames) }
     if ($Cfg.PSObject.Properties['ConflictWords'] -and $null -ne $Cfg.ConflictWords) { $o.ConflictWords = @($Cfg.ConflictWords) }
+    # Felder, die diese Version nicht kennt (neuere HUMig-Version), unveraendert mitschreiben
+    if ($Cfg.PSObject.Properties['Extra'] -and $Cfg.Extra) { foreach ($k in @($Cfg.Extra.Keys)) { if (-not $o.Contains($k)) { $o[$k] = $Cfg.Extra[$k] } } }
+    $before = $null; try { if ([System.IO.File]::Exists($script:SbCfgFile)) { $before = [System.IO.File]::GetLastWriteTimeUtc($script:SbCfgFile) } } catch { }
     Write-JsonFile $script:SbCfgFile ([pscustomobject]$o) -Depth 6
+    # Write-JsonFile meldet Fehler nicht zurueck: Erfolg nur, wenn die Datei danach lesbar und neu geschrieben ist
+    $after = $null; try { if ([System.IO.File]::Exists($script:SbCfgFile)) { $after = [System.IO.File]::GetLastWriteTimeUtc($script:SbCfgFile) } } catch { }
+    if ((Read-HMSbJsonState $script:SbCfgFile).State -eq 'Ok' -and $null -ne $after -and ($null -eq $before -or $after -ne $before)) { $script:SbLastSaveOk = $true }
+    else { Out-Console 'Server-Backup: Profile NICHT gespeichert (Config\serverbackup.json konnte nicht geschrieben werden).' 'Error' }
 }
 # Umbenennungen (alter -> neuer Profilname) auf Verlaufseintraege nicht angesteckter Platten anwenden
 function Get-HMSbCurrentName([string]$Name, $Renames) {
@@ -88,6 +125,21 @@ function Get-HMSbProfile {
     if (-not $n) { return $null }
     $cfg = Get-HMSbConfig
     return (@($cfg.Profiles | Where-Object { $_.Name -eq $n })[0])
+}
+# Sind die Listen (VMs, Laufwerke) gueltig geladen? Waehrend des Lesens oder nach einem Lesefehler fehlen die Haken -
+# dann wuerde "keine VM" gespeichert/geplant/gesichert. Rueckgabe: Loading | Error | Ok
+function Get-HMSbListState([string]$VmState = $script:SbVmsState, [string]$VolState = $script:SbVolsState) {
+    if ($VmState -eq 'Loading' -or $VolState -eq 'Loading') { return 'Loading' }
+    if ($VmState -eq 'Error' -or $VolState -eq 'Error') { return 'Error' }
+    return 'Ok'
+}
+$script:SbListWaitText = 'VMs und Laufwerke werden noch gelesen - bitte kurz warten (oder "Aktualisieren") und dann erneut versuchen.'
+# Text fuer Rueckfragen: welche Liste nicht lesbar ist und was dann gilt
+function Get-HMSbListErrorText($p, [string]$Action) {
+    $t = @()
+    if ($script:SbVmsState -eq 'Error') { $t += "Die VM-Liste ist nicht lesbar.$(if ($p -and @($p.VMs).Count) { " Im Profil gespeichert: $(@($p.VMs) -join ', ')." })" }
+    if ($script:SbVolsState -eq 'Error') { $t += "Die Laufwerksliste ist nicht lesbar.$(if ($p -and @($p.Volumes).Count) { " Im Profil gespeichert: $(@($p.Volumes) -join ', ')." })" }
+    return (($t -join "`n") + $(if ($Action) { "`n`n$Action" } else { '' }))
 }
 function Get-HMSbCheckedVms {
     return @($ui.pnlSbVms.Children | Where-Object { $_ -is [System.Windows.Controls.CheckBox] -and $_.IsChecked -and "$($_.Tag)" -notlike 'vol:*' } | ForEach-Object { "$($_.Tag)" })
@@ -141,6 +193,11 @@ function Save-HMSbLastProfile([string]$Name) {
 }
 
 function New-HMSbProfile {
+    # die angehakten VMs/Laufwerke werden uebernommen: nicht waehrend des Lesens, nach Lesefehler nur nach Rueckfrage
+    $ls = Get-HMSbListState
+    if ($ls -eq 'Loading') { Out-Console "Neues Profil: $($script:SbListWaitText)" 'Warning'; return }
+    # nicht lesbare Liste: ohne Rueckfrage anlegen, Hinweis in der Konsole
+    if ($ls -eq 'Error') { Out-Console ("Neues Profil: " + ((Get-HMSbListErrorText $null '') -replace "`n", ' ') + " Das Profil uebernimmt daraus nichts - nach ""Aktualisieren"" anhaken und ""Profil speichern"".") 'Warning' }
     $n = Show-TextInputDialog -Title 'Neues Sicherungs-Profil' -Label 'Name des Profils (z.B. Schule oder Standort):'
     if (-not "$n".Trim()) { return }
     $n = "$n".Trim()
@@ -156,6 +213,7 @@ function New-HMSbProfile {
     $cfg.Profiles = @($cfg.Profiles) + @($prof)
     $cfg.LastProfile = $n
     Save-HMSbConfig $cfg
+    if (-not $script:SbLastSaveOk) { return }
     Out-Console "Profil '$n' angelegt: Platten $pre-1 bis $pre-$cnt, $(@($prof.VMs).Count) VM(s)" 'Success'
     Update-HMSbProfileList $n
 }
@@ -176,18 +234,27 @@ function Read-HMSbDiskCount([int]$Default) {
 function Save-HMSbProfile {
     $p = Get-HMSbProfile
     if (-not $p) { Out-Console 'Kein Profil gewaehlt - zuerst "Neu ..."' 'Warning'; return }
+    # nie "0 VMs" speichern, nur weil die Liste gerade gelesen wird oder nicht lesbar war
+    $ls = Get-HMSbListState
+    if ($ls -eq 'Loading') { Out-Console "Profil speichern: $($script:SbListWaitText)" 'Warning'; return }
+    $keepVms = ($script:SbVmsState -ne 'Ok'); $keepVols = ($script:SbVolsState -ne 'Ok')
+    # nicht lesbare Liste: ohne Rueckfrage die gespeicherte Auswahl dieser Liste behalten (Hinweis in der Konsole)
+    if ($ls -eq 'Error') { Out-Console ("Profil speichern: " + ((Get-HMSbListErrorText $p '') -replace "`n", ' ') + " Diese Auswahl bleibt unveraendert gespeichert.") 'Warning' }
     $cfg = Get-HMSbConfig
+    $nVm = 0; $nVol = 0
     foreach ($x in $cfg.Profiles) {
         if ($x.Name -eq $p.Name) {
-            $x.VMs = @(Get-HMSbCheckedVms)
-            if ($x.PSObject.Properties['Volumes']) { $x.Volumes = @(Get-HMSbCheckedVols) } else { $x | Add-Member -NotePropertyName Volumes -NotePropertyValue @(Get-HMSbCheckedVols) -Force }
+            if (-not $keepVms) { $x.VMs = @(Get-HMSbCheckedVms) }
+            if (-not $keepVols) { if ($x.PSObject.Properties['Volumes']) { $x.Volumes = @(Get-HMSbCheckedVols) } else { $x | Add-Member -NotePropertyName Volumes -NotePropertyValue @(Get-HMSbCheckedVols) -Force } }
             $x.HostConfig = [bool]$ui.chkSbHostConfig.IsChecked
             $x.Verify = [bool]$ui.chkSbVerify.IsChecked
             $x.HostSystem = [bool]$ui.chkSbHostSystem.IsChecked
+            $nVm = @($x.VMs).Count; $nVol = @($x.Volumes).Count
         }
     }
     Save-HMSbConfig $cfg
-    Out-Console "Profil '$($p.Name)' gespeichert: $(@(Get-HMSbCheckedVms).Count) VM(s), $(@(Get-HMSbCheckedVols).Count) Laufwerk(e)" 'Success'
+    if (-not $script:SbLastSaveOk) { return }
+    Out-Console "Profil '$($p.Name)' gespeichert: $nVm VM(s)$(if ($keepVms) { ' (unveraendert, Liste nicht lesbar)' }), $nVol Laufwerk(e)$(if ($keepVols) { ' (unveraendert, Liste nicht lesbar)' })" 'Success'
     Update-HMSbHistory
 }
 function Edit-HMSbProfile {
@@ -238,6 +305,7 @@ function Edit-HMSbProfile {
     if ($n -ne $p.Name) { $cfg.Renames = @(@($cfg.Renames) | Where-Object { $_.Old -ne $n }) + @([pscustomobject]@{ Old = $p.Name; New = $n }) }
     if ($cfg.LastProfile -eq $p.Name) { $cfg.LastProfile = $n }
     Save-HMSbConfig $cfg
+    if (-not $script:SbLastSaveOk) { return }
     if ($n -ne $p.Name) {
         # Verlauf und Profil-Kopien mitnehmen: Tool-Ordner + alle angesteckten Platten
         $cnt2 = 0
@@ -253,11 +321,21 @@ function Edit-HMSbProfile {
 function Remove-HMSbProfile {
     $p = Get-HMSbProfile
     if (-not $p) { return }
-    if (-not (Confirm-Action "Profil '$($p.Name)' loeschen?`n`nSicherungen und Verlauf auf den Platten bleiben erhalten.")) { return }
+    # Zeitplaene des Profils bleiben in der Aufgabenplanung und schlagen danach fehl ("Profil nicht gefunden") - nennen
+    $tasks = @()
+    try {
+        $ren0 = @((Get-HMSbConfig).Renames)
+        $srows = Get-HMSbScheduleRows
+        $srows = @($srows)
+        $tasks = @($srows | Where-Object { $_ -and (Test-HMSbTaskOfProfile "$($_.Name)" $p.Name $ren0) } | ForEach-Object { "$($_.Name)" })
+    } catch { }
+    $tt = if ($tasks.Count) { "`n`nACHTUNG: Diese Zeitplaene bleiben bestehen und melden danach 'Profil nicht gefunden':`n  " + ($tasks -join "`n  ") + "`nLoeschen: Rechtsklick auf ""Zeitplan ..."", dann markieren und ""Loeschen""." } else { '' }
+    if (-not (Confirm-Action "Profil '$($p.Name)' loeschen?`n`nSicherungen und Verlauf auf den Platten bleiben erhalten.$tt")) { return }
     $cfg = Get-HMSbConfig
     $cfg.Profiles = @($cfg.Profiles | Where-Object { $_.Name -ne $p.Name })
     if ($cfg.LastProfile -eq $p.Name) { $cfg.LastProfile = '' }
     Save-HMSbConfig $cfg
+    if (-not $script:SbLastSaveOk) { return }
     Out-Console "Profil '$($p.Name)' geloescht" 'Info'
     Update-HMSbProfileList
 }
@@ -278,11 +356,14 @@ function Add-HMSbHeader([string]$Text) {
 }
 function Update-HMSbVms {
     $ui.pnlSbVms.Children.Clear()
+    $script:SbVmsState = 'Loading'; $script:SbVolsState = 'Loading'
     Add-HMSbInfoText 'VMs und Laufwerke werden gelesen ...'
     Invoke-AsyncCommand -ScriptBlock { param($eng) . $eng; Get-HMSbSources } -ArgumentList @($script:SbEngine) -TimeoutSec 120 -BusyTag 'Sb' -BusyText 'VMs und Laufwerke werden gelesen ...' -OnComplete {
         param($r)
         $ui.pnlSbVms.Children.Clear()
-        if ($r -is [string] -or $null -eq $r) { $script:SbVms = @(); $script:SbVols = @(); Add-HMSbInfoText "Nicht lesbar: $r" '#FFF38BA8'; return }
+        if ($r -is [string] -or $null -eq $r) { $script:SbVms = @(); $script:SbVols = @(); $script:SbVmsState = 'Error'; $script:SbVolsState = 'Error'; Add-HMSbInfoText "Nicht lesbar: $r" '#FFF38BA8'; return }
+        $script:SbVmsState = $(if ([bool]$r.HyperV -and "$($r.VmError)") { 'Error' } else { 'Ok' })
+        $script:SbVolsState = $(if ("$($r.VolError)") { 'Error' } else { 'Ok' })
         $script:SbHyperV = [bool]$r.HyperV
         $script:SbVms = @($r.VMs | Where-Object { $_ -and $_.Name })
         $script:SbVols = @($r.Volumes | Where-Object { $_ -and $_.Letter })
@@ -426,7 +507,7 @@ function Import-HMSbDiskProfiles {
     }
     if ($added.Count) {
         Save-HMSbConfig $cfg
-        Out-Console "Profil(e) von der Platte uebernommen: $($added -join ', ')" 'Success'
+        if ($script:SbLastSaveOk) { Out-Console "Profil(e) von der Platte uebernommen: $($added -join ', ')" 'Success' }
         Update-HMSbProfileList $added[0]
     }
 }
@@ -467,7 +548,7 @@ function Set-HMSbAfterMode {
         $x.DiskAfter = [pscustomobject]$m
     }
     Save-HMSbConfig $cfg
-    Out-Console "Platte $($d.Label): nach der Sicherung $(Format-HMSbAfterMode $mode)" 'Info'
+    if ($script:SbLastSaveOk) { Out-Console "Platte $($d.Label): nach der Sicherung $(Format-HMSbAfterMode $mode)" 'Info' }
     Update-HMSbDiskInfo
 }
 function Update-HMSbDiskInfo {
@@ -736,6 +817,7 @@ function Update-HMSbHistory {
     $p = Get-HMSbProfile
     $all = Get-HMSbAllHistory
     $all = @($all)
+    Show-HMSbStateNotes
     $rows = @()
     if (-not $p) { $ui.dgSbHistory.ItemsSource = $rows; Show-HMSbDiskStatus $null; $ui.lblSbHostSystem.Text = ''; return }
     $mine = @($all | Where-Object { "$($_.Profile)" -eq $p.Name })
@@ -813,6 +895,7 @@ function Show-HMSbAllRuns {
 # ----------------------------------------------------------------------------
 function Start-HMSbBackup {
     if ($script:JobRunning) { Out-Console 'Es laeuft bereits ein Vorgang.' 'Warning'; return }
+    if ((Get-HMSbListState) -eq 'Loading') { Out-Console "Server-Backup: $($script:SbListWaitText)" 'Warning'; return }
     $p = Get-HMSbProfile
     $d = Get-HMSbDrive
     $vms = @(Get-HMSbCheckedVms)
@@ -846,6 +929,7 @@ function Start-HMSbBackup {
         if ($pi.Count) { $msg += "`n`nHinweis:`n" + (@($pi | ForEach-Object { "  - $($_.Text)" }) -join "`n") }
         foreach ($x in $pf) { Out-Console "Server-Backup Vorab-Pruefung: $($x.Text)" $(if ($x.Lvl -eq 'Info') { 'Info' } else { 'Warning' }) }
     } catch { Out-Console "Server-Backup Vorab-Pruefung nicht moeglich: $($_.Exception.Message)" 'Warning' }
+    if ((Get-HMSbListState) -eq 'Error') { $msg += "`n`nACHTUNG - " + (Get-HMSbListErrorText $p 'Was in dieser Liste nicht lesbar ist, wird in diesem Lauf NICHT gesichert (es zaehlt nur, was oben aufgefuehrt ist). Vorher "Aktualisieren" versuchen.') }
     if (-not $p) { $msg += "`n`nHinweis: kein Profil gewaehlt - Verlauf unter '(ohne Profil)'." }
     elseif (-not (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { $msg += "`n`nACHTUNG: Die Platte '$($d.Label)' gehoert laut Bezeichnung NICHT zum Profil ($($p.DiskPrefix)-...)." }
     if ($p) {
@@ -883,6 +967,21 @@ function Start-HMSbBackup {
         Start-HMSbBackgroundRun $p $d $vms $vols $hc $hs ([bool]$ui.chkSbVerify.IsChecked)
         return
     }
+    # unmittelbar vor dem Start: gehoert der Buchstabe noch zur gewaehlten Platte? (Rueckfragen koennen lange offen sein)
+    $mm = ''; try { $mm = Get-HMSbDriveMismatch "$($d.Letter)" "$($d.Label)" "$($d.Serial)" } catch { }
+    $ans = ''; $now = $null
+    if ($mm) {
+        $mq = "Die gewaehlte Ziel-Platte hat sich geaendert:`n$mm`n`nJa = trotzdem auf $($d.Letter): sichern (Warnung im Bericht)`nNein = nicht starten (danach ""Aktualisieren"" und Platte neu waehlen)"
+        $ans = "$((Show-HMDialogBox -Owner $script:Window -Text $mq -Title 'Server-Backup' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))"
+        if ($ans -eq 'Yes') { $now = Get-HMSbDriveNow "$($d.Letter)" }
+    }
+    $sd = Resolve-HMSbStartDrive $d $mm $ans $now
+    if (-not $sd.Start) { Out-Console "Server-Backup nicht gestartet: $mm" 'Warning'; return }
+    if ($mm) {
+        # Verlauf und Plattenwechsel laufen unter der Platte, die wirklich beschrieben wird
+        $d = $sd.Drive
+        $after = if ($p -and (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { Get-HMSbAfterMode $p $d.Label } else { '' }
+    }
     # Vorab-Pruefung: laeuft schon eine Sicherung/Wiederherstellung am Host?
     $busy = @(Get-HMSbBusy)
     if ($busy.Count) {
@@ -895,12 +994,13 @@ function Start-HMSbBackup {
         Profile = $pName; DiskPrefix = $(if ($p) { $p.DiskPrefix } else { '' }); Drive = $d.Letter; DiskLabel = $d.Label; DiskSerial = $d.Serial
         VMs = $vms; Volumes = $vols; HostConfig = $hc; HostSystem = $hs; Verify = [bool]$ui.chkSbVerify.IsChecked
         LocalHistory = $script:SbHistFile; LocalHealth = $script:SbHealthFile; LocalReportDir = $script:SbReportDir; Version = $script:Version
-        ProfileData = $(if ($p) { $p } else { $null }); After = $after; Export = $exp; ConflictWords = @(Get-HMSbConflictWords)
+        ProfileData = $(if ($p) { $p } else { $null }); After = $after; Export = $exp; ConflictWords = @(Get-HMSbConflictWords); DiskNote = "$($sd.Note)"
     }
     $script:SbAfterRun = $after
     $script:SbRunProfile = $pName
     # Teams-Meldung auch fuer manuell gestartete Laeufe (auch bei Abbruch durch einen Fehler; nicht bei "Abbrechen")
-    $cmd = '$e = ''''; try { Start-HMServerBackup -Ctx $Ctx -Job $Job } catch { $e = "$($_.Exception.Message)"; throw } finally { Send-HMSbRunNotify $Ctx $Job $e }'
+    # Fehler vor dem Anlegen des Berichtsordners: trotzdem ein Verlaufseintrag (Add-HMSbEarlyError)
+    $cmd = '$e = ''''; try { Start-HMServerBackup -Ctx $Ctx -Job $Job } catch { $e = "$($_.Exception.Message)"; if (-not $Job.SbStarted) { Add-HMSbEarlyError $Ctx $e }; throw } finally { Send-HMSbRunNotify $Ctx $Job $e }'
     Start-EngineJob -Command $cmd -Ctx $ctx -Title 'Server-Backup' -ScriptFiles @($script:SbEngine, (Join-Path $script:AppRoot 'Functions\Core-Notify.ps1'), (Join-Path $script:AppRoot 'Functions\UI-Status.ps1')) -OnFinished {
         param($j)
         Update-HMSbHistory
@@ -1138,6 +1238,7 @@ function Start-HMSbExportUi {
     if (-not $r) { return }
     if ($r.Action -eq 'Save') {
         Save-HMSbExportSettings $p.Name $r
+        if (-not $script:SbLastSaveOk) { return }
         $b = Get-HMSbExportBase $r.Folder ''
         Out-Console ("Profil '{0}': VM-Export {1}{2}" -f $p.Name, $(if ($r.After) { "nach jeder Sicherung: $($r.VMs -join ', ')" } else { "nach der Sicherung aus (gemerkte Auswahl: $(if ($r.VMs.Count) { $r.VMs -join ', ' } else { '-' }))" }), " - Ziel: $(if ($b) { $b } else { 'Platte des Profils \HUMig-Export' }), behalten je VM: $($r.Keep)") 'Success'
         Update-HMSbSchedules
@@ -1209,12 +1310,23 @@ function Get-HMSbNextLabel($p) {
     foreach ($l in $cand) { if (-not (@($used) -contains $l)) { return $l } }
     return "$($p.DiskPrefix)-1"
 }
+# Zeile im Einrichten-Fenster (Nr, Modell, Seriennummer) gehoert zur gemerkten Platte?
+function Test-HMSbDiskRowMatch($Row, $Disk) {
+    if (-not $Row -or -not $Disk) { return $false }
+    return ([int]$Row.Nr -eq [int]$Disk.Number -and "$($Row.Modell)".Trim() -eq "$($Disk.Model)".Trim() -and "$($Row.Seriennummer)".Trim() -eq "$($Disk.Serial)".Trim())
+}
 function Invoke-HMSbDiskSetup($Sel, $Win) {
     $row = @($Sel)[0]
     if (-not $row) { return }
     $num = [int]$row.Nr
     $disk = @($script:SbDiskRows | Where-Object { [int]$_.Number -eq $num })[0]
     if (-not $disk -or -not "$($disk.Id)") { Out-Console 'Platte einrichten: Platte nicht eindeutig bestimmbar - Liste neu oeffnen.' 'Warning'; return }
+    # zwei offene Einrichten-Fenster teilen sich die Liste: die markierte Zeile muss zur gemerkten Platte passen
+    if (-not (Test-HMSbDiskRowMatch $row $disk)) { [void](Show-HMDialogBox -Owner $Win -Text "Die Liste ist nicht mehr aktuell (unter Nummer $num steht inzwischen $($disk.Model), SN $($disk.Serial)). Nichts geloescht - Fenster schliessen und 'Platte einrichten' neu oeffnen." -Title 'Platte einrichten' -Mode 'OK' -Icon 'Warning'); return }
+    # laeuft gerade eine Sicherung auf eine Partition dieser Platte (auch im Hintergrund als SYSTEM)?
+    $dl = @("$($disk.Volumes)" -split ',\s*' | ForEach-Object { ("$_" -replace '^[A-Za-z]:\s*', '').Trim() } | Where-Object { $_ })
+    $dLet = @("$($disk.Volumes)" -split ',\s*' | Where-Object { "$_" -match '^([A-Za-z]):' } | ForEach-Object { "$_".Substring(0, 1) })
+    if (-not (Confirm-HMSbNoRunOnDisk $dl 'einrichten' "Einrichten LOESCHT ALLES auf Datentraeger $num und bricht eine Sicherung darauf ab." $Win $dLet)) { return }
     $p = Get-HMSbProfile
     $label = Show-TextInputDialog -Title 'Platte einrichten' -Label "Bezeichnung fuer Datentraeger $num ($($row.Modell), $($row.Groesse)):" -Text (Get-HMSbNextLabel $p) -Owner $Win
     if ($null -eq $label) { return }
@@ -1290,10 +1402,50 @@ function Invoke-HMSbDiskAdopt($Sel, $Win) {
     }
 }
 
+# Laeuft gerade eine Sicherung, die eine Platte betrifft? (auch im Hintergrund als SYSTEM - $script:JobRunning kennt nur HUMig selbst)
+# $Markers: lebende Laufend-Markierungen, $Tasks: laufende Aufgaben in \HUMig\, $Busy: Get-HMSbBusy, $Labels: Bezeichnungen der Platte
+function Get-HMSbDiskRunHints($Markers, $Tasks, $Busy, [string[]]$Labels, [string[]]$Letters = @()) {
+    $out = @()
+    $lab = @($Labels | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim().ToUpperInvariant() })
+    $known = @()
+    foreach ($m in @($Markers | Where-Object { $_ })) {
+        $known += (ConvertTo-HMSbTaskPart "$($m.Profile)").ToUpperInvariant()
+        if ($lab -notcontains "$($m.Disk)".Trim().ToUpperInvariant()) { continue }
+        $out += "Server-Backup '$($m.Profile)' seit $(try { ([datetime]$m.Started).ToString('dd.MM. HH:mm') } catch { '?' }) ($(if ("$($m.Kind)" -eq 'Zeitplan') { 'Zeitplan/Hintergrund, als SYSTEM' } else { 'in HUMig' })) auf Platte $($m.Disk)"
+    }
+    foreach ($t in @($Tasks | Where-Object { $_ })) {
+        $part = "$(("$($t.TaskName)" -split ' - ', 3)[1])".Trim().ToUpperInvariant()
+        if ($part -and $known -contains $part) { continue }   # schon oben (mit Platte) genannt
+        $out += "geplante Aufgabe '$($t.TaskName)' laeuft ($($t.State)) - Platte noch nicht bekannt"
+    }
+    # wbadmin mit anderem Ziel betrifft diese Platte nicht; ohne erkennbares Ziel (Get-WBJob) immer nennen
+    $lt = @($Letters | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim().TrimEnd(':', '\').ToUpperInvariant() })
+    foreach ($b in @($Busy | Where-Object { $_ })) {
+        if ($lt.Count -and "$b" -match '(?i)-backupTarget:([A-Za-z]):' -and $lt -notcontains $Matches[1].ToUpperInvariant()) { continue }
+        $out += "am Host laeuft: $b"
+    }
+    return $out
+}
+# Rueckfrage, wenn eine Sicherung die Platte betreffen kann. $true = weitermachen
+function Confirm-HMSbNoRunOnDisk([string[]]$Labels, [string]$What, [string]$Effect, $Owner = $null, [string[]]$Letters = @()) {
+    $mk = @(); $tk = @(); $bz = @()
+    try { $mk = @(Get-HMSbAliveRuns (Split-Path $script:SbHistFile -Parent)) } catch { }
+    try { $tk = @(Get-ScheduledTask -TaskPath $script:SbTaskPath -ErrorAction Stop | Where-Object { "$($_.TaskName)" -like 'Server-Backup - *' -and "$($_.State)" -in @('Running', 'Queued') }) } catch { }
+    try { $bz = @(Get-HMSbBusy) } catch { }
+    $h = @(Get-HMSbDiskRunHints $mk $tk $bz $Labels $Letters)
+    if (-not $h.Count) { return $true }
+    $q = "Moeglicherweise laeuft gerade eine Sicherung:`n  " + ($h -join "`n  ") + "`n`n$Effect`n`nJa = trotzdem $What`nNein = nicht $What"
+    $o = if ($Owner) { $Owner } else { $script:Window }
+    if ("$((Show-HMDialogBox -Owner $o -Text $q -Title 'Server-Backup' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -eq 'Yes') { return $true }
+    Out-Console "Server-Backup: nicht $What - es laeuft moeglicherweise eine Sicherung ($($h[0]))." 'Warning'
+    return $false
+}
+
 function Invoke-HMSbEject {
     if ($script:JobRunning) { Out-Console 'Waehrend eines Vorgangs nicht moeglich.' 'Warning'; return }
     $d = Get-HMSbDrive
     if (-not $d) { return }
+    if (-not (Confirm-HMSbNoRunOnDisk @("$($d.Label)") 'auswerfen' "Auswerfen (oder offline schalten) bricht eine Sicherung auf $($d.Letter): $($d.Label) ab." -Letters @("$($d.Letter)"))) { return }
     $L = $d.Letter
     try { Write-VolumeCache -DriveLetter $L -ErrorAction Stop; Out-Console "Schreibcache von ${L}: geleert" 'Info' } catch { Out-Console "Schreibcache ${L}: $($_.Exception.Message)" 'Warning' }
     # Sicher entfernen ueber die Geraeteverwaltung (CM_Request_Device_Eject) - liefert den Grund, falls Windows ablehnt
@@ -1314,7 +1466,9 @@ function Invoke-HMSbEject {
             return
         }
         Out-Console "Platte $($d.Label) wurde von Windows NICHT ausgeworfen: $($r.Result)" 'Warning'
-        if (Confirm-Action "Die Platte $($d.Letter): $($d.Label) laesst sich nicht auswerfen:`n$($r.Result)`n`nStattdessen OFFLINE schalten? (Windows trennt das Volume sofort, die Platte kann danach abgezogen werden.`nWieder online: ""Aktualisieren"" oder der naechste geplante Lauf.)" 'Auswerfen') {
+        # zwischen Auswerfen und dieser Frage kann eine Sicherung angelaufen sein: vor dem Offline-Schalten erneut pruefen
+        if ((Confirm-Action "Die Platte $($d.Letter): $($d.Label) laesst sich nicht auswerfen:`n$($r.Result)`n`nStattdessen OFFLINE schalten? (Windows trennt das Volume sofort, die Platte kann danach abgezogen werden.`nWieder online: ""Aktualisieren"" oder der naechste geplante Lauf.)" 'Auswerfen') -and
+            (Confirm-HMSbNoRunOnDisk @("$($d.Label)") 'offline schalten' "Offline schalten bricht eine Sicherung auf $($d.Letter): $($d.Label) ab." -Letters @("$($d.Letter)"))) {
             Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $lb) . $eng; Set-HMSbDiskOffline -Number $n -Label $lb; 'OK' } -ArgumentList @($script:SbEngine, $r.Number, "$($d.Label)") -TimeoutSec 60 -State $d -BusyTag 'Sb' -BusyText 'Platte wird offline geschaltet ...' -OnComplete {
                 param($x, $d)
                 if ("$x" -eq 'OK') { Out-Console "Platte $($d.Label) offline geschaltet - kann jetzt abgezogen werden." 'Success'; [System.Media.SystemSounds]::Asterisk.Play() }
@@ -1668,6 +1822,7 @@ function Edit-HMSbConflictWords($Owner = $null) {
     $cfg = Get-HMSbConfig
     $cfg.ConflictWords = $(if ($list.Count) { $list } else { $null })
     Save-HMSbConfig $cfg
+    if (-not $script:SbLastSaveOk) { return $false }
     Out-Console "Server-Backup: Suchwoerter fuer andere Sicherungsaufgaben gespeichert ($(if ($list.Count) { $list -join ', ' } else { 'Standard' }))" 'Success'
     return $true
 }
@@ -1687,6 +1842,10 @@ function Show-HMSbConflicts($Plan = $null, [string]$OwnPrefix = '', [double]$Own
 function New-HMSbSchedule {
     $p = Get-HMSbProfile
     if (-not $p) { Out-Console 'Zeitplan: zuerst ein Profil waehlen/anlegen.' 'Warning'; return }
+    # der Zeitplan friert die angehakten VMs/Laufwerke ein: nicht waehrend des Lesens, nach Lesefehler nur nach Rueckfrage
+    $ls = Get-HMSbListState
+    if ($ls -eq 'Loading') { Out-Console "Zeitplan: $($script:SbListWaitText)" 'Warning'; return }
+    # nicht lesbare Liste: keine eigene Rueckfrage, Hinweis steht im Zeitplan-Fenster (unten, $info)
     $vms = @(Get-HMSbCheckedVms)
     $vols = @(Get-HMSbCheckedVols)
     $hc = [bool]$ui.chkSbHostConfig.IsChecked; $hs = [bool]$ui.chkSbHostSystem.IsChecked; $vf = [bool]$ui.chkSbVerify.IsChecked
@@ -1695,6 +1854,7 @@ function New-HMSbSchedule {
     foreach ($x in $vms) { if ("$x" -match '["|]') { Out-Console "Zeitplan: Name '$x' enthaelt ein nicht erlaubtes Zeichen (Anfuehrungszeichen oder |)." 'Error'; return } }
     $info = "Profil: $($p.Name)   (Platten $($p.DiskPrefix)-...)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })   Pruefen: $(if ($vf) { 'ja' } else { 'nein' })   Host-System: $(if ($hs) { 'ja' } else { 'nein' })`n`nEs gelten die aktuell angehakten VMs und Optionen.$(if (Get-HMSbExportOptions $p) { "`nNach der Sicherung: VM-Export $(@($p.ExportVMs) -join ', ') (Einstellung im Profil - gilt beim Lauf, Button 'VMs exportieren ...')" })"
     if ($hs) { $sv = Format-HMSbSysDriveVms (Get-HMSbSysDriveVms $script:SbVms); if ($sv) { $info += "`n`n$sv" } }
+    if ($ls -eq 'Error') { $info += "`n`nACHTUNG - " + (Get-HMSbListErrorText $p 'Der Zeitplan sichert aus dieser Liste nichts (er nimmt nur, was jetzt angehakt ist). Besser abbrechen und vorher "Aktualisieren".') }
     $r = Show-HMSbScheduleDialog $info
     if (-not $r) { return }
     # andere Sicherungsaufgaben, die sich ueberschneiden (naechste 14 Tage)
@@ -1761,13 +1921,19 @@ function Get-HMSbScheduleRows {
     }
     return ,$rows
 }
+# Gehoert eine Zeitplan-Aufgabe zum Profil? Auch unter einem frueheren Namen (die Aufgabe folgt der Umbenennung ueber Renames)
+function Test-HMSbTaskOfProfile([string]$TaskName, [string]$ProfileName, $Renames) {
+    $names = @($ProfileName) + @(@($Renames) | Where-Object { $_ -and (Get-HMSbCurrentName "$($_.Old)" $Renames) -eq $ProfileName } | ForEach-Object { "$($_.Old)" })
+    foreach ($n in $names) { if ("$TaskName".StartsWith(('Server-Backup - {0} - ' -f (ConvertTo-HMSbTaskPart $n)), [StringComparison]::OrdinalIgnoreCase)) { return $true } }
+    return $false
+}
 function Update-HMSbSchedules {
     try {
         $rows = Get-HMSbScheduleRows
         $rows = @($rows)
         $p = Get-HMSbProfile
-        $pre = if ($p) { 'Server-Backup - {0} - ' -f (ConvertTo-HMSbTaskPart $p.Name) } else { '' }
-        $mine = @($rows | Where-Object { -not $p -or "$($_.Name)".StartsWith($pre, [StringComparison]::OrdinalIgnoreCase) })
+        $ren = if ($p) { @((Get-HMSbConfig).Renames) } else { @() }
+        $mine = @($rows | Where-Object { -not $p -or (Test-HMSbTaskOfProfile "$($_.Name)" $p.Name $ren) })
         if ($mine.Count) {
             $ui.lblSbSchedule.Text = 'Geplant: ' + (@($mine | ForEach-Object { "$(($_.Name -split ' - ', 3)[-1])$(if ($_.Next) { " (naechster Lauf $($_.Next))" })$(if ($_.Result) { " letzter: $($_.Result)" })" }) -join '   |   ')
         } else { $ui.lblSbSchedule.Text = 'Kein Zeitplan fuer dieses Profil (Button Zeitplan ...)' }
