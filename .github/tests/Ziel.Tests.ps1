@@ -23,19 +23,25 @@ BeforeAll {
 
 Describe 'Ziel: Computernamen vergleichen' {
     It 'lokal, gross/klein, FQDN gegen kurzen Namen, IP-Adressen' {
-        Test-HMSameComputer 'pc01' 'PC01' 'EIGEN' | Should -BeTrue
-        Test-HMSameComputer '' 'EIGEN' 'EIGEN' | Should -BeTrue
-        Test-HMSameComputer 'localhost' '.' 'EIGEN' | Should -BeTrue
-        Test-HMSameComputer 'eigen.schule.local' 'EIGEN' 'EIGEN' | Should -BeTrue
-        Test-HMSameComputer 'PC01.schule.local' 'PC01' 'EIGEN' | Should -BeTrue
-        Test-HMSameComputer 'PC01.a.local' 'PC01.b.local' 'EIGEN' | Should -BeFalse
-        Test-HMSameComputer 'PC01' 'PC02' 'EIGEN' | Should -BeFalse
-        Test-HMSameComputer 'PC01' 'EIGEN' 'EIGEN' | Should -BeFalse
-        Test-HMSameComputer '203.0.113.5' '203' 'EIGEN' | Should -BeFalse
-        Test-HMSameComputer '203.0.113.5' '203.0.113.5' 'EIGEN' | Should -BeTrue
+        Test-HMSameComputer 'pc01' 'PC01' 'EIGEN' 'a.local' | Should -BeTrue
+        Test-HMSameComputer '' 'EIGEN' 'EIGEN' 'a.local' | Should -BeTrue
+        Test-HMSameComputer 'localhost' '.' 'EIGEN' 'a.local' | Should -BeTrue
+        Test-HMSameComputer 'PC01.schule.local' 'PC01' 'EIGEN' 'a.local' | Should -BeTrue
+        Test-HMSameComputer 'PC01' 'PC02' 'EIGEN' 'a.local' | Should -BeFalse
+        Test-HMSameComputer 'PC01' 'EIGEN' 'EIGEN' 'a.local' | Should -BeFalse
+        Test-HMSameComputer '203.0.113.5' '203' 'EIGEN' 'a.local' | Should -BeFalse
+        Test-HMSameComputer '203.0.113.5' '203.0.113.5' 'EIGEN' 'a.local' | Should -BeTrue
+    }
+    It 'FQDN mit anderer Domaene ist ein anderer PC, auch beim eigenen Namen' {
+        Test-HMSameComputer 'PC01.a.local' 'PC01.b.local' 'EIGEN' 'a.local' | Should -BeFalse
+        Test-HMSameComputer 'PC01.a.local' 'pc01.A.LOCAL' 'EIGEN' 'a.local' | Should -BeTrue
+        Test-HMSameComputer 'eigen.a.local' 'EIGEN' 'EIGEN' 'a.local' | Should -BeTrue
+        Test-HMSameComputer 'eigen.b.local' 'EIGEN' 'EIGEN' 'a.local' | Should -BeFalse
+        Test-HMSameComputer 'eigen.a.local' 'eigen.b.local' 'EIGEN' 'a.local' | Should -BeFalse
+        # Arbeitsgruppe (keine Domaene bekannt): eigener Name mit Domaene gilt als lokal
+        Test-HMSameComputer 'eigen.fritz.box' '' 'EIGEN' '' | Should -BeTrue
     }
 }
-
 Describe 'Ziel: Feld gegen verbundenen PC' {
     It 'Zustand Match, Differs, None und Verbindungsstand' {
         $s = Get-HMTargetState 'PC01' @{ Computer = 'PC01'; Connected = $true } 'EIGEN'
@@ -66,22 +72,37 @@ Describe 'Ziel: Feld gegen verbundenen PC' {
         (Get-HMTargetLabel (Get-HMTargetState 'PC01' @{ Computer = 'PC01' } 'EIGEN')).Text | Should -Match '^nicht verbunden: PC01 \(Verbindung fehlgeschlagen'
         (Get-HMTargetLabel (Get-HMTargetState 'PC01' $null 'EIGEN')).Text | Should -Be 'nicht verbunden'
     }
-    It 'Rueckfrage nur bei Unterschied, mit klarer Wahl (als Satz gelesen)' {
+    It 'Rueckfrage nur bei Unterschied, in beiden Varianten gleich belegt (als Satz gelesen)' {
         Get-HMTargetQuestion (Get-HMTargetState 'PC01' @{ Computer = 'PC01'; Connected = $true } 'EIGEN') 'Backup' | Should -BeNullOrEmpty
         $q = Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connected = $true } 'EIGEN') 'Backup'
         $q | Should -Match '^Im Feld Computer steht PC02, verbunden ist PC01\.'
         $q | Should -Match 'Backup wuerde auf PC01 laufen, nicht auf PC02\.'
-        $q | Should -Match 'Ja = zuerst mit PC02 verbinden \(Backup startet danach nicht von selbst\)'
-        $q | Should -Match 'Nein = Backup auf PC01 ausfuehren \(das Feld wird auf PC01 zurueckgesetzt\)'
-        $q | Should -Match 'Abbrechen = nichts tun$'
+        $q | Should -Match 'Ja = Backup auf PC01 ausfuehren \(das Feld wird auf PC01 zurueckgesetzt\)'
+        $q | Should -Match 'Nein = nichts tun'
+        $q | Should -Match 'Fuer PC02: Nein, dann im Feld Enter oder Verbinden\.$'
         (Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connecting = $true } 'EIGEN') 'Restore') | Should -Match 'die Verbindung zu PC01 wird gerade aufgebaut'
         (Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01' } 'EIGEN') 'Restore') | Should -Match 'gewaehlt ist PC01 \(nicht verbunden\)'
-        # waehrend eines Vorgangs: kein Verbinden anbieten
-        $q = Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connected = $true } 'EIGEN') "'Netzwerktest'" 'Restore'
-        $q | Should -Match "Waehrend 'Restore' laeuft, wird nicht neu verbunden\."
-        $q | Should -Match "Ja = 'Netzwerktest' auf PC01 ausfuehren \(das Feld wird auf PC01 zurueckgesetzt\)"
-        $q | Should -Match 'Nein = nichts tun \(mit PC02 erst nach dem Vorgang verbinden: Enter oder Verbinden\)$'
-        $q | Should -Not -Match 'zuerst mit'
+        # waehrend Backup/Restore: dieselbe Belegung, Hinweis auf spaeteres Verbinden
+        $j = Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connected = $true } 'EIGEN') "'Netzwerktest'" 'Restore'
+        $j | Should -Match "Ja = 'Netzwerktest' auf PC01 ausfuehren \(das Feld wird auf PC01 zurueckgesetzt\)"
+        $j | Should -Match 'Nein = nichts tun'
+        $j | Should -Match "Waehrend 'Restore' laeuft, wird nicht neu verbunden\. Fuer PC02: Nein, nach dem Vorgang im Feld Enter oder Verbinden\.$"
+        foreach ($x in @($q, $j)) { $x | Should -Not -Match 'Nein = .*ausfuehren'; $x | Should -Not -Match 'Abbrechen' }
+    }
+    It 'Art des Vorgangs: nur Backup und Restore belegen PC und Profil' {
+        Test-HMIsBackupRestoreJob 'Backup' | Should -BeTrue
+        Test-HMIsBackupRestoreJob 'Restore' | Should -BeTrue
+        foreach ($t in @('Groesse ermitteln', 'Backup pruefen', 'Backups vergleichen', 'Restore-Vorschau', 'Updates suchen', 'WinGet einrichten', 'Server-Backup', 'VM-Export', '')) { Test-HMIsBackupRestoreJob $t | Should -BeFalse }
+    }
+    It 'Entscheidung je Werkzeugart: nur PC = still umschalten, Benutzer = Rueckfrage, ohne Ziel = laufen' {
+        $d = Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connected = $true } 'EIGEN'
+        $m = Get-HMTargetState 'PC01' @{ Computer = 'PC01'; Connected = $true } 'EIGEN'
+        Get-HMToolDecision 'Pc' $d $false | Should -Be 'Switch'
+        Get-HMToolDecision 'Pc' $d $true | Should -Be 'Ask'
+        Get-HMToolDecision 'User' $d $false | Should -Be 'Ask'
+        Get-HMToolDecision 'None' $d $true | Should -Be 'Run'
+        Get-HMToolDecision 'Pc' $m $false | Should -Be 'Run'
+        Get-HMToolDecision 'User' $m $true | Should -Be 'Run'
     }
     It 'Antwort eines Verbindens zaehlt nur, wenn sie zum neuesten gehoert' {
         Test-HMConnectCurrent 3 3 | Should -BeTrue
@@ -174,6 +195,18 @@ Describe 'Ziel: Verbinden verwirft veraltete Antworten und behaelt die Auswahl' 
         & $script:Calls[1].OnComplete ([pscustomobject]@{ Profiles = $p2; Error = $null; WinRM = $null }) $script:Calls[1].State
         $ui.cmbUser.SelectedIndex | Should -Be 2
     }
+    It 'zweites Neuladen waehrend das erste noch verbindet: Auswahl bleibt erhalten' {
+        $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
+        $p = @((New-ZielProfile 'S-A' 'PC01\anna' $true), (New-ZielProfile 'S-B' 'PC01\bert'))
+        & $script:Calls[0].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[0].State
+        $ui.cmbUser.SelectedIndex = 1
+        Connect-Target
+        $ui.cmbUser.SelectedIndex = -1   # Liste ist beim Neuladen leer (wie im Fenster)
+        Connect-Target
+        & $script:Calls[1].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[1].State
+        & $script:Calls[2].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[2].State
+        $ui.cmbUser.SelectedIndex | Should -Be 1
+    }
     It 'anderer PC: eingetipptes Konto des bisherigen PCs wird geleert, gleicher PC behaelt es' {
         $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
         & $script:Calls[0].OnComplete ([pscustomobject]@{ Profiles = @(New-ZielProfile 'S-A' 'PC01\anna'); Error = $null; WinRM = $null }) $script:Calls[0].State
@@ -224,133 +257,182 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
     BeforeAll {
         . ([scriptblock]::Create((Get-ZielFn 'Get-HMFieldComputer')))
         . ([scriptblock]::Create((Get-ZielFn 'Confirm-HMTarget')))
+        . ([scriptblock]::Create((Get-ZielFn 'Test-HMBackupRestoreRunning')))
         function Out-Console { }
         function Update-HMTargetLabel { }
-        function Set-ConnectStatus { param($t, $c) $script:LastStatus = $t }
         function Connect-Target([switch]$FromField) { $script:Connected = "FromField=$([bool]$FromField)" }
         function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Asked = @{ Text = $Text; Mode = $Mode; Default = $Default }; return $script:Answer }
     }
-    BeforeEach { $script:Asked = $null; $script:Connected = $null; $script:UserMode = $false; $script:JobRunning = $false; $script:Target = @{ Computer = 'PC01'; Connected = $true }; $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC02' } } }
+    BeforeEach { $script:Asked = $null; $script:Connected = $null; $script:UserMode = $false; $script:JobRunning = $false; $script:JobTitle = ''; $script:Target = @{ Computer = 'PC01'; Connected = $true }; $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC02' } } }
     It 'Feld passt: keine Rueckfrage' {
         $ui.cmbComputer.Text = 'pc01'
         Confirm-HMTarget 'Backup' | Should -BeTrue
         $script:Asked | Should -BeNullOrEmpty
+        $script:HMTargetDeclined | Should -BeFalse
     }
-    It 'Ja: zuerst mit dem PC im Feld verbinden, Vorgang startet nicht' {
+    It 'Ja: auf dem verbundenen PC, Feld wird zurueckgesetzt; verbindet nie' {
         $script:Answer = 'Yes'
-        Confirm-HMTarget 'Backup' | Should -BeFalse
-        $script:Connected | Should -Be 'FromField=True'
-        $script:Asked.Mode | Should -Be 'YesNoCancel'
-        $script:Asked.Default | Should -Be 'Cancel'
-    }
-    It 'Nein: auf dem verbundenen PC, Feld wird zurueckgesetzt' {
-        $script:Answer = 'No'
         Confirm-HMTarget 'Backup' | Should -BeTrue
         $ui.cmbComputer.Text | Should -Be 'PC01'
-        $script:Connected | Should -BeNullOrEmpty
-    }
-    It 'Abbrechen oder Schliessen: nichts' {
-        $script:Answer = 'Cancel'
-        Confirm-HMTarget 'Backup' | Should -BeFalse
-        $ui.cmbComputer.Text | Should -Be 'PC02'
-        $script:Connected | Should -BeNullOrEmpty
-    }
-    It 'waehrend eines Vorgangs: nie neu verbinden, Ja = auf dem Ziel, Standard Nein' {
-        $script:JobRunning = $true; $script:JobTitle = 'Restore'
-        $script:Answer = 'No'
-        Confirm-HMTarget "'Netzwerktest'" | Should -BeFalse
         $script:Asked.Mode | Should -Be 'YesNo'
         $script:Asked.Default | Should -Be 'No'
         $script:Connected | Should -BeNullOrEmpty
-        $ui.cmbComputer.Text | Should -Be 'PC02'
-        $script:Answer = 'Yes'
-        Confirm-HMTarget "'Netzwerktest'" | Should -BeTrue
-        $script:Connected | Should -BeNullOrEmpty
-        $ui.cmbComputer.Text | Should -Be 'PC01'
-        $script:JobRunning = $false
     }
-    It 'Wake-on-LAN, Netzwerktest, Fernwartung (-FieldOk): Ja fuehrt direkt auf dem PC im Feld aus, ohne Benutzer von PC01' {
-        $ui.cmbUser = [pscustomobject]@{ Items = (New-Object System.Collections.ArrayList); Text = 'PC01\anna' }; [void]$ui.cmbUser.Items.Add('PC01\anna'); $ui.lblSid = [pscustomobject]@{ Text = 'C:\Users\anna' }
-        $script:Profiles = @(New-ZielProfile 'S-A' 'PC01\anna'); $script:ConnectSeq = 4
-        $script:Answer = 'Yes'
-        Confirm-HMTarget "'Wake-on-LAN'" -FieldOk | Should -BeTrue
-        $script:Asked.Text | Should -Match "Ja = 'Wake-on-LAN' auf PC02 ausfuehren \(PC02 wird gewaehlt, ohne Benutzerliste\)"
-        $script:Asked.Text | Should -Match "Nein = 'Wake-on-LAN' auf PC01 ausfuehren"
-        $script:Asked.Default | Should -Be 'Cancel'
+    It 'Nein oder Schliessen: nichts, Ablehnung wird gemerkt' {
+        $script:Answer = 'No'
+        Confirm-HMTarget 'Backup' | Should -BeFalse
+        $ui.cmbComputer.Text | Should -Be 'PC02'
         $script:Connected | Should -BeNullOrEmpty
-        $script:Target.Computer | Should -Be 'PC02'
-        $script:Target.Connected | Should -BeFalse
-        @($script:Profiles).Count | Should -Be 0
-        $ui.cmbUser.Items.Count | Should -Be 0
-        $script:ConnectSeq | Should -Be 5
-        $ui.cmbUser.Text | Should -Be ''
-        $script:LastStatus | Should -Be 'Gewaehlt: PC02 (nicht verbunden)'
-        (Get-HMTargetLabel (Get-HMTargetState 'PC02' $script:Target 'EIGEN')).Text | Should -Be 'gewaehlt: PC02 (nicht verbunden, Benutzerliste leer)'
+        $script:HMTargetDeclined | Should -BeTrue
+    }
+    It 'waehrend Backup/Restore dieselbe Belegung; bei anderen Vorgaengen die normale Variante' {
+        $script:JobRunning = $true; $script:JobTitle = 'Restore'; $script:Answer = 'No'
+        Confirm-HMTarget "'Netzwerktest'" | Should -BeFalse
+        $script:Asked.Text | Should -Match "Waehrend 'Restore' laeuft"
+        $script:Asked.Default | Should -Be 'No'
+        $script:JobTitle = 'Groesse ermitteln'
+        Confirm-HMTarget "'Netzwerktest'" | Should -BeFalse
+        $script:Asked.Text | Should -Not -Match 'Waehrend'
+        $script:Answer = 'Yes'; $script:JobTitle = 'Restore'
+        Confirm-HMTarget "'Netzwerktest'" | Should -BeTrue
+        $ui.cmbComputer.Text | Should -Be 'PC01'
+        $script:Connected | Should -BeNullOrEmpty
     }
     It 'Benutzer-Modus: keine Rueckfrage' {
         $script:UserMode = $true
         Confirm-HMTarget 'Backup' | Should -BeTrue
         $script:Asked | Should -BeNullOrEmpty
     }
-    It 'Backup, Restore, Groesse, Vorab-Pruefung und Profilordner fragen vor allem anderen' {
+    It 'Knoepfe mit Benutzerbezug fragen vor allem anderen, Verbinden nur aus dem Feld' {
         $script:MainSrc | Should -Match "btnBackup\.Add_Click\(\{\r?\n    if \(-not \(Confirm-HMTarget 'Backup'\)\) \{ return \}\r?\n    \`$p = Get-SelectedProfile"
         $script:MainSrc | Should -Match "if \(-not \(Confirm-HMTarget 'Restore'\)\) \{ return \}\r?\n    \`$b = \`$script:SelectedBackup"
-        $script:MainSrc | Should -Match "btnProfileSize\.Add_Click\(\{ if \(Confirm-HMTarget 'Groesse ermitteln'\)"
-        $script:MainSrc | Should -Match "if \(-not \(Confirm-HMTarget 'Vorab-Pruefung'\)\) \{ return \}"
-        (Get-ZielFn 'Get-SelectedProfilePath') | Should -Match "Confirm-HMTarget 'Ordner oeffnen'"
-        $script:MainSrc | Should -Match "btnBackupSchedule\.Add_Click\(\{ if \(Confirm-HMTarget 'Zeitplan'\) \{ New-HMBackupSchedule \} \}\)"
-    }
-    It 'Verbinden aus dem Feld nur ueber Verbinden, Enter, Lokal und den Geraete-Dialog' {
         $script:MainSrc | Should -Match '\$ui\.btnConnect\.Add_Click\(\{ Connect-Target -FromField \}\)'
         $script:MainSrc | Should -Match "Add_KeyDown\(\{ if \(\`$_\.Key -eq 'Return'\) \{ Connect-Target -FromField \} \}\)"
-        $script:MainSrc | Should -Match 'btnLocal\.Add_Click\(\{ .*Connect-Target -FromField \}\)'
-        $m = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Tools-Multi.ps1') -Encoding UTF8
-        $m | Should -Match '(?s)\$ui\.cmbComputer\.Text = "\$\(\$rv\.Row\.Name\)".*?if \(\$script:JobRunning\) \{.*?return \}\r?\n\s+Connect-Target -FromField'
     }
 }
 
-Describe 'Ziel: Werkzeuge waehrend Backup/Restore (Merkmal Busy)' {
+Describe 'Ziel: Werkzeuge (Busy, nur PC, Benutzer)' {
     BeforeAll {
+        . ([scriptblock]::Create((Get-ZielFn 'Get-HMFieldComputer')))
         . ([scriptblock]::Create((Get-ZielFn 'Test-HMToolStart')))
+        . ([scriptblock]::Create((Get-ZielFn 'Test-HMBackupRestoreRunning')))
+        . ([scriptblock]::Create((Get-ZielFn 'Select-HMFieldTarget')))
+        . ([scriptblock]::Create((Get-ZielFn 'Use-HMPcTarget')))
         function Out-Console { }
+        function Update-HMTargetLabel { }
+        function Update-RestoreTargetLabel { }
+        function Set-ConnectStatus { param($t, $c) $script:LastStatus = $t }
         function Confirm-HMTarget([string]$Action) { $script:TargetAsked = $Action; return $script:TargetOk }
         function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Asked = @{ Text = $Text; Mode = $Mode; Default = $Default }; return $script:Answer }
     }
-    BeforeEach { $script:Asked = $null; $script:TargetAsked = $null; $script:TargetOk = $true; $script:JobRunning = $true; $script:JobTitle = 'Backup' }
-    It 'eingreifendes Werkzeug waehrend eines Vorgangs: Rueckfrage mit Standard Nein' {
-        $script:Answer = 'No'
-        Test-HMToolStart @{ Busy = $true; Target = $true; Name = 'Neustart / Herunterfahren' } | Should -BeFalse
+    BeforeEach {
+        $script:Asked = $null; $script:TargetAsked = $null; $script:TargetOk = $true; $script:JobRunning = $false; $script:JobTitle = ''; $script:UserMode = $false; $script:LastStatus = $null
+        $script:Target = @{ Computer = 'PC01'; Connected = $true }; $script:ConnectSeq = 4; $script:Profiles = @(New-ZielProfile 'S-A' 'PC01\anna')
+        $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC01' }; cmbUser = [pscustomobject]@{ Items = (New-Object System.Collections.ArrayList); Text = 'PC01\anna' }; lblSid = [pscustomobject]@{ Text = 'C:\Users\anna' } }
+        [void]$ui.cmbUser.Items.Add('PC01\anna')
+    }
+    It 'nur PC (z.B. Laufwerke C$, Wake-on-LAN): anderer PC im Feld - ohne Rueckfrage umschalten, Benutzer von PC01 verworfen' {
+        $ui.cmbComputer.Text = 'PC02'
+        Test-HMToolStart @{ Kind = 'Pc'; Busy = $false; Name = 'Laufwerke (C$)' } | Should -BeTrue
+        $script:Asked | Should -BeNullOrEmpty
+        $script:TargetAsked | Should -BeNullOrEmpty
+        $script:Target.Computer | Should -Be 'PC02'
+        $script:Target.Connected | Should -BeFalse
+        $script:Target.Chosen | Should -BeTrue
+        @($script:Profiles).Count | Should -Be 0
+        $ui.cmbUser.Items.Count | Should -Be 0
+        $ui.cmbUser.Text | Should -Be ''
+        $script:ConnectSeq | Should -Be 5
+        $script:LastStatus | Should -Be 'Gewaehlt: PC02 (nicht verbunden)'
+        (Get-HMTargetLabel (Get-HMTargetState 'PC02' $script:Target 'EIGEN')).Text | Should -Be 'gewaehlt: PC02 (nicht verbunden, Benutzerliste leer)'
+    }
+    It 'nur PC, Feld passt: nichts aendert sich' {
+        Test-HMToolStart @{ Kind = 'Pc'; Busy = $false; Name = 'Netzwerktest' } | Should -BeTrue
+        $script:Target.Connected | Should -BeTrue
+        @($script:Profiles).Count | Should -Be 1
+    }
+    It 'nur PC waehrend Backup/Restore: nicht umschalten, Rueckfrage; waehrend anderer Vorgaenge: umschalten' {
+        $ui.cmbComputer.Text = 'PC02'; $script:JobRunning = $true; $script:JobTitle = 'Backup'
+        Test-HMToolStart @{ Kind = 'Pc'; Busy = $false; Name = 'Netzwerktest' } | Should -BeTrue
+        $script:TargetAsked | Should -Be "'Netzwerktest'"
+        $script:Target.Computer | Should -Be 'PC01'
+        $script:JobTitle = 'Groesse ermitteln'; $script:TargetAsked = $null
+        Test-HMToolStart @{ Kind = 'Pc'; Busy = $false; Name = 'Netzwerktest' } | Should -BeTrue
+        $script:TargetAsked | Should -BeNullOrEmpty
+        $script:Target.Computer | Should -Be 'PC02'
+    }
+    It 'Benutzer (z.B. Profil erneuern): Rueckfrage, abgelehnt = nichts; ohne Ziel: keine Pruefung' {
+        $ui.cmbComputer.Text = 'PC02'; $script:TargetOk = $false
+        Test-HMToolStart @{ Kind = 'User'; Busy = $false; Name = 'Profil erneuern (Test)' } | Should -BeFalse
+        $script:TargetAsked | Should -Be "'Profil erneuern (Test)'"
+        $script:Target.Computer | Should -Be 'PC01'
+        $script:TargetAsked = $null
+        Test-HMToolStart @{ Kind = 'None'; Busy = $false; Name = 'Inventar (mehrere PCs)' } | Should -BeTrue
+        $script:TargetAsked | Should -BeNullOrEmpty
+        $script:Target.Computer | Should -Be 'PC01'
+    }
+    It 'Knoepfe ausserhalb der Leisten, die nur den PC brauchen (Software, Treiber, Links): ebenso umschalten' {
+        $ui.cmbComputer.Text = 'PC02'
+        Use-HMPcTarget 'Softwareverteilung' | Should -BeTrue
+        $script:Target.Computer | Should -Be 'PC02'
+        $script:Asked | Should -BeNullOrEmpty
+    }
+    It 'Busy: Rueckfrage nur waehrend Backup oder Restore, Standard Nein' {
+        $script:JobRunning = $true; $script:JobTitle = 'Backup'; $script:Answer = 'No'
+        Test-HMToolStart @{ Kind = 'Pc'; Busy = $true; Name = 'Neustart / Herunterfahren' } | Should -BeFalse
         $script:Asked.Mode | Should -Be 'YesNo'
         $script:Asked.Default | Should -Be 'No'
         $script:Asked.Text | Should -Match "^Es laeuft gerade: Backup\.\s+'Neustart / Herunterfahren' greift in den PC bzw\. das Benutzerprofil ein und kann den laufenden Vorgang stoeren\.\s+Trotzdem ausfuehren\?$"
-        $script:TargetAsked | Should -BeNullOrEmpty
         $script:Answer = 'Yes'
-        Test-HMToolStart @{ Busy = $true; Target = $true; Name = 'Neustart / Herunterfahren' } | Should -BeTrue
-        $script:TargetAsked | Should -Be "'Neustart / Herunterfahren'"
+        Test-HMToolStart @{ Kind = 'Pc'; Busy = $true; Name = 'Neustart / Herunterfahren' } | Should -BeTrue
+        foreach ($t in @('Groesse ermitteln', 'Backup pruefen', 'Server-Backup', 'Updates suchen')) {
+            $script:Asked = $null; $script:JobTitle = $t
+            Test-HMToolStart @{ Kind = 'Pc'; Busy = $true; Name = 'Neustart / Herunterfahren' } | Should -BeTrue
+            $script:Asked | Should -BeNullOrEmpty
+        }
     }
-    It 'ohne Vorgang oder ohne Merkmal: keine Rueckfrage; -NoTarget: keine Frage zum Feld' {
-        $script:JobRunning = $false
-        Test-HMToolStart @{ Busy = $true; Target = $true; Name = 'X' } | Should -BeTrue
-        $script:Asked | Should -BeNullOrEmpty
-        $script:JobRunning = $true; $script:TargetAsked = $null
-        Test-HMToolStart @{ Busy = $false; Target = $false; Name = 'Y' } | Should -BeTrue
-        $script:Asked | Should -BeNullOrEmpty
-        $script:TargetAsked | Should -BeNullOrEmpty
-        $script:TargetOk = $false
-        Test-HMToolStart @{ Busy = $false; Target = $true; Name = 'Z' } | Should -BeFalse
-    }
-    It 'Merkmal wird gesetzt und an Links- und Rechtsklick geprueft; eingreifende Werkzeuge sind gekennzeichnet' {
+    It 'Zuordnung der Werkzeuge (Busy, Benutzer, ohne Ziel) und Weitergabe an Links- und Rechtsklick' {
         $f = Get-ZielFn 'Add-ToolButton'
-        $f | Should -Match 'Busy = \[bool\]\$Busy'
         ([regex]::Matches($f, 'Test-HMToolStart \$src\.Tag')).Count | Should -Be 2
         foreach ($n in @('Umbenennen', 'IP-Adresse / DHCP', 'Neustart / Herunterfahren', 'Profil erneuern \(Test\)', 'Profil zurueckholen', 'Profilordner umbenennen', 'Profil anderem Konto zuweisen', 'Alte Profile loeschen')) {
-            $script:MainSrc | Should -Match "(?m)^Add-ToolButton \`$t[cp] '$n' .* -Busy\r?$"
+            $script:MainSrc | Should -Match "(?m)^Add-ToolButton \`$t[cp] '$n' .* -Busy"
         }
-        foreach ($n in @('Fernwartung aktivieren', 'Netzwerktest', 'Wake-on-LAN')) { $script:MainSrc | Should -Match ('(?m)^Add-ToolButton \$tc ''' + $n + ''' .* -FieldOk\r?$') }
-        (Get-ZielFn 'Test-HMToolStart') | Should -Match '-FieldOk:\(\[bool\]\$Tag\.FieldOk\)'
+        foreach ($n in @('Profil erneuern \(Test\)', 'Profilordner umbenennen', 'Profil anderem Konto zuweisen', 'Windows-Apps neu registrieren', 'Gruppenrichtlinien-Ergebnis', 'Datenbanken suchen')) {
+            $script:MainSrc | Should -Match "(?m)^Add-ToolButton \`$tp '$n' .* -User\r?$"
+        }
         foreach ($n in @('Geraete \(AD\) / Mehrfach', 'USMT einrichten \(ADK\)', 'Inventar \(mehrere PCs\)', 'HUPilot \.\.\.', 'Im Backup suchen')) {
             $script:MainSrc | Should -Match "(?m)^Add-ToolButton \`$t[cp] '$n' .* -NoTarget\r?$"
         }
+        $script:MainSrc | Should -Not -Match 'FieldOk'
+    }
+}
+
+Describe 'Ziel: Umzugs-Assistent bei abgelehnter Rueckfrage' {
+    BeforeAll {
+        $wa = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\UI-Wizard.ps1'), [ref]$null, [ref]$null)
+        . ([scriptblock]::Create(@($wa.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq 'Invoke-HMWizardAction' }, $true))[0].Extent.Text))
+        function Test-HMWizSelection { $true }
+        function Select-HMMainTab { }
+        function Set-HMWizDone($n) { $script:Done.Add($n) }
+        function Save-HMWizState { }
+        function Update-HMWizard { }
+        function Out-Console { }
+        function Invoke-HMMainButton($b) { $script:HMTargetDeclined = $script:Decline }
+    }
+    BeforeEach { $script:Done = New-Object System.Collections.Generic.List[int]; $script:JobRunning = $false; $script:WizWaitFor = $null; $ui = @{ btnPrecheck = 'p'; btnBackup = 'b' } }
+    It 'Schritt 2: abgelehnt = nicht erledigt, sonst erledigt' {
+        $script:WizState = [pscustomobject]@{ Step = 2; Source = 'x' }
+        $script:Decline = $true; Invoke-HMWizardAction
+        $script:Done.Count | Should -Be 0
+        $script:Decline = $false; Invoke-HMWizardAction
+        @($script:Done) | Should -Be @(2)
+    }
+    It 'Schritt 3: abgelehnt = es wird auf kein Backup gewartet' {
+        $script:WizState = [pscustomobject]@{ Step = 3; Source = 'x' }
+        $script:Decline = $true; Invoke-HMWizardAction
+        $script:WizWaitFor | Should -BeNullOrEmpty
+        $script:Decline = $false; Invoke-HMWizardAction
+        $script:WizWaitFor | Should -Be 'Backup'
     }
 }
 
@@ -375,6 +457,12 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
     }
     It 'Warntexte' {
         Get-HMDeleteWarning 'B1' 'Restore' | Should -Match "(?s)^ACHTUNG: Das Backup 'B1' wird gerade vom laufenden Vorgang 'Restore' benutzt.*Trotzdem jetzt loeschen\?$"
+        Get-HMDeleteWarning 'B1' 'Restore' | Should -Match '\(der Restore liest daraus\)'
+        Get-HMDeleteWarning 'B1' 'Backup' | Should -Match '\(das Backup schreibt hinein\)'
+        Get-HMDeleteWarning 'B1' 'Backup pruefen' | Should -Match '\(die Pruefung liest daraus\)'
+        Get-HMDeleteWarning 'B1' 'Backups vergleichen' | Should -Match '\(der Vergleich liest daraus\)'
+        Get-HMDeleteWarning 'B1' 'Restore-Vorschau' | Should -Match '\(die Vorschau liest daraus\)'
+        Get-HMDeleteWarning 'B1' 'Groesse ermitteln' | Should -Match '\(der Vorgang arbeitet damit\)'
         Get-HMDeletingWarning 'B1' 'Restore' | Should -Match "(?s)^ACHTUNG: Das Backup 'B1' wird gerade geloescht\..*Restore wuerde damit arbeiten.*Trotzdem starten\?$"
     }
     Context 'Rueckfrage im Hauptfenster' {

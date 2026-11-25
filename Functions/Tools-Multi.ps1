@@ -218,9 +218,9 @@ function Show-HMMultiDialogCore {
         if (-not $rv) { return }
         $ui.cmbComputer.Text = "$($rv.Row.Name)"
         $s.W.Close()
-        # waehrend Backup/Restore nicht neu verbinden (wie der gesperrte Knopf Verbinden) - der Name steht im Feld,
+        # waehrend Backup/Restore nicht neu verbinden - der Name steht im Feld,
         # die Anzeige unter dem Feld zeigt den Unterschied, Enter verbindet nach dem Vorgang
-        if ($script:JobRunning) { Out-Console "$($rv.Row.Name) ins Feld Computer uebernommen - verbunden wird nach dem laufenden Vorgang (Enter oder Verbinden)." 'Warning'; return }
+        if (Test-HMBackupRestoreRunning) { Out-Console "$($rv.Row.Name) ins Feld Computer uebernommen - verbunden wird nach dem laufenden Vorgang (Enter oder Verbinden)." 'Warning'; return }
         Connect-Target -FromField
     }
     $script:MultiDlgTake = $take
