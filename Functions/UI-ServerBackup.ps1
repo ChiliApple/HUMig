@@ -313,7 +313,10 @@ function Edit-HMSbProfile {
 function Remove-HMSbProfile {
     $p = Get-HMSbProfile
     if (-not $p) { return }
-    if (-not (Confirm-Action "Profil '$($p.Name)' loeschen?`n`nSicherungen und Verlauf auf den Platten bleiben erhalten.")) { return }
+    # Zeitplaene des Profils bleiben in der Aufgabenplanung und schlagen danach fehl ("Profil nicht gefunden") - nennen
+    $tasks = @(); try { $ren0 = @((Get-HMSbConfig).Renames); $tasks = @(@(Get-HMSbScheduleRows) | Where-Object { $_ -and (Test-HMSbTaskOfProfile "$($_.Name)" $p.Name $ren0) } | ForEach-Object { "$($_.Name)" }) } catch { }
+    $tt = if ($tasks.Count) { "`n`nACHTUNG: Diese Zeitplaene bleiben bestehen und melden danach 'Profil nicht gefunden':`n  " + ($tasks -join "`n  ") + "`nLoeschen: Rechtsklick auf ""Zeitplan ..."", dann markieren und ""Loeschen""." } else { '' }
+    if (-not (Confirm-Action "Profil '$($p.Name)' loeschen?`n`nSicherungen und Verlauf auf den Platten bleiben erhalten.$tt")) { return }
     $cfg = Get-HMSbConfig
     $cfg.Profiles = @($cfg.Profiles | Where-Object { $_.Name -ne $p.Name })
     if ($cfg.LastProfile -eq $p.Name) { $cfg.LastProfile = '' }
@@ -949,6 +952,12 @@ function Start-HMSbBackup {
         Start-HMSbBackgroundRun $p $d $vms $vols $hc $hs ([bool]$ui.chkSbVerify.IsChecked)
         return
     }
+    # unmittelbar vor dem Start: gehoert der Buchstabe noch zur gewaehlten Platte? (Rueckfragen koennen lange offen sein)
+    $mm = ''; try { $mm = Get-HMSbDriveMismatch "$($d.Letter)" "$($d.Label)" "$($d.Serial)" } catch { }
+    if ($mm) {
+        $mq = "Die gewaehlte Ziel-Platte hat sich geaendert:`n$mm`n`nJa = trotzdem auf $($d.Letter): sichern (Warnung im Bericht)`nNein = nicht starten (danach ""Aktualisieren"" und Platte neu waehlen)"
+        if ("$((Show-HMDialogBox -Owner $script:Window -Text $mq -Title 'Server-Backup' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { Out-Console "Server-Backup nicht gestartet: $mm" 'Warning'; return }
+    }
     # Vorab-Pruefung: laeuft schon eine Sicherung/Wiederherstellung am Host?
     $busy = @(Get-HMSbBusy)
     if ($busy.Count) {
@@ -966,7 +975,8 @@ function Start-HMSbBackup {
     $script:SbAfterRun = $after
     $script:SbRunProfile = $pName
     # Teams-Meldung auch fuer manuell gestartete Laeufe (auch bei Abbruch durch einen Fehler; nicht bei "Abbrechen")
-    $cmd = '$e = ''''; try { Start-HMServerBackup -Ctx $Ctx -Job $Job } catch { $e = "$($_.Exception.Message)"; throw } finally { Send-HMSbRunNotify $Ctx $Job $e }'
+    # Fehler vor dem Anlegen des Berichtsordners: trotzdem ein Verlaufseintrag (Add-HMSbEarlyError)
+    $cmd = '$e = ''''; try { Start-HMServerBackup -Ctx $Ctx -Job $Job } catch { $e = "$($_.Exception.Message)"; if (-not $Job.SbStarted) { Add-HMSbEarlyError $Ctx $e }; throw } finally { Send-HMSbRunNotify $Ctx $Job $e }'
     Start-EngineJob -Command $cmd -Ctx $ctx -Title 'Server-Backup' -ScriptFiles @($script:SbEngine, (Join-Path $script:AppRoot 'Functions\Core-Notify.ps1'), (Join-Path $script:AppRoot 'Functions\UI-Status.ps1')) -OnFinished {
         param($j)
         Update-HMSbHistory
@@ -1887,13 +1897,19 @@ function Get-HMSbScheduleRows {
     }
     return ,$rows
 }
+# Gehoert eine Zeitplan-Aufgabe zum Profil? Auch unter einem frueheren Namen (die Aufgabe folgt der Umbenennung ueber Renames)
+function Test-HMSbTaskOfProfile([string]$TaskName, [string]$ProfileName, $Renames) {
+    $names = @($ProfileName) + @(@($Renames) | Where-Object { $_ -and (Get-HMSbCurrentName "$($_.Old)" $Renames) -eq $ProfileName } | ForEach-Object { "$($_.Old)" })
+    foreach ($n in $names) { if ("$TaskName".StartsWith(('Server-Backup - {0} - ' -f (ConvertTo-HMSbTaskPart $n)), [StringComparison]::OrdinalIgnoreCase)) { return $true } }
+    return $false
+}
 function Update-HMSbSchedules {
     try {
         $rows = Get-HMSbScheduleRows
         $rows = @($rows)
         $p = Get-HMSbProfile
-        $pre = if ($p) { 'Server-Backup - {0} - ' -f (ConvertTo-HMSbTaskPart $p.Name) } else { '' }
-        $mine = @($rows | Where-Object { -not $p -or "$($_.Name)".StartsWith($pre, [StringComparison]::OrdinalIgnoreCase) })
+        $ren = if ($p) { @((Get-HMSbConfig).Renames) } else { @() }
+        $mine = @($rows | Where-Object { -not $p -or (Test-HMSbTaskOfProfile "$($_.Name)" $p.Name $ren) })
         if ($mine.Count) {
             $ui.lblSbSchedule.Text = 'Geplant: ' + (@($mine | ForEach-Object { "$(($_.Name -split ' - ', 3)[-1])$(if ($_.Next) { " (naechster Lauf $($_.Next))" })$(if ($_.Result) { " letzter: $($_.Result)" })" }) -join '   |   ')
         } else { $ui.lblSbSchedule.Text = 'Kein Zeitplan fuer dieses Profil (Button Zeitplan ...)' }

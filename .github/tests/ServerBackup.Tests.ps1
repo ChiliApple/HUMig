@@ -286,3 +286,130 @@ Describe 'Server-Backup: Auswerfen und Einrichten gegen laufende Sicherungen (US
         Test-HMSbDiskRowMatch $null $d | Should -BeFalse
     }
 }
+Describe 'Server-Backup: Ziel-Platte vor dem Start abgleichen (SB-06)' {
+    It 'passt: gleiche Bezeichnung und Seriennummer' {
+        Get-HMSbDriveMismatch 'E' 'HUMIG-GYM-1' 'S1' ([pscustomobject]@{ FileSystemLabel = 'HUMIG-GYM-1' }) ([pscustomobject]@{ SerialNumber = 'S1' }) | Should -BeNullOrEmpty
+    }
+    It 'andere Bezeichnung unter dem Buchstaben wird erkannt' {
+        Get-HMSbDriveMismatch 'E:' 'HUMIG-GYM-1' '' ([pscustomobject]@{ FileSystemLabel = 'HUMIG-BHAK-2' }) | Should -Match "HUMIG-BHAK-2.*statt 'HUMIG-GYM-1'"
+    }
+    It 'gleiche Bezeichnung, andere Seriennummer wird erkannt; ohne Seriennummer kein Vergleich' {
+        Get-HMSbDriveMismatch 'E' 'HUMIG-GYM-1' 'S1' ([pscustomobject]@{ FileSystemLabel = 'HUMIG-GYM-1' }) ([pscustomobject]@{ SerialNumber = 'S2' }) | Should -Match 'Seriennummer S2 statt S1'
+        Get-HMSbDriveMismatch 'E' 'HUMIG-GYM-1' '' ([pscustomobject]@{ FileSystemLabel = 'HUMIG-GYM-1' }) ([pscustomobject]@{ SerialNumber = 'S2' }) | Should -BeNullOrEmpty
+        Get-HMSbDriveMismatch 'E' 'HUMIG-GYM-1' 'S1' ([pscustomobject]@{ FileSystemLabel = 'HUMIG-GYM-1' }) ([pscustomobject]@{ SerialNumber = '' }) | Should -BeNullOrEmpty
+    }
+    It 'Hauptablauf warnt (kein Abbruch), Oberflaeche fragt vor dem Start' {
+        $eng = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1')
+        $eng | Should -Match 'Get-HMSbDriveMismatch \$L "\$\(\$Ctx\.DiskLabel\)" "\$\(\$Ctx\.DiskSerial\)"'
+        $ui = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+        [regex]::Match($ui, '(?s)function Start-HMSbBackup \{.*?\r?\n\}\r?\n').Value | Should -Match 'Get-HMSbDriveMismatch'
+    }
+}
+
+Describe 'Server-Backup: durchgereichte Platten (Pass-Through, SB-02)' {
+    BeforeAll {
+        function Get-VM { }
+        function Get-VMHardDiskDrive { param($VM) }
+        function Get-Disk { }
+        function Set-Disk { param($Number, $IsOffline) }
+        function Get-Volume { }
+        function Get-Partition { }
+    }
+    BeforeEach {
+        Mock Get-HMSbOfflineMarks { @() }
+        Mock Set-HMSbOfflineMarks { }
+        Mock Get-Volume { @() }
+        Mock Get-Disk { @([pscustomobject]@{ Number = 4; BusType = 'USB'; IsOffline = $true; FriendlyName = 'An VM'; UniqueId = 'U4' }, [pscustomobject]@{ Number = 5; BusType = 'USB'; IsOffline = $true; FriendlyName = 'Sicherung'; UniqueId = 'U5' }) }
+        Mock Set-Disk { }
+    }
+    It 'Pass-Through-Platte bleibt offline, andere offline USB-Platte wird wie bisher online geschaltet' {
+        Mock Get-VM { @([pscustomobject]@{ Name = 'FS1' }) }
+        Mock Get-VMHardDiskDrive { @([pscustomobject]@{ Path = 'Disk 4 1.82 TB Bus 0 Lun 0 Target 0'; DiskNumber = 4 }, [pscustomobject]@{ Path = 'D:\VMs\FS1.vhdx'; DiskNumber = $null }) }
+        $r = Get-HMSbDriveList
+        Should -Invoke Set-Disk -Times 1 -Exactly -ParameterFilter { $Number -eq 5 }
+        Should -Invoke Set-Disk -Times 0 -Exactly -ParameterFilter { $Number -eq 4 }
+        @($r.Messages) -join ' ' | Should -Match 'Pass-Through'
+    }
+    It 'VM-Liste nicht lesbar: wie bisher online schalten, aber Hinweis' {
+        Mock Get-VM { throw 'nicht lesbar' }
+        $r = Get-HMSbDriveList
+        Should -Invoke Set-Disk -Times 2 -Exactly
+        @($r.Messages) -join ' ' | Should -Match 'nicht pruefbar'
+    }
+    It 'Platte einrichten: Pass-Through-Nummern zaehlen als Platten mit VM-Daten' {
+        Mock Get-VM { @([pscustomobject]@{ Name = 'FS1'; Path = 'D:\VMs'; ConfigurationLocation = 'D:\VMs'; SnapshotFileLocation = ''; SmartPagingFilePath = '' }) }
+        Mock Get-VMHardDiskDrive { @([pscustomobject]@{ Path = 'Disk 4 1.82 TB Bus 0 Lun 0 Target 0'; DiskNumber = 4 }) }
+        Mock Get-Partition { @([pscustomobject]@{ DiskNumber = 1; AccessPaths = @('D:\') }) }
+        $n = @(Get-HMSbVmDiskNumbers)
+        $n -contains 4 | Should -BeTrue
+        $n -contains 1 | Should -BeTrue
+        (Get-HMSbPassThroughDisks) -contains 4 | Should -BeTrue
+    }
+}
+
+Describe 'Server-Backup: Laufzeit-Schaetzung, Versionen, Sperrzeit, frueher Fehler (SB-03, SB-08, SB-11, SB-12)' {
+    It 'abgebrochene Laeufe (Zeit bis zur Erkennung) zaehlen nicht zur Schaetzung' {
+        $h = @(
+            [pscustomobject]@{ Profile = 'GYM'; Date = '2026-11-01 22:00'; Minutes = 120; Status = 'OK' }
+            [pscustomobject]@{ Profile = 'GYM'; Date = '2026-11-02 22:00'; Minutes = 2900; Status = 'Error'; Aborted = $true }
+        )
+        Get-HMSbEstimateMinutes $h 'GYM' | Should -Be 120
+        $h2 = @($h[0], [pscustomobject]@{ Profile = 'GYM'; Date = '2026-11-03 22:00'; Minutes = 300; Status = 'Error' })
+        Get-HMSbEstimateMinutes $h2 'GYM' | Should -Be 300
+    }
+    It 'Version gehoert nur zum Lauf, wenn sie nach dem Start entstand' {
+        $t0 = Get-Date '2026-11-25 22:00'
+        Test-HMSbVersionFromRun ([pscustomobject]@{ When = (Get-Date '2026-11-25 22:01') }) $t0 | Should -BeTrue
+        Test-HMSbVersionFromRun ([pscustomobject]@{ When = (Get-Date '2026-11-24 22:01') }) $t0 | Should -BeFalse
+        Test-HMSbVersionFromRun ([pscustomobject]@{ When = [datetime]::MinValue }) $t0 | Should -BeFalse
+        Test-HMSbVersionFromRun $null $t0 | Should -BeFalse
+    }
+    It 'Sperrzeit-Pruefung warnt einmal, auch wenn wbadmin laufend Fortschritt meldet' {
+        $script:SbJob = @{ Log = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue)) }
+        $now = Get-Date
+        $script:SbBlockWindows = @((ConvertFrom-HMSbBlockText ("taeglich {0} - {1}" -f $now.AddMinutes(-5).ToString('HH:mm'), $now.AddMinutes(30).ToString('HH:mm'))).Windows)
+        $script:SbBlockWarned = $false
+        Invoke-HMSbBlockCheck
+        Invoke-HMSbBlockCheck
+        $script:SbBlockWarned | Should -BeTrue
+        @($script:SbJob.Log.ToArray() | Where-Object { $_.Msg -match 'Sperrzeit' }).Count | Should -Be 1
+        $eng = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1')
+        [regex]::Match($eng, '(?s)function Invoke-HMSbWbadmin \{.*?\r?\n\}\r?\n').Value | Should -Match '\$lastBlockChk = Get-Date; Invoke-HMSbBlockCheck'
+        $script:SbJob = $null; $script:SbBlockWindows = $null
+    }
+    It 'Fehler vor dem Berichtsordner: Verlaufseintrag "Nicht gestartet" im Tool-Ordner' {
+        $p = Join-Path $TestDrive 'early\history.json'
+        Add-HMSbEarlyError @{ LocalHistory = $p; Profile = 'GYM'; DiskLabel = 'HUMIG-GYM-1'; VMs = @('DC1'); Volumes = @(); Version = '9' } 'Ziel-Laufwerk E: nicht vorhanden'
+        $h = Read-HMSbHistory $p
+        $h.Count | Should -Be 1
+        $h[0].Status | Should -Be 'Error'
+        $h[0].Note | Should -Match 'Nicht gestartet: Ziel-Laufwerk'
+        $ui = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+        $ui | Should -Match 'if \(-not \$Job\.SbStarted\) \{ Add-HMSbEarlyError \$Ctx \$e \}'
+        $eng = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:Root 'Functions\ServerBackup-Engine.ps1')
+        $eng | Should -Match '\$Job\.SbStarted = \$true\r?\n.*\r?\n\s*Set-HMSbRunMarker \$Ctx \$rep \$t0'
+    }
+    It 'Zeitplan-Skript: Platten lesen und unerwartete Fehler enden mit Verlauf und Meldung (SB-04)' {
+        $tsk = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:Root 'Functions\ServerBackup-Task.ps1')
+        $tsk | Should -Match 'try \{ \$dl = Get-HMSbDriveList \} catch \{ Add-HMSbTaskError'
+        $tsk | Should -Match '(?s)trap \{.*Add-HMSbTaskError \$tm.*exit 2'
+    }
+}
+
+Describe 'Server-Backup: Zeitplaene nach Umbenennen und beim Loeschen des Profils (US-07)' {
+    BeforeAll {
+        $script:AppRoot = $script:Root
+        . (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+    }
+    It 'Aufgabe unter dem alten Profilnamen gehoert weiter zum Profil' {
+        $ren = @([pscustomobject]@{ Old = 'Gym alt'; New = 'GYM' })
+        Test-HMSbTaskOfProfile 'Server-Backup - Gym alt - taeglich 22-00' 'GYM' $ren | Should -BeTrue
+        Test-HMSbTaskOfProfile 'Server-Backup - GYM - taeglich 22-00' 'GYM' $ren | Should -BeTrue
+        Test-HMSbTaskOfProfile 'Server-Backup - BHAK - taeglich 22-00' 'GYM' $ren | Should -BeFalse
+        Test-HMSbTaskOfProfile 'Server-Backup - Gym alt - taeglich 22-00' 'GYM' @() | Should -BeFalse
+    }
+    It 'Loeschen des Profils nennt die bleibenden Zeitplaene' {
+        $ui = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+        [regex]::Match($ui, '(?s)function Remove-HMSbProfile \{.*?\r?\n\}\r?\n').Value | Should -Match 'Test-HMSbTaskOfProfile'
+    }
+}

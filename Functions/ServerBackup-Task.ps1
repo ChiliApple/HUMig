@@ -54,8 +54,16 @@ function Add-HMSbTaskError([string]$Note, [string]$Disk = '') {
             HostVersionId = ''; Note = "Geplante Aufgabe: $Note"; Tool = "HUMig $version"
         })
     } catch { }
-    $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME FEHLGESCHLAGEN" -Lines @($Note, "Protokoll: $($script:TaskLog)") -Level 'Error' -Category 'SbError' -SbProfile $(if ($prof) { $ProfileName } else { '' })
-    if ($n) { Write-HMSbLog $n 'Info' }
+    try {
+        $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME FEHLGESCHLAGEN" -Lines @($Note, "Protokoll: $($script:TaskLog)") -Level 'Error' -Category 'SbError' -SbProfile $(if ($prof) { $ProfileName } else { '' })
+        if ($n) { Write-HMSbLog $n 'Info' }
+    } catch { Write-HMSbLog "Benachrichtigung: $($_.Exception.Message)" 'Warning' }
+}
+# Sicherheitsnetz: ein unerwarteter Fehler ausserhalb der einzelnen Pruefungen endet nie ohne Verlauf, Ereignis und Meldung
+trap {
+    $tm = "Unerwarteter Fehler: $($_.Exception.Message)"
+    try { Add-HMSbTaskError $tm } catch { try { Write-HMSbLog $tm 'Error' } catch { } }
+    exit 2
 }
 
 Write-HMSbLog "Geplantes Server-Backup - Profil '$ProfileName' - Host $env:COMPUTERNAME - Konto $env:USERDOMAIN\$env:USERNAME - HUMig $version" 'Header'
@@ -105,7 +113,8 @@ $prefix = "$($prof.DiskPrefix)".Trim()
 if (-not $prefix) { $prefix = 'HUMIG-' + (ConvertTo-HMSbSafeName $ProfileName).ToUpper() }
 
 # --- Platte des Profils suchen
-$dl = Get-HMSbDriveList
+$dl = $null
+try { $dl = Get-HMSbDriveList } catch { Add-HMSbTaskError "Platten nicht lesbar: $($_.Exception.Message)"; exit 2 }
 foreach ($m in @($dl.Messages)) { if ($m) { Write-HMSbLog $m 'Warning' } }
 $drives = @(@($dl.Drives) | Where-Object { $_ -and (Test-HMSbLabelMatch "$($_.Label)" $prefix) })
 if ($DiskLabel) {

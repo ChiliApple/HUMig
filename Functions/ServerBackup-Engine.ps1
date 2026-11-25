@@ -150,11 +150,17 @@ function Get-HMSbDriveList([switch]$KeepHumigOffline) {
     $msgs = @()
     $marks = @(Get-HMSbOfflineMarks)
     $marksNew = @($marks)
+    # direkt an eine VM durchgereichte Platten (Pass-Through) sind am Host offline und duerfen nie online geschaltet werden
+    $pt = Get-HMSbPassThroughDisks
+    $ptKnown = ($null -ne $pt)
+    if (-not $ptKnown) { $pt = @() }
     foreach ($d in @(Get-Disk -ErrorAction SilentlyContinue | Where-Object { "$($_.BusType)" -match '^(USB|7)$' })) {
         $k = Get-HMSbDiskKey $d
         $m = $null
         if ($k) { $m = @($marks | Where-Object { "$_".Split('|')[0] -eq $k })[0] }
         if (-not $d.IsOffline) { if ($m) { $marksNew = @($marksNew | Where-Object { $_ -ne $m }) }; continue }
+        if (@($pt) -contains [int]$d.Number) { $msgs += "USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) ist direkt an eine VM durchgereicht (Pass-Through) - bleibt offline und ist kein Sicherungsziel"; continue }
+        if (-not $ptKnown -and -not $m) { $msgs += "Hinweis: Hyper-V-VM-Liste nicht lesbar - ob die offline USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) an eine VM durchgereicht ist, war nicht pruefbar; sie wird wie bisher online geschaltet" }
         if ($KeepHumigOffline -and $m) { $msgs += "USB-Platte $("$m".Split('|')[1]) (Datentraeger $($d.Number)) wurde nach der Sicherung von HUMig offline geschaltet und bleibt offline - ""Aktualisieren"" schaltet sie wieder online."; continue }
         try {
             Set-Disk -Number $d.Number -IsOffline $false -ErrorAction Stop
@@ -183,26 +189,60 @@ function Get-HMSbDriveList([switch]$KeepHumigOffline) {
 # Datentraeger-Nummern, auf denen Dateien von Hyper-V-VMs liegen (Konfiguration, Snapshots, Smart Paging, virtuelle Platten).
 # Zuordnung ueber die Zugriffspfade der Partitionen (Laufwerksbuchstabe, Bereitstellungspunkt, \\?\Volume{...}\) - laengster passender Pfad.
 # Ist Hyper-V installiert, aber die VM-Liste nicht lesbar: Fehler (nie "keine VMs" annehmen). Ohne Hyper-V: leere Liste.
+# Datentraeger-Nummern, die als physische Platte direkt an eine VM durchgereicht sind (Pass-Through, DiskNumber gesetzt).
+# Ohne Hyper-V: leere Liste. VM-Liste nicht lesbar: $null (der Aufrufer entscheidet und meldet es).
+function Get-HMSbPassThroughDisks {
+    if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return ,@() }
+    $n = @()
+    try {
+        foreach ($vm in @(Get-VM -ErrorAction Stop)) {
+            foreach ($hd in @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)) {
+                if ($null -ne $hd.DiskNumber -and "$($hd.DiskNumber)" -match '^\d+$' -and $n -notcontains [int]$hd.DiskNumber) { $n += [int]$hd.DiskNumber }
+            }
+        }
+    } catch { return $null }
+    return ,$n
+}
 function Get-HMSbVmDiskNumbers {
     if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) { return }
     $paths = @()
+    $nums = @()
     try {
         foreach ($vm in @(Get-VM -ErrorAction Stop)) {
             $paths += @("$($vm.Path)", "$($vm.ConfigurationLocation)", "$($vm.SnapshotFileLocation)", "$($vm.SmartPagingFilePath)")
-            $paths += @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop | ForEach-Object { "$($_.Path)" })
+            foreach ($hd in @(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)) {
+                $paths += "$($hd.Path)"
+                # Pass-Through: physische Platte direkt an der VM (DiskNumber gesetzt, Path ist dann kein Dateipfad)
+                if ($null -ne $hd.DiskNumber -and "$($hd.DiskNumber)" -match '^\d+$' -and $nums -notcontains [int]$hd.DiskNumber) { $nums += [int]$hd.DiskNumber }
+            }
         }
     } catch { throw "VM-Liste nicht lesbar ($($_.Exception.Message)) - zur Sicherheit abgebrochen (Platten mit VM-Dateien waeren nicht erkennbar)" }
     $map = @()
     foreach ($p in @(Get-Partition -ErrorAction Stop)) {
         foreach ($ap in @($p.AccessPaths)) { if ("$ap") { $map += [pscustomobject]@{ Path = "$ap".TrimEnd('\') + '\'; Disk = [int]$p.DiskNumber } } }
     }
-    $nums = @()
     foreach ($x in @($paths | Where-Object { "$_".Trim() } | Select-Object -Unique)) {
         $f = "$x".TrimEnd('\') + '\'
         $hit = @($map | Where-Object { $f.StartsWith($_.Path, [StringComparison]::OrdinalIgnoreCase) } | Sort-Object { $_.Path.Length } -Descending)[0]
         if ($hit -and $nums -notcontains $hit.Disk) { $nums += $hit.Disk }
     }
     return $nums
+}
+# Gehoert der Laufwerksbuchstabe noch zur erwarteten Platte (Bezeichnung, Seriennummer beim Lesen der Liste)?
+# '' = passt oder nicht pruefbar, sonst Beschreibung der Abweichung. Seriennummer nur, wenn beide bekannt sind
+# (viele USB-Gehaeuse melden keine). $Volume/$Disk nur fuer Tests, sonst live gelesen.
+function Get-HMSbDriveMismatch([string]$Letter, [string]$Label, [string]$Serial, $Volume = $null, $Disk = $null) {
+    $L = "$Letter".TrimEnd(':', '\').ToUpper()
+    if (-not $L) { return '' }
+    if ($null -eq $Volume) { try { $Volume = Get-Volume -DriveLetter $L -ErrorAction Stop } catch { return "Laufwerk ${L}: ist nicht mehr vorhanden" } }
+    $now = "$($Volume.FileSystemLabel)".Trim()
+    if ("$Label".Trim() -and $now -ne "$Label".Trim()) { return "Laufwerk ${L}: traegt jetzt die Bezeichnung '$(if ($now) { $now } else { '(ohne)' })' statt '$("$Label".Trim())' - wohl eine andere Platte" }
+    if ("$Serial".Trim()) {
+        if ($null -eq $Disk) { try { $Disk = Get-Partition -DriveLetter $L -ErrorAction Stop | Get-Disk -ErrorAction Stop } catch { return '' } }
+        $sn = "$($Disk.SerialNumber)".Trim()
+        if ($sn -and $sn -ne "$Serial".Trim()) { return "Laufwerk ${L}: ist eine andere Platte (Seriennummer $sn statt $("$Serial".Trim()), gleiche Bezeichnung '$now')" }
+    }
+    return ''
 }
 # Merkmale einer Platte zum Wiedererkennen (Nummern koennen nach dem Umstecken wechseln)
 function Get-HMSbDiskIdentity($d) { return ('{0}|{1}|{2}|{3}' -f "$($d.UniqueId)".Trim(), "$($d.SerialNumber)".Trim(), [long]$d.Size, "$($d.FriendlyName)".Trim()) }
@@ -550,7 +590,8 @@ function Get-HMSbBlockOverlap($Windows, [datetime]$Start, [datetime]$End) {
 #   - Groesse / langsamstes gemessenes Tempo der letzten 5 Laeufe (neue Platte = Vollsicherung)
 # ohne Verlauf: Groesse / 30 MB/s, ohne Groesse: 6 h
 function Get-HMSbEstimateMinutes($History, [string]$ProfileName, [long]$SizeBytes = 0) {
-    $runs = @(@($History) | Where-Object { $_ -and "$($_.Profile)" -eq $ProfileName -and [double]"0$($_.Minutes)" -gt 0 } | Sort-Object { "$($_.Date)" } | Select-Object -Last 5)
+    # abgebrochene Laeufe (Neustart, Absturz) zaehlen nicht: ihre Dauer ist die Zeit bis zur Erkennung, nicht die Laufzeit
+    $runs = @(@($History) | Where-Object { $_ -and "$($_.Profile)" -eq $ProfileName -and [double]"0$($_.Minutes)" -gt 0 -and $_.Aborted -ne $true } | Sort-Object { "$($_.Date)" } | Select-Object -Last 5)
     $cand = @()
     if ($runs.Count) { $cand += [double](@($runs | ForEach-Object { [double]$_.Minutes } | Measure-Object -Maximum).Maximum) }
     $rates = @($runs | ForEach-Object { [double]"0$($_.MBs)" } | Where-Object { $_ -gt 0 })
@@ -699,6 +740,11 @@ function Get-HMSbErrorLogReasons([string[]]$Files, [int]$Max = 6) {
     return $out.ToArray()
 }
 
+# Hat waehrend des Laufs die Sperrzeit des Profils begonnen? Einmal warnen
+function Invoke-HMSbBlockCheck {
+    if (-not $script:SbBlockWindows -or $script:SbBlockWarned) { return }
+    try { $nowB = Get-Date; $ovB = Get-HMSbBlockOverlap $script:SbBlockWindows $nowB $nowB.AddMinutes(1); if ($ovB) { $script:SbBlockWarned = $true; Write-HMSbLog "  ACHTUNG: Die Sperrzeit $(Format-HMSbBlockWindow $ovB.Window) hat begonnen - die Sicherung laeuft noch" 'Warning' } } catch { }
+}
 # wbadmin ausfuehren (stdout+stderr), Fortschritt in $Job, Zeilen ins Log
 function Invoke-HMSbWbadmin {
     param([string]$Arguments, [string]$Phase = '', [double]$PBase = 0, [double]$PSpan = 100, [string]$LogFile = '', [switch]$Quiet)
@@ -720,7 +766,7 @@ function Invoke-HMSbWbadmin {
     # geschriebene Menge = Summe der Zunahmen des belegten Platzes (verwirft Windows waehrenddessen aeltere Versionen,
     # sinkt der belegte Platz - das zaehlt nicht als "weniger geschrieben")
     $usedPrev = $used0; $written = [long]0
-    $t0 = Get-Date; $lastLog = $t0; $lastPctTxt = ''
+    $t0 = Get-Date; $lastLog = $t0; $lastPctTxt = ''; $lastBlockChk = $t0
     while ($true) {
         $rl = $p.StandardOutput.ReadLineAsync()
         while (-not $rl.Wait(5000)) {
@@ -728,12 +774,14 @@ function Invoke-HMSbWbadmin {
                 $lastLog = Get-Date
                 $uNow = if ($tgt -and $null -ne $usedPrev) { Get-HMSbDriveUsedBytes $tgt } else { $null }
                 if ($null -ne $uNow) { if ([long]$uNow -gt [long]$usedPrev) { $written += ([long]$uNow - [long]$usedPrev) }; $usedPrev = $uNow }
-                if ($script:SbBlockWindows -and -not $script:SbBlockWarned) { try { $nowB = Get-Date; $ovB = Get-HMSbBlockOverlap $script:SbBlockWindows $nowB $nowB.AddMinutes(1); if ($ovB) { $script:SbBlockWarned = $true; Write-HMSbLog "  ACHTUNG: Die Sperrzeit $(Format-HMSbBlockWindow $ovB.Window) hat begonnen - die Sicherung laeuft noch" 'Warning' } } catch { } }
+                Invoke-HMSbBlockCheck
                 Write-HMSbLog ('  ' + (Format-HMSbAliveLine -Phase $Phase -Elapsed ((Get-Date) - $t0) -PctText $lastPctTxt -UsedStart $(if ($null -ne $used0) { [long]0 } else { $null }) -UsedNow $(if ($null -ne $used0) { $written } else { $null })))
             }
         }
         $line = $rl.Result
         if ($null -eq $line) { break }
+        # gibt wbadmin laufend Fortschritt aus, kommt die Schleife oben nie dran: Sperrzeit trotzdem jede Minute pruefen
+        if (-not $Quiet -and ((Get-Date) - $lastBlockChk).TotalMinutes -ge 1) { $lastBlockChk = Get-Date; Invoke-HMSbBlockCheck }
         $t = $line.Trim()
         if (-not $t) { continue }
         $lines.Add($t)
@@ -876,6 +924,13 @@ function Get-HMSbVersions([string]$Target) {
     return [pscustomobject]@{ Versions = $sorted; ExitCode = $r.ExitCode; Text = $r.Text }
 }
 
+# Entstand eine Version (When = Ortszeit aus der Versions-ID, minutengenau) waehrend des Laufs ab $Start?
+# Unbekannte Zeit = $false (lieber keine ID als die eines frueheren Laufs)
+function Test-HMSbVersionFromRun($V, [datetime]$Start) {
+    if ($null -eq $V) { return $false }
+    try { if ($V.When -is [datetime] -and $V.When -gt [datetime]::MinValue) { return ($V.When -ge $Start.AddMinutes(-2)) } } catch { }
+    return $false
+}
 # Anzahl Versionen aus einem Get-HMSbVersions-Ergebnis - -1 = nicht feststellbar (wbadmin-Fehler, busy, Platte kurz weg).
 # Eine leere Liste zaehlt nur als 0, wenn wbadmin ohne Fehler endete oder ausdruecklich "keine Sicherungen" meldet (B42).
 function Get-HMSbVersionCount($Result) {
@@ -2336,6 +2391,18 @@ function Start-HMSbExport {
     if ($st -eq 'Error') { $Job.Error = (@($r.Notes) -join '; ') }
 }
 
+# Fehler vor dem Anlegen des Berichtsordners (Ziel fehlt, VM unbekannt, wbadmin fehlt ...): Start-HMServerBackup wirft,
+# ohne Verlauf. Damit der Lauf trotzdem im Verlauf (Tool-Ordner) steht. Nur wenn $Job.SbStarted nicht gesetzt ist.
+function Add-HMSbEarlyError($Ctx, [string]$Msg) {
+    if (-not $Ctx -or -not "$($Ctx.LocalHistory)") { return }
+    try {
+        Add-HMSbHistory "$($Ctx.LocalHistory)" ([pscustomobject][ordered]@{
+            Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Profile = "$($Ctx.Profile)"; Host = $env:COMPUTERNAME; Disk = "$($Ctx.DiskLabel)"; DiskSerial = "$($Ctx.DiskSerial)"
+            VMs = ''; VmsFailed = (@($Ctx.VMs) -join ', '); Volumes = (@($Ctx.Volumes) -join ', '); VolVersionId = ''; Status = 'Error'; Minutes = 0; SizeGB = 0; VersionId = ''
+            HostConfig = $false; HostSystem = $false; HostVersionId = ''; Note = "Nicht gestartet: $Msg"; Tool = "HUMig $($Ctx.Version)"
+        })
+    } catch { Write-HMSbLog "Verlauf nicht gespeichert: $($_.Exception.Message)" 'Warning' }
+}
 # ----------------------------------------------------------------------------
 # Hauptablauf (Hintergrund-Runspace)
 #   Ctx: Profile, DiskPrefix, Drive (Buchstabe), DiskLabel, DiskSerial, VMs (Namen), HostConfig, HostSystem, Verify, LocalHistory, LocalReportDir, Version
@@ -2361,6 +2428,13 @@ function Start-HMServerBackup {
     if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\wbadmin.exe'))) { throw 'wbadmin.exe fehlt - Feature "Windows Server-Sicherung" installieren' }
     if (-not (Test-Path -LiteralPath "$target\")) { throw "Ziel-Laufwerk $target nicht vorhanden" }
     if ("$env:SystemDrive".TrimEnd(':').ToUpper() -eq $L) { throw 'Ziel darf nicht das System-Laufwerk sein' }
+    # Buchstabe noch bei der erwarteten Platte? (Platte zwischen Lesen der Liste und Start getauscht) - Warnung im Ergebnis, kein Abbruch
+    $mm = ''; try { $mm = Get-HMSbDriveMismatch $L "$($Ctx.DiskLabel)" "$($Ctx.DiskSerial)" } catch { }
+    if ($mm) {
+        Write-HMSbLog "ACHTUNG Ziel-Platte: $mm" 'Warning'
+        $status = 'Warning'; $notes += "Ziel-Platte: $mm"
+        $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Ziel-Platte passt nicht mehr zur gewaehlten: $mm."; Fix = 'Im Bericht und unter "Versionen auf der Platte" pruefen, auf welche Platte gesichert wurde; vor dem naechsten Lauf "Aktualisieren".' }
+    }
     $info = @()
     if ($vms.Count) {
         $all = Get-HMSbVmList
@@ -2406,6 +2480,8 @@ function Start-HMServerBackup {
     }
 
     # Ab hier existiert der Berichtsordner: Abbruch/Fehler wird trotzdem in Verlauf und Bericht festgehalten
+    # (davor: Aufrufer schreibt mit Add-HMSbEarlyError einen Verlaufseintrag)
+    $Job.SbStarted = $true
     # Laufend-Markierung: endet der Vorgang ohne Aufraeumen (Neustart, Absturz), meldet der naechste Start den Abbruch
     Set-HMSbRunMarker $Ctx $rep $t0
     # Neustart ausstehend? Windows Update startet sonst evtl. mitten in der Sicherung neu (z. B. nachts ausserhalb der Nutzungszeit)
@@ -2510,6 +2586,12 @@ function Start-HMServerBackup {
             try {
                 $vv = Get-HMSbVersions $target
                 $last = @($vv.Versions) | Select-Object -Last 1
+                # fehlgeschlagener Lauf: die neueste Version ist nur dann von diesem Lauf, wenn sie nach dem Start entstand
+                # (sonst stuende die Version eines frueheren Laufs im Verlauf)
+                if ($last -and $r.ExitCode -ne 0 -and -not (Test-HMSbVersionFromRun $last $t0)) {
+                    Write-HMSbLog "Neueste Version auf der Platte ($($last.Time)) stammt von einem frueheren Lauf - nicht als Version dieses Laufs eingetragen" 'Info'
+                    $last = $null
+                }
                 if ($last) {
                     $verId = "$($last.Id)"; $res.VersionId = $verId
                     Write-HMSbLog "Versionen auf der Platte: $(@($vv.Versions).Count) - neueste: $($last.Time) (ID $verId)" 'Info'
