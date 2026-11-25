@@ -1,5 +1,29 @@
 ﻿# Changelog
 
+## v2.1.24 - 2026-11-26
+`
+### 🪟 Hauptfenster
+- **Anzeige "verbunden mit":** Unter dem Feld Computer steht dauerhaft, mit welchem PC HUMig verbunden ist. Die Statuszeile überschreibt das nicht mehr.
+  - Steht im Feld ein anderer Name, zeigt die Anzeige das in Hinweisfarbe: "verbunden mit ... | im Feld: ... (Enter = verbinden)". Der ganze Satz steht im Tooltip.
+  - Ist das Verbinden gescheitert, steht dort "nicht verbunden: ..." mit dem Namen des PCs. Wurde ein PC nur gewählt (siehe Werkzeuge), steht "gewählt: ... (nicht verbunden, Benutzerliste leer)".
+- **Backup und Restore wirken auf den verbundenen PC:** PC und Benutzer kommen immer zusammen vom verbundenen PC.
+  - Bisher konnte ein im Feld getippter, aber nicht verbundener PC mit dem Benutzer des vorher verbundenen PCs gemischt werden.
+- **Rückfrage bei anderem PC im Feld:** Startet ein Vorgang, der einen Benutzer braucht, während im Feld ein anderer PC steht, fragt HUMig: Ja = auf dem verbundenen PC ausführen (das Feld wird zurückgesetzt), Nein = nichts tun. Für den PC im Feld: Enter oder Verbinden.
+- **Verbinden ohne Durcheinander:** Wird während des Verbindens ein anderer PC gewählt, wird die Antwort des ersten PCs verworfen.
+- **Benutzer bleibt gewählt:** Nach dem Restore, nach Profil-Werkzeugen und bei Verbinden auf denselben PC behält HUMig den gewählten Benutzer, soweit es ihn noch gibt.
+- **Abbrechen nennt den Vorgang:** Die Rückfrage beim Abbrechen sagt, welcher Vorgang läuft.
+### 🧰 Werkzeuge
+- **Wie bisher ohne Verbinden:** Werkzeuge, die nur den PC brauchen (z. B. Laufwerke, Remote-PowerShell, Wake-on-LAN, Diagnose), laufen sofort auf dem PC im Feld. Er wird dabei gewählt, die Benutzerliste des vorigen PCs wird verworfen.
+- **Rückfrage während Backup und Restore:** Umbenennen, IP-Adresse, Neustart, Profil erneuern, Profil zurückholen, Profilordner umbenennen, Profil anderem Konto zuweisen und Alte Profile löschen fragen während eines laufenden Backups oder Restores "Trotzdem ausführen?", Standard ist Nein.
+- **Geräte (AD):** Während eines Backups oder Restores übernimmt "Als Computer übernehmen" nur den Namen ins Feld, verbunden wird nach dem Vorgang.
+### 🗑️ Backups löschen
+- **Warnung bei benutztem Backup:** Löschen eines Backups, mit dem gerade ein Vorgang arbeitet (Restore, Backup, Prüfen, Vergleichen), fragt mit deutlicher Warnung nach, Standard ist Nein.
+- **Warnung beim Start:** Startet ein Vorgang mit einem Backup, das gerade gelöscht wird, kommt ebenfalls eine Warnung mit Standard Nein.
+- **Alte löschen:** Wurde der Backup-Ordner gewechselt, seit das Fenster offen ist, löscht HUMig nichts und bittet, das Fenster neu zu öffnen.
+- **Unvollständiges Backup:** Die Rückfrage beim Löschen sagt, wenn das Backup unvollständig ist oder gerade geschrieben wird.
+### ✅ Qualität
+- **Tests:** PLATZHALTER
+
 ## v2.1.23 - 2026-11-25
 ### 🔄 Update
 - **Nur geprüfte Dateien:** Ein Update installiert nur noch Dateien, die in der signierten Prüfsummen-Datei stehen.
