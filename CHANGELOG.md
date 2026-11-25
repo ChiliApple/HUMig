@@ -1,5 +1,39 @@
 ﻿# Changelog
 
+## v2.1.21 - 2026-11-25
+### 🪟 Hauptfenster
+- **Statuszeile zeigt das echte Ergebnis:** Nach einem Vorgang steht dort z. B. "Backup erfolgreich", "Backup mit Warnungen" oder "Restore mit Fehlern", passend gefärbt: grün nur bei Erfolg, gelb bei Warnungen, rot bei Fehlern, zu wenig Platz und Abbruch.
+  - Bisher stand grün "fertig", auch wenn das Ergebnis Fehler oder Warnungen hatte.
+  - Fortschrittsbalken und Laufzeit bleiben am Ende nicht mehr auf einem Zwischenstand stehen.
+### 💾 Backup
+- **Nicht erreichbare Quelle ist ein Fehler:** Ist der PC, die Freigabe oder der Profilordner nicht lesbar, meldet das Backup "Quelle nicht erreichbar" mit Grund. Die Ordner darunter gelten nicht mehr als "nicht vorhanden".
+  - Was trotzdem erreichbar ist, wird weiter gesichert.
+  - Ordner, die es am PC wirklich nicht gibt, bleiben wie bisher "nicht vorhanden".
+- **Gescheiterte Anmeldung an der Freigabe steht im Ergebnis:** als Warnung, nicht mehr nur als Zeile im Protokoll.
+- **Windows-Einstellungen (USMT) nur mit neuem Stand OK:** Erzeugt ScanState keinen neuen Stand, meldet das Backup einen Fehler mit dem Datum des vorhandenen alten Stands. Der alte Stand bleibt erhalten.
+  - Scheitert beim Fernzugriff die Kopie von USMT zum PC oder zurück, wird das gemeldet, statt einen alten Stand als Ergebnis zu nehmen.
+- **WLAN-Profile:** Meldet der Export einen Fehler oder lässt sich ein Profil nicht ins Backup kopieren, ist das Ergebnis eine Warnung.
+- **Prüfung nach dem Backup:** Konnte der Vergleich nicht laufen oder wurde keine einzige Stichprobe geprüft, steht "Prüfung nicht möglich" mit Grund und das Backup endet mit Warnung, statt "vollständig" zu melden.
+### ♻️ Restore
+- **Windows-Einstellungen (USMT) mit eigenem Ergebnis:** LoadState steht jetzt als eigene Zeile im Ergebnis und im Bericht. Code 0 ist OK, Code 3 (Teil übersprungen, Rest übernommen) eine Warnung, jeder andere Code ein Fehler mit Erklärung.
+  - USMT nicht gefunden, kein USMT-Stand im Backup oder eine gescheiterte Kopie zum Ziel-PC sind ebenfalls Fehler.
+  - Bricht LoadState mit einer Ausnahme ab, laufen die übrigen Module weiter und der Bericht entsteht trotzdem.
+- **Zielbenutzer ohne Profil:** Die Benutzer-Module werden wie bisher ausgelassen und die Computer-Module zurückgespielt. Neu steht ein Fehler im Ergebnis, der die ausgelassenen Module nennt.
+- **Benutzer-Registry und Anmelde-Aktionen:** Ist die Registry des Zielbenutzers nicht verfügbar oder lässt sich die Aufgabe für die nächste Anmeldung nicht einrichten, steht eine Warnung im Ergebnis.
+  - Netzwerkdrucker und Symbolpositionen melden dann nicht mehr "OK, wird bei der Anmeldung ...", sondern eine Warnung zum Nachholen.
+- **Nacharbeiten:** Ein Nach-Skript, das nicht ausgeführt wurde oder mit Fehler endete, ist ein Fehler im Ergebnis, ein nicht gefundenes Nach-Skript eine Warnung. Eine Ausnahme in den Nacharbeiten beendet den Restore nicht mehr ohne Bericht.
+- **Kontrolle nach dem Restore:** War die Kontrolle bei einem Ordner nicht möglich, ist dieser Ordner eine Warnung. Der Schlusstext nennt nur noch, wie viele Ordner wirklich kontrolliert wurden.
+- **Treiber:** pnputil wird ausgewertet. Erfolg und "Neustart nötig" sind OK, andere Ergebnisse und eine unvollständige Kopie zum Ziel-PC eine Warnung.
+- **Schriftarten:** Lassen sich Schriftarten nicht kopieren, ist das Ergebnis eine Warnung mit den Dateinamen.
+### 🧩 Programm-Module
+- **Dienste nicht wieder gestartet:** Lässt sich ein gestoppter Dienst nach Backup oder Restore nicht wieder starten, steht eine Warnung im betroffenen Modul.
+### ⚠️ Nach dem Update
+- **Mehr Warnungen und Fehler als bisher:** Backups und Restores, die bisher "OK" meldeten, können jetzt Warnung oder Fehler zeigen. Der Fehler war vorher auch schon da, er wurde nur nicht gemeldet.
+  - Geplantes Backup: Die Teams-Meldung kommt dann als Warnung bzw. Fehler.
+  - Aufbewahrung im Zeitplan: Sie läuft nur nach einem Backup mit OK oder Warnung. Endet ein Lauf mit Fehler, werden in diesem Lauf keine alten Backups gelöscht.
+  - Ein Backup mit Fehler wird im Restore nicht vorausgewählt, Module mit Fehler fehlen in der Restore-Auswahl.
+  - Der Umzugs-Assistent geht nach einem Backup mit Fehler nicht zum nächsten Schritt.
+
 ## v2.1.20 - 2026-11-25
 ### 📱 Handy-Fernbedienung
 - **Push-Schlüssel wieder anlegbar:** Der Schlüssel für Push-Meldungen ans Handy entsteht jetzt nur im Speicher und wird wie bisher geschützt in der eigenen Datei abgelegt.
