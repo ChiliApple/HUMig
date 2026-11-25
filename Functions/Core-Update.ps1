@@ -15,6 +15,9 @@ $script:HMDefaultOwner  = 'ChiliApple'
 $script:HMDefaultRepo   = 'HUMig'
 $script:HMDefaultSigner = '1B669AE240DA1A91043C4576763D9F8E0BF762FA'
 $script:HMUserAgent     = 'HUMig'
+# Ab dieser Version muss die signierte Pruefsummen-Datei die Versionszeile '# HUMig-Release <Tag>' haben (Schutz gegen das
+# Unterschieben der Datei eines anderen Releases). Bei Uebernahme in eine andere App auf deren erste Version damit setzen.
+$script:HMManifestTagSince = '2.0.121'
 
 function Get-HMDefaultSigner([string]$Owner, [string]$Repo) {
     if ($Owner -eq $script:HMDefaultOwner -and $Repo -eq $script:HMDefaultRepo) { return $script:HMDefaultSigner }
@@ -119,7 +122,7 @@ function ConvertFrom-HMManifest([string]$Text) {
 }
 # Versionszeile der (signierten) Pruefsummen-Datei: "# HUMig-Release <Tag>" in der ersten Zeile.
 # Verhindert, dass die signierte Pruefsummen-Datei eines anderen Releases (mit dessen Dateien) untergeschoben wird.
-# Rueckgabe: '' = passt, sonst Grund. Ohne Versionszeile nur fuer Releases vor 2.0.121 zulaessig.
+# Rueckgabe: '' = passt, sonst Grund. Ohne Versionszeile nur fuer Releases vor $script:HMManifestTagSince zulaessig.
 function Test-HMManifestRelease([string]$Text, $Version) {
     $want = ConvertTo-HMVersion "$Version"
     if (-not $want) { return "Version unbekannt ($Version)" }
@@ -130,7 +133,7 @@ function Test-HMManifestRelease([string]$Text, $Version) {
         if (-not $have -or $have -ne $want) { return "Signierte Pruefsummen-Datei gehoert zu $tag, nicht zu $want - Update abgelehnt." }
         return ''
     }
-    if ($want -ge [Version]'2.0.121') { return "Signierte Pruefsummen-Datei ohne Versionszeile (Pflicht ab 2.0.121) - Update abgelehnt." }
+    if ($want -ge [Version]$script:HMManifestTagSince) { return "Signierte Pruefsummen-Datei ohne Versionszeile (Pflicht ab $($script:HMManifestTagSince)) - Update abgelehnt." }
     return ''
 }
 function Get-HMFileSha256([string]$Path) {

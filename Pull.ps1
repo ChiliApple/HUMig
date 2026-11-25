@@ -53,6 +53,9 @@ $script:HMDefaultOwner  = 'ChiliApple'
 $script:HMDefaultRepo   = 'HUMig'
 $script:HMDefaultSigner = '1B669AE240DA1A91043C4576763D9F8E0BF762FA'
 $script:HMUserAgent     = 'HUMig'
+# Ab dieser Version muss die signierte Pruefsummen-Datei die Versionszeile '# HUMig-Release <Tag>' haben (Schutz gegen das
+# Unterschieben der Datei eines anderen Releases). Bei Uebernahme in eine andere App auf deren erste Version damit setzen.
+$script:HMManifestTagSince = '2.0.121'
 
 function Get-HMDefaultSigner([string]$Owner, [string]$Repo) {
     if ($Owner -eq $script:HMDefaultOwner -and $Repo -eq $script:HMDefaultRepo) { return $script:HMDefaultSigner }
@@ -157,7 +160,7 @@ function ConvertFrom-HMManifest([string]$Text) {
 }
 # Versionszeile der (signierten) Pruefsummen-Datei: "# HUMig-Release <Tag>" in der ersten Zeile.
 # Verhindert, dass die signierte Pruefsummen-Datei eines anderen Releases (mit dessen Dateien) untergeschoben wird.
-# Rueckgabe: '' = passt, sonst Grund. Ohne Versionszeile nur fuer Releases vor 2.0.121 zulaessig.
+# Rueckgabe: '' = passt, sonst Grund. Ohne Versionszeile nur fuer Releases vor $script:HMManifestTagSince zulaessig.
 function Test-HMManifestRelease([string]$Text, $Version) {
     $want = ConvertTo-HMVersion "$Version"
     if (-not $want) { return "Version unbekannt ($Version)" }
@@ -168,7 +171,7 @@ function Test-HMManifestRelease([string]$Text, $Version) {
         if (-not $have -or $have -ne $want) { return "Signierte Pruefsummen-Datei gehoert zu $tag, nicht zu $want - Update abgelehnt." }
         return ''
     }
-    if ($want -ge [Version]'2.0.121') { return "Signierte Pruefsummen-Datei ohne Versionszeile (Pflicht ab 2.0.121) - Update abgelehnt." }
+    if ($want -ge [Version]$script:HMManifestTagSince) { return "Signierte Pruefsummen-Datei ohne Versionszeile (Pflicht ab $($script:HMManifestTagSince)) - Update abgelehnt." }
     return ''
 }
 function Get-HMFileSha256([string]$Path) {
@@ -555,6 +558,137 @@ function Resolve-HMPullTarget([string]$Here) {
     if ($others.Count) { return $desk }
     return @{ Target = $full; Mode = 'Erstinstallation (Ordner von Pull.ps1)' }
 }
+# Pfad aus Pruefsummen-Datei oder Journal: nur relativ zum Programmordner, ohne Laufwerk, ohne '..' und '.'
+# (sonst koennte ein Eintrag ausserhalb des Programmordners schreiben). Rueckgabe: Pfad mit '/' oder '' = unzulaessig
+function ConvertTo-HMPullRelPath([string]$Path) {
+    $p = "$Path".Trim() -replace '\\', '/'
+    if (-not $p -or $p.StartsWith('/') -or $p.Contains(':') -or $p -match '[\x00-\x1f]') { return '' }
+    foreach ($seg in ($p -split '/')) { if ($seg -eq '' -or $seg -eq '.' -or $seg -eq '..') { return '' } }
+    return $p
+}
+# Dateiliste des Updates aus der geprueften Pruefsummen-Datei (nicht aus dem Git-Baum): installiert wird nur, was dort steht.
+# Pull.ps1 kommt zuletzt an die Reihe (ein altes Pull.ps1 trifft so nie auf ein Journal dieses Laufs).
+# Rueckgabe: @{ Files = Pfade (sortiert, Pull.ps1 am Ende); Bad = unzulaessige Eintraege }
+function Get-HMPullFileList([hashtable]$Manifest) {
+    $ok = New-Object System.Collections.Generic.List[string]
+    $bad = @()
+    foreach ($k in @($Manifest.Keys | ForEach-Object { "$_" } | Sort-Object)) {
+        $r = ConvertTo-HMPullRelPath $k
+        if (-not $r -or $r -cne $k) { $bad += $k; continue }
+        if ($r -like '.github/*') { continue }
+        $ok.Add($r)
+    }
+    return @{ Files = @(Get-HMPullOrder @($ok)); Bad = $bad }
+}
+function Get-HMPullOrder([string[]]$Paths) {
+    return @(@($Paths | Where-Object { $_ -ne 'Pull.ps1' }) + @($Paths | Where-Object { $_ -eq 'Pull.ps1' }))
+}
+# Journal (Config\pull-journal.json): JSON-Liste, erster Eintrag = Programmordner mit '\' am Ende, danach die Dateien als volle
+# Pfade. Aeltere Pull.ps1 lesen jeden Eintrag als vollen Pfad (der Ordner-Eintrag bleibt fuer sie wirkungslos).
+# Ausgewertet wird relativ zum Programmordner - nach einem Wechsel des Laufwerksbuchstabens (USB) stimmt die Liste weiter.
+function New-HMPullJournalText([string]$Root, [string[]]$Paths) {
+    $rt = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    return (ConvertTo-Json -InputObject @(@($rt) + @($Paths | ForEach-Object { "$_" })))
+}
+# gemeinsamer Ordner aller Eintraege (alte Journale ohne Ordner-Eintrag), mit '\' am Ende; '' = keiner
+function Get-HMPullCommonDir([string[]]$Paths) {
+    $common = $null
+    foreach ($p in $Paths) {
+        $parts = @((Split-Path $p -Parent).TrimEnd('\') -split '\\')
+        if ($null -eq $common) { $common = $parts; continue }
+        $n = 0
+        while ($n -lt $common.Count -and $n -lt $parts.Count -and $common[$n] -ieq $parts[$n]) { $n++ }
+        $common = @($common | Select-Object -First $n)
+    }
+    if (-not $common -or -not @($common).Count -or -not "$($common[0])") { return '' }
+    return ((@($common) -join '\') + '\')
+}
+# Journal-Eintraege -> volle Pfade im heutigen Programmordner. Versteht neue Journale (Ordner-Eintrag), alte (nur volle Pfade:
+# Ordner = gemeinsamer Anfang aller Eintraege) und relative Eintraege. Rueckgabe: @{ Paths = volle Pfade; Bad = nicht zuordenbar }
+function Resolve-HMPullJournal($Entries, [string]$Root) {
+    $rt = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $list = @(@($Entries) | ForEach-Object { "$_" } | Where-Object { $_.Trim() })
+    $base = "$(@($list | Where-Object { $_.EndsWith('\') -or $_.EndsWith('/') })[0])"
+    $files = @($list | Where-Object { -not ($_.EndsWith('\') -or $_.EndsWith('/')) })
+    if (-not $base) {
+        $abs = @($files | Where-Object { [IO.Path]::IsPathRooted($_) })
+        if (@($abs | Where-Object { -not $_.StartsWith($rt, [StringComparison]::OrdinalIgnoreCase) }).Count) { $base = Get-HMPullCommonDir $abs }
+    }
+    $paths = @(); $bad = @()
+    foreach ($e in $files) {
+        $rel = ''
+        if ([IO.Path]::IsPathRooted($e)) {
+            if ($base -and $e.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) { $rel = $e.Substring($base.Length) }
+            elseif ($e.StartsWith($rt, [StringComparison]::OrdinalIgnoreCase)) { $rel = $e.Substring($rt.Length) }
+        } else { $rel = $e }
+        $rel = ConvertTo-HMPullRelPath $rel
+        if (-not $rel) { $bad += $e; continue }
+        $paths += $rt + ($rel -replace '/', '\')
+    }
+    return @{ Paths = $paths; Bad = $bad }
+}
+# Abgebrochenes Update zurueckstellen: *.pullold -> Datei, *.pulltmp entfernen.
+# Rueckgabe je Datei mit Sicherung: Path, Ok, Text
+function Restore-HMPullJournal([string[]]$Paths) {
+    foreach ($p in $Paths) {
+        $o = "$p.pullold"
+        if (Test-Path -LiteralPath $o) {
+            try { Move-Item -LiteralPath $o -Destination $p -Force -ErrorAction Stop; [pscustomobject]@{ Path = $p; Ok = $true; Text = 'zurueckgestellt' } }
+            catch { [pscustomobject]@{ Path = $p; Ok = $false; Text = "$($_.Exception.Message)" } }
+        }
+        Remove-Item -LiteralPath "$p.pulltmp" -Force -ErrorAction SilentlyContinue
+    }
+}
+# Ersetzen rueckgaengig machen (umgekehrte Reihenfolge): neue Dateien entfernen, Sicherungen zurueck.
+# $Moved: Liste @(Ziel, Sicherung oder ''). Rueckgabe: Dateien, die NICHT zurueckgestellt werden konnten (Path, Text)
+function Undo-HMPullReplace($Moved) {
+    for ($k = $Moved.Count - 1; $k -ge 0; $k--) {
+        $m = $Moved[$k]
+        try {
+            if ($m[1]) { Move-Item -LiteralPath $m[1] -Destination $m[0] -Force -ErrorAction Stop }
+            else { Remove-Item -LiteralPath $m[0] -Force -ErrorAction Stop }
+        } catch {
+            [pscustomobject]@{ Path = $m[0]; Text = $(if ($m[1]) { "neue Fassung bleibt, bisherige liegt als $(Split-Path $m[1] -Leaf) ($($_.Exception.Message))" } else { "neu hinzugekommene Datei nicht entfernt ($($_.Exception.Message))" }) }
+        }
+    }
+}
+# Sperre gegen zwei gleichzeitige Pull-Laeufe fuer denselben Programmordner: pull.lock exklusiv geoeffnet, solange Pull laeuft
+# (Windows gibt sie beim Beenden frei, auch nach einem Absturz, und loescht die Datei). Rueckgabe: Handle oder $null = besetzt
+function Enter-HMPullLock([string]$Root) {
+    $f = Join-Path $Root 'pull.lock'
+    try { return (New-Object System.IO.FileStream -ArgumentList $f, ([System.IO.FileMode]::OpenOrCreate), ([System.IO.FileAccess]::ReadWrite), ([System.IO.FileShare]::None), 1, ([System.IO.FileOptions]::DeleteOnClose)) }
+    catch {
+        $ex = $_.Exception; while ($ex.InnerException) { $ex = $ex.InnerException }
+        if ($ex -is [System.IO.IOException] -and $ex -isnot [System.IO.DirectoryNotFoundException]) { return $null }
+        throw
+    }
+}
+# installierte Version: Config\version.json (stimmt auch bei von Hand kopierten Teststaenden), sonst installed.json; $null = unbekannt
+function Get-HMPullInstalledVersion([string]$Root) {
+    foreach ($x in @(@('Config\version.json', 'version'), @('Config\installed.json', 'Version'))) {
+        $f = Join-Path $Root $x[0]
+        try {
+            if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { continue }
+            $j = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($j -and $j.PSObject.Properties[$x[1]]) { $v = ConvertTo-HMVersion "$($j.($x[1]))"; if ($v) { return $v } }
+        } catch { }
+    }
+    return $null
+}
+# Zurueckstufen ohne ausdrueckliche Wahl (z.B. "Update" nach Wechsel von Kanal Test auf Stabil)? $true = nachfragen.
+# Ausdrueckliches -Version, unbekannte Version und gleiche Version (Neuinstallation) fragen nicht.
+function Test-HMPullDowngrade($Installed, $New, [string]$Explicit) {
+    if ("$Explicit".Trim() -or -not $Installed -or -not $New) { return $false }
+    return ([Version]"$New" -lt [Version]"$Installed")
+}
+# HUMig nach dem Pull starten (HUMig.exe, sonst Start.cmd, sonst HUMig.ps1 als Administrator)
+function Start-HMPullApp([string]$Root) {
+    $exe = Join-Path $Root 'HUMig.exe'
+    $cmd = Join-Path $Root 'Start.cmd'
+    if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe -WorkingDirectory $Root }
+    elseif (Test-Path -LiteralPath $cmd) { Start-Process -FilePath $cmd -WorkingDirectory $Root -WindowStyle Hidden }
+    else { Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$(Join-Path $Root 'HUMig.ps1')`"" -WorkingDirectory $Root -Verb RunAs }
+}
 if (-not $Target) {
     $rt = Resolve-HMPullTarget $PSScriptRoot
     $Target = $rt.Target; $mode = $rt.Mode
@@ -564,6 +698,13 @@ $Target = $Target.TrimEnd('\')
 $pullFirst = -not (Test-Path -LiteralPath (Join-Path $Target 'HUMig.ps1'))
 
 $cfgDir = Join-Path $Target 'Config'
+# nur ein Pull-Lauf je Programmordner (zwei gleichzeitige wuerden sich Dateien, Journal und Sicherungen gegenseitig zerstoeren)
+$script:PullLock = $null
+try {
+    if (-not (Test-Path -LiteralPath $Target)) { New-Item -ItemType Directory -Path $Target -Force | Out-Null }
+    $script:PullLock = Enter-HMPullLock $Target
+} catch { Stop-HMPull "Kein Schreibzugriff auf '$Target' ($($_.Exception.Message)). PowerShell als Administrator starten." }
+if (-not $script:PullLock) { Stop-HMPull "Fuer '$Target' laeuft bereits ein Update (Pull.ps1 in einem anderen Fenster) - abwarten, bis es fertig ist, dann bei Bedarf erneut starten." }
 # abgebrochenes Update (Journal vorhanden): bisherige Dateien aus *.pullold zuruecksetzen
 $jr = Join-Path $cfgDir 'pull-journal.json'
 if (Test-Path -LiteralPath $jr) {
@@ -573,15 +714,13 @@ if (Test-Path -LiteralPath $jr) {
     $jl = $null
     try { $jl = Get-Content -LiteralPath $jr -Raw -Encoding UTF8 | ConvertFrom-Json }
     catch { Stop-HMPull "Journal $jr nicht lesbar ($($_.Exception.Message)) - bitte *.pullold im Programmordner pruefen." }
+    # Pfade relativ zum heutigen Programmordner (alte Journale mit vollen Pfaden auch nach Wechsel des Laufwerksbuchstabens)
+    $jres = Resolve-HMPullJournal @($jl) $Target
+    foreach ($x in @($jres.Bad)) { Write-Host "  [WARN] Eintrag ausserhalb des Programmordners - nicht angefasst: $x" -ForegroundColor Yellow }
     $jbad = 0
-    foreach ($jp in @($jl)) {
-        if (-not "$jp") { continue }
-        $jo = "$jp.pullold"
-        if (Test-Path -LiteralPath $jo) {
-            try { Move-Item -LiteralPath $jo -Destination "$jp" -Force -ErrorAction Stop; Write-Host "  zurueckgestellt: $jp" -ForegroundColor DarkGray }
-            catch { $jbad++; Write-Host "  [WARN] $($jp): $($_.Exception.Message)" -ForegroundColor Yellow }
-        }
-        Remove-Item -LiteralPath "$jp.pulltmp" -Force -ErrorAction SilentlyContinue
+    foreach ($x in @(Restore-HMPullJournal @($jres.Paths))) {
+        if ($x.Ok) { Write-Host "  zurueckgestellt: $($x.Path)" -ForegroundColor DarkGray }
+        else { $jbad++; Write-Host "  [WARN] $($x.Path): $($x.Text)" -ForegroundColor Yellow }
     }
     # Journal nur loeschen, wenn alles zurueckgestellt ist (sonst bleibt die Start-Sperre bestehen)
     if ($jbad) { Stop-HMPull "$jbad Datei(en) konnten nicht zurueckgestellt werden (gesperrt?) - Programm schliessen und Pull erneut ausfuehren." }
@@ -623,10 +762,10 @@ if ($WaitPid -gt 0) {
     Start-Sleep -Milliseconds 800
 }
 
-if (-not (Test-Path $Target)) { New-Item -ItemType Directory -Path $Target -Force | Out-Null }
+if (-not (Test-Path -LiteralPath $Target)) { New-Item -ItemType Directory -Path $Target -Force | Out-Null }
 try {
     $probe = Join-Path $Target ('.pullprobe_' + [Guid]::NewGuid().ToString('N'))
-    [System.IO.File]::WriteAllText($probe, 'x'); Remove-Item $probe -Force
+    [System.IO.File]::WriteAllText($probe, 'x'); Remove-Item -LiteralPath $probe -Force
 } catch { Stop-HMPull "Kein Schreibzugriff auf '$Target'. PowerShell als Administrator starten." }
 
 function New-GHHeaders([string]$Accept) {
@@ -688,6 +827,20 @@ if ($newCred) {
 }
 if ($useBranch) { Write-Host "Version:    Entwicklungsstand Branch '$Branch' ($($ref.Substring(0, [Math]::Min(12, $ref.Length))))" -ForegroundColor Yellow }
 else { Write-Host "Version:    $($rel.Tag)  ($(if ($rel.Prerelease) { 'Test' } else { 'Stabil' }), $($rel.Date))" -ForegroundColor Gray }
+# kein stilles Zurueckstufen: ohne ausdrueckliches -Version (z.B. "Update" nach Wechsel von Kanal Test auf Stabil) nachfragen
+if (-not $useBranch -and -not $pullFirst) {
+    $instVer = Get-HMPullInstalledVersion $Target
+    if (Test-HMPullDowngrade $instVer $rel.Version $Version) {
+        Write-Host "[WARN] $($rel.Tag) ist AELTER als die installierte Version $instVer (z.B. nach einem Wechsel von Kanal Test auf Stabil)." -ForegroundColor Yellow
+        if ($NonInteractive) { Stop-HMPull "Kein stilles Zurueckstufen von $instVer auf $($rel.Version) - eine aeltere Version nur ausdruecklich mit -Version $($rel.Version) laden." }
+        $a = Read-Host "Trotzdem auf $($rel.Tag) zurueckstufen? (j/N)"
+        if ("$a".Trim() -notmatch '^[jJyY]') {
+            Write-Host "Abgebrochen - es wurde nichts veraendert, HUMig bleibt auf $instVer." -ForegroundColor Yellow
+            if (-not $NoStart) { Start-HMPullApp $Target }
+            exit 0
+        }
+    }
+}
 
 # --- 2. Pruefsumme und Signatur
 if (-not $useBranch) {
@@ -719,12 +872,23 @@ if (-not $useBranch) {
 }
 Write-Host "Pruefung:   $verified" -ForegroundColor Gray
 
-# --- 3. Dateiliste
-try { $tree = Invoke-RestMethod "https://api.github.com/repos/$Owner/$Repo/git/trees/${ref}?recursive=1" -Headers (New-GHHeaders 'application/vnd.github.v3+json') -UseBasicParsing }
-catch { Stop-HMPull "Dateiliste nicht lesbar: $($_.Exception.Message)" }
-$files = @($tree.tree | Where-Object { $_.type -eq 'blob' -and "$($_.path)" -notlike '.github/*' })
-if (-not $files.Count) { Stop-HMPull 'Repo-Inhalt leer' }
-Write-Host "$($files.Count) Dateien`n" -ForegroundColor Gray
+# --- 3. Dateiliste: aus der geprueften Pruefsummen-Datei - installiert wird nur, was dort steht (ein Tag auf einem anderen
+#        Stand kann so keine Dateien unterschieben oder weglassen). Ohne Pruefsummen-Datei (Branch-Stand, sehr alte Releases
+#        nach Rueckfrage) wie bisher aus dem Git-Baum.
+if ($manifest) {
+    $fl = Get-HMPullFileList $manifest
+    if (@($fl.Bad).Count) { Stop-HMPull "Pruefsummen-Datei enthaelt unzulaessige Pfade ($(@($fl.Bad | Select-Object -First 3) -join ', ')) - Update abgelehnt, es wurde NICHTS veraendert." }
+    if (@($fl.Files) -notcontains 'HUMig.ps1') { Stop-HMPull 'Pruefsummen-Datei ohne HUMig.ps1 - Update abgelehnt, es wurde NICHTS veraendert.' }
+    $files = @($fl.Files | ForEach-Object { [pscustomobject]@{ path = $_ } })
+    Write-Host "$($files.Count) Dateien (laut Pruefsummen-Datei)`n" -ForegroundColor Gray
+} else {
+    try { $tree = Invoke-RestMethod "https://api.github.com/repos/$Owner/$Repo/git/trees/${ref}?recursive=1" -Headers (New-GHHeaders 'application/vnd.github.v3+json') -UseBasicParsing }
+    catch { Stop-HMPull "Dateiliste nicht lesbar: $($_.Exception.Message)" }
+    $tp = @(Get-HMPullOrder @($tree.tree | Where-Object { $_.type -eq 'blob' -and "$($_.path)" -notlike '.github/*' } | ForEach-Object { "$($_.path)" }))
+    $files = @($tp | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ path = $_ } })
+    if (-not $files.Count) { Stop-HMPull 'Repo-Inhalt leer' }
+    Write-Host "$($files.Count) Dateien`n" -ForegroundColor Gray
+}
 
 # --- 4. alles laden und pruefen (noch nichts ersetzen)
 $staged = New-Object System.Collections.Generic.List[object]
@@ -732,7 +896,7 @@ $fail = 0
 foreach ($f in $files) {
     $local = Join-Path $Target ($f.path -replace '/', '\')
     $dir = Split-Path $local -Parent
-    try { if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null } } catch { Write-Host "  $($f.path): Ordner nicht anlegbar" -ForegroundColor Red; $fail++; continue }
+    try { if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null } } catch { Write-Host "  $($f.path): Ordner nicht anlegbar" -ForegroundColor Red; $fail++; continue }
     Write-Host ('  {0,-48} ... ' -f $f.path) -NoNewline
     $tmp = "$local.pulltmp"
     $done = $false; $lastErr = ''
@@ -765,8 +929,9 @@ if ($fail) {
 $journal = Join-Path $cfgDir 'pull-journal.json'
 $moved = New-Object System.Collections.Generic.List[object]   # @(Ziel, Sicherung oder '')
 $repl = 0; $lastErr = ''
+$notBack = @()                                                # Dateien, die beim Zurueckstellen nicht zurueckkamen
 try { if (-not (Test-Path -LiteralPath $cfgDir)) { New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null } } catch { }
-try { ConvertTo-Json -InputObject @($staged | ForEach-Object { "$($_[1])" }) | Set-Content -LiteralPath $journal -Encoding UTF8 -ErrorAction Stop }
+try { New-HMPullJournalText $Target @($staged | ForEach-Object { "$($_[1])" }) | Set-Content -LiteralPath $journal -Encoding UTF8 -ErrorAction Stop }
 catch {
     foreach ($s in $staged) { Remove-Item -LiteralPath $s[0] -Force -ErrorAction SilentlyContinue }
     Stop-HMPull "Journal nicht schreibbar ($($_.Exception.Message)) - es wurde NICHTS veraendert."
@@ -786,18 +951,23 @@ foreach ($s in $staged) {
         } catch { $lastErr = $_.Exception.Message; Start-Sleep -Seconds 1 }
     }
     if (-not $done) {
-        if ($backedUp) { try { Move-Item -LiteralPath $old -Destination $s[1] -Force } catch { Write-Host "  [WARN] $($s[1]): Sicherung nicht zurueckgestellt ($($_.Exception.Message))" -ForegroundColor Yellow } }
+        if ($backedUp) {
+            try { Move-Item -LiteralPath $old -Destination $s[1] -Force -ErrorAction Stop; $backedUp = $false }
+            catch { $notBack += [pscustomobject]@{ Path = $s[1]; Text = "fehlt, bisherige Fassung liegt als $(Split-Path $old -Leaf) ($($_.Exception.Message))" } }
+        }
         Write-Host "  $($s[1]): nicht ersetzbar ($lastErr)" -ForegroundColor Red; $repl++; break
     }
 }
 if ($repl) {
     # zurueckstellen (umgekehrte Reihenfolge): neue Dateien entfernen, Sicherungen zurueck
-    for ($k = $moved.Count - 1; $k -ge 0; $k--) {
-        $m = $moved[$k]
-        try { if ($m[1]) { Move-Item -LiteralPath $m[1] -Destination $m[0] -Force } else { Remove-Item -LiteralPath $m[0] -Force } }
-        catch { Write-Host "  [WARN] $($m[0]): nicht zurueckgestellt ($($_.Exception.Message))" -ForegroundColor Yellow }
-    }
+    $notBack = @(@($notBack) + @(Undo-HMPullReplace $moved))
     foreach ($s in $staged) { Remove-Item -LiteralPath $s[0] -Force -ErrorAction SilentlyContinue }
+    if ($notBack.Count) {
+        # Journal bleibt: HUMig startet so nicht, der naechste Pull-Lauf stellt die Sicherungen (*.pullold) zuerst zurueck
+        Write-Host "  NICHT zurueckgestellt ($($notBack.Count)):" -ForegroundColor Red
+        foreach ($x in $notBack) { Write-Host "    $($x.Path): $($x.Text)" -ForegroundColor Red }
+        Stop-HMPull "Eine Datei war gesperrt ($lastErr). $($notBack.Count) Datei(en) konnten NICHT zurueckgestellt werden (Liste oben) - HUMig ist teils alt, teils neu und startet so nicht. HUMig und andere Programme, die Dateien aus dem Ordner offen haben, schliessen, dann Pull erneut ausfuehren (stellt zuerst die bisherigen Dateien wieder her)."
+    }
     Remove-Item -LiteralPath $journal -Force -ErrorAction SilentlyContinue
     Stop-HMPull "Eine Datei war gesperrt ($lastErr) - alles wurde zurueckgestellt, HUMig bleibt auf der bisherigen Version. HUMig schliessen und erneut versuchen."
 }
@@ -866,11 +1036,7 @@ finally { $ErrorActionPreference = $eapPull }
 Write-Host "`n=== Pull fertig === $ok Dateien ($verified)$(if ($removedOld) { " | $removedOld alte entfernt" })" -ForegroundColor Cyan
 if ($NoStart) { if ($repl) { exit 1 } else { exit 0 } }
 if ($repl -eq 0) {
-    $exe = Join-Path $Target 'HUMig.exe'
-    $cmd = Join-Path $Target 'Start.cmd'
-    if (Test-Path $exe) { Start-Process -FilePath $exe -WorkingDirectory $Target }
-    elseif (Test-Path $cmd) { Start-Process -FilePath $cmd -WorkingDirectory $Target -WindowStyle Hidden }
-    else { Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$(Join-Path $Target 'HUMig.ps1')`"" -WorkingDirectory $Target -Verb RunAs }
+    Start-HMPullApp $Target
     exit 0
 }
 Stop-HMPull 'Einzelne Dateien konnten nicht ersetzt werden (gesperrt?) - HUMig wird NICHT automatisch gestartet. Pull erneut ausfuehren.'
