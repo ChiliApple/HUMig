@@ -9,7 +9,10 @@ BeforeAll {
     $tok = $null; $err = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Pull.ps1'), [ref]$tok, [ref]$err)
     $names = @('ConvertTo-HMPullRelPath', 'Get-HMPullFileList', 'Get-HMPullOrder', 'New-HMPullJournalText', 'Get-HMPullCommonDir',
-        'Resolve-HMPullJournal', 'Restore-HMPullJournal', 'Undo-HMPullReplace', 'Enter-HMPullLock', 'Get-HMPullInstalledVersion', 'Test-HMPullDowngrade')
+        'Resolve-HMPullJournal', 'Restore-HMPullJournal', 'Undo-HMPullReplace', 'Enter-HMPullLock', 'Get-HMPullInstalledVersion', 'Test-HMPullDowngrade',
+        'Test-HMPullSharingError', 'Get-HMPullLeftovers', 'Get-HMPullMissingRequired')
+    $script:Pull = Join-Path $script:Root 'Pull.ps1'
+    $script:Ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $defs = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false) | Where-Object { $names -contains $_.Name })
     foreach ($d in $defs) { . ([scriptblock]::Create($d.Extent.Text)) }
     $script:PullFunctions = @($defs | ForEach-Object { $_.Name })
@@ -22,7 +25,7 @@ BeforeAll {
 
 Describe 'Pull.ps1: Hilfsfunktionen vorhanden' {
     It 'alle Funktionen aus Pull.ps1 geladen' {
-        @($script:PullFunctions).Count | Should -Be 11
+        @($script:PullFunctions).Count | Should -Be 14
     }
 }
 
@@ -350,5 +353,83 @@ Describe 'Signieren: Invoke-HMReleaseSigning im Ganzen (ohne Zertifikat, ohne Ne
         $c[1].Text | Should -Match 'lokal ist Version 9\.0\.5'
         $c[2].State | Should -Be 'Fehler'
         Should -Invoke Publish-HMReleaseSignature -Times 0 -Exactly
+    }
+}
+
+Describe 'Abnahme Paket 6: Nachbesserungen' {
+    It 'Punkt 1: Sperre wird beim Ausgang freigegeben - zwei Laeufe nacheinander im selben Prozess' {
+        $t = Join-Path $TestDrive 'Zweimal'; New-Item -ItemType Directory -Path $t -Force | Out-Null
+        # Lauf endet ohne Netz nach der Sperre (Branch-Stand mit Signaturpflicht); zweimal im selben PowerShell-Prozess
+        $cmd = "`$a = & '$script:Pull' -Target '$t' -Branch main -NonInteractive -NoStart *>&1 | Out-String; `$b = & '$script:Pull' -Target '$t' -Branch main -NonInteractive -NoStart *>&1 | Out-String; 'ERSTER:' + `$a; 'ZWEITER:' + `$b"
+        $o = (& $script:Ps51 -NoProfile -ExecutionPolicy Bypass -Command $cmd | Out-String) -replace '\s*\r?\n\s*', ' '
+        $o | Should -Match 'ERSTER:[\s\S]*Branch-Stand ist nicht signiert'
+        $o | Should -Match 'ZWEITER:[\s\S]*Branch-Stand ist nicht signiert'
+        $o | Should -Not -Match 'laeuft bereits ein Update'
+        Test-Path -LiteralPath (Join-Path $t 'pull.lock') | Should -BeFalse
+    }
+    It 'Punkt 2: nur Freigabe-/Sperrverletzung gilt als besetzt, andere Schreibfehler nicht' {
+        Test-HMPullSharingError (New-Object System.IO.IOException 'x', ([int]0x80070020)) | Should -BeTrue
+        Test-HMPullSharingError (New-Object System.IO.IOException 'x', ([int]0x80070021)) | Should -BeTrue
+        Test-HMPullSharingError (New-Object System.IO.IOException 'voll', ([int]0x80070070)) | Should -BeFalse
+        Test-HMPullSharingError (New-Object System.IO.IOException 'schreibgeschuetzt', ([int]0x80070013)) | Should -BeFalse
+        Test-HMPullSharingError (New-Object System.IO.IOException 'Netz', ([int]0x80070035)) | Should -BeFalse
+        { Enter-HMPullLock (Join-Path $TestDrive 'gibt\es\nicht') } | Should -Throw
+    }
+    It 'Punkt 2: besetzte Sperre wird weiter als besetzt erkannt (echte Freigabeverletzung)' {
+        $t = Join-Path $TestDrive 'Sperre3'; New-Item -ItemType Directory -Path $t -Force | Out-Null
+        $a = Enter-HMPullLock $t
+        try { Enter-HMPullLock $t | Should -BeNullOrEmpty } finally { $a.Dispose() }
+    }
+    It 'Punkt 3: relatives -Target (HUMig und .\HUMig) stellt aus dem Journal richtig zurueck' {
+        foreach ($rel in @('HUMig', '.\HUMig')) {
+            $base = Join-Path $TestDrive ("Rel" + [guid]::NewGuid().ToString('N').Substring(0, 6)); $t = Join-Path $base 'HUMig'
+            New-HMTestFile "$t\HUMig.ps1.pullold" 'alt'; New-HMTestFile "$t\HUMig.ps1" 'halb'
+            New-HMTestFile "$t\Functions\A.ps1.pullold" 'altA'
+            New-HMPullJournalText $t @("$t\HUMig.ps1", "$t\Functions\A.ps1") | Set-Content -LiteralPath "$t\Config\pull-journal.json" -Encoding UTF8 -ErrorAction SilentlyContinue
+            if (-not (Test-Path -LiteralPath "$t\Config")) { New-Item -ItemType Directory -Path "$t\Config" -Force | Out-Null; New-HMPullJournalText $t @("$t\HUMig.ps1", "$t\Functions\A.ps1") | Set-Content -LiteralPath "$t\Config\pull-journal.json" -Encoding UTF8 }
+            # aktueller Ordner der Sitzung = $base, .NET-Arbeitsordner bleibt woanders
+            $cmd = "Set-Location -LiteralPath '$base'; & '$script:Pull' -Target '$rel' -Branch main -NonInteractive -NoStart *>&1 | Out-String"
+            $o = (& $script:Ps51 -NoProfile -ExecutionPolicy Bypass -Command $cmd | Out-String) -replace '\s*\r?\n\s*', ' '
+            $o | Should -Match ([regex]::Escape("zurueckgestellt: $t\HUMig.ps1"))
+            Get-Content -LiteralPath "$t\HUMig.ps1" -Raw | Should -Be 'alt'
+            Get-Content -LiteralPath "$t\Functions\A.ps1" -Raw | Should -Be 'altA'
+            Test-Path -LiteralPath "$t\Config\pull-journal.json" | Should -BeFalse
+        }
+    }
+    It 'Punkt 3: nicht zuordenbare Eintraege und noch Sicherungen im Ordner: Journal bleibt, ehrliche Meldung' {
+        $t = Join-Path $TestDrive 'Fremd\HUMig'
+        New-HMTestFile "$t\HUMig.ps1.pullold" 'alt'; New-HMTestFile "$t\HUMig.ps1" 'halb'
+        New-HMTestFile "$t\Config\pull-journal.json" (ConvertTo-Json -InputObject @('..\Anderswo\HUMig.ps1'))
+        $o = (& $script:Ps51 -NoProfile -ExecutionPolicy Bypass -Command "& '$script:Pull' -Target '$t' -Branch main -NonInteractive -NoStart *>&1 | Out-String" | Out-String) -replace '\s*\r?\n\s*', ' '
+        $o | Should -Match 'passt nicht zu diesem Programmordner'
+        $o | Should -Match ([regex]::Escape("noch nicht zurueckgestellt: $t\HUMig.ps1.pullold"))
+        Test-Path -LiteralPath "$t\Config\pull-journal.json" | Should -BeTrue
+        Test-Path -LiteralPath "$t\HUMig.ps1.pullold" | Should -BeTrue
+        Test-Path -LiteralPath "$t\pull.lock" | Should -BeFalse
+    }
+    It 'Punkt 3: Reste-Suche nur in Wurzel und Programmordnern, nicht in Backups' {
+        $t = Join-Path $TestDrive 'Reste'
+        New-HMTestFile "$t\A.ps1.pullold" 'x'; New-HMTestFile "$t\XAML\B.xaml.pullold" 'x'; New-HMTestFile "$t\BACKUPS\pc\C.pullold" 'x'
+        $r = @(Get-HMPullLeftovers $t)
+        $r.Count | Should -Be 2
+        @($r | Where-Object { $_ -like '*BACKUPS*' }).Count | Should -Be 0
+    }
+    It 'Punkt 4: HUMig.ps1 und Pull.ps1 sind Pflicht in der Pruefsummen-Datei' {
+        @(Get-HMPullMissingRequired @('HUMig.ps1', 'Pull.ps1', 'X.ps1')).Count | Should -Be 0
+        @(Get-HMPullMissingRequired @('HUMig.ps1', 'X.ps1')) | Should -Be @('Pull.ps1')
+        @(Get-HMPullMissingRequired @('Pull.ps1')) | Should -Be @('HUMig.ps1')
+        (Get-Content -LiteralPath $script:Pull -Raw) | Should -Match 'Get-HMPullMissingRequired @\(\$fl\.Files\)'
+    }
+    It 'Punkt 5: Fehler beim Abgleich (Datei exklusiv offen) endet als nicht abgleichbar, nicht als Abbruch' {
+        $l = Join-Path $TestDrive 'Offen'
+        New-HMTestFile "$l\Config\version.json" '{ "version": "9.1.0" }'
+        New-HMTestFile "$l\HUMig.ps1" 'H'
+        $man = "# HUMig-Release v9.1.0`n" + ('a' * 64) + "  HUMig.ps1`n"
+        $h = [IO.File]::Open("$l\HUMig.ps1", 'Open', 'ReadWrite', 'None')
+        try {
+            $r = Compare-HMReleaseManifest $man '9.1.0' $l
+            $r.State | Should -Be 'nicht abgleichbar'
+            $r.Text | Should -Match '^nicht abgleichbar: '
+        } finally { $h.Dispose() }
     }
 }

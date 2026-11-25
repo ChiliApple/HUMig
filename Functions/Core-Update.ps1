@@ -236,7 +236,12 @@ $script:HMUpdateAppRoot = $(if ($PSScriptRoot) { Split-Path $PSScriptRoot -Paren
 # Unterschiede nur bei den Zeilenenden (CRLF/LF, z.B. Arbeitskopie mit autocrlf) gelten als gleich. Programmdateien, die
 # lokal vorhanden sind, aber in der Pruefsummen-Datei fehlen (Wurzel *.ps1/*.cmd, Functions, XAML, Tools), gelten als Abweichung.
 # Rueckgabe: State 'gleich' | 'abweichend' | 'nicht abgleichbar', Diff (Liste "Pfad: Grund"), Text (kurz)
+# Ein Fehler beim Abgleich (z.B. lokale Datei exklusiv geoeffnet) endet als 'nicht abgleichbar: <Grund>' - nie als Abbruch.
 function Compare-HMReleaseManifest([string]$ManifestText, $Version, [string]$LocalRoot) {
+    try { return (Compare-HMReleaseManifestCore $ManifestText $Version $LocalRoot) }
+    catch { return [pscustomobject]@{ State = 'nicht abgleichbar'; Diff = @(); Text = "nicht abgleichbar: $($_.Exception.Message)" } }
+}
+function Compare-HMReleaseManifestCore([string]$ManifestText, $Version, [string]$LocalRoot) {
     $res = [pscustomobject]@{ State = 'nicht abgleichbar'; Diff = @(); Text = '' }
     $want = ConvertTo-HMVersion "$Version"
     $root = "$LocalRoot".TrimEnd('\')

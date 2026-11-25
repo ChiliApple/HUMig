@@ -580,6 +580,11 @@ function Get-HMPullFileList([hashtable]$Manifest) {
     }
     return @{ Files = @(Get-HMPullOrder @($ok)); Bad = $bad }
 }
+# Pflichtdateien jedes Updates: Hauptprogramm und Update-Programm (ohne Pull.ps1 entfernte Schritt 6 das Update-Programm,
+# die Installation koennte sich nicht mehr aktualisieren). Rueckgabe: fehlende Pflichtdateien
+function Get-HMPullMissingRequired([string[]]$Files) {
+    return @(@('HUMig.ps1', 'Pull.ps1') | Where-Object { @($Files) -notcontains $_ })
+}
 function Get-HMPullOrder([string[]]$Paths) {
     return @(@($Paths | Where-Object { $_ -ne 'Pull.ps1' }) + @($Paths | Where-Object { $_ -eq 'Pull.ps1' }))
 }
@@ -653,15 +658,31 @@ function Undo-HMPullReplace($Moved) {
     }
 }
 # Sperre gegen zwei gleichzeitige Pull-Laeufe fuer denselben Programmordner: pull.lock exklusiv geoeffnet, solange Pull laeuft
-# (Windows gibt sie beim Beenden frei, auch nach einem Absturz, und loescht die Datei). Rueckgabe: Handle oder $null = besetzt
+# (Windows gibt sie beim Beenden frei, auch nach einem Absturz, und loescht die Datei; Pull schliesst sie zusaetzlich auf jedem
+# Ausgang selbst). Rueckgabe: Handle oder $null = besetzt. Nur Freigabe-/Sperrverletzung (Win32-Fehler 32/33) gilt als besetzt,
+# jeder andere Fehler (schreibgeschuetzt, Pfad nicht erreichbar, Laufwerk voll) kommt als Fehler zurueck.
 function Enter-HMPullLock([string]$Root) {
     $f = Join-Path $Root 'pull.lock'
     try { return (New-Object System.IO.FileStream -ArgumentList $f, ([System.IO.FileMode]::OpenOrCreate), ([System.IO.FileAccess]::ReadWrite), ([System.IO.FileShare]::None), 1, ([System.IO.FileOptions]::DeleteOnClose)) }
     catch {
         $ex = $_.Exception; while ($ex.InnerException) { $ex = $ex.InnerException }
-        if ($ex -is [System.IO.IOException] -and $ex -isnot [System.IO.DirectoryNotFoundException]) { return $null }
+        if ($ex -is [System.IO.IOException] -and (Test-HMPullSharingError $ex)) { return $null }
         throw
     }
+}
+# Freigabe- oder Sperrverletzung (ERROR_SHARING_VIOLATION 32, ERROR_LOCK_VIOLATION 33, HResult 0x80070020/0x80070021)?
+function Test-HMPullSharingError($Ex) {
+    $h = 0; try { $h = [int]$Ex.HResult } catch { }
+    return (($h -band 0xFFFF0000) -eq [int]0x80070000 -and @(32, 33) -contains ($h -band 0xFFFF))
+}
+# .pullold-Dateien im Programmordner (Wurzel und Programmordner, nicht Backups und Daten) - Reste eines abgebrochenen Updates
+function Get-HMPullLeftovers([string]$Root) {
+    $out = @(Get-ChildItem -LiteralPath $Root -File -Force -Filter '*.pullold' -ErrorAction SilentlyContinue)
+    foreach ($d in @('Config', 'Functions', 'XAML', 'Tools', 'Assets', 'Docs')) {
+        $dp = Join-Path $Root $d
+        if (Test-Path -LiteralPath $dp -PathType Container) { $out += @(Get-ChildItem -LiteralPath $dp -File -Force -Recurse -Filter '*.pullold' -ErrorAction SilentlyContinue) }
+    }
+    return @($out | ForEach-Object { $_.FullName })
 }
 # installierte Version: Config\version.json (stimmt auch bei von Hand kopierten Teststaenden), sonst installed.json; $null = unbekannt
 function Get-HMPullInstalledVersion([string]$Root) {
@@ -693,6 +714,9 @@ if (-not $Target) {
     $rt = Resolve-HMPullTarget $PSScriptRoot
     $Target = $rt.Target; $mode = $rt.Mode
 } else { $mode = 'Ziel per -Target' }
+# voller Pfad, relativ zum aktuellen Ordner der PowerShell-Sitzung (nicht zum .NET-Arbeitsordner) - sonst stimmen Journal,
+# Sperre und Programmordner nicht ueberein
+try { $Target = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Target) } catch { $Target = [IO.Path]::GetFullPath($Target) }
 $Target = $Target.TrimEnd('\')
 # Erstinstallation (noch kein HUMig im Zielordner)? Fuer die Ordnerrechte am Ende (Schritt 7)
 $pullFirst = -not (Test-Path -LiteralPath (Join-Path $Target 'HUMig.ps1'))
@@ -705,6 +729,10 @@ try {
     $script:PullLock = Enter-HMPullLock $Target
 } catch { Stop-HMPull "Kein Schreibzugriff auf '$Target' ($($_.Exception.Message)). PowerShell als Administrator starten." }
 if (-not $script:PullLock) { Stop-HMPull "Fuer '$Target' laeuft bereits ein Update (Pull.ps1 in einem anderen Fenster) - abwarten, bis es fertig ist, dann bei Bedarf erneut starten." }
+# Ab hier haelt Pull die Sperre: der ganze Lauf steht in try/finally, damit sie auf jedem Ausgang (exit, Fehler, Strg+C) sofort
+# freigegeben wird - auch wenn Pull in einer offenen Konsole laeuft und dort danach erneut gestartet wird. (Unter PowerShell 5.1
+# laeuft finally auch bei exit.) Der Inhalt ist absichtlich nicht eingerueckt.
+try {
 # abgebrochenes Update (Journal vorhanden): bisherige Dateien aus *.pullold zuruecksetzen
 $jr = Join-Path $cfgDir 'pull-journal.json'
 if (Test-Path -LiteralPath $jr) {
@@ -724,6 +752,14 @@ if (Test-Path -LiteralPath $jr) {
     }
     # Journal nur loeschen, wenn alles zurueckgestellt ist (sonst bleibt die Start-Sperre bestehen)
     if ($jbad) { Stop-HMPull "$jbad Datei(en) konnten nicht zurueckgestellt werden (gesperrt?) - Programm schliessen und Pull erneut ausfuehren." }
+    # nicht zuordenbare Eintraege und noch Sicherungen im Programmordner: Journal (und damit die Startsperre) bleibt
+    if (@($jres.Bad).Count) {
+        $jleft = @(Get-HMPullLeftovers $Target)
+        if ($jleft.Count) {
+            foreach ($x in $jleft) { Write-Host "  [WARN] noch nicht zurueckgestellt: $x" -ForegroundColor Yellow }
+            Stop-HMPull "Das Journal $jr passt nicht zu diesem Programmordner ($(@($jres.Bad).Count) Eintrag/Eintraege nicht zuordenbar), es liegen aber noch $($jleft.Count) Sicherung(en) *.pullold im Ordner (oben aufgelistet). Nichts wurde geloescht. Bitte jede *.pullold-Datei von Hand zurueckbenennen (Endung .pullold entfernen) und danach das Journal loeschen."
+        }
+    }
     Remove-Item -LiteralPath $jr -Force -ErrorAction SilentlyContinue
 }
 $cfg = Get-HMUpdateConfig $cfgDir
@@ -878,7 +914,8 @@ Write-Host "Pruefung:   $verified" -ForegroundColor Gray
 if ($manifest) {
     $fl = Get-HMPullFileList $manifest
     if (@($fl.Bad).Count) { Stop-HMPull "Pruefsummen-Datei enthaelt unzulaessige Pfade ($(@($fl.Bad | Select-Object -First 3) -join ', ')) - Update abgelehnt, es wurde NICHTS veraendert." }
-    if (@($fl.Files) -notcontains 'HUMig.ps1') { Stop-HMPull 'Pruefsummen-Datei ohne HUMig.ps1 - Update abgelehnt, es wurde NICHTS veraendert.' }
+    $miss = @(Get-HMPullMissingRequired @($fl.Files))
+    if ($miss.Count) { Stop-HMPull "Pruefsummen-Datei ohne $($miss -join ', ') - Update abgelehnt, es wurde NICHTS veraendert." }
     $files = @($fl.Files | ForEach-Object { [pscustomobject]@{ path = $_ } })
     Write-Host "$($files.Count) Dateien (laut Pruefsummen-Datei)`n" -ForegroundColor Gray
 } else {
@@ -1040,3 +1077,6 @@ if ($repl -eq 0) {
     exit 0
 }
 Stop-HMPull 'Einzelne Dateien konnten nicht ersetzt werden (gesperrt?) - HUMig wird NICHT automatisch gestartet. Pull erneut ausfuehren.'
+} finally {
+    if ($script:PullLock) { try { $script:PullLock.Dispose() } catch { }; $script:PullLock = $null }
+}
