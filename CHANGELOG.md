@@ -1,5 +1,14 @@
 ﻿# Changelog
 
+## v2.1.20 - 2026-11-25
+### 📱 Handy-Fernbedienung
+- **Push-Schlüssel wieder anlegbar:** Der Schlüssel für Push-Meldungen ans Handy entsteht jetzt nur im Speicher und wird wie bisher geschützt in der eigenen Datei abgelegt.
+  - Bisher blieb im Windows-Konto ein Schlüssel ohne Namen zurück, danach scheiterte jedes neue Anlegen, z. B. nach dem Löschen der Push-Datei, und Push-Meldungen waren nicht verfügbar.
+### 🔄 App-Updates
+- **"Zeitpläne ansehen ..." hängt nicht mehr:** Hatte der Zeitplan auf dem PC schon einmal ein Protokoll geschrieben, rechnete der PC beim Lesen endlos mit voller Last. Jetzt kommt das Ergebnis mit den letzten 80 Protokollzeilen sofort.
+### 🛠️ Werkzeuge
+- **Autologon abschalten löscht das Kennwort wirklich:** Beim Abschalten wird das gespeicherte Kennwort entfernt. Bisher blieb ein leeres Kennwort gespeichert und der Status meldete weiter "als LSA-Geheimnis gespeichert".
+
 ## v2.1.19 - 2026-11-01
 ### Restore
 - **Zusaetzliche Ordner an einen anderen Ort zurueckspielen:** neuer Knopf *Ziele der Zusaetzlichen Ordner ...* im Reiter Restore (nur bei Backups mit Zusaetzlichen Ordnern, mit Statuszeile) - je Ordner Originalpfad, neues Ziel (eintippen oder Ordnerauswahl am Ziel-PC, neuer Ordner moeglich) oder auslassen; Hinweise in Farbe (Laufwerk fehlt, Pfad ungueltig, Systemordner); die Rueckfrage beim Start nennt die geaenderten Ziele, das Protokoll "-> neues Ziel" bzw. "ausgelassen". Kopiert wird wie bisher (Robocopy mit Threads, Kontrolle auf fehlende Dateien); die Schutzregeln (Systemordner, OneDrive) gelten auch fuer gewaehlte Ziele
