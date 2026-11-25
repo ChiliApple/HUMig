@@ -4057,6 +4057,20 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             @{ Created = '2026-11-25 10:00:00'; SourceComputer = 'Q'; UserName = 'u'; Modules = @([pscustomobject]@{ Id = 'Usmt'; Name = 'Windows-Einstellungen (USMT)'; Status = $r.Status; Items = @($r) }); Status = 'Warning' } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $bk 'manifest.json') -Encoding UTF8
             @((Read-HMBackupInfo -Path $bk -Modules @()).Modules) | Should -Contain 'Usmt'
         }
+        It 'Punkt 5 (Backup): Rueckkopie vom Ziel-PC gescheitert ohne alten Stand - halbes MIG ist Fehler, nicht waehlbar' {
+            Mock Find-HMUsmt { (Join-Path $TestDrive 'usmtbin') }; New-Item -ItemType Directory -Path (Join-Path $TestDrive 'usmtbin') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $TestDrive 'usmtbin\scanstate.exe') -Value 'x'
+            # Pfade am Ziel-PC nach TestDrive umlenken (kein Netz, nichts unter C:\Windows)
+            Mock Convert-HMPath { if ("$Path" -match '^[A-Za-z]:') { Join-Path $TestDrive ('ziel' + ("$Path" -replace '^[A-Za-z]:', '')) } else { "$Path" } }
+            Mock Invoke-HMTarget { 'C:\Windows' } -ParameterFilter { "$Script" -match 'windir' }
+            Mock Invoke-HMTarget { $d = Join-Path $TestDrive ('ziel' + ("$($ArgumentList[2])" -replace '^[A-Za-z]:', '') + '\USMT'); New-Item -ItemType Directory -Path $d -Force | Out-Null; [System.IO.File]::WriteAllText((Join-Path $d 'USMT.MIG'), 'neu'); 0 } -ParameterFilter { "$Script" -match 'scanstate' }
+            $bb = New-TDir 'BB'
+            $script:TStoreDir = Join-Path $bb 'Usmt\STORE\USMT'
+            Mock Invoke-HMRobocopy { New-Item -ItemType Directory -Path $script:TStoreDir -Force | Out-Null; [System.IO.File]::WriteAllText((Join-Path $script:TStoreDir 'USMT.MIG'), 'hal'); [pscustomobject]@{ ExitCode = 16; Level = 'Error'; FilesFailed = 1 } } -ParameterFilter { "$Source" -like '*STORE' }
+            $ctx = @{ BackupPath = $bb; Account = 'DOM\u'; ToolRoot = $TestDrive; IsRemote = $true; Computer = 'HMTESTPC'; Settings = @{}; Threads = 2 }
+            $r = Backup-HMUsmt $ctx (New-TJob) ([pscustomobject]@{ Id = 'Usmt' })
+            $r.Status | Should -Be 'Error'
+            $r.Msg | Should -Match 'nicht verwendbar'
+        }
         It 'Punkt 5 (Backup): kein USMT-Stand und ScanState gescheitert bleibt Fehler' {
             Mock Find-HMUsmt { (Join-Path $TestDrive 'usmtbin') }; New-Item -ItemType Directory -Path (Join-Path $TestDrive 'usmtbin') -Force | Out-Null; Set-Content -LiteralPath (Join-Path $TestDrive 'usmtbin\scanstate.exe') -Value 'x'
             Mock Invoke-HMTarget { 5 }
@@ -4200,6 +4214,7 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             $v.Status | Should -Be 'OK'
             $v.Problem | Should -BeNullOrEmpty
             $v.Note | Should -Match 'nicht auswertbar'
+            $v.Unparsed | Should -Be 1
         }
         It 'Punkt 8: WLAN ohne gespeicherte Profile ist kein Fehler, mit Profilen und ohne Export eine Warnung' {
             $script:TWx = New-TDir 'wxLeer'

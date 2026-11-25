@@ -1956,6 +1956,7 @@ function Test-HMBackupIntegrity {
     $noCompare = New-Object System.Collections.Generic.List[string]
     # nur Hinweise (Status bleibt): Zusammenfassung in anderer Sprache, keine geeignete Datei fuer die Stichprobe
     $notes = New-Object System.Collections.Generic.List[string]
+    $unparsed = 0
     $Ctx.ListOnly = $true
     try {
         foreach ($m in @($Map)) {
@@ -1965,7 +1966,7 @@ function Test-HMBackupIntegrity {
             if (Test-HMCancel $Job) { break }
             if (-not $rc -or [int]$rc.ExitCode -ge 8) { $noCompare.Add("$($m.Module)/$($m.Name) (Robocopy-Code $(if ($rc) { $rc.ExitCode } else { '?' }))"); continue }
             # Exitcode unter 8, nur die Zusammenfassung nicht lesbar (Windows in anderer Sprache): kein Problem, nur Hinweis
-            if (-not $rc.HaveDirs) { $notes.Add("$($m.Module)/$($m.Name): Zusammenfassung nicht auswertbar, Vergleich nach Exitcode in Ordnung (Code $($rc.ExitCode))"); continue }
+            if (-not $rc.HaveDirs) { $unparsed++; $notes.Add("$($m.Module)/$($m.Name): Zusammenfassung nicht auswertbar, Vergleich nach Exitcode in Ordnung (Code $($rc.ExitCode))"); continue }
             $diffFiles += $rc.FilesCopied; $diffBytes += $rc.BytesCopied
         }
     } finally { $Ctx.ListOnly = $false }
@@ -2016,7 +2017,7 @@ function Test-HMBackupIntegrity {
     if ($unreadable -gt 0 -and $checked -eq 0 -and -not (Test-HMCancel $Job)) { $prob += "keine Stichprobe geprueft ($unreadable geeignete Datei(en) nicht lesbar)" }
     elseif ($cand.Count -and $eligible -eq 0 -and -not (Test-HMCancel $Job)) { $notes.Add("keine geeignete Datei fuer die Stichprobe (nur Dateien ueber 50 MB, seit dem Kopieren geaenderte oder an der Quelle geloeschte)") }
     $st = if ($bad.Count -or $prob.Count) { 'Warning' } else { 'OK' }
-    return [pscustomobject]@{ Status = $st; DiffFiles = $diffFiles; DiffBytes = $diffBytes; Sampled = $checked; HashMismatch = @($bad); Problem = ($prob -join ' | '); Note = (@($notes) -join ' | ') }
+    return [pscustomobject]@{ Status = $st; DiffFiles = $diffFiles; DiffBytes = $diffBytes; Sampled = $checked; HashMismatch = @($bad); Problem = ($prob -join ' | '); Note = (@($notes) -join ' | '); Unparsed = $unparsed }
 }
 
 # ============================================================================
@@ -2806,8 +2807,13 @@ function Backup-HMUsmt {
     $why = Get-HMUsmtCodeText $code $uver
     if ($fresh.Fresh -and $code -eq 0) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'OK'; Msg = "ScanState OK, $(Format-HMSize $mig.Length)"; Bytes = $mig.Length; Source = $usmt } }
     if ($fresh.Fresh) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'Warning'; Msg = "ScanState Code $code$why (Details: $store\scanstate.log)"; Bytes = $mig.Length; Source = $usmt } }
+    # liegt ein MIG vor, das weder neu noch der unveraenderte alte Stand ist (z. B. halbe Rueckkopie vom Ziel-PC): nicht verwendbar -> Fehler
+    $oldSame = ($oldInfo -and $newInfo -and $oldInfo.Length -eq $newInfo.Length -and $oldInfo.WriteUtc -eq $newInfo.WriteUtc)
+    if ($mig -and -not $oldSame) {
+        return [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; Msg = "USMT.MIG in der Ablage ist nicht verwendbar (ScanState Code $code$why$(if ($fresh.Why) { "; $($fresh.Why)" })) - kein gueltiger Stand. Log: $store\scanstate.log - Ursache beheben und Backup wiederholen"; Bytes = 0; Source = $usmt }
+    }
     if ($mig) {
-        # nur ein aelterer Stand liegt vor (oder die Rueckkopie vom Ziel-PC ist gescheitert): Warnung, damit der brauchbare
+        # nur der unveraenderte aeltere Stand liegt vor: Warnung, damit der brauchbare
         # alte Stand im Restore waehlbar bleibt (Read-HMBackupInfo nimmt nur Module mit OK/Warning)
         $dt = $newInfo.WriteUtc.ToLocalTime().ToString('dd.MM.yyyy HH:mm')
         return [pscustomobject]@{ Name = 'Usmt'; Status = 'Warning'; Msg = "USMT-Stand stammt vom $dt, dieser Lauf hat keinen neuen erzeugt - ein Restore spielt diesen aelteren Stand ein (ScanState Code $code$why$(if ($fresh.Why) { "; $($fresh.Why)" })). Log: $store\scanstate.log - Ursache beheben und Backup wiederholen"; Bytes = $mig.Length; Source = $usmt }
@@ -3122,7 +3128,7 @@ function Start-HMBackup {
                 if ($verify.Note) { Write-HMLog $Job "   Hinweis zur Pruefung: $($verify.Note)" 'Info' }
                 if ($verify.Problem) { Write-HMLog $Job "   Pruefung nicht moeglich: $($verify.Problem) - ob das Backup vollstaendig ist, ist nicht belegt" 'Warning' }
                 if ($verify.DiffFiles) { Write-HMLog $Job ("   Seit dem Kopieren neu/geaendert: {0} Dateien ({1}) - normal, wenn der Benutzer angemeldet ist" -f $verify.DiffFiles, (Format-HMSize $verify.DiffBytes)) 'Info' }
-                elseif (-not $verify.Problem) { Write-HMLog $Job '   Vergleich: Backup ist vollstaendig (keine fehlenden/abweichenden Dateien)' 'Success' }
+                elseif (-not $verify.Problem -and -not $verify.Unparsed) { Write-HMLog $Job '   Vergleich: Backup ist vollstaendig (keine fehlenden/abweichenden Dateien)' 'Success' }
             } catch {
                 Write-HMLog $Job "   Pruefung fehlgeschlagen: $($_.Exception.Message)" 'Warning'
                 $verify = [pscustomobject]@{ Status = 'Warning'; DiffFiles = 0; DiffBytes = [long]0; Sampled = 0; HashMismatch = @(); Problem = "Pruefung fehlgeschlagen: $($_.Exception.Message)" }
