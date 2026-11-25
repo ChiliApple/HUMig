@@ -1,5 +1,27 @@
 ﻿# Changelog
 
+## v2.1.23 - 2026-11-25
+### 🔄 Update
+- **Nur geprüfte Dateien:** Ein Update installiert nur noch Dateien, die in der signierten Prüfsummen-Datei stehen.
+  - Eine Prüfsummen-Datei mit ungültigen Pfaden oder ohne Hauptprogramm wird abgelehnt, nichts wird verändert.
+- **Ehrliche Meldung beim Zurückstellen:** Scheitert das Ersetzen und lassen sich einzelne Dateien nicht zurückstellen, nennt Pull jede Datei mit ihrem Zustand.
+  - HUMig startet dann nicht, der nächste Update-Lauf stellt zuerst die bisherigen Dateien wieder her.
+- **Abgebrochenes Update nach Laufwerkswechsel:** Wurde ein Update auf einem USB-Laufwerk abgebrochen, stellt der nächste Lauf die Dateien auch dann zurück, wenn das Laufwerk jetzt einen anderen Buchstaben hat.
+- **Kein zweites Update gleichzeitig:** Läuft für einen Programmordner schon ein Update, bricht ein zweites mit einer Meldung ab.
+- **Kein stilles Zurückstufen:** Wäre die gewählte Version älter als die installierte (z. B. nach einem Wechsel von Kanal Test auf Stabil), fragt das Update nach.
+  - Eine ältere Version über "Andere Version" bleibt ohne Rückfrage möglich.
+### 🔐 Herausgeber
+- **Release signieren mit Abgleich:** Beim Signieren wird die Prüfsummen-Datei mit dem lokalen Stand verglichen, das Ergebnis nennt den Abgleich.
+  - Hat der lokale Stand eine andere Version, wird wie bisher signiert, mit Hinweis.
+  - Weicht die Datei bei gleicher Version ab, steht das deutlich im Ergebnis.
+  - Das Werkzeug `Tools\Sign-HUMigRelease.ps1` zeigt ohne Versionsangabe zuerst die betroffenen Releases und fragt bei einer Abweichung je Release nach.
+### 🚀 Start
+- **Ordner mit Klammer im Namen:** `Start.cmd` und `Start-Benutzer.cmd` laufen jetzt auch in Ordnern wie "Test (1)" oder mit Apostroph im Namen.
+### ⚠️ Nach dem Update
+- **Erst ab dem nächsten Update wirksam:** Das Update auf diese Version läuft noch mit dem bisherigen Update-Programm.
+### ✅ Qualität
+- **Tests:** 45 neue Tests für die Update-Kette.
+
 ## v2.1.22 - 2026-11-25
 ### 🗄️ Server-Backup: Sicherung
 - **Abbrechen beendet nur den eigenen Lauf:** Wer abbricht, während HUMig auf eine andere laufende Windows-Sicherung wartet, beendet diese andere Sicherung nicht mehr.
