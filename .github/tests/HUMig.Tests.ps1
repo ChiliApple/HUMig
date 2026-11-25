@@ -3956,6 +3956,12 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             $j2 = New-TJob
             Start-HMRestore -Ctx $ctx2 -Job $j2
             @($j2.Result.Modules | Where-Object { $_.Id -eq 'UserRegistry' -and $_.Status -eq 'Warning' }).Count | Should -Be 1
+            # Pfad in AppData (umgeleitete AppData-Ordner kommen aus der Benutzer-Registry): ebenfalls Warnung
+            $am = [pscustomobject]@{ Id = 'App_Test'; Name = 'Programm'; Scope = 'Machine'; Items = @([pscustomobject]@{ Name = 'Daten'; Type = 'Folder'; Path = '{APPDATA}\Programm' }) }
+            $ctx3 = New-TRestoreCtx @($am) (New-TDir 'prof') 'S-1-5-21-1-2-3-1001'
+            $j3 = New-TJob
+            Start-HMRestore -Ctx $ctx3 -Job $j3
+            @($j3.Result.Modules | Where-Object { $_.Id -eq 'UserRegistry' -and $_.Status -eq 'Warning' }).Count | Should -Be 1
         }
         It 'Punkt 4: Anmelde-Aufgabe nicht registriert - Drucker auf Warnung' {
             Mock Register-HMLogonTask { $false }
@@ -4335,6 +4341,15 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             $script:TWx = New-TDir 'wxLeer2'
             Mock Invoke-HMTarget { [pscustomobject]@{ Dir = $script:TWx; Code = 1; Text = 'Fehler'; Profiles = 2 } }
             (Backup-HMBuiltin $ctx (New-TJob) ([pscustomobject]@{ Id = 'Wlan'; Name = 'WLAN' }) ([pscustomobject]@{ Name = 'Wlan'; Type = 'Builtin'; Handler = 'Wlan' }) @{}).Status | Should -Be 'Warning'
+            # Zahl der Profile nicht feststellbar (-1): netsh-Fehler bleibt Warnung, ohne Fehler und ohne Dateien Skip
+            $script:TWx = New-TDir 'wxLeer3'
+            Mock Invoke-HMTarget { [pscustomobject]@{ Dir = $script:TWx; Code = 1; Text = 'Fehler'; Profiles = -1 } }
+            $r3 = Backup-HMBuiltin $ctx (New-TJob) ([pscustomobject]@{ Id = 'Wlan'; Name = 'WLAN' }) ([pscustomobject]@{ Name = 'Wlan'; Type = 'Builtin'; Handler = 'Wlan' }) @{}
+            $r3.Status | Should -Be 'Warning'
+            $r3.Msg | Should -Match 'nicht feststellbar'
+            $script:TWx = New-TDir 'wxLeer4'
+            Mock Invoke-HMTarget { [pscustomobject]@{ Dir = $script:TWx; Code = 0; Text = ''; Profiles = -1 } }
+            (Backup-HMBuiltin $ctx (New-TJob) ([pscustomobject]@{ Id = 'Wlan'; Name = 'WLAN' }) ([pscustomobject]@{ Name = 'Wlan'; Type = 'Builtin'; Handler = 'Wlan' }) @{}).Status | Should -Be 'Skip'
         }
         It 'Punkt 7 (Restore): Kontrolle nicht moeglich ergibt Warnung im Eintrag' {
             Mock Test-HMRestoredItem { [pscustomobject]@{ Missing = 0; Error = 'Robocopy-Code 16' } }

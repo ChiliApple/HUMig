@@ -1966,7 +1966,7 @@ function Test-HMBackupIntegrity {
             if (Test-HMCancel $Job) { break }
             if (-not $rc -or [int]$rc.ExitCode -ge 8) { $noCompare.Add("$($m.Module)/$($m.Name) (Robocopy-Code $(if ($rc) { $rc.ExitCode } else { '?' }))"); continue }
             # Exitcode unter 8, nur die Zusammenfassung nicht lesbar (Windows in anderer Sprache): kein Problem, nur Hinweis
-            if (-not $rc.HaveDirs) { $unparsed++; $notes.Add("$($m.Module)/$($m.Name): Zusammenfassung nicht auswertbar, Vergleich ohne Fehler laut Exitcode (Code $($rc.ExitCode), Unterschiede nicht gezaehlt)"); continue }
+            if (-not $rc.HaveDirs) { $unparsed++; $notes.Add("$($m.Module)/$($m.Name): Zusammenfassung nicht auswertbar - Robocopy meldet keinen Kopierfehler (Code $($rc.ExitCode)), Unterschiede wurden nicht gezaehlt"); continue }
             $diffFiles += $rc.FilesCopied; $diffBytes += $rc.BytesCopied
         }
     } finally { $Ctx.ListOnly = $false }
@@ -2190,7 +2190,7 @@ function Backup-HMFolderItem {
     $src = Convert-HMPath $Ctx $srcLocal
     $dst = if ($DestOverride) { $DestOverride } else { Get-HMItemTargetPath $Ctx.BackupPath $Module $Item }
     $mk = { param($st, $msg) [pscustomobject]@{ Name = $Item.Name; Status = $st; Msg = $msg; Bytes = 0; BytesCopied = 0; Source = $srcLocal } }
-    # Test-Path kann bei verweigertem Zugriff selbst eine Ausnahme werfen (ErrorActionPreference Stop) - dann gilt der Ordner als nicht vorhanden/lesbar
+    # Test-Path kann bei verweigertem Zugriff selbst eine Ausnahme werfen, wenn der Aufrufer ErrorActionPreference Stop setzt (z. B. die CI-Tests) - dann gilt der Ordner als nicht vorhanden/lesbar
     $srcThere = $false; try { $srcThere = [bool](Test-Path -LiteralPath $src -ErrorAction Stop) } catch { $srcThere = $false }
     if (-not $srcThere) {
         # liegt der Ordner unter einer nicht erreichbaren Quelle (Test-HMBackupSource), ist "nicht vorhanden" nicht belegt -> Fehler
@@ -2554,9 +2554,12 @@ function Backup-HMBuiltin {
             $hint = if ($Ctx.Settings.WlanExportClearKey) { ' (Schluessel im Klartext!)' } else { '' }
             # keine WLAN-Profile am PC (bzw. nicht feststellbar und nichts exportiert): kein Fehler
             $pcn = if ($wr.PSObject.Properties['Profiles'] -and "$($wr.Profiles)" -ne '') { [int]"$($wr.Profiles)" } else { -1 }
-            if (-not $files.Count -and $pcn -le 0) { return (& $res 'Skip' 'keine WLAN-Profile gefunden') }
+            # Skip nur, wenn sicher keine Profile da sind, oder wenn die Zahl nicht feststellbar ist und netsh ohne Fehler nichts exportiert hat
+            if (-not $files.Count -and $pcn -eq 0) { return (& $res 'Skip' 'keine WLAN-Profile gefunden') }
+            if (-not $files.Count -and $pcn -lt 0 -and "$($wr.Code)" -eq '0') { return (& $res 'Skip' 'keine WLAN-Profile gefunden') }
             $wSt = 'OK'; $wMsg = "$($files.Count - $wBad.Count) Profile$hint"
-            if (-not $files.Count) { $wSt = 'Warning'; $wMsg += " | $pcn WLAN-Profil(e) am PC, aber keines exportiert" }
+            if (-not $files.Count -and $pcn -gt 0) { $wSt = 'Warning'; $wMsg += " | $pcn WLAN-Profil(e) am PC, aber keines exportiert" }
+            if ($pcn -lt 0 -and ("$($wr.Code)" -ne '0' -or $wBad.Count)) { $wMsg += ' | Zahl der WLAN-Profile am PC nicht feststellbar' }
             if ("$($wr.Code)" -ne '0') { $wSt = 'Warning'; $wMsg += " | netsh Code $($wr.Code)$(if ("$($wr.Text)".Trim()) { ": $("$($wr.Text)".Trim())" }) - WLAN-Profile evtl. unvollstaendig" }
             if ($wBad.Count) { $wSt = 'Warning'; $wMsg += " | $($wBad.Count) Profil(e) nicht ins Backup kopiert: $($wBad -join ', ')" }
             return (& $res $wSt $wMsg)
@@ -5032,7 +5035,9 @@ function Start-HMRestore {
             if (-not $Ctx.HiveReady) {
                 # Warnung nur, wenn ein gewaehltes Modul die Benutzer-Registry braucht (gleiche Bedingung wie beim Backup)
                 $needHive = @($Ctx.Modules | ForEach-Object { $_.Items } | Where-Object {
-                    ($_.Type -eq 'Reg' -and $_.Key -match '^HK(CU|EY_CURRENT_USER)') -or ($_.Type -eq 'Builtin' -and $_.Handler -in @('PrinterConnections', 'Wallpaper')) -or ($_.Exceptions -eq 'Profile') }).Count -gt 0
+                    ($_.Type -eq 'Reg' -and $_.Key -match '^HK(CU|EY_CURRENT_USER)') -or ($_.Type -eq 'Builtin' -and $_.Handler -in @('PrinterConnections', 'Wallpaper')) -or ($_.Exceptions -eq 'Profile') -or
+                    # Pfade in AppData: umgeleitete AppData-Ordner liest Get-HMTargetEnv aus der Benutzer-Registry
+                    ("$($_.Path)" -match '\{(APPDATA|LOCALAPPDATA)\}') }).Count -gt 0
                 # Nacharbeiten mit Benutzer-Registry (NumLock, Explorer-Favoriten)
                 if ($Ctx.PostOptions -and ($Ctx.PostOptions.NumLockOn -or $Ctx.PostOptions.ExplorerFavorites)) { $needHive = $true }
                 if ($needHive) {
