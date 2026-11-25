@@ -4201,6 +4201,34 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             @($mf.Modules | Where-Object { $_ -and $_.Id -eq 'Source' }).Count | Should -Be 0
             Get-Content -LiteralPath (Join-Path $bp 'HUMig.log') -Raw -Encoding UTF8 | Should -Match 'Quelle nicht erreichbar'
         }
+        It 'Punkt 5 (Backup): fortlaufend - nur ein als unbrauchbar markierter USMT-Stand wird abgewertet, die Markierung bleibt bis zu einem neuen Stand' {
+            Mock Get-HMTargetEnv { @{ WINDIR = (Join-Path $TestDrive 'win'); PROFILE = '' } }
+            Mock Get-HMSyncRoots { @() }
+            Mock Get-HMMachineGuid { '' }
+            Mock Get-HMTargetComputerName { '' }
+            Mock Dismount-HMHive { }
+            Mock Set-HMBackupFolderAcl { [pscustomobject]@{ Ok = $true; Who = @('Test'); Extra = @(); Notes = @(); Unchanged = $true; Skipped = $false; Error = '' } }
+            Mock Update-HMCatalogStats { 0 }
+            Mock Backup-HMUsmt { $script:TPrevUsable = $Ctx.PrevUsmtUsable; [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; Msg = 'USMT nicht gefunden'; Bytes = 0; Source = '' } }
+            $run = {
+                param($prevUsmt)
+                $root = New-TDir 'BKF'; $old = Join-Path $root 'alt'; New-Item -ItemType Directory -Path $old -Force | Out-Null
+                @{ Created = '2026-11-20 10:00:00'; SourceComputer = $env:COMPUTERNAME; UserName = 'u'; UserSid = 'S-1-5-21-1-2-3-1001'; Status = 'Error'; Modules = @($prevUsmt) } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $old 'manifest.json') -Encoding UTF8
+                $ctx = @{ Computer = $env:COMPUTERNAME; BackupPath = (Join-Path $root 'neu'); ExistingBackup = $old; BackupRoot = $root; Options = @{ SkipSpaceCheck = $true }; Settings = @{}
+                          Modules = @([pscustomobject]@{ Id = 'Usmt'; Name = 'Windows-Einstellungen (USMT)'; Scope = 'User'; Items = @([pscustomobject]@{ Name = 'Usmt'; Type = 'Builtin'; Handler = 'Usmt' }) })
+                          ToolRoot = $TestDrive; ToolVersion = 'Test'; UserFolder = 'u'; Account = 'u'; UserSid = 'S-1-5-21-1-2-3-1001'; ProfilePath = (New-TDir 'profF'); Threads = 2 }
+                $j = New-TJob
+                Start-HMBackup -Ctx $ctx -Job $j
+                $j.Result
+            }
+            # voriger Lauf: USMT nicht gefunden (Fehler, Stand unberuehrt) - alter Stand bleibt brauchbar
+            $null = & $run ([pscustomobject]@{ Id = 'Usmt'; Name = 'USMT'; Status = 'Error'; Items = @() })
+            $script:TPrevUsable | Should -BeTrue
+            # voriger Lauf: Stand als unbrauchbar markiert - nicht brauchbar, und die Markierung wird weitergegeben
+            $res = & $run ([pscustomobject]@{ Id = 'Usmt'; Name = 'USMT'; Status = 'Error'; MigState = 'Unusable'; Items = @() })
+            $script:TPrevUsable | Should -BeFalse
+            @($res.Modules | Where-Object { $_.Id -eq 'Usmt' })[0].MigState | Should -Be 'Unusable'
+        }
         It 'Punkt 7 (Backup): Vergleich nicht moeglich ergibt Warnung statt vollstaendig' {
             Mock Invoke-HMRobocopy { [pscustomobject]@{ ExitCode = 16; Level = 'Error'; FilesCopied = 0; BytesCopied = 0; HaveDirs = $false } }
             $map = @([pscustomobject]@{ Module = 'M'; Name = 'I'; Src = (Join-Path $TestDrive 'q1'); Dst = (Join-Path $TestDrive 'nichtDa'); Files = @(); XD = @(); XF = @(); NoHidden = $false; NoRecurse = $false })

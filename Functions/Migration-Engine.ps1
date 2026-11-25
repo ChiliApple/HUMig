@@ -2188,7 +2188,9 @@ function Backup-HMFolderItem {
     $src = Convert-HMPath $Ctx $srcLocal
     $dst = if ($DestOverride) { $DestOverride } else { Get-HMItemTargetPath $Ctx.BackupPath $Module $Item }
     $mk = { param($st, $msg) [pscustomobject]@{ Name = $Item.Name; Status = $st; Msg = $msg; Bytes = 0; BytesCopied = 0; Source = $srcLocal } }
-    if (-not (Test-Path -LiteralPath $src)) {
+    # Test-Path kann bei verweigertem Zugriff selbst eine Ausnahme werfen (ErrorActionPreference Stop) - dann gilt der Ordner als nicht vorhanden/lesbar
+    $srcThere = $false; try { $srcThere = [bool](Test-Path -LiteralPath $src -ErrorAction Stop) } catch { $srcThere = $false }
+    if (-not $srcThere) {
         # liegt der Ordner unter einer nicht erreichbaren Quelle (Test-HMBackupSource), ist "nicht vorhanden" nicht belegt -> Fehler
         $ur = @(@($Ctx.SourceUnreachable) | Where-Object { $_ -and (Test-HMPathUnder $srcLocal $_) }) | Select-Object -First 1
         if ($ur) { return (& $mk 'Error' "Quelle nicht erreichbar: $srcLocal (siehe Eintrag Quelle) - nicht gesichert") }
@@ -2815,7 +2817,7 @@ function Backup-HMUsmt {
     # liegt ein MIG vor, das weder neu noch der unveraenderte alte Stand ist (z. B. halbe Rueckkopie vom Ziel-PC): nicht verwendbar -> Fehler
     $oldSame = ($oldInfo -and $newInfo -and $oldInfo.Length -eq $newInfo.Length -and $oldInfo.WriteUtc -eq $newInfo.WriteUtc)
     if ($mig -and (-not $oldSame -or -not $oldUsable)) {
-        return [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; Msg = "USMT.MIG in der Ablage ist nicht verwendbar (ScanState Code $code$why$(if ($fresh.Why) { "; $($fresh.Why)" })) - kein gueltiger Stand. Log: $store\scanstate.log - Ursache beheben und Backup wiederholen"; Bytes = 0; Source = $usmt }
+        return [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; MigState = 'Unusable'; Msg = "USMT.MIG in der Ablage ist nicht verwendbar (ScanState Code $code$why$(if ($fresh.Why) { "; $($fresh.Why)" })) - kein gueltiger Stand. Log: $store\scanstate.log - Ursache beheben und Backup wiederholen"; Bytes = 0; Source = $usmt }
     }
     if ($mig) {
         # nur der unveraenderte aeltere Stand liegt vor: Warnung, damit der brauchbare
@@ -2875,9 +2877,10 @@ function Start-HMBackup {
         if ($prev) { $Ctx.BackupPath = $Ctx.ExistingBackup }
     }
     # Ausschluesse des letzten Laufs (neu ausgeschlossene Pfade werden beiseitegelegt); $null = unbekannt (aeltere Backups)
-    # USMT-Ergebnis des weitergefuehrten Backups: war es ein Fehler, gilt ein dort liegendes USMT.MIG nicht als brauchbarer alter Stand
+    # USMT im weitergefuehrten Backup als unbrauchbar markiert (MigState, z. B. halbe Rueckkopie): dort liegendes USMT.MIG ist kein brauchbarer alter Stand.
+    # Andere Fehler (z. B. USMT nicht gefunden) lassen einen alten Stand unberuehrt und werten ihn nicht ab.
     $Ctx.PrevUsmtUsable = $true
-    if ($prev) { $pu = @(@($prev.Modules) | Where-Object { $_ -and "$($_.Id)" -eq 'Usmt' })[0]; if ($pu -and "$($pu.Status)" -notin @('OK', 'Warning')) { $Ctx.PrevUsmtUsable = $false } }
+    if ($prev) { $pu = @(@($prev.Modules) | Where-Object { $_ -and "$($_.Id)" -eq 'Usmt' })[0]; if ($pu -and $pu.PSObject.Properties['MigState'] -and "$($pu.MigState)" -eq 'Unusable') { $Ctx.PrevUsmtUsable = $false } }
     $Ctx.PrevExcludePaths = $null
     if ($prev -and $prev.PSObject.Properties['ExcludePaths']) { $Ctx.PrevExcludePaths = @($prev.ExcludePaths | Where-Object { $_ }) }
     Write-HMLog $Job "BACKUP  $($Ctx.Computer) \ $($Ctx.UserFolder)  ->  $target" 'Header'
@@ -3072,6 +3075,11 @@ function Start-HMBackup {
                 $lvl = switch ($r.Status) { 'OK' { 'Success' } 'Skip' { 'Debug' } 'Warning' { 'Warning' } default { 'Error' } }
                 Write-HMLog $Job ("   {0}: {1}" -f $r.Name, ("$($r.Msg)" -replace "`r?`n", "`n      ")) $lvl
                 $mres.Items += [pscustomobject]@{ Name = $r.Name; Status = $r.Status; Msg = $r.Msg; Bytes = [long]$r.Bytes; Source = $r.Source }
+                # USMT: unbrauchbarer Stand in der Ablage merken (auch weitergeben, wenn dieser Lauf ihn nicht ersetzt hat) - der naechste Lauf vertraut ihm dann nicht
+                if ("$($r.Name)" -eq 'Usmt') {
+                    if ($r.PSObject.Properties['MigState'] -and "$($r.MigState)") { $mres.MigState = "$($r.MigState)" }
+                    elseif ("$($r.Status)" -eq 'Error' -and $Ctx.PrevUsmtUsable -eq $false) { $mres.MigState = 'Unusable' }
+                }
                 $mres.Bytes += [long]$r.Bytes
                 if ($r.Status -in @('Error', 'Cancel')) { $mres.Status = 'Error' } elseif ($r.Status -eq 'Warning' -and $mres.Status -eq 'OK') { $mres.Status = 'Warning' }
                 $done++; $wDone += $wIt; $Job.ItemBytes = 0
