@@ -1415,16 +1415,20 @@ function Start-EngineJob {
         Set-JobUi $false
         $script:CurrentJob = $null
         $ttl = $script:JobTitle
-        if ($j.Cancel) { Set-Status "$ttl abgebrochen" '#FFF38BA8' }
-        elseif ($j.Error) { Set-Status "$ttl mit Fehler beendet" '#FFF38BA8' }
-        else { Set-Status "$ttl fertig" '#FFA6E3A1' }
-        Set-HMTaskbarProgress 0 'None'
-        if ($script:JobOnFinished) { & $script:JobOnFinished $j }
-        # Benachrichtigung (Ton, Windows-Hinweis, Taskleiste blinkt) - bei laengeren Vorgaengen oder wenn das Fenster nicht aktiv ist
+        # Ergebnis einmal bestimmen - Statuszeile, Farbe, Fortschritt, Hinweis und Handy zeigen dasselbe
         $res = $j.Result
         $rs = if ($j.Cancel) { 'Cancelled' } elseif ($j.Error) { 'Error' } elseif ($res -and $res.Status) { "$($res.Status)" } else { 'OK' }
         $kind = switch ($rs) { 'OK' { 'Info' } 'Created' { 'Info' } 'Warning' { 'Warning' } 'NoCatalog' { 'Warning' } default { 'Error' } }
         $stTxt = switch ($rs) { 'OK' { 'erfolgreich' } 'Created' { 'erstellt' } 'NoCatalog' { 'ohne Katalog - nur Kurzpruefung' } 'Warning' { 'mit Warnungen' } 'NoSpace' { 'nicht gestartet - zu wenig Platz' } 'Cancelled' { 'abgebrochen' } default { 'mit Fehlern' } }
+        # gruen nur bei Erfolg, Hinweisfarbe bei Warnung, rot bei Fehler, zu wenig Platz und Abbruch
+        $stCol = switch ($kind) { 'Info' { '#FFA6E3A1' } 'Warning' { '#FFF9E2AF' } default { '#FFF38BA8' } }
+        Set-Status "$ttl $stTxt" $stCol
+        # Endzustand: Balken voll bei durchgelaufenem Vorgang, leer bei Abbruch/nicht gestartet; Laufzeit = Dauer des Vorgangs
+        $ui.pbMain.Value = $(if ($rs -in @('Cancelled', 'NoSpace')) { 0 } else { 100 })
+        $ui.lblElapsed.Text = ($j.Ended - $j.Started).ToString('hh\:mm\:ss')
+        Set-HMTaskbarProgress 0 'None'
+        if ($script:JobOnFinished) { & $script:JobOnFinished $j }
+        # Benachrichtigung (Ton, Windows-Hinweis, Taskleiste blinkt) - bei laengeren Vorgaengen oder wenn das Fenster nicht aktiv ist
         $det = "Dauer $(Format-HMDuration ($j.Ended - $j.Started))"
         if ($res -and $res.SizeBytes) { $det = "$(Format-HMSize ([long]$res.SizeBytes)), $det" } elseif ($res -and $res.Total) { $det = "$(Format-HMSize ([long]$res.Total)), $det" }
         $long = ($j.Ended - $j.Started).TotalSeconds -gt 20
