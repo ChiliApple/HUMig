@@ -1975,7 +1975,8 @@ function Test-HMBackupIntegrity {
     $srcGone = New-Object System.Collections.Generic.List[string]
     foreach ($m in @($Map)) {
         if (-not (Test-Path -LiteralPath $m.Dst)) { continue }
-        if (-not (Test-Path -LiteralPath $m.Src)) { $srcGone.Add("$($m.Module)/$($m.Name)"); continue }
+        $sThere = $false; try { $sThere = [bool](Test-Path -LiteralPath $m.Src -ErrorAction Stop) } catch { $sThere = $false }
+        if (-not $sThere) { $srcGone.Add("$($m.Module)/$($m.Name)"); continue }
         $n = 0
         try {
             $opt = if ($m.NoRecurse) { [System.IO.SearchOption]::TopDirectoryOnly } else { [System.IO.SearchOption]::AllDirectories }
