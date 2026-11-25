@@ -342,7 +342,7 @@ T 'Starter HUMig.exe erzeugen (TEMP)' {
 $out.Add('')
 $out.Add($(if ($fail) { "ERGEBNIS: $fail FEHLER" } else { 'ERGEBNIS: alles OK' }))
 $outFile = Join-Path $root 'Test-HUMig.result.txt'
-# Programmordner nur fuer Administratoren beschreibbar (z. B. C:\Tools\HUMig ohne Adminrechte): Ausweichort Temp statt Abbruch
+# in einem nur fuer Administratoren beschreibbaren Programmordner (Selbsttest ohne Adminrechte): Ausweichort Temp statt Abbruch
 try { $out | Set-Content -LiteralPath $outFile -Encoding UTF8 -ErrorAction Stop }
 catch {
     $outFile = Join-Path $env:TEMP 'Test-HUMig.result.txt'

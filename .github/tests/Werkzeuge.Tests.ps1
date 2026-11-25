@@ -177,6 +177,13 @@ function New-NetIPAddress { param($InterfaceIndex, $IPAddress, $PrefixLength, $D
         $r = @(& $script:RS_NetPoll 'PC-ANDERS' $null 'x.txt' 30 '' $false)
         $r | Should -Be @('OK statische Adresse ...')
     }
+    It 'Abholen: ein Verbindungsfehler, danach antwortet der PC mit "noch nicht" -> Urteil aus dem letzten Zustand (Warnung)' {
+        $script:Calls = 0
+        Mock Invoke-Command { $script:Calls++; if ($script:Calls -eq 1) { throw 'kurz weg' } else { 'NOCH-NICHT' } }
+        Mock Start-Sleep { }
+        $r = @(& $script:RS_NetPoll 'PC-ANDERS' $null 'x.txt' 1 '' $false)
+        $r[0] | Should -Match '^WARN Verbindung zum PC steht, aber'
+    }
     It 'Abholen: Verbindung steht, aber kein Ergebnis -> Warnung (Aufgabe lief vermutlich nicht)' {
         Mock Invoke-Command { 'NOCH-NICHT' }
         Mock Start-Sleep { }
@@ -355,6 +362,45 @@ Describe 'Softwareverteilung: Nachkontrolle mit Mindestversion und Rechte der Pa
         (ConvertTo-HUVer '1.2.3 (x64)') -eq (ConvertTo-HUVer '1.2.3.0') | Should -BeTrue
         (ConvertTo-HUVer 'v2.5+build7') -eq (ConvertTo-HUVer '2.5') | Should -BeTrue
     }
+    It 'Versionstabelle: jede Eingabe, die vorher (73e8bcb) eine Version ergab, ergibt dieselbe Version - Abweichungen nur wie begruendet' {
+        # Funktion aus 73e8bcb (unveraendert eingetragen), Ergebnis zum Vergleich auf vier Stellen aufgefuellt
+        function ConvertTo-HUVerAlt([string]$v) { if ("$v" -match '^\d+(\.\d+){0,3}') { $t = $Matches[0]; if ($t -notmatch '\.') { $t += '.0' }; try { return [version]$t } catch { } }; return $null }
+        $pad = { param($x) if ($null -eq $x) { '' } else { '{0}.{1}.{2}.{3}' -f $x.Major, $x.Minor, [Math]::Max(0, $x.Build), [Math]::Max(0, $x.Revision) } }
+        # Treiber-Fassung (DrvLibText) unter eigenem Namen laden: beide Dateien muessen gleich lesen
+        . (Join-Path $script:Root 'Functions\Tools-Drivers.ps1')
+        $dast = [System.Management.Automation.Language.Parser]::ParseInput($script:DrvLibText, [ref]$null, [ref]$null)
+        $dfn = $dast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'ConvertTo-HUVer' }, $true) | Select-Object -First 1
+        . ([scriptblock]::Create($dfn.Extent.Text.Replace('function ConvertTo-HUVer', 'function ConvertTo-HUVerDrv')))
+        # Eingabe, erwartete Abweichung: '' = gleich wie vorher, 'NEU-NULL' = jetzt nicht vergleichbar, 'NEU-LESBAR' = jetzt lesbar
+        $rows = @(
+            @('1.2.3', ''), @('1.2.3.0', ''), @('1.2.3.4', ''), @('7', ''), @('10.0.19045.3803', ''), @('8.0.3a', ''), @('1.1.1w', ''),
+            @('1.2.3.4.5', ''), @('1.2.3-beta', ''), @('2.5+build7', ''), @('1.2.3 (x64)', ''), @('3.14.0.0 Release', ''), @('124.0.6367.91', ''),
+            @('2006-06-21', ''), @('21.06.2006', ''), @('0.9', ''), @('01.02.0003', ''), @('2023.10.1.12345', ''), @('1.0.0.0.0.0', ''),
+            @('5.10 SP1', ''), @('12345678901.1', ''), @('', ''), @('Version unbekannt', ''), @('abc1.2', ''),
+            # neu nicht vergleichbar (vorher falsch gelesen): Datumsform mit Schraegstrich wurde zum Tag/Monat als Hauptversion
+            @('06/21/2006', 'NEU-NULL'), @('6/1/2023', 'NEU-NULL'),
+            # neu lesbar (vorher $null): fuehrendes "v" bzw. Leerzeichen am Rand
+            @('v1.2', 'NEU-LESBAR'), @('V2.0.1', 'NEU-LESBAR'), @(' 1.2.3 ', 'NEU-LESBAR'),
+            # mehr als 18 Ziffern: vorher $null (Ueberlauf abgefangen), jetzt ebenfalls $null, ohne Fehler
+            @('1234567890123456789012.1', '')
+        )
+        $rows.Count | Should -BeGreaterOrEqual 25
+        foreach ($r in $rows) {
+            $alt = & $pad (ConvertTo-HUVerAlt $r[0]); $neu = & $pad (ConvertTo-HUVer $r[0]); $drv = & $pad (ConvertTo-HUVerDrv $r[0])
+            $drv | Should -Be $neu -Because "Software und Treiber lesen '$($r[0])' gleich"
+            switch ($r[1]) {
+                ''           { $neu | Should -Be $alt -Because "'$($r[0])': vorher '$alt'" }
+                'NEU-NULL'   { $alt | Should -Not -BeNullOrEmpty; $neu | Should -BeNullOrEmpty }
+                'NEU-LESBAR' { $alt | Should -BeNullOrEmpty; $neu | Should -Not -BeNullOrEmpty }
+            }
+        }
+    }
+    It 'mehrere passende Eintraege ohne Mindestversion: ein Eintrag mit lesbarer Version geht vor' {
+        Mock Get-ItemProperty { @([pscustomobject]@{ PSChildName = '{A}'; DisplayName = 'Testprogramm'; DisplayVersion = '' }, [pscustomobject]@{ PSChildName = '{B}'; DisplayName = 'Testprogramm'; DisplayVersion = '1.5' }) }
+        (Find-HUApp 'Testprogramm*' '' '').PSChildName | Should -Be '{B}'
+        Mock Get-ItemProperty { @([pscustomobject]@{ PSChildName = '{A}'; DisplayName = 'Testprogramm'; DisplayVersion = '' }) }
+        (Find-HUApp 'Testprogramm*' '' '').PSChildName | Should -Be '{A}'
+    }
     It 'Version in Datumsform: OK mit "Version nicht pruefbar" statt "Update nicht wirksam"' {
         $r = Get-HUInstallVerdict 0 @(0) (& $script:Det $true '06/21/2006') (& $script:Det $false '') '2.0' '5 s' '' '' ''
         $r | Should -Match '^OK\|.*Version nicht pruefbar'
@@ -531,6 +577,12 @@ Describe 'App-Updates: Doppelstart, Zeitplan-Status, Zeitlimit' {
         $script:Target | Should -Match ([regex]::Escape('$o.LastErr = [int]"0$($l.Err)"'))
         $script:Auto | Should -Match ([regex]::Escape('exit $(if ($err -gt 0) { 1 } else { 0 })'))
         $script:Auto | Should -Match ([regex]::Escape('Invoke-AWinget $wg @('))
+    }
+    It 'Zeitplan: sehr grosses Zeitlimit laeuft nicht ueber (hoechstens 24 Stunden)' {
+        $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        { $script:Big = Invoke-AWinget $ps @('-NoProfile', '-Command', 'exit 4') 1e12 } | Should -Not -Throw
+        $script:Big.Code | Should -Be 4
+        $script:Auto | Should -Match ([regex]::Escape('[Math]::Min([double]1440, [Math]::Max([double]0.01, [double]$TimeoutMin))'))
     }
     It 'Zeitplan: winget mit Zeitlimit - Rueckgabecode, Ausgabe und Abbruch nach dem Limit' {
         $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -741,6 +793,9 @@ Describe 'Status-Reiter: nicht lesbare Quellen und Profile ohne Lauf' {
 }
 
 Describe 'Selbsttest und Testdateien: keine privaten Adressen, Ergebnisdatei mit Ausweichort' {
+    It 'Selbsttest nennt keinen lokalen Installationspfad' {
+        [IO.File]::ReadAllText((Join-Path $script:Root 'Test-HUMig.ps1')) | Should -Not -Match '(?i)C:\\Tools'
+    }
     It 'Test-HUMig.ps1 und diese Testdatei enthalten keine Adressen aus privaten Netzen' {
         # Muster aus Teilen gebaut, damit es selbst nicht als Adresse in der Datei steht
         $o = '(\d{1,3})'

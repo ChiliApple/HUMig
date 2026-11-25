@@ -109,7 +109,8 @@ function Invoke-AWinget([string]$Exe, [string[]]$ArgList, [double]$TimeoutMin) {
     try { $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8; $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8 } catch { }
     $p = [System.Diagnostics.Process]::Start($psi)
     $to = $p.StandardOutput.ReadToEndAsync(); $te = $p.StandardError.ReadToEndAsync()
-    if (-not $p.WaitForExit([int]([Math]::Max(0.01, $TimeoutMin) * 60000))) {
+    # Wartezeit begrenzt auf hoechstens 24 Stunden (sehr grosse Werte liefen sonst bei der Umrechnung in Millisekunden ueber)
+    if (-not $p.WaitForExit([int]([Math]::Min([double]1440, [Math]::Max([double]0.01, [double]$TimeoutMin)) * 60000))) {
         try { $p.Kill($true) } catch { try { $p.Kill() } catch { } }
         return @{ TimedOut = $true; Code = -1; Out = @() }
     }

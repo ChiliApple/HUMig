@@ -424,17 +424,22 @@ $script:RS_SwInstall = {
     $ErrorActionPreference = 'SilentlyContinue'
     # Versionen vergleichbar machen: fuehrendes "v" und Anhaenge weg, auf vier Stellen auffuellen ("1.2.3" = "1.2.3.0"); nicht lesbar = $null
     function ConvertTo-HUVer([string]$v) {
-        # nur reine Punkt-Zahlen-Versionen (nach fuehrendem "v" und einem Anhang wie "-beta", "+build" oder " (x64)");
-        # Datumsform ("06/21/2006"), Text oder Stellen mit mehr als 9 Ziffern sind nicht vergleichbar
-        $s = (("$v".Trim() -replace '^[vV]\s*', '') -split '[-+ ]', 2)[0]
-        if ($s -notmatch '^\d{1,9}(\.\d{1,9}){0,3}$') { return $null }
-        $p = @($s.Split('.') | ForEach-Object { [int]$_ })
+        # Fuehrender Teil aus Zahlen und Punkten, hoechstens vier Stellen, auf vier Stellen aufgefuellt (wie bisher: "8.0.3a" = 8.0.3.0,
+        # "1.2.3.4.5" = 1.2.3.4). Neu: fuehrendes "v" und Leerzeichen am Rand sind erlaubt. Nicht vergleichbar ($null): leer, ohne
+        # fuehrende Zahl, Datumsform mit Schraegstrich ("06/21/2006"), Stellen mit mehr als 9 Ziffern (passen nicht in eine Version).
+        $s = "$v".Trim() -replace '^[vV]\s*', ''
+        if ($s -notmatch '^\d+(\.\d+){0,3}') { return $null }
+        $m = $Matches[0]
+        if ($s.Length -gt $m.Length -and $s[$m.Length] -eq '/') { return $null }
+        $parts = @($m.Split('.'))
+        if (@($parts | Where-Object { $_.Length -gt 9 }).Count) { return $null }
+        $p = @($parts | ForEach-Object { [int]$_ })
         while ($p.Count -lt 4) { $p += 0 }
         try { return New-Object System.Version $p[0], $p[1], $p[2], $p[3] } catch { return $null }
     }
     # ProductCode gesetzt -> NUR danach (exakt). Sonst DisplayName-Muster + optional Mindestversion (aeltere Version = nicht installiert -> Update)
     function Find-HUApp([string]$Name, [string]$Code, [string]$MinVer) {
-        $min = ConvertTo-HUVer $MinVer
+        $min = ConvertTo-HUVer $MinVer; $firstAny = $null
         foreach ($k in 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*') {
             foreach ($i in @(Get-ItemProperty -Path $k -ErrorAction SilentlyContinue)) {
                 if ($Code) { if ($i.PSChildName -eq $Code) { return $i } else { continue } }
@@ -442,10 +447,12 @@ $script:RS_SwInstall = {
                 try { $hit = ($Name -and $i.DisplayName -and "$($i.DisplayName)" -like $Name) } catch { $hit = ("$($i.DisplayName)" -eq $Name) }
                 if (-not $hit) { continue }
                 if ($min) { $iv = ConvertTo-HUVer "$($i.DisplayVersion)"; if (-not $iv -or $iv -lt $min) { continue } }
+                # ohne Mindestversion: einen Eintrag mit vergleichbarer Version bevorzugen (mehrere passende Eintraege)
+                if (-not $min -and -not (ConvertTo-HUVer "$($i.DisplayVersion)")) { if (-not $firstAny) { $firstAny = $i }; continue }
                 return $i
             }
         }
-        return $null
+        return $firstAny
     }
     # Registry-Schluessel vorhanden (optional Version >= MinVer aus DisplayVersion/Version). HKCU -> alle geladenen Benutzerprofile
     function Find-HUKey([string]$Path, [string]$MinVer) {

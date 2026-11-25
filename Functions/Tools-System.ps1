@@ -283,6 +283,7 @@ $script:RS_NetPoll = {
                 if ($cred) { $p.Credential = $cred }
                 $r = $null
                 try { $r = @(Invoke-Command @p) } catch { $lost = $true; continue }
+                $lost = $false   # PC antwortet wieder: das Urteil am Ende richtet sich nach dem LETZTEN Zustand
                 if ($r.Count -and "$($r[0])" -ne 'NOCH-NICHT') { return $r }
                 break
             }
