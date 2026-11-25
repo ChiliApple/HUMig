@@ -456,3 +456,47 @@ Describe 'Server-Backup: Nachpruefung (Meldungen, Platten-Liste ohne offline Pla
         @($r.Messages).Count | Should -Be 0
     }
 }
+Describe 'Server-Backup: Befunde der unabhaengigen Pruefung' {
+    BeforeAll {
+        $script:AppRoot = $script:Root
+        if (-not $script:ConfigDir) { $script:ConfigDir = Join-Path $TestDrive 'CfgUi4'; $script:LogDir = Join-Path $TestDrive 'LogsUi4' }
+        New-Item -ItemType Directory -Path $script:ConfigDir -Force | Out-Null
+        . (Join-Path $script:Root 'Functions\UI-ServerBackup.ps1')
+        function Out-Console([string]$Text, [string]$Level = 'Info') { $script:Console += , @($Level, $Text) }
+        function Write-JsonFile([string]$Path, $Data, [int]$Depth = 6) { $Data | ConvertTo-Json -Depth $Depth | Set-Content -LiteralPath $Path -Encoding UTF8 }
+    }
+    BeforeEach { $script:Console = @(); $script:SbCorruptSeen = @{} }
+    It 'Profile beim Lesen gesperrt: spaeteres Speichern ersetzt die Profile nie' {
+        $good = '{"LastProfile":"GYM","Profiles":[{"Name":"GYM"}],"Renames":[]}'
+        [System.IO.File]::WriteAllText($script:SbCfgFile, $good)
+        $lock = New-Object System.IO.FileStream($script:SbCfgFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        try { $c = Get-HMSbConfig } finally { $lock.Dispose() }
+        $c.ReadState | Should -Be 'Unreadable'
+        @($c.Profiles).Count | Should -Be 0
+        Save-HMSbConfig $c
+        $script:SbLastSaveOk | Should -BeFalse
+        [System.IO.File]::ReadAllText($script:SbCfgFile) | Should -Be $good
+    }
+    It 'Schreiben gescheitert (Write-JsonFile schluckt Fehler): kein Erfolg gemeldet' {
+        [System.IO.File]::WriteAllText($script:SbCfgFile, '{"LastProfile":"","Profiles":[],"Renames":[]}')
+        $c = Get-HMSbConfig
+        function Write-JsonFile([string]$Path, $Data, [int]$Depth = 6) { }
+        Save-HMSbConfig $c
+        $script:SbLastSaveOk | Should -BeFalse
+        @($script:Console | Where-Object { $_[1] -match 'NICHT gespeichert' }).Count | Should -Be 1
+    }
+    It 'gueltiges JSON mit NUL am Ende gilt unter 5.1 und 7 als lesbar' {
+        $p = Join-Path $TestDrive 'nul.json'
+        [System.IO.File]::WriteAllText($p, '[{"A":1}]' + [char]0 + [char]0)
+        (Read-HMSbJsonState $p).State | Should -Be 'Ok'
+    }
+    It 'Abbrechen zwischen Warten und Start: eigene Sicherung startet nicht, kein stop job' {
+        $job = @{ Cancel = $false }
+        Mock Wait-HMSbIdle { $job.Cancel = $true; $true }
+        Mock Invoke-HMSbWbadmin { throw 'darf nicht laufen' }
+        $r = Invoke-HMSbStart -Arguments 'start backup -backupTarget:X: -quiet' -Job $job
+        $r.Started | Should -BeFalse
+        Test-HMSbOwnJobRunning $r | Should -BeFalse
+        Should -Invoke Invoke-HMSbWbadmin -Times 0
+    }
+}

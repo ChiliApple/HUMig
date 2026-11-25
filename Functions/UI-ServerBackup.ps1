@@ -88,21 +88,27 @@ function Get-HMSbConfig {
     $cw = if ($c -and $c.PSObject.Properties['ConflictWords'] -and $null -ne $c.ConflictWords) { @($c.ConflictWords | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() }) } else { $null }
     $extra = [ordered]@{}
     if ($c -and $c -is [System.Management.Automation.PSCustomObject]) { foreach ($pp in @($c.PSObject.Properties)) { if ($pp.Name -notin @('LastProfile', 'Profiles', 'Renames', 'ConflictWords')) { $extra[$pp.Name] = $pp.Value } } }
-    return [pscustomobject]@{ LastProfile = "$($c.LastProfile)"; Profiles = $list; Renames = $ren; ConflictWords = $cw; Extra = $extra }
+    return [pscustomobject]@{ LastProfile = "$($c.LastProfile)"; Profiles = $list; Renames = $ren; ConflictWords = $cw; Extra = $extra; ReadState = "$($st.State)" }
 }
 function Save-HMSbConfig($Cfg) {
     # vorher pruefen: nicht lesbar = nicht speichern (nichts ueberschreiben), beschaedigt = beiseitelegen (Name mit Datum) und melden
     # $script:SbLastSaveOk: Aufrufer melden "gespeichert" nur, wenn hier nicht abgebrochen wurde
     $script:SbLastSaveOk = $false
+    # beim Lesen nicht lesbar: der Stand im Speicher ist leer und wuerde alle Profile ersetzen - nie speichern
+    if ($Cfg.PSObject.Properties['ReadState'] -and "$($Cfg.ReadState)" -eq 'Unreadable') { Out-Console 'Server-Backup: Profile NICHT gespeichert - Config\serverbackup.json war beim Lesen gesperrt. Reiter neu laden ("Aktualisieren") und erneut versuchen.' 'Error'; return }
     try { [void](Read-HMSbJsonForWrite $script:SbCfgFile) }
     catch { Out-Console "Server-Backup: Profile NICHT gespeichert - $($_.Exception.Message)" 'Error'; return }
-    $script:SbLastSaveOk = $true
     Show-HMSbStateNotes
     $o = [ordered]@{ LastProfile = "$($Cfg.LastProfile)"; Profiles = @($Cfg.Profiles); Renames = @($Cfg.Renames) }
     if ($Cfg.PSObject.Properties['ConflictWords'] -and $null -ne $Cfg.ConflictWords) { $o.ConflictWords = @($Cfg.ConflictWords) }
     # Felder, die diese Version nicht kennt (neuere HUMig-Version), unveraendert mitschreiben
     if ($Cfg.PSObject.Properties['Extra'] -and $Cfg.Extra) { foreach ($k in @($Cfg.Extra.Keys)) { if (-not $o.Contains($k)) { $o[$k] = $Cfg.Extra[$k] } } }
+    $before = $null; try { if ([System.IO.File]::Exists($script:SbCfgFile)) { $before = [System.IO.File]::GetLastWriteTimeUtc($script:SbCfgFile) } } catch { }
     Write-JsonFile $script:SbCfgFile ([pscustomobject]$o) -Depth 6
+    # Write-JsonFile meldet Fehler nicht zurueck: Erfolg nur, wenn die Datei danach lesbar und neu geschrieben ist
+    $after = $null; try { if ([System.IO.File]::Exists($script:SbCfgFile)) { $after = [System.IO.File]::GetLastWriteTimeUtc($script:SbCfgFile) } } catch { }
+    if ((Read-HMSbJsonState $script:SbCfgFile).State -eq 'Ok' -and $null -ne $after -and ($null -eq $before -or $after -ne $before)) { $script:SbLastSaveOk = $true }
+    else { Out-Console 'Server-Backup: Profile NICHT gespeichert (Config\serverbackup.json konnte nicht geschrieben werden).' 'Error' }
 }
 # Umbenennungen (alter -> neuer Profilname) auf Verlaufseintraege nicht angesteckter Platten anwenden
 function Get-HMSbCurrentName([string]$Name, $Renames) {
@@ -501,7 +507,7 @@ function Import-HMSbDiskProfiles {
     }
     if ($added.Count) {
         Save-HMSbConfig $cfg
-        Out-Console "Profil(e) von der Platte uebernommen: $($added -join ', ')" 'Success'
+        if ($script:SbLastSaveOk) { Out-Console "Profil(e) von der Platte uebernommen: $($added -join ', ')" 'Success' }
         Update-HMSbProfileList $added[0]
     }
 }
@@ -542,7 +548,7 @@ function Set-HMSbAfterMode {
         $x.DiskAfter = [pscustomobject]$m
     }
     Save-HMSbConfig $cfg
-    Out-Console "Platte $($d.Label): nach der Sicherung $(Format-HMSbAfterMode $mode)" 'Info'
+    if ($script:SbLastSaveOk) { Out-Console "Platte $($d.Label): nach der Sicherung $(Format-HMSbAfterMode $mode)" 'Info' }
     Update-HMSbDiskInfo
 }
 function Update-HMSbDiskInfo {
@@ -1806,6 +1812,7 @@ function Edit-HMSbConflictWords($Owner = $null) {
     $cfg = Get-HMSbConfig
     $cfg.ConflictWords = $(if ($list.Count) { $list } else { $null })
     Save-HMSbConfig $cfg
+    if (-not $script:SbLastSaveOk) { return $false }
     Out-Console "Server-Backup: Suchwoerter fuer andere Sicherungsaufgaben gespeichert ($(if ($list.Count) { $list -join ', ' } else { 'Standard' }))" 'Success'
     return $true
 }

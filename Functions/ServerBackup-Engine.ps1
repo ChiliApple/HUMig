@@ -868,6 +868,8 @@ function Invoke-HMSbStart {
         if (-not (Wait-HMSbIdle $Job)) {
             return [pscustomobject]@{ ExitCode = -3; Lines = @(); Text = 'Ein weiterer Sicherungs- oder Wiederherstellungsvorgang wird ausgefuehrt (Wartezeit abgelaufen oder abgebrochen).'; LogFiles = @(); Busy = $true; Started = $false; WbSec = $wbSec }
         }
+        # Abbrechen im Fenster zwischen Warten und Start: eigene Sicherung gar nicht erst starten
+        if ($Job.Cancel) { return [pscustomobject]@{ ExitCode = -3; Lines = @(); Text = 'Abgebrochen vor dem Start.'; LogFiles = @(); Busy = $false; Started = $false; WbSec = $wbSec } }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $r = Invoke-HMSbWbadmin -Arguments $Arguments -Phase $Phase -PBase $PBase -PSpan $PSpan -LogFile $LogFile
         $wbSec += $sw.Elapsed.TotalSeconds
@@ -1186,7 +1188,7 @@ function Read-HMSbJsonState([string]$Path) {
     if (-not $tt) { $r.State = 'Empty'; return $r }
     # abgeschnittene Datei (Absturz beim Schreiben): PowerShell 7 liest unvollstaendiges JSON sonst still als Teilstand
     if (-not (($tt.StartsWith('[') -and $tt.EndsWith(']')) -or ($tt.StartsWith('{') -and $tt.EndsWith('}')))) { $r.State = 'Corrupt'; $r.Error = 'unvollstaendig (Anfang oder Ende fehlt)'; return $r }
-    try { $r.Data = ConvertFrom-Json -InputObject $txt -ErrorAction Stop; $r.State = 'Ok' }
+    try { $r.Data = ConvertFrom-Json -InputObject $tt -ErrorAction Stop; $r.State = 'Ok' }
     catch { $r.State = 'Corrupt'; $r.Error = Format-HMSbShortError $_.Exception.Message }
     return $r
 }
