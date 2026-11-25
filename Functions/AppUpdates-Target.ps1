@@ -48,6 +48,7 @@ function Out-R($v) { [pscustomobject]@{ HMAu = 'R'; PC = $PC; J = (ConvertTo-Jso
 # Abbruch: am eigenen PC ueber $Payload.Job.Cancel, an anderen PCs ueber die Datei "cancel", die HUMig in die Laufordner
 # dieses Laufs legt (Ordnername mit RunTag) - das laufende Programm wird fertig, danach startet nichts mehr
 $script:TCancelled = $false
+$script:TStill = $null   # Aufgabe, die nach hartem Abbruch noch lief (Task, Dir)
 $RunTag = if ("$($Payload.RunTag)" -match '^[0-9a-f]{8,32}$') { "$($Payload.RunTag)" } else { '' }
 function Test-TCancel {
     if ($script:TCancelled -or ($Payload.Job -and $Payload.Job.Cancel)) { return $true }
@@ -56,7 +57,7 @@ function Test-TCancel {
     return $false
 }
 # Zeitlimit je Programm fuer Laeufe als SYSTEM (Minuten); haengt ein Installer laenger, wird die Aufgabe beendet und mit dem Rest weitergemacht
-$SysItemMin = if ([int]"0$($Payload.ItemTimeoutMin)" -gt 0) { [int]"$($Payload.ItemTimeoutMin)" } else { 120 }
+$SysItemMin = 120; $simTmp = 0; if ([int]::TryParse("$($Payload.ItemTimeoutMin)", [ref]$simTmp) -and $simTmp -gt 0) { $SysItemMin = $simTmp }
 function Get-TLoggedOnSids {
     @(foreach ($p in @(Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue)) {
             try { "$((Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid -ErrorAction Stop).Sid)" } catch { }
@@ -132,7 +133,7 @@ function Install-TWinGet {
 function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec, [int]$ItemTimeoutMin = 0) {
     $script:TRes = $null
     $script:TTimedOut = ''
-    $script:TDone = @()
+    $script:TDone = @(); $loopDone = $false
     $curId = ''; $curT = $null
     $id = [guid]::NewGuid().ToString('N')
     $dir = Join-Path $Base $(if ($RunTag) { "run_$($RunTag)_$id" } else { "run_$id" })
@@ -195,14 +196,60 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec, 
             }
             Start-Sleep -Milliseconds 1500
         }
+        $loopDone = $true
     } catch { $script:TErr += "Aufgabe nicht ausfuehrbar: $($_.Exception.Message)" }
     finally {
-        try { Unregister-ScheduledTask -TaskPath '\' -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue } catch { }
-        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+        # laeuft die Aufgabe noch (Verbindung von HUMig hart beendet, z. B. nach "Abbrechen"): nicht aufraeumen - das laufende
+        # Programm wird fertig, den Rest erledigt die Nachlauf-Aufgabe (Update-Zweig unten)
+        $still = ''; try { $still = "$((Get-ScheduledTask -TaskPath '\' -TaskName $name -ErrorAction Stop).State)" } catch { }
+        if (-not $loopDone -and $still -eq 'Running' -and -not $script:TRes) { $script:TStill = @{ Task = $name; Dir = $dir } }
+        else {
+            try { Unregister-ScheduledTask -TaskPath '\' -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue } catch { }
+            Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
     if ($script:TRes) { $script:TErr += @($script:TRes.Errors | Where-Object { $_ }) }
 }
 
+# Nachlauf nach hartem Abbruch: eigene SYSTEM-Aufgabe wartet (bis 240 min), bis die laufende Aufgabe fertig ist, startet dann die
+# gestoppten Dienste, raeumt Aufgabe, Laufordner und Abbruch-Markierung weg und legt das Ergebnis in nachlauf_<Kennung>.txt ab.
+# Laeuft als -EncodedCommand (kurz, unabhaengig von der Ausfuehrungsrichtlinie).
+function New-TAfterRunText([string]$Task, [string]$Dir, [string[]]$Services, [bool]$Apps, [string]$Marker, [string]$Log, [string]$Self) {
+    $q = { param($s) "'" + ("$s" -replace "'", "''") + "'" }
+    $sv = (@($Services | Where-Object { "$_".Trim() } | ForEach-Object { & $q "$_" }) -join ', ')
+    return @"
+`$ErrorActionPreference = 'SilentlyContinue'
+`$w = $(& $q $Task); `$d = $(& $q $Dir); `$m = $(& $q $Marker); `$lg = $(& $q $Log); `$me = $(& $q $Self); `$svc = @($sv)
+`$t0 = Get-Date; `$s = `$null
+while (((Get-Date) - `$t0).TotalMinutes -lt 240) { `$s = Get-ScheduledTask -TaskPath '\' -TaskName `$w; if (-not `$s -or "`$(`$s.State)" -ne 'Running') { break }; Start-Sleep -Seconds 15 }
+`$s = Get-ScheduledTask -TaskPath '\' -TaskName `$w   # Zustand am Ende noch einmal lesen
+`$ln = @()
+if (`$s -and "`$(`$s.State)" -eq 'Running') { `$ln += "WARN das laufende Programm war nach 240 min noch nicht fertig - Dienste bleiben gestoppt: `$(`$svc -join ', ')" }
+else {
+    `$done = 0; if (Test-Path -LiteralPath (Join-Path `$d 'log.txt')) { `$done = @(Get-Content -LiteralPath (Join-Path `$d 'log.txt') | Where-Object { "`$_" -like 'DONE|*' }).Count }
+    `$ln += "INFO abgebrochen - `$done Programm(e) fertig, danach nichts mehr gestartet"
+    foreach (`$n in `$svc) { try { Start-Service -Name `$n -ErrorAction Stop; `$ln += "OK Dienst `$n wieder gestartet" } catch { `$ln += "WARN Dienst `$n nicht startbar: `$(`$_.Exception.Message)" } }
+    $(if ($Apps) { "`$ln += 'INFO beendete Programme werden nach einem Abbruch nicht neu gestartet'" })
+    Unregister-ScheduledTask -TaskPath '\' -TaskName `$w -Confirm:`$false
+    Remove-Item -LiteralPath `$d -Recurse -Force
+    Remove-Item -LiteralPath `$m -Force
+}
+`$ln += 'ENDE'
+[System.IO.File]::WriteAllLines(`$lg, [string[]]`$ln, (New-Object System.Text.UTF8Encoding(`$true)))
+Unregister-ScheduledTask -TaskPath '\' -TaskName `$me -Confirm:`$false
+"@
+}
+function Register-TAfterRun($Still, [string[]]$Services, [bool]$Apps) {
+    $self = "HUMig_AppUpdates_Nachlauf_$([guid]::NewGuid().ToString('N').Substring(0, 12))"
+    $tag = if ($RunTag) { $RunTag } else { 'ohne' }
+    $txt = New-TAfterRunText $Still.Task $Still.Dir $Services $Apps (Join-Path $Base "cancel_$tag") (Join-Path $Base "nachlauf_$tag.txt") $self
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($txt))
+    $a = New-ScheduledTaskAction -Execute $WinPs -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $enc"
+    $p = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $st = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 5)
+    Register-ScheduledTask -TaskName $self -TaskPath '\' -Action $a -Principal $p -Settings $st -Force -ErrorAction Stop | Out-Null
+    Start-ScheduledTask -TaskPath '\' -TaskName $self -ErrorAction Stop
+}
 # PowerShell 7 (fuer das Lesen als SYSTEM und den Zeitplan): offizielles ZIP-Paket von GitHub (Microsoft),
 # SHA256 aus den Release-Angaben geprueft, entpackt nach Programme\HUMig\PowerShell7 (nur Administratoren duerfen schreiben)
 function Install-TPwsh {
@@ -389,6 +436,8 @@ try {
     if ($AutoText -and (Test-Path -LiteralPath $autoFile)) {
         if ([System.IO.File]::ReadAllText($autoFile) -cne $AutoText) { [System.IO.File]::WriteAllText($autoFile, $AutoText, (New-Object System.Text.UTF8Encoding($true))); Out-L 'Zeitplan-Skript auf den aktuellen Stand gebracht' }
     }
+    # Reste frueherer Abbrueche: Markierungen (0 Byte) nach einem Tag, nicht abgeholte Nachlauf-Ergebnisse nach 7 Tagen
+    foreach ($x in @(Get-ChildItem -LiteralPath $Base -File -ErrorAction SilentlyContinue | Where-Object { ($_.Name -like 'cancel_*' -and $_.LastWriteTime -lt (Get-Date).AddDays(-1)) -or ($_.Name -like 'nachlauf_*.txt' -and $_.LastWriteTime -lt (Get-Date).AddDays(-7)) })) { Remove-Item -LiteralPath $x.FullName -Force -ErrorAction SilentlyContinue }
     switch ($Op) {
         'Search' {
             Install-TModule
@@ -582,8 +631,20 @@ try {
             if ($rs.Services.Count -or $rs.Apps.Count) { $rsDone = $true; Restart-TStopped $rs }
             Out-R ([pscustomobject]@{ Results = @($res | Where-Object { $_ }); Errors = $script:TErr })
             } finally {
-                if (-not $rsDone -and ($rs.Services.Count -or $rs.Apps.Count)) { try { $null = @(Restart-TStopped $rs) } catch { } }
-                if ($RunTag) { Remove-Item -LiteralPath (Join-Path $Base "cancel_$RunTag") -Force -ErrorAction SilentlyContinue }
+                # (ohne Ausgabe: nach einem harten Abbruch der Verbindung schreibt hier niemand mehr in die Pipeline)
+                if ($script:TStill) {
+                    # Programm laeuft noch: Dienste NICHT jetzt starten (der Installer laeuft evtl. noch) - die Nachlauf-Aufgabe
+                    # wartet, bis es fertig ist, startet dann die Dienste, raeumt auf und schreibt nachlauf_<Kennung>.txt
+                    try { Register-TAfterRun $script:TStill @($rs.Services) ([bool]@($rs.Apps).Count) } catch { }
+                } else {
+                    $ln = @()
+                    if (-not $rsDone -and ($rs.Services.Count -or $rs.Apps.Count)) { try { $ln = @(Restart-TStopped $rs | ForEach-Object { "INFO $($_.V)" }) } catch { } }
+                    # abgebrochen, aber kein Programm lief mehr: trotzdem ein Ergebnis fuer HUMig ablegen
+                    if ($RunTag -and (Test-Path -LiteralPath (Join-Path $Base "cancel_$RunTag"))) {
+                        try { [System.IO.File]::WriteAllLines((Join-Path $Base "nachlauf_$RunTag.txt"), [string[]](@('INFO abgebrochen - kein Programm lief mehr') + $ln + @('ENDE')), (New-Object System.Text.UTF8Encoding($true))) } catch { }
+                    }
+                    if ($RunTag) { Remove-Item -LiteralPath (Join-Path $Base "cancel_$RunTag") -Force -ErrorAction SilentlyContinue }
+                }
             }
         }
         'ScheduleSet' {

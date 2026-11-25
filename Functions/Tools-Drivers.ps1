@@ -330,7 +330,7 @@ function Confirm-DrvDeploy($Package, [string[]]$Hosts, [bool]$Force) {
     $prot = if ($s.ProtectDriver) { "`n  Schutz:   danach vor Treiber-Updates schuetzen (Geraete-Sperre, nur Windows Pro/Education/Enterprise) - $script:DrvLockNote" } else { '' }
     $ziel = if ($Hosts.Count -le 5) { $Hosts -join ', ' } else { "$($Hosts.Count) PCs" }
     $rk = ''; try { $rk = Get-SwPackageRiskText $Package (Get-DrvFolder) } catch { }
-    $rkT = if ($rk) { "`n  ACHTUNG:  $rk" } else { '' }
+    $rkT = if ($rk) { "`n  $rk" } else { '' }
     return (Confirm-Action "Treiber '$($s.Name)' installieren auf: $ziel`n`n  Art:      $how`n  Hardware: $hw$prot`n  Version:  $(if ($Force) { 'auch wenn dieselbe Version schon aktiv ist' } else { 'PCs mit derselben aktiven Version werden uebersprungen' })`n  Groesse:  $(Get-DrvCopyText $Package)$rkT`n`nGeraete koennen dabei kurz ausfallen (Bildschirm flackert, Netzwerk trennt kurz).`nFortfahren?" 'Treiberverteilung')
 }
 
@@ -742,8 +742,6 @@ function Start-DriverDeploy {
                        TimeoutMin = [int]$s.TimeoutMin; OnlyMatching = [bool]$s.OnlyMatching; ForceDriver = [bool]$s.ForceDriver; ProtectDriver = [bool]$s.ProtectDriver }
     $pkgJson = [pscustomobject]$pkg | ConvertTo-Json -Compress
     Out-Console "Treiberverteilung '$($s.Name)' auf $($Hosts.Count) PC(s)$(if ($Label) { " [$Label]" })$(if ($Force) { ' - auch wenn gleiche Version aktiv' }) ..." 'Info'
-    $rk = ''; try { $rk = Get-SwPackageRiskText $Package (Get-DrvFolder) } catch { }
-    if ($rk) { Out-Console "  ACHTUNG: $rk" 'Warning' }
     $tmo = [int]$s.TimeoutMin; if ($tmo -lt 1) { $tmo = 20 }
     $copyMB = Get-DrvCopyMB $Package
     # Kopie auf die INF-Unterordner beschraenken (Art INF)

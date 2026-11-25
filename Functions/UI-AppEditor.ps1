@@ -782,6 +782,8 @@ function Write-HMAeLocal([object[]]$Apps) {
     # Ausnahmefall: vorhandene apps.json nicht lesbar (defekt) - dann kennt der Editor deren Eintraege nicht und wuerde sie
     # beim Speichern verlieren. Rueckfrage (Standard Nein); bei Ja bleibt die defekte Datei als apps.json.defekt-<Zeit> erhalten
     $st = Test-HMAeLocalFile $p
+    # gesperrt/nicht lesbar: nichts schreiben (das Schreiben scheiterte ohnehin) und nicht 'beschaedigt' nennen
+    if ($st -eq 'Gesperrt') { throw 'apps.json ist gerade nicht lesbar (in Benutzung oder keine Rechte) - nichts gespeichert, bitte gleich erneut speichern' }
     if ($st -eq 'Defekt') {
         $q = "Die Datei apps.json (eigene Katalog-Eintraege) ist nicht lesbar oder beschaedigt.`n`nSpeichern legt sie neu an, nur mit den Eintraegen, die der Editor gerade kennt - eigene Eintraege aus der beschaedigten Datei fehlen dann.`nDie beschaedigte Datei bleibt als apps.json.defekt-<Zeit> erhalten, die Sicherung apps.json.bak bleibt unveraendert.`n`nTrotzdem speichern?"
         if ("$((Show-HMDialogBox -Owner $script:Ae.Win -Text $q -Title 'Katalog' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { throw 'nicht gespeichert (apps.json beschaedigt, Rueckfrage mit Nein beantwortet)' }
@@ -798,15 +800,14 @@ function Write-HMAeLocal([object[]]$Apps) {
     Write-HMAeTextAtomic $p $json
     $script:Ae.Saved = $true
 }
-# Zustand der eigenen Katalog-Datei: 'Fehlt', 'OK' (lesbares JSON) oder 'Defekt'
+# Zustand der eigenen Katalog-Datei: 'Fehlt', 'OK' (lesbares JSON), 'Gesperrt' (nicht lesbar: in Benutzung oder keine Rechte)
+# oder 'Defekt' (gelesen, aber kein gueltiges JSON)
 function Test-HMAeLocalFile([string]$Path) {
     if (-not [System.IO.File]::Exists($Path)) { return 'Fehlt' }
-    try {
-        $t = [System.IO.File]::ReadAllText($Path)
-        if (-not $t.Trim()) { return 'Defekt' }
-        $null = $t | ConvertFrom-Json -ErrorAction Stop
-        return 'OK'
-    } catch { return 'Defekt' }
+    $t = $null
+    try { $t = [System.IO.File]::ReadAllText($Path) } catch { return 'Gesperrt' }
+    if (-not $t.Trim()) { return 'Defekt' }
+    try { $null = $t | ConvertFrom-Json -ErrorAction Stop; return 'OK' } catch { return 'Defekt' }
 }
 # Text ueber eine Hilfsdatei schreiben und dann austauschen: bricht das Schreiben ab, bleibt die alte Datei ganz
 function Write-HMAeTextAtomic([string]$Path, [string]$Text) {

@@ -251,14 +251,13 @@ function Show-HMAuSearchResult($Res) {
 # ----------------------------------------------------------------------------
 # Aktualisieren
 # ----------------------------------------------------------------------------
-# Laeuft gerade die Vorpruefung eines frueheren "Aktualisieren" (laufende Programme)? Zaehler aus Invoke-AsyncCommand -BusyTag 'Au'
-# (raeumt sich selbst auf); andere Arbeiten mit derselben Kennung (WinGet pruefen, Quellen) zaehlen nicht. Rueckgabe Text oder ''
+# Laeuft gerade die Vorpruefung (laufende Programme) eines frueheren "Aktualisieren"? Eigener Zaehler: vor jeder Vorpruefung +1,
+# in deren OnComplete -1 (Invoke-AsyncCommand ruft OnComplete immer auf, auch nach dem Zeitlimit). Rueckgabe Text oder ''
+$script:AuPreCheck = 0
 function Get-HMAuBusyText {
-    $n = 0; try { $n = [int]$script:AsyncBusy['Au'] } catch { $n = 0 }
+    $n = 0; try { $n = [int]$script:AuPreCheck } catch { $n = 0 }
     if ($n -le 0) { return '' }
-    $t = ''; try { $t = "$($script:AsyncBusyText['Au'])".Trim() } catch { }
-    if ($t -notmatch '^Laufende Programme') { return '' }
-    return "die Pruefung der laufenden Programme eines frueheren Klicks laeuft noch ($t)"
+    return 'die Pruefung der laufenden Programme eines frueheren Klicks laeuft noch'
 }
 function Start-HMAuUpdate([switch]$All) {
     if ($script:JobRunning) { Out-Console 'Es laeuft bereits ein Vorgang.' 'Warning'; return }
@@ -300,6 +299,7 @@ function Start-HMAuUpdate([switch]$All) {
         Start-EngineJob -Command 'Start-HMAppUpdate -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'App-Updates' -ScriptFiles @($script:Engine, $script:AuEngine) -OnFinished {
             param($j)
             if ($j.Result -and $j.Result.Items) { Add-HMAuHistory @($j.Result.Items); Update-HMAuAfterRun @($j.Result.Items) }
+            if ($j.Result -and @($j.Result.AfterCancel).Count) { Start-HMAuAfterCancelPoll @($j.Result.AfterCancel) }
             if ($j.Result -and $j.Result.Reboot) { Out-Console 'App-Updates: mindestens ein Programm braucht einen Neustart.' 'Warning' }
         }
     }
@@ -310,12 +310,14 @@ function Start-HMAuUpdate([switch]$All) {
         $rk = @($byPc.Keys | Where-Object { "$_" -ne $lk2 })
         if (-not $rk.Count) { & $script:AuGoBlock $byPc $running $dec; return }
         $rp = @{}; foreach ($k in $rk) { $rp[$k] = @{ Items = @($byPc[$k].Items | ForEach-Object { @{ Id = "$($_.Id)"; Name = "$($_.Name)" } }) } }
+        $script:AuPreCheck = [int]$script:AuPreCheck + 1
         Invoke-AsyncCommand -ScriptBlock {
             param($eng, $au, $keys, $rp, $cred)
             . $eng; . $au
             Invoke-HMAuTarget $keys 'Running' @{ ByPc = $rp } $cred
         } -ArgumentList @($script:Engine, $script:AuEngine, $rk, $rp, $script:RemoteCred) -TimeoutSec 180 -BusyTag 'Au' -BusyText 'Laufende Programme an den PCs pruefen ...' -State @{ ByPc = $byPc; Running = $running; Dec = $dec; Go = $script:AuGoBlock } -OnComplete {
             param($r, $st)
+            $script:AuPreCheck = [Math]::Max(0, [int]$script:AuPreCheck - 1)
             $d2 = @{}; foreach ($kk in @($st.Dec.Keys)) { $d2[$kk] = $st.Dec[$kk] }
             $res = @($r | Where-Object { $_ -is [hashtable] })[0]
             if (-not $res) { Out-Console "App-Updates: laufende Programme an den PCs nicht pruefbar ($(@($r) -join ' ')) - Installer melden sich dann selbst" 'Warning'; & $st.Go $st.ByPc $st.Running $d2; return }
@@ -337,12 +339,14 @@ function Start-HMAuUpdate([switch]$All) {
     $script:AuGoBlock = $go; $script:AuRemoteBlock = $remote
     if (-not $localItems.Count) { & $remote $byPc @() @{}; return }
     Out-Console 'App-Updates: laufende Programme pruefen ...' 'Debug'
+    $script:AuPreCheck = [int]$script:AuPreCheck + 1
     Invoke-AsyncCommand -ScriptBlock {
         param($eng, $items)
         . $eng
         @(Get-HMAuRunning $items)
     } -ArgumentList @($script:AuEngine, $localItems) -TimeoutSec 60 -BusyTag 'Au' -BusyText 'Laufende Programme pruefen ...' -State @{ ByPc = $byPc; Go = $script:AuRemoteBlock } -OnComplete {
         param($r, $st)
+        $script:AuPreCheck = [Math]::Max(0, [int]$script:AuPreCheck - 1)
         $running = @()
         if ($r -is [string]) { Out-Console "App-Updates: laufende Programme nicht pruefbar ($r) - Installer melden sich dann selbst" 'Warning' }
         else { $running = @(@($r) | Where-Object { $_ -and $_.Id }) }
@@ -441,6 +445,39 @@ function Start-HMAuSchedule {
         $ctx = @{ Op = 'ScheduleSet'; Computers = $pcs; Payload = $pl; Credential = $script:RemoteCred }
     }
     Start-EngineJob -Command 'Start-HMAuScheduleJob -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'App-Updates Zeitplan' -ScriptFiles @($script:Engine, $script:AuEngine) -OnFinished { param($j) }
+}
+# Nach "Abbrechen": an den PCs laeuft das gerade laufende Programm noch fertig (Nachlauf-Aufgabe). Deren Ergebnis im Hintergrund
+# abholen (alle 30 s, bis 30 min) und in der Konsole melden - die Oberflaeche ist dabei frei.
+function Start-HMAuAfterCancelPoll($Pcs) {
+    $list = @($Pcs | Where-Object { $_ -and "$($_.Computer)" -and "$($_.RunTag)" -match '^[0-9a-f]{8,32}$' })
+    if (-not $list.Count) { return }
+    Out-Console "App-Updates: Abbruch an $($list.Count) PC(s) gemeldet - das laufende Programm wird dort noch fertig, das Ergebnis kommt spaeter hier." 'Info'
+    Invoke-AsyncCommand -ScriptBlock $script:RS_AuAfterCancelPoll -ArgumentList @(@($list | ForEach-Object { "$($_.Computer)|$($_.RunTag)" }), $script:RemoteCred, 1800) -TimeoutSec 1900 -OnComplete {
+        param($r)
+        if ("$r" -match '^FEHLER: ' -and -not ($r -is [System.Array])) { Out-Console "App-Updates (Nachlauf): $r" 'Warning'; return }
+        foreach ($l in @($r)) {
+            $lvl = if ("$l" -match '\|WARN ') { 'Warning' } elseif ("$l" -match '\|OK ') { 'Success' } else { 'Info' }
+            Out-Console "   App-Updates (nach Abbruch) $("$l" -replace '\|(OK|WARN|INFO) ', ': ')" $lvl
+        }
+    }
+}
+$script:RS_AuAfterCancelPoll = {
+    param([string[]]$Items, $cred, [int]$MaxSec)
+    $open = @{}; foreach ($i in $Items) { $p = "$i".Split('|'); $open[$p[0]] = $p[1] }
+    $out = New-Object System.Collections.Generic.List[string]
+    $t0 = Get-Date
+    while ($open.Count -and ((Get-Date) - $t0).TotalSeconds -lt $MaxSec) {
+        foreach ($pc in @($open.Keys)) {
+            $p = @{ ComputerName = $pc; ArgumentList = @($open[$pc]); ErrorAction = 'Stop'; SessionOption = (New-PSSessionOption -OpenTimeout 5000 -OperationTimeout 15000)
+                    ScriptBlock = { param($tag) $f = Join-Path $env:ProgramData "HUMig\AppUpdates\nachlauf_$tag.txt"; if (Test-Path -LiteralPath $f) { @(Get-Content -LiteralPath $f -Encoding UTF8 | ForEach-Object { "$_" }); Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } else { 'NOCH' } } }
+            if ($cred) { $p.Credential = $cred }
+            $r = $null; try { $r = @(Invoke-Command @p) } catch { continue }
+            if ($r.Count -and "$($r[0])" -ne 'NOCH') { foreach ($l in $r) { if ("$l" -ne 'ENDE') { $out.Add("${pc}|$l") } }; $open.Remove($pc) }
+        }
+        if ($open.Count) { Start-Sleep -Seconds 30 }
+    }
+    foreach ($pc in @($open.Keys)) { $out.Add("${pc}|WARN Nachlauf nach $([int]($MaxSec / 60)) min noch nicht fertig oder PC nicht erreichbar - Ergebnis am PC: %ProgramData%\HUMig\AppUpdates\nachlauf_$($open[$pc]).txt") }
+    return $out.ToArray()
 }
 # Spalte "Ergebnis" im Fenster Zeitplaene: Fehler aus dem letzten Bericht (last.json) gehen vor dem Rueckgabewert der Aufgabe -
 # aeltere Zeitplaene liefern immer 0, auch wenn Programme scheiterten

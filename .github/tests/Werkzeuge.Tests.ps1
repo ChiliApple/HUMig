@@ -360,10 +360,18 @@ Describe 'Softwareverteilung: Nachkontrolle mit Mindestversion und Rechte der Pa
         (Get-SwPackageRiskText ([pscustomobject]@{ SrcPath = $d; ConfigPath = '' }) '') | Should -Match 'laeuft als Administrator'
         (Get-SwPackageRiskText ([pscustomobject]@{ SrcPath = (Join-Path $TestDrive 'gibtsnicht'); ConfigPath = '' }) '') | Should -Be ''
     }
-    It 'Warnung steht in der Rueckfrage und im Protokoll (kein Klick mehr)' {
+    It 'Pruefung nur beim Bestaetigen (kein Get-Acl beim Start im UI-Thread)' {
         ${function:Confirm-SwDeploy}.ToString() | Should -Match 'Get-SwPackageRiskText'
-        ${function:Start-SoftwareDeploy}.ToString() | Should -Match 'Get-SwPackageRiskText'
-        ${function:Start-SwPackageUninstall}.ToString() | Should -Match 'Get-SwPackageRiskText'
+        ${function:Start-SoftwareDeploy}.ToString() | Should -Not -Match 'Get-SwPackageRiskText'
+        ${function:Start-SwPackageUninstall}.ToString() | Should -Not -Match 'Get-SwPackageRiskText'
+    }
+    It 'Ablage auf FAT/exFAT: einmal ein ruhiger Hinweis, danach nichts (statt Warnung bei jedem Vorgang)' {
+        $script:SwFatHintShown = $false
+        Mock Get-SwPathFileSystem { 'exFAT' }
+        Mock Get-SwPathWriteRisk { throw 'darf auf FAT nicht laufen' }
+        $p = [pscustomobject]@{ SrcPath = 'X:\Ablage\x'; ConfigPath = '' }
+        (Get-SwPackageRiskText $p 'X:\Ablage') | Should -Match '^Hinweis: Paketablage auf einem Datentraeger ohne Rechte \(exFAT\)'
+        (Get-SwPackageRiskText $p 'X:\Ablage') | Should -Be ''
     }
 }
 
@@ -426,15 +434,71 @@ Describe 'App-Updates: Abbrechen, Doppelstart, Zeitplan-Status, Zeitlimit' {
         $script:Target = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\AppUpdates-Target.ps1'))
         $script:Worker = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\AppUpdates-Worker.ps1'))
         $script:Auto = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\AppUpdates-Auto.ps1'))
+        # Ersatz fuer den Nachlauf-Text (eigener Prozess): Aufgabenzustand aus HM_T_STATE, gestartete Dienste nach HM_T_SVC,
+        # die Uhr springt beim Zustand Running nach dem ersten Blick ueber die 240 Minuten
+        $script:AfterStubs = @'
+function Get-ScheduledTask { [pscustomobject]@{ State = $env:HM_T_STATE } }
+function Start-Sleep { }
+function Start-Service { param($Name, $ErrorAction) if ($Name -eq "O'Dienst") { throw 'gibt es nicht' }; Add-Content -LiteralPath $env:HM_T_SVC -Value $Name }
+function Unregister-ScheduledTask { }
+$global:T_N = 0
+function Get-Date { $global:T_N++; if ($env:HM_T_STATE -eq 'Running' -and $global:T_N -gt 1) { return [datetime]'2030-01-01' }; return [datetime]'2026-01-01' }
+'@
     }
-    It 'Abbrechen an anderen PCs: erst Signal, dann alle 30 s wiederholen, nach der Wartezeit Verbindung beenden' {
-        $t0 = Get-Date '2026-11-26 01:00:00'
-        Get-HMAuCancelAction $false $null $null $false $t0 20 | Should -Be ''
-        Get-HMAuCancelAction $true $null $null $false $t0 20 | Should -Be 'First'
-        Get-HMAuCancelAction $true $t0 $t0 $false $t0.AddSeconds(10) 20 | Should -Be ''
-        Get-HMAuCancelAction $true $t0 $t0 $false $t0.AddSeconds(31) 20 | Should -Be 'Send'
-        Get-HMAuCancelAction $true $t0 $t0.AddMinutes(19) $false $t0.AddMinutes(20) 20 | Should -Be 'Stop'
-        Get-HMAuCancelAction $true $t0 $t0 $true $t0.AddMinutes(30) 20 | Should -Be ''
+    It 'Abbrechen: Markierung nur an PCs, deren Teilauftrag noch laeuft, danach sofort Stop-Job (Oberflaeche frei)' {
+        $rj = [pscustomobject]@{ ChildJobs = @([pscustomobject]@{ State = 'Running'; Location = 'PC-A' }, [pscustomobject]@{ State = 'Completed'; Location = 'PC-B' }, [pscustomobject]@{ State = 'NotStarted'; Location = 'PC-C' }) }
+        @(Get-HMAuRunningChildren $rj) | Should -Be @('PC-A', 'PC-C')
+        $t = ${function:Invoke-HMAuTarget}.ToString()
+        $t.IndexOf('Send-HMAuRemoteCancel $cancelSent $tag $Credential') | Should -BeLessThan $t.IndexOf('Stop-Job -Job $rj')
+        $t | Should -Not -Match 'CancelGraceMin'
+        ${function:Start-HMAppUpdate}.ToString() | Should -Match 'AfterCancel = \$after'
+    }
+    It 'Nachlauf nach Abbruch: wartet, bis das Programm fertig ist, startet dann die Dienste und raeumt auf' {
+        & $script:LoadFn 'Functions\AppUpdates-Target.ps1' @('New-TAfterRunText')
+        $d = Join-Path $TestDrive 'run_x'; New-Item -ItemType Directory -Path $d -Force | Out-Null
+        [IO.File]::WriteAllLines((Join-Path $d 'log.txt'), [string[]]@('START|A', 'DONE|A|Cli|0|0|0|False'))
+        $m = Join-Path $TestDrive 'cancel_x'; [IO.File]::WriteAllText($m, '')
+        $lg = Join-Path $TestDrive 'nachlauf_x.txt'
+        $txt = New-TAfterRunText 'HUMig_AppUpdates_t' $d @('Spooler', "O'Dienst") $true $m $lg 'HUMig_AppUpdates_Nachlauf_t'
+        @(Get-UnstubbedCommands $txt (@('Get-ScheduledTask', 'Start-Sleep', 'Start-Service', 'Unregister-ScheduledTask', 'Test-Path', 'Get-Content', 'Remove-Item') + $script:SafeCmds)) | Should -BeNullOrEmpty
+        $env:HM_T_STATE = 'Ready'; $env:HM_T_SVC = Join-Path $TestDrive 'svc.txt'
+        try { $null = Invoke-InChild $script:AfterStubs $txt } finally { Remove-Item Env:\HM_T_STATE -ErrorAction SilentlyContinue }
+        $r = @(Get-Content -LiteralPath $lg)
+        $r | Should -Contain 'INFO abgebrochen - 1 Programm(e) fertig, danach nichts mehr gestartet'
+        $r | Should -Contain 'OK Dienst Spooler wieder gestartet'
+        ($r -join ' ') | Should -Match "WARN Dienst O'Dienst nicht startbar"
+        ($r -join ' ') | Should -Match 'beendete Programme werden nach einem Abbruch nicht neu gestartet'
+        Test-Path $d | Should -BeFalse
+        Test-Path $m | Should -BeFalse
+    }
+    It 'Nachlauf: laeuft das Programm noch, bleiben die Dienste gestoppt (Meldung statt Start)' {
+        & $script:LoadFn 'Functions\AppUpdates-Target.ps1' @('New-TAfterRunText')
+        $d = Join-Path $TestDrive 'run_y'; New-Item -ItemType Directory -Path $d -Force | Out-Null
+        $lg = Join-Path $TestDrive 'nachlauf_y.txt'; $svc = Join-Path $TestDrive 'svc_y.txt'
+        $txt = New-TAfterRunText 'HUMig_AppUpdates_t' $d @('Spooler') $false (Join-Path $TestDrive 'cancel_y') $lg 'me'
+        $env:HM_T_STATE = 'Running'; $env:HM_T_SVC = $svc
+        try { $null = Invoke-InChild $script:AfterStubs $txt } finally { Remove-Item Env:\HM_T_STATE -ErrorAction SilentlyContinue }
+        (Get-Content -LiteralPath $lg) -join ' ' | Should -Match 'Dienste bleiben gestoppt: Spooler'
+        Test-Path $svc | Should -BeFalse
+        Test-Path $d | Should -BeTrue
+    }
+    It 'Ziel: nach hartem Abbruch mit noch laufendem Programm Nachlauf statt Dienste-Neustart, sonst Ergebnis fuer HUMig ablegen' {
+        $script:Target | Should -Match ([regex]::Escape('if (-not $loopDone -and $still -eq ''Running'' -and -not $script:TRes) { $script:TStill = @{ Task = $name; Dir = $dir } }'))
+        $i1 = $script:Target.IndexOf('if ($script:TStill) {'); $i2 = $script:Target.IndexOf('try { Register-TAfterRun $script:TStill')
+        $i1 | Should -BeGreaterThan 0; $i2 | Should -BeGreaterThan $i1
+        $script:Target | Should -Match ([regex]::Escape('"nachlauf_$RunTag.txt"'))
+        $script:Target | Should -Match ([regex]::Escape("`$_.Name -like 'cancel_*' -and `$_.LastWriteTime -lt (Get-Date).AddDays(-1)"))
+    }
+    It 'Oberflaeche holt das Nachlauf-Ergebnis im Hintergrund ab' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\UI-AppUpdates.ps1'), [ref]$null, [ref]$null)
+        $as = $ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and "$($x.Left)" -eq '$script:RS_AuAfterCancelPoll' }, $true) | Select-Object -First 1
+        $sb = [scriptblock]::Create($as.Right.Extent.Text.Trim().TrimStart('{').TrimEnd('}'))
+        Mock Invoke-Command { if ($ComputerName -eq 'PC-A') { @('INFO abgebrochen - 1 Programm(e) fertig', 'OK Dienst Spooler wieder gestartet', 'ENDE') } else { throw 'weg' } }
+        Mock Start-Sleep { }
+        $r = @(& $sb @('PC-A|aaaaaaaaaaaaaaaa', 'PC-B|bbbbbbbbbbbbbbbb') $null 1)
+        $r | Should -Contain 'PC-A|OK Dienst Spooler wieder gestartet'
+        $r | Should -Not -Contain 'PC-A|ENDE'
+        ($r -join ' ') | Should -Match 'PC-B\|WARN Nachlauf'
     }
     It 'Abbruch-Signal legt "cancel" nur in die Laufordner dieses Laufs (Kennung), falsche Kennung wird nicht gesendet' {
         $pd = Join-Path $TestDrive 'pd'
@@ -468,10 +532,10 @@ Describe 'App-Updates: Abbrechen, Doppelstart, Zeitplan-Status, Zeitlimit' {
     }
     It 'Ziel-PC: gestoppte Dienste werden auch bei Fehler wieder gestartet (finally ohne Ausgabe)' {
         $i = $script:Target.IndexOf('$rsDone = $false')
-        $f = $script:Target.IndexOf('if (-not $rsDone -and ($rs.Services.Count -or $rs.Apps.Count)) { try { $null = @(Restart-TStopped $rs) } catch { } }')
+        $f = $script:Target.IndexOf('if (-not $rsDone -and ($rs.Services.Count -or $rs.Apps.Count)) { try { $ln = @(Restart-TStopped $rs | ForEach-Object')
         $i | Should -BeGreaterThan 0
         $f | Should -BeGreaterThan $i
-        $script:Target.Substring($f - 40, 40) | Should -Match 'finally \{'
+        $script:Target.Substring($f - 900, 900) | Should -Match '\} finally \{'
     }
     It 'eigener PC: geschlossene Programme werden im finally wieder gestartet' {
         $t = ${function:Start-HMAppUpdate}.ToString()
@@ -481,30 +545,34 @@ Describe 'App-Updates: Abbrechen, Doppelstart, Zeitplan-Status, Zeitlimit' {
         ([regex]::Matches($script:Worker, [regex]::Escape("if (Test-Path -LiteralPath (Join-Path `$Dir 'cancel')) { Write-WLog 'CANCEL'; break }"))).Count | Should -Be 2
         $script:Worker | Should -Not -Match ([regex]::Escape('-not (Test-Path -LiteralPath $Dir)'))
     }
-    It 'Abbruch: Wartezeit nur bei Aktualisieren/Installieren, Markierung je Lauf wird am Ziel geprueft und entfernt' {
-        ${function:Invoke-HMAuTarget}.ToString() | Should -Match ([regex]::Escape("`$graceful = (`$Op -in @('Update', 'Install'))"))
+    It 'Abbruch: nur bei Aktualisieren/Installieren geht die Markierung raus, sie wird am Ziel geprueft und entfernt' {
+        ${function:Invoke-HMAuTarget}.ToString() | Should -Match ([regex]::Escape("if (`$Op -in @('Update', 'Install')) {"))
         $script:Target | Should -Match ([regex]::Escape('if ($RunTag -and (Test-Path -LiteralPath (Join-Path $Base "cancel_$RunTag")))'))
         $script:Target | Should -Match ([regex]::Escape('if ($RunTag) { Remove-Item -LiteralPath (Join-Path $Base "cancel_$RunTag")'))
     }
     It 'Zeitlimit je Programm als SYSTEM (Standard 120 min, Rest laeuft weiter)' {
-        $script:Target | Should -Match ([regex]::Escape('$SysItemMin = if ([int]"0$($Payload.ItemTimeoutMin)" -gt 0)'))
-        $script:Target | Should -Match ([regex]::Escape("} else { 120 }"))
+        $script:Target | Should -Match ([regex]::Escape('$SysItemMin = 120; $simTmp = 0; if ([int]::TryParse("$($Payload.ItemTimeoutMin)", [ref]$simTmp) -and $simTmp -gt 0)'))
         $script:Target | Should -Match ([regex]::Escape('$false 10800 $SysItemMin'))
-        $script:Auto | Should -Match ([regex]::Escape('$itemMin = if ([int]"0$($cfg.ItemTimeoutMin)" -gt 0) { [int]"$($cfg.ItemTimeoutMin)" } else { 120 }'))
+        $script:Auto | Should -Match ([regex]::Escape('$itemMin = 120; $im = 0; if ([int]::TryParse("$($cfg.ItemTimeoutMin)", [ref]$im) -and $im -gt 0)'))
+        # "-5" oder Text werfen nicht, sondern ergeben den Standardwert
+        foreach ($v in @('-5', 'abc', '', $null)) { $im = 0; $x = 120; if ([int]::TryParse("$v", [ref]$im) -and $im -gt 0) { $x = $im }; $x | Should -Be 120 }
+    }
+    It 'Zeitplan: eine nicht lesbare Quelle ist ein Hinweis, Fehler nur ohne jede lesbare Quelle' {
+        $script:Auto | Should -Match ([regex]::Escape('} catch { $srcBad += "$src"; Write-ALog "Hinweis: Quelle ${src} nicht lesbar'))
+        $script:Auto | Should -Match ([regex]::Escape('if ($srcBad.Count -and -not $srcOk) { $err++'))
     }
     It 'Doppelstart: Rueckfrage nur, wenn die Vorpruefung eines frueheren Klicks laeuft' {
-        $script:AsyncBusy = @{ 'Au' = 0 }; $script:AsyncBusyText = @{ 'Au' = '' }
+        $global:AuPreCheck = 0; $script:AuPreCheck = 0
         Get-HMAuBusyText | Should -Be ''
-        $script:AsyncBusy = @{ 'Au' = 1 }; $script:AsyncBusyText = @{ 'Au' = 'Laufende Programme pruefen ...' }
+        $global:AuPreCheck = 1; $script:AuPreCheck = 1
         Get-HMAuBusyText | Should -Match 'Pruefung der laufenden Programme eines frueheren Klicks'
-        $script:AsyncBusy = @{ 'Au' = 1 }; $script:AsyncBusyText = @{ 'Au' = 'Laufende Programme an den PCs pruefen ...' }
-        Get-HMAuBusyText | Should -Not -Be ''
-        # WinGet pruefen oder Quelle hinzufuegen: keine Rueckfrage
-        $script:AsyncBusy = @{ 'Au' = 1 }; $script:AsyncBusyText = @{ 'Au' = 'WinGet wird geprueft ...' }
-        Get-HMAuBusyText | Should -Be ''
-        $script:AsyncBusy = @{ 'Au' = 2 }; $script:AsyncBusyText = @{}
+        # andere Arbeiten mit der Kennung Au (WinGet pruefen, Quellen) zaehlen nicht
+        $global:AuPreCheck = 0; $script:AuPreCheck = 0; $script:AsyncBusy = @{ 'Au' = 3 }; $script:AsyncBusyText = @{ 'Au' = 'Laufende Programme pruefen ...' }
         Get-HMAuBusyText | Should -Be ''
         $ui = [System.IO.File]::ReadAllText((Join-Path $script:Root 'Functions\UI-AppUpdates.ps1'))
+        # Zaehler: zweimal erhoeht (lokal, andere PCs), zweimal im OnComplete gesenkt
+        ([regex]::Matches($ui, [regex]::Escape('$script:AuPreCheck = [int]$script:AuPreCheck + 1'))).Count | Should -Be 2
+        ([regex]::Matches($ui, [regex]::Escape('$script:AuPreCheck = [Math]::Max(0, [int]$script:AuPreCheck - 1)'))).Count | Should -Be 2
         # Rueckfrage erst, wenn wirklich etwas zu aktualisieren ist
         $ui.IndexOf("if (`$busy -and -not (Confirm-Action") | Should -BeGreaterThan $ui.IndexOf('if (-not $byPc.Count) { return }')
     }
@@ -682,6 +750,17 @@ Describe 'Katalog-Editor: eigene Eintraege sicher speichern' {
         [IO.File]::ReadAllText("$($script:P).bak") | Should -Match 'App_Gut2'
         Test-HMAeLocalFile $script:P | Should -Be 'OK'
     }
+    It 'gesperrte Datei: "Gesperrt", nicht "beschaedigt", nichts gespeichert, keine Rueckfrage' {
+        [IO.File]::WriteAllText($script:P, '{"Apps":[{"Id":"App_A"}]}')
+        $fs = [System.IO.File]::Open($script:P, 'Open', 'ReadWrite', 'None')
+        try {
+            Test-HMAeLocalFile $script:P | Should -Be 'Gesperrt'
+            $global:T_Answer = 'Yes'
+            { Write-HMAeLocal @([pscustomobject]@{ Id = 'App_Neu' }) } | Should -Throw '*nicht lesbar (in Benutzung oder keine Rechte)*'
+        } finally { $fs.Dispose() }
+        [IO.File]::ReadAllText($script:P) | Should -Match 'App_A'
+        @(Get-ChildItem -LiteralPath $global:ConfigDir -Filter 'apps.json.defekt-*').Count | Should -Be 0
+    }
     It 'Zustand der Datei: Fehlt, OK, Defekt (auch leer)' {
         Test-HMAeLocalFile (Join-Path $global:ConfigDir 'gibtsnicht.json') | Should -Be 'Fehlt'
         [IO.File]::WriteAllText($script:P, '   '); Test-HMAeLocalFile $script:P | Should -Be 'Defekt'
@@ -697,10 +776,11 @@ Describe 'Status-Reiter: nicht lesbare Quellen und Profile ohne Lauf' {
         $s.Warnings[0].Text | Should -Be 'Status: App-Updates-Verlauf nicht lesbar - die Angaben dazu fehlen hier'
         @((Get-HMStatusData -Now ([datetime]'2026-11-26 10:00')).Warnings).Count | Should -Be 0
     }
-    It 'Server-Backup-Profil ohne jeden Lauf ergibt einen Hinweis' {
+    It 'Server-Backup-Profil ohne jeden Lauf ergibt einen Hinweis, keine Warnung' {
         $p = [pscustomobject]@{ Name = 'Neu'; DiskPrefix = 'HUMIG-NEU'; Disks = 2; WarnDays = 14; ArchiveDisks = 0; ArchiveDays = 30 }
         $s = Get-HMStatusData -SbProfiles @($p) -SbHistory @() -Now ([datetime]'2026-11-26 10:00')
-        @($s.Warnings | Where-Object { $_.Text -match "Server-Backup 'Neu': noch kein Lauf" }).Count | Should -Be 1
+        @($s.Notes | Where-Object { $_.Text -match "Server-Backup 'Neu': noch kein Lauf" -and $_.Level -eq 'Info' }).Count | Should -Be 1
+        @($s.Warnings | Where-Object { $_.Text -match 'noch kein Lauf' }).Count | Should -Be 0
     }
     It 'JSON-Datei pruefen: fehlt = lesbar, leer oder beschaedigt = nicht lesbar' {
         Test-HMStatusJsonFile '' | Should -BeTrue

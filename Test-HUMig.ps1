@@ -274,12 +274,22 @@ T 'App-Updates: Ausnahmen und WinGet-Status (v2.0.58)' {
     if ($s.Ready) { "WinGet $($s.WinGet), Modul $($s.Module)" } else { "nicht eingerichtet: $($s.Problem)" }
 }
 T 'App-Updates: Ziel-PC-Skript lokal (Zeitplan lesen, v2.0.64)' {
-    . (Join-Path $root 'Functions\AppUpdates-Engine.ps1')
-    $lines = New-Object System.Collections.ArrayList
-    $r = Invoke-HMAuTarget @($env:COMPUTERNAME) 'ScheduleGet' @{} $null { param($pc, $l) [void]$lines.Add($l) }
-    $v = $r["$env:COMPUTERNAME".ToUpper()]
-    if (-not $v -or -not $v.PSObject.Properties['Exists']) { throw "kein Ergebnis: $(@($v.Errors) -join '; ')" }
-    if ($v.Exists) { "Zeitplan vorhanden: $($v.When), naechster Lauf $($v.Next)" } else { 'kein Zeitplan (Ziel-Skript laeuft)' }
+    # Nur pruefen, nichts am PC aendern: das Ziel-Skript arbeitet hier in einem Ersatzordner (statt ProgramData\HUMig\AppUpdates),
+    # ohne Zeitplan-Skript (keine Aktualisierung der installierten auto.ps1) und ohne Absicherung von ProgramData\HUMig
+    $txt = [System.IO.File]::ReadAllText((Join-Path $root 'Functions\AppUpdates-Target.ps1')) -replace '(?m)^#Requires.*$', ''
+    $tmpBase = Join-Path $env:TEMP ("HUMig_Selbsttest_AU_{0}" -f [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $baseLine = "`$Base = Join-Path `$env:ProgramData 'HUMig\AppUpdates'"
+    $protLine = 'if (Get-Command Protect-HMDataDir -ErrorAction SilentlyContinue) {'
+    if (-not $txt.Contains($baseLine) -or -not $txt.Contains($protLine)) { throw 'Ziel-Skript: Zeile fuer den Ablageordner bzw. die Absicherung nicht gefunden - Selbsttest anpassen' }
+    $txt = $txt.Replace($baseLine, "`$Base = '$($tmpBase -replace "'", "''")'").Replace($protLine, 'if ($false) {')
+    try {
+        $out = @(& ([scriptblock]::Create($txt)) 'ScheduleGet' @{} '' '')
+        $rr = @($out | Where-Object { $_ -and $_.PSObject.Properties['HMAu'] -and "$($_.HMAu)" -eq 'R' })[0]
+        if (-not $rr) { throw "kein Ergebnis vom Ziel-Skript: $(@($out | ForEach-Object { "$($_.V)" }) -join '; ')" }
+        $v = "$($rr.J)" | ConvertFrom-Json
+        if (-not $v.PSObject.Properties['Exists']) { throw "kein Ergebnis: $(@($v.Errors) -join '; ')" }
+        if ($v.Exists) { "Zeitplan vorhanden: $($v.When), naechster Lauf $($v.Next) (nur gelesen)" } else { 'kein Zeitplan (Ziel-Skript laeuft, nur gelesen)' }
+    } finally { Remove-Item -LiteralPath $tmpBase -Recurse -Force -ErrorAction SilentlyContinue }
 }
 T 'Zeitplan: Auswerfen lehnt Systemplatte ab (v2.0.57)' {
     $d = Get-HMDriveDisk $env:SystemDrive

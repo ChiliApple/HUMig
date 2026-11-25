@@ -56,14 +56,27 @@ function Get-SwPathWriteRisk([string[]]$Paths) {
     }
     return $out
 }
-# Hinweistext fuer ein Paket (Ablage, Paketordner/-datei, Einstellungsdatei); '' = in Ordnung
+# Dateisystem des Pfads (nur Laufwerksbuchstaben; Freigaben und Unbekanntes: '')
+function Get-SwPathFileSystem([string]$Path) {
+    if ("$Path" -notmatch '^([A-Za-z]):') { return '' }
+    try { return "$(([System.IO.DriveInfo]::new($Matches[1])).DriveFormat)" } catch { return '' }
+}
+# Hinweistext fuer ein Paket (Ablage, Paketordner/-datei, Einstellungsdatei); '' = in Ordnung.
+# Rueckgabe beginnt mit "ACHTUNG:" (breite Gruppen duerfen schreiben, Rechte nicht pruefbar) oder "Hinweis:" (FAT/exFAT ohne
+# Rechte - nur einmal je Sitzung, danach ''). Laeuft nur beim Bestaetigen (UI), nicht bei jedem Start.
 function Get-SwPackageRiskText($Package, [string]$Root) {
     if (-not $Package) { return '' }
-    $r = @(Get-SwPathWriteRisk @($Root, "$($Package.SrcPath)", "$($Package.ConfigPath)"))
+    $paths = @(@($Root, "$($Package.SrcPath)", "$($Package.ConfigPath)") | Where-Object { "$_".Trim() })
+    $fat = @($paths | ForEach-Object { Get-SwPathFileSystem $_ } | Where-Object { $_ -match '^(FAT|FAT32|exFAT)$' } | Select-Object -Unique)
+    if ($fat.Count) {
+        if ($script:SwFatHintShown) { return '' }
+        $script:SwFatHintShown = $true
+        return "Hinweis: Paketablage auf einem Datentraeger ohne Rechte ($($fat -join ', ')) - wer ihn erreicht, kann Pakete aendern; was dort liegt, laeuft als Administrator auf den Ziel-PCs (Hinweis nur einmal je Sitzung)"
+    }
+    $r = @(Get-SwPathWriteRisk $paths)
     if (-not $r.Count) { return '' }
-    return "Paketablage fuer normale Benutzer beschreibbar oder nicht pruefbar - was dort liegt, laeuft als Administrator auf den Ziel-PCs: $($r -join '; ')"
+    return "ACHTUNG: Paketablage fuer normale Benutzer beschreibbar oder nicht pruefbar - was dort liegt, laeuft als Administrator auf den Ziel-PCs: $($r -join '; ')"
 }
-
 # Installer analysieren: MSI-Eigenschaften (Windows Installer COM, nur lesend) bzw. EXE-Framework (Signaturen im Stub)
 $script:SwInfoCache = @{}
 function Get-SwInstallerInfo([string]$Path) {
@@ -383,7 +396,7 @@ function Confirm-SwDeploy($Package, [string[]]$Hosts, [bool]$Force) {
     $ts = $null; try { $ts = Get-SwTestState $Package } catch { }
     if ($ts -and $ts.State -ne 'OK') { $extra += "`n  Sandbox:   $($ts.Text)" }
     $rk = ''; try { $rk = Get-SwPackageRiskText $Package (Get-SwFolder) } catch { }
-    if ($rk) { $extra += "`n  ACHTUNG:   $rk" }
+    if ($rk) { $extra += "`n  $rk" }
     return (Confirm-Action "Paket '$($s.Name)' installieren auf: $ziel`n`n  Befehl:    $cmd`n  Erkennung: $det$(if ($Force) { '  -> trotzdem installieren' } else { '  -> installierte werden uebersprungen' })`n  Erfolg:    ExitCode $($s.SuccessCodes) (3010/1641 = Neustart noetig)`n  Groesse:   $($Package.SizeMB) MB$(if ($Package.IsDir) { ' (ganzer Ordner)' })$extra`n`nFortfahren?" 'Softwareverteilung')
 }
 
@@ -691,8 +704,6 @@ function Start-SoftwareDeploy {
         }
     }
     Out-Console "Softwareverteilung '$($s.Name)' auf $($Hosts.Count) PC(s)$(if ($Label) { " [$Label]" })$(if ($Force) { ' - auch wenn installiert' })$(if ($depNames.Count) { " - vorher: $($depNames -join ', ')" }) ..." 'Info'
-    $rk = ''; try { $rk = Get-SwPackageRiskText $Package (Get-SwFolder) } catch { }
-    if ($rk) { Out-Console "  ACHTUNG: $rk" 'Warning' }
     $jobSec = [int][Math]::Max(1800, ([Math]::Ceiling($Hosts.Count / 8.0) * $perHost))
     Invoke-AsyncCommand -ScriptBlock {
         param($hostStr, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $workerText, $sizeMB, $timeoutMin, $deadlineSec, $cred)
@@ -880,8 +891,6 @@ function Start-SwPackageUninstall {
     $job = Get-SwUninstallJob -Package $Package
     if (-not $job) { Out-Console "Deinstallation '$($Package.Settings.Name)': kein Deinstallationsbefehl hinterlegt" 'Error'; return }
     Out-Console "Deinstallation '$($Package.Settings.Name)' auf $($Hosts.Count) PC(s) ..." 'Info'
-    $rk = ''; try { $rk = Get-SwPackageRiskText $Package (Get-SwFolder) } catch { }
-    if ($rk) { Out-Console "  ACHTUNG: $rk" 'Warning' }
     Start-SwParallel -Hosts $Hosts -ScriptText $job.ScriptText -ArgList @($job.ArgsJson, $job.TimeoutMin) -OpMin ($job.TimeoutMin + 2) `
         -State @{ Hosts = $Hosts; Package = $Package } -OnComplete {
         param($result, $st)

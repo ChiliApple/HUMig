@@ -136,7 +136,7 @@ try {
     try { $lf = Join-Path $Dir 'log.txt'; if ((Get-Item -LiteralPath $lf -ErrorAction Stop).Length -gt 400KB) { Get-Content -LiteralPath $lf -Tail 2000 | Set-Content -LiteralPath $lf -Encoding UTF8 } } catch { }
     $cfg = Get-Content -LiteralPath (Join-Path $Dir 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     # Zeitlimit je Programm (Minuten), ueberschreibbar in config.json (ItemTimeoutMin)
-    $itemMin = if ([int]"0$($cfg.ItemTimeoutMin)" -gt 0) { [int]"$($cfg.ItemTimeoutMin)" } else { 120 }
+    $itemMin = 120; $im = 0; if ([int]::TryParse("$($cfg.ItemTimeoutMin)", [ref]$im) -and $im -gt 0) { $itemMin = $im }
     try { Import-Module Microsoft.WinGet.Client -ErrorAction Stop } catch { Import-Module (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\Microsoft.WinGet.Client') -ErrorAction Stop }
     $wg = Get-AWingetExe
     if (-not $wg) { throw 'winget.exe nicht gefunden' }
@@ -147,6 +147,7 @@ try {
     foreach ($d in @(@($vcl | Select-Object -First 1 | ForEach-Object { $_.FullName }) + @(Split-Path $wg -Parent))) { if ($d -and "$env:PATH" -notlike "*$d*") { $env:PATH = "$d;$env:PATH" } }
     $seen = @{}
     $todo = @()
+    $srcOk = 0; $srcBad = @()
     foreach ($src in @($cfg.Sources | Where-Object { $_ })) {
         try {
             foreach ($p in @(Get-WinGetPackage -Source "$src" -ErrorAction Stop | Where-Object { $_.IsUpdateAvailable })) {
@@ -158,8 +159,11 @@ try {
                 if ($ex) { $excl++; Write-ALog "Ausnahme: $($p.Name) ($($ex.Pattern))"; continue }
                 $todo += [pscustomobject]@{ Id = "$($p.Id)"; Name = "$($p.Name)"; From = "$($p.InstalledVersion)"; To = "$(@($p.AvailableVersions)[0])"; Source = "$src" }
             }
-        } catch { $err++; Write-ALog "Quelle ${src}: $($_.Exception.Message)" }
+            $srcOk++
+        } catch { $srcBad += "$src"; Write-ALog "Hinweis: Quelle ${src} nicht lesbar: $($_.Exception.Message)" }
     }
+    # eine nicht lesbare Quelle (z. B. der Store als SYSTEM) ist nur ein Hinweis; Fehler nur, wenn gar keine Quelle lesbar war
+    if ($srcBad.Count -and -not $srcOk) { $err++; Write-ALog "FEHLER: keine Quelle lesbar ($($srcBad -join ', '))" }
     Write-ALog "$found Update(s), $excl Ausnahme(n), $($todo.Count) zu aktualisieren"
     $i = 0
     foreach ($t in $todo) {

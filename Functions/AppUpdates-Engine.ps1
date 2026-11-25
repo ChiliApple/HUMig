@@ -427,19 +427,13 @@ function Test-HMAuLocal([string]$Computer) {
     $c = "$Computer".Trim().ToUpper()
     return (-not $c -or $c -in @('.', 'LOCALHOST', '127.0.0.1', "$env:COMPUTERNAME".ToUpper()) -or $c -like "$("$env:COMPUTERNAME".ToUpper()).*")
 }
-# Abbruch an entfernten PCs: was ist jetzt zu tun? 'First' (erstes Signal), 'Send' (Signal wiederholen, alle 30 s),
-# 'Stop' (nach der Wartezeit Verbindung beenden), '' (nichts)
-function Get-HMAuCancelAction([bool]$Cancel, $CancelAt, $LastSend, [bool]$Stopped, [datetime]$Now, [int]$GraceMin = 20) {
-    if (-not $Cancel -or $Stopped) { return '' }
-    if (-not $CancelAt) { return 'First' }
-    if (($Now - [datetime]$CancelAt).TotalMinutes -ge $GraceMin) { return 'Stop' }
-    if (-not $LastSend -or ($Now - [datetime]$LastSend).TotalSeconds -ge 30) { return 'Send' }
-    return ''
-}
-# Datei "cancel" in die Laufordner dieses Laufs (run_<Kennung>_*) an den PCs legen - kurze eigene Verbindung, Fehler egal
+# PCs, deren Teilauftrag noch laeuft (nur an diese geht beim Abbrechen die Markierung)
+function Get-HMAuRunningChildren($RemoteJob) {
+    return @(@($RemoteJob.ChildJobs) | Where-Object { "$($_.State)" -in @('Running', 'NotStarted') } | ForEach-Object { "$($_.Location)" } | Where-Object { $_ })
+}# Datei "cancel" in die Laufordner dieses Laufs (run_<Kennung>_*) an den PCs legen - kurze eigene Verbindung, Fehler egal
 function Send-HMAuRemoteCancel([string[]]$Computers, [string]$Tag, $Credential = $null) {
     if (-not @($Computers).Count -or "$Tag" -notmatch '^[0-9a-f]{8,32}$') { return }
-    $p = @{ ComputerName = @($Computers); ArgumentList = @($Tag); ErrorAction = 'SilentlyContinue'; SessionOption = (New-PSSessionOption -OpenTimeout 15000 -OperationTimeout 30000)
+    $p = @{ ComputerName = @($Computers); ArgumentList = @($Tag); ErrorAction = 'SilentlyContinue'; SessionOption = (New-PSSessionOption -OpenTimeout 5000 -OperationTimeout 15000)
             ScriptBlock = {
                 param($t)
                 $b = Join-Path $env:ProgramData 'HUMig\AppUpdates'
@@ -450,7 +444,7 @@ function Send-HMAuRemoteCancel([string[]]$Computers, [string]$Tag, $Credential =
     if ($Credential) { $p.Credential = $Credential }
     try { Invoke-Command @p | Out-Null } catch { }
 }
-function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payload, $Credential = $null, [scriptblock]$OnLine = $null, $Job = $null, [scriptblock]$OnResult = $null, [int]$Throttle = 16, [int]$CancelGraceMin = 20) {
+function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payload, $Credential = $null, [scriptblock]$OnLine = $null, $Job = $null, [scriptblock]$OnResult = $null, [int]$Throttle = 16) {
     $txt = [System.IO.File]::ReadAllText($script:HMAuTargetFile) -replace '(?m)^#Requires.*$', ''
     # Schutz-Funktion direkt nach dem param()-Block einfuegen (param muss am Anfang stehen)
     $pi = $txt.IndexOf('param([string]$Op')
@@ -494,32 +488,31 @@ function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payloa
         catch { if (-not $out.ContainsKey($lk)) { $out[$lk] = [pscustomobject]@{ Errors = @("Fehler: $($_.Exception.Message)") } } }
     }
     if ($rj) {
-        $stopped = $false; $cancelAt = $null; $lastSend = $null
+        $stopped = $false; $cancelSent = @()
         while ($true) {
             $fin = ("$($rj.State)" -notin @('Running', 'NotStarted'))
             foreach ($o in @(Receive-Job -Job $rj -ErrorAction SilentlyContinue)) { & $handle $o "$($o.PSComputerName)".ToUpper() }
             if ($fin) { break }
-            # Abbrechen wie versprochen "nach dem laufenden Programm": Datei "cancel" in die Laufordner an den PCs legen (alle 30 s
-            # wiederholt, falls dort gerade eine neue Aufgabe beginnt). Erst nach $CancelGraceMin Minuten die Verbindung hart beenden.
-            # nur Aktualisieren/Installieren warten das laufende Programm ab; Suchen, Zeitplan und Pruefen brechen wie bisher sofort ab
-            $graceful = ($Op -in @('Update', 'Install'))
-            $act = Get-HMAuCancelAction $(if ($Job) { [bool]$Job.Cancel } else { $false }) $cancelAt $lastSend $stopped (Get-Date) $(if ($graceful) { $CancelGraceMin } else { 0 })
-            if (-not $graceful -and $act) { $act = 'Stop' }
-            if ($act -eq 'Send' -or $act -eq 'First') {
-                if (-not $cancelAt) { $cancelAt = Get-Date; if ($OnLine) { foreach ($c in $rem) { & $OnLine $c.ToUpper() 'Abbruch angefordert - das laufende Programm wird noch fertig, danach startet nichts mehr' } } }
-                $lastSend = Get-Date
-                Send-HMAuRemoteCancel $rem $tag $Credential
-            } elseif ($act -eq 'Stop') { Stop-Job -Job $rj -ErrorAction SilentlyContinue; $stopped = $true }
+            if (-not $stopped -and $Job -and $Job.Cancel) {
+                # Aktualisieren/Installieren: zuerst die Abbruch-Markierung an die PCs, die noch laufen - dort wird das laufende Programm
+                # fertig, danach startet nichts mehr; gestoppte Dienste startet der PC danach selbst wieder (Nachlauf-Aufgabe).
+                # Dann wie bisher sofort die Verbindung beenden, damit die Oberflaeche frei ist.
+                if ($Op -in @('Update', 'Install')) {
+                    $cancelSent = @(Get-HMAuRunningChildren $rj)
+                    if ($cancelSent.Count) { Send-HMAuRemoteCancel $cancelSent $tag $Credential }
+                }
+                Stop-Job -Job $rj -ErrorAction SilentlyContinue; $stopped = $true
+            }
             Start-Sleep -Milliseconds 700
-        }
-        foreach ($cj in @($rj.ChildJobs)) {
+        }        foreach ($cj in @($rj.ChildJobs)) {
             $k = "$($cj.Location)".ToUpper()
             if ($out.ContainsKey($k)) { continue }
             $why = ''
             try { $why = "$($cj.JobStateInfo.Reason.Message)" } catch { }
             if (-not $why) { try { $why = "$(@($cj.Error)[0])" } catch { } }
-            $txt2 = if ($stopped) { 'abgebrochen' } elseif ($why) { "nicht erreichbar: $($why.Trim())" } else { "Verbindung endete ohne Ergebnis (Zustand $($cj.State)) - eine am PC gestartete Aufgabe laeuft dort weiter (ggf. UAC-Abfrage beim Benutzer); Ergebnisse spaeter mit 'Updates suchen' pruefen" }
-            $out[$k] = [pscustomobject]@{ Errors = @($txt2) }
+            $sent = (@($cancelSent | ForEach-Object { "$_".ToUpper() }) -contains $k)
+            $txt2 = if ($stopped -and $sent) { 'abgebrochen - das laufende Programm wird am PC noch fertig, danach startet dort nichts mehr; gestoppte Dienste startet der PC danach selbst wieder' } elseif ($stopped) { 'abgebrochen' } elseif ($why) { "nicht erreichbar: $($why.Trim())" } else { "Verbindung endete ohne Ergebnis (Zustand $($cj.State)) - eine am PC gestartete Aufgabe laeuft dort weiter (ggf. UAC-Abfrage beim Benutzer); Ergebnisse spaeter mit 'Updates suchen' pruefen" }
+            $out[$k] = [pscustomobject]@{ Errors = @($txt2); CancelSent = $sent; RunTag = $(if ($sent) { $tag } else { '' }) }
         }
         Remove-Job -Job $rj -Force -ErrorAction SilentlyContinue
     }
@@ -854,7 +847,9 @@ function Start-HMAppUpdate([hashtable]$Ctx, $Job) {
     $skip = @($res | Where-Object { $_.Status -eq 'Skipped' }).Count
     $reb = @($res | Where-Object { $_.Reboot }).Count
     Write-HMLog $Job "App-Updates fertig: $ok $verb, $err Fehler, $skip uebersprungen$(if ($reb) { ", $reb brauchen einen Neustart" })" $(if ($err) { 'Warning' } else { 'Success' })
-    $Job.Result = [pscustomobject]@{ Status = $(if ($Job.Cancel) { 'Cancelled' } elseif ($err) { 'Warning' } else { 'OK' }); Items = $res; Reboot = ($reb -gt 0) }
+    # PCs, an die beim Abbrechen die Markierung ging: dort laeuft ein Nachlauf, die Oberflaeche holt dessen Ergebnis spaeter ab
+    $after = @(foreach ($k in @($r.Keys)) { if ($r[$k] -and $r[$k].PSObject.Properties['CancelSent'] -and $r[$k].CancelSent) { [pscustomobject]@{ Computer = $k; RunTag = "$($r[$k].RunTag)" } } })
+    $Job.Result = [pscustomobject]@{ Status = $(if ($Job.Cancel) { 'Cancelled' } elseif ($err) { 'Warning' } else { 'OK' }); Items = $res; Reboot = ($reb -gt 0); AfterCancel = $after }
 }
 
 # ----------------------------------------------------------------------------
