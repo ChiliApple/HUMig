@@ -589,7 +589,9 @@ try {
             $pf = Join-Path $Base 'auto\progress.json'
             if ($o.Running -and (Test-Path -LiteralPath $pf)) { try { $g = Get-Content -LiteralPath $pf -Raw -Encoding UTF8 | ConvertFrom-Json; $o.Progress = "$($g.Done)/$($g.Total)$(if ($g.Current) { ": $($g.Current)" }) ($($g.Ok) ok, $($g.Err) Fehler)" } catch { } }
             $lg = Join-Path $Base 'auto\log.txt'
-            if (Test-Path -LiteralPath $lg) { try { $o.Log = @(Get-Content -LiteralPath $lg -Tail 80 -Encoding UTF8) } catch { } }
+            # als reine Zeichenketten: Zeilen aus Get-Content tragen Zusatz-Eigenschaften (PSPath, PSDrive, PSProvider ...),
+            # ConvertTo-Json -Depth 8 (Out-R) haengt damit praktisch endlos
+            if (Test-Path -LiteralPath $lg) { try { $o.Log = @(Get-Content -LiteralPath $lg -Tail 80 -Encoding UTF8 | ForEach-Object { "$_" }) } catch { } }
             $hf = Join-Path $Base 'auto\history.json'
             if (Test-Path -LiteralPath $hf) { try { $o.History = @(Get-Content -LiteralPath $hf -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { $_ } | Select-Object -Last 200) } catch { } }
             Out-R ([pscustomobject]$o)

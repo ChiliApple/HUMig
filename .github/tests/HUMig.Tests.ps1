@@ -265,6 +265,29 @@ Describe 'App-Updates (WinGet)' {
         $tw | Should -Match 'EncodedCommand'
         $tw | Should -Not -Match '(?m)^\s*(Import-Module|Repair-WinGetPackageManager)\b'
     }
+    It 'Zeitplan lesen (ScheduleGet): Protokoll des Zeitplans wird schnell zu JSON, Zeilen als reine Zeichenketten' -Skip:([Environment]::OSVersion.Platform -ne 'Win32NT') {
+        # Ziel-Skript in eigenem Prozess mit Zeitgrenze (haengt es, wird der Prozess beendet); ProgramData zeigt in den Testordner
+        $pd = Join-Path $TestDrive 'PD'
+        $ad = Join-Path $pd 'HUMig\AppUpdates\auto'
+        New-Item -ItemType Directory -Path $ad -Force | Out-Null
+        $want = @(1..100 | ForEach-Object { '25.11.2026 03:{0:00} Programm {1}: aktualisiert (Ä Ö Ü ß)' -f ($_ % 60), $_ })
+        [System.IO.File]::WriteAllLines((Join-Path $ad 'log.txt'), [string[]]$want, (New-Object System.Text.UTF8Encoding $true))
+        $tg = Join-Path $script:Root 'Functions\AppUpdates-Target.ps1'
+        $sc = "`$env:ProgramData = '$($pd -replace "'", "''")'`n" +
+        "foreach (`$o in @(& '$($tg -replace "'", "''")' -Op 'ScheduleGet' -Payload @{})) { if (`"`$(`$o.HMAu)`" -eq 'R') { [Console]::Out.WriteLine('R|' + `$o.J) } }"
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $r = Invoke-HMAuIsolated $sc 60
+        $sw.Stop()
+        $r.TimedOut | Should -BeFalse -Because "nach $([int]$sw.Elapsed.TotalSeconds) s abgebrochen"
+        $r.Ok | Should -BeTrue -Because "$($r.Error)"
+        $j = $r.Result | ConvertFrom-Json
+        @($j.Errors).Count | Should -Be 0
+        $log = @($j.Log)
+        $log.Count | Should -Be 80
+        foreach ($l in $log) { $l | Should -BeOfType [string] }
+        $log[79] | Should -Be $want[99]
+        $log[0] | Should -Be $want[20]
+    }
 }
 
 Describe 'Migration: Robocopy-Auswertung' {
@@ -1461,39 +1484,43 @@ Describe 'HUPilot: Ordner finden und Hashes uebergeben' {
         $f = Join-Path $TestDrive 'Risk\HUPilot\Setup\HUPilot-Setup.ps1'
         New-Item -ItemType Directory -Path (Split-Path $f -Parent) -Force | Out-Null
         Set-Content -LiteralPath $f -Value '#'
+        # Rechte direkt ueber .NET setzen: Set-Acl verlangt bei geschuetzten Rechten ohne Adminrechte SeSecurityPrivilege und
+        # scheitert dann ohne Abbruch (Test liefe mit falschen Rechten weiter). PowerShell 7 hat dafuer nur die Erweiterungsmethode
+        $put = { param($p, $a) $i = Get-Item -LiteralPath $p; if ($i.PSObject.Methods['SetAccessControl']) { $i.SetAccessControl($a) } else { [System.IO.FileSystemAclExtensions]::SetAccessControl($i, $a) } }
         # nur eigenes Konto, SYSTEM und Administratoren (Vererbung aus)
         $acl = Get-Acl -LiteralPath $f
         $acl.SetAccessRuleProtection($true, $false)
         foreach ($sid in @('S-1-5-18', 'S-1-5-32-544', ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value))) {
             $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier($sid)), 'FullControl', 'Allow')))
         }
-        Set-Acl -LiteralPath $f -AclObject $acl
+        & $put $f $acl
         $d = Get-Acl -LiteralPath (Split-Path $f -Parent)
         $d.SetAccessRuleProtection($true, $false)
         foreach ($sid in @('S-1-5-18', 'S-1-5-32-544', ([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value))) {
             $d.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier($sid)), 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
         }
-        Set-Acl -LiteralPath (Split-Path $f -Parent) -AclObject $d
+        & $put (Split-Path $f -Parent) $d
         $rk = Get-HMHUPilotRisk $f
-        @($rk | Where-Object { $_ -match 'duerfen|nicht lesbar' }).Count | Should -Be 0
+        # nur Datei und Ordner bewerten: die Rechte der Ordner darueber (Profil, TEMP) haengen vom PC ab
+        @($rk | Where-Object { $_ -match 'duerfen (die Datei|den Ordner) aendern|nicht lesbar' }).Count | Should -Be 0
         foreach ($x in $rk) { $x | Should -BeOfType [string] }
         # Benutzer duerfen lesen: keine Warnung
         $acl = Get-Acl -LiteralPath $f
         $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'ReadAndExecute', 'Allow')))
-        Set-Acl -LiteralPath $f -AclObject $acl
+        & $put $f $acl
         $rk = Get-HMHUPilotRisk $f
         @($rk | Where-Object { $_ -match 'normale Benutzer' }).Count | Should -Be 0
         # Benutzer duerfen aendern: Warnung
         $acl = Get-Acl -LiteralPath $f
         $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'Modify', 'Allow')))
-        Set-Acl -LiteralPath $f -AclObject $acl
+        & $put $f $acl
         $rk = Get-HMHUPilotRisk $f
         @($rk | Where-Object { $_ -match 'normale Benutzer duerfen die Datei' }).Count | Should -Be 1
         # anderes einzelnes Konto mit Schreibrecht (z. B. Ordner im Profil eines Standardbenutzers): ebenfalls Warnung
         $f2 = Join-Path (Split-Path $f -Parent) 'B.ps1'; Set-Content -LiteralPath $f2 -Value '#'
         $a2 = Get-Acl -LiteralPath $f2
         $a2.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule((New-Object System.Security.Principal.SecurityIdentifier('S-1-5-21-1-2-3-1001')), 'Modify', 'Allow')))
-        Set-Acl -LiteralPath $f2 -AclObject $a2
+        & $put $f2 $a2
         $rk = Get-HMHUPilotRisk $f2
         @($rk | Where-Object { $_ -match 'duerfen die Datei' }).Count | Should -Be 1
     }
@@ -1780,6 +1807,22 @@ Describe 'Handy-Fernbedienung: Push-Meldungen (ohne Inhalt)' {
         (@($rq2 | Where-Object { $_.Url -like '*apple*' })[0].Auth) | Should -Be (@($rq | Where-Object { $_.Url -like '*apple*' })[0].Auth)
         $none = Get-HMRemotePushRequests ([hashtable]::Synchronized(@{})) $v
         $none.Count | Should -Be 0
+    }
+    It 'VAPID: neuer Schluessel ist fluechtig, mehrfach anlegbar, nichts im Schluesselspeicher des Kontos (Windows)' -Skip:([Environment]::OSVersion.Platform -ne 'Win32NT') {
+        # ein gespeicherter Schluessel ohne Namen im Konto liess jedes weitere Anlegen scheitern ("Das Objekt ist bereits vorhanden")
+        $kd = Join-Path $env:APPDATA 'Microsoft\Crypto\Keys'
+        $list = { @(if (Test-Path -LiteralPath $kd) { Get-ChildItem -LiteralPath $kd -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.Name } }) }
+        $before = & $list
+        $hadEmpty = [System.Security.Cryptography.CngKey]::Exists('')
+        $p1 = Join-Path $TestDrive 'vapid1\push.json'; $p2 = Join-Path $TestDrive 'vapid2\push.json'
+        $v1 = Get-HMRemoteVapid $p1
+        $v2 = Get-HMRemoteVapid $p2
+        $v1.Key.IsEphemeral | Should -BeTrue
+        $v2.Key.IsEphemeral | Should -BeTrue
+        $v2.Public | Should -Not -Be $v1.Public
+        (Get-HMRemoteVapid $p2).Public | Should -Be $v2.Public
+        [System.Security.Cryptography.CngKey]::Exists('') | Should -Be $hadEmpty
+        @(& $list | Where-Object { $before -notcontains $_ }) | Should -BeNullOrEmpty
     }
 }
 
