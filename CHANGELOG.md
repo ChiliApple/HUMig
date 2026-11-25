@@ -1,7 +1,6 @@
 ﻿# Changelog
 
 ## v2.1.24 - 2026-11-26
-`
 ### 🪟 Hauptfenster
 - **Anzeige "verbunden mit":** Unter dem Feld Computer steht dauerhaft, mit welchem PC HUMig verbunden ist. Die Statuszeile überschreibt das nicht mehr.
   - Steht im Feld ein anderer Name, zeigt die Anzeige das in Hinweisfarbe: "verbunden mit ... | im Feld: ... (Enter = verbinden)". Der ganze Satz steht im Tooltip.
@@ -22,7 +21,7 @@
 - **Alte löschen:** Wurde der Backup-Ordner gewechselt, seit das Fenster offen ist, löscht HUMig nichts und bittet, das Fenster neu zu öffnen.
 - **Unvollständiges Backup:** Die Rückfrage beim Löschen sagt, wenn das Backup unvollständig ist oder gerade geschrieben wird.
 ### ✅ Qualität
-- **Tests:** PLATZHALTER
+- **Tests:** 62 neue Tests für Ziel und Verbindung.
 
 ## v2.1.23 - 2026-11-25
 ### 🔄 Update
