@@ -3860,21 +3860,24 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
         It 'USMT.MIG zaehlt nur, wenn es aus diesem Lauf stammt' {
             $t0 = [DateTime]::UtcNow
             $old = [pscustomobject]@{ Length = 10; WriteUtc = $t0.AddDays(-1) }
-            (Test-HMUsmtMigFresh -Old $old -New $old -RunStartUtc $t0 -Remote $false).Fresh | Should -BeFalse
-            (Test-HMUsmtMigFresh -Old $null -New $null -RunStartUtc $t0 -Remote $false).Fresh | Should -BeFalse
-            (Test-HMUsmtMigFresh -Old $old -New ([pscustomobject]@{ Length = 12; WriteUtc = $t0.AddSeconds(5) }) -RunStartUtc $t0 -Remote $false).Fresh | Should -BeTrue
-            (Test-HMUsmtMigFresh -Old $null -New ([pscustomobject]@{ Length = 12; WriteUtc = $t0.AddSeconds(-1) }) -RunStartUtc $t0 -Remote $false).Fresh | Should -BeTrue
+            (Test-HMUsmtMigFresh -Old $old -New $old -Remote $false).Fresh | Should -BeFalse
+            (Test-HMUsmtMigFresh -Old $null -New $null -Remote $false).Fresh | Should -BeFalse
+            (Test-HMUsmtMigFresh -Old $old -New ([pscustomobject]@{ Length = 12; WriteUtc = $t0.AddSeconds(5) }) -Remote $false).Fresh | Should -BeTrue
+            (Test-HMUsmtMigFresh -Old $null -New ([pscustomobject]@{ Length = 12; WriteUtc = $t0.AddHours(-1) }) -Remote $false).Fresh | Should -BeTrue
+            # anderer Stand mit aelterer Schreibzeit (Netzlaufwerk mit nachgehender Uhr): im Lauf geschrieben
+            (Test-HMUsmtMigFresh -Old $old -New ([pscustomobject]@{ Length = 12; WriteUtc = $t0.AddHours(-1) }) -Remote $false).Fresh | Should -BeTrue
             # Fernzugriff: Uhr des Ziel-PCs zaehlt nicht, nur frischer Ordner am Ziel-PC und fehlerfreie Rueckkopie
             $n = [pscustomobject]@{ Length = 12; WriteUtc = $t0.AddHours(-3) }
-            (Test-HMUsmtMigFresh -Old $old -New $n -RunStartUtc $t0 -Remote $true -RemoteMig $true -CopyBack $script:RoboOk).Fresh | Should -BeTrue
-            (Test-HMUsmtMigFresh -Old $old -New $n -RunStartUtc $t0 -Remote $true -RemoteMig $false -CopyBack $script:RoboOk).Fresh | Should -BeFalse
-            $bad = (Test-HMUsmtMigFresh -Old $old -New $n -RunStartUtc $t0 -Remote $true -RemoteMig $true -CopyBack ([pscustomobject]@{ ExitCode = 16; Level = 'Error'; FilesFailed = 0 }))
+            (Test-HMUsmtMigFresh -Old $old -New $n -Remote $true -RemoteMig $true -CopyBack $script:RoboOk).Fresh | Should -BeTrue
+            (Test-HMUsmtMigFresh -Old $old -New $n -Remote $true -RemoteMig $false -CopyBack $script:RoboOk).Fresh | Should -BeFalse
+            $bad = (Test-HMUsmtMigFresh -Old $old -New $n -Remote $true -RemoteMig $true -CopyBack ([pscustomobject]@{ ExitCode = 16; Level = 'Error'; FilesFailed = 0 }))
             $bad.Fresh | Should -BeFalse
             $bad.Why | Should -Match 'Rueckkopie'
         }
-        It 'Treiber-Ergebnis: pnputil 0 und 3010 OK, sonst Warnung; gescheiterte Kopie Warnung' {
+        It 'Treiber-Ergebnis: pnputil 0, 259 und 3010 OK, sonst Warnung; gescheiterte Kopie Warnung' {
             (Get-HMDriverRestoreResult $script:RoboOk ([pscustomobject]@{ Code = 0; Text = 'ok' })).Status | Should -Be 'OK'
             (Get-HMDriverRestoreResult $script:RoboOk ([pscustomobject]@{ Code = 3010; Text = 'ok' })).Status | Should -Be 'OK'
+            (Get-HMDriverRestoreResult $script:RoboOk ([pscustomobject]@{ Code = 259; Text = 'kein Geraet' })).Status | Should -Be 'OK'
             (Get-HMDriverRestoreResult $script:RoboOk ([pscustomobject]@{ Code = 1; Text = 'x' })).Status | Should -Be 'Warning'
             (Get-HMDriverRestoreResult $script:RoboOk $null).Status | Should -Be 'Warning'
             (Get-HMDriverRestoreResult ([pscustomobject]@{ ExitCode = 16; Level = 'Error'; FilesFailed = 0 }) ([pscustomobject]@{ Code = 0; Text = 'ok' })).Status | Should -Be 'Warning'
@@ -4069,6 +4072,26 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             Test-HMBackupSource $ok (New-TJob)
             @($ok.RunResults | Where-Object { $_ }).Count | Should -Be 0
             @($ok.SourceUnreachable | Where-Object { $_ }).Count | Should -Be 0
+        }
+        It 'Punkt 6: Start-HMBackup - nicht erreichbares Profil macht das Backup zum Fehler, Eintrag in RunIssues statt in Modules' {
+            Mock Get-HMTargetEnv { @{ WINDIR = (Join-Path $TestDrive 'win'); PROFILE = '' } }
+            Mock Get-HMSyncRoots { @() }
+            Mock Get-HMMachineGuid { '' }
+            Mock Get-HMTargetComputerName { '' }
+            Mock Dismount-HMHive { }
+            Mock Set-HMBackupFolderAcl { [pscustomobject]@{ Ok = $true; Who = @('Test'); Extra = @(); Notes = @(); Unchanged = $true; Skipped = $false; Error = '' } }
+            Mock Update-HMCatalogStats { 0 }
+            $bp = Join-Path (New-TDir 'BKS') 'neu'
+            $ctx = @{ Computer = $env:COMPUTERNAME; BackupPath = $bp; BackupRoot = (Split-Path $bp -Parent); Modules = @(); Options = @{ SkipSpaceCheck = $true }; Settings = @{}
+                      ToolRoot = $TestDrive; ToolVersion = 'Test'; UserFolder = 'u'; Account = 'u'; UserSid = 'S-1-5-21-1-2-3-1001'; ProfilePath = (Join-Path $TestDrive 'profFehlt'); Threads = 2 }
+            $j = New-TJob
+            Start-HMBackup -Ctx $ctx -Job $j
+            $j.Result.Status | Should -Be 'Error'
+            @($j.Result.Modules).Count | Should -Be 0
+            @($j.Result.RunIssues | Where-Object { $_.Id -eq 'Source' -and $_.Status -eq 'Error' }).Count | Should -Be 1
+            $mf = Get-Content -LiteralPath (Join-Path $bp 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            $mf.Status | Should -Be 'Error'
+            @($mf.Modules | Where-Object { $_ }).Count | Should -Be 0
         }
         It 'Punkt 7 (Backup): Vergleich nicht moeglich ergibt Warnung statt vollstaendig' {
             Mock Invoke-HMRobocopy { [pscustomobject]@{ ExitCode = 16; Level = 'Error'; FilesCopied = 0; BytesCopied = 0; HaveDirs = $false } }

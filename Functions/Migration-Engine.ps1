@@ -2724,7 +2724,6 @@ function Backup-HMUsmt {
     # vorhandenes USMT.MIG eines frueheren Laufs merken (wird nicht geloescht) - als Ergebnis zaehlt nur ein neu geschriebenes
     $old = Get-ChildItem -LiteralPath $store -Filter 'USMT.MIG' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     $oldInfo = if ($old) { [pscustomobject]@{ Path = $old.FullName; Length = [long]$old.Length; WriteUtc = $old.LastWriteTimeUtc } } else { $null }
-    $runStartUtc = [DateTime]::UtcNow
     $copyBack = $null
     if ($Ctx.IsRemote) {
         # USMT + XML auf den Ziel-PC kopieren und dort ausfuehren
@@ -2759,7 +2758,7 @@ function Backup-HMUsmt {
     }
     $mig = Get-ChildItem -LiteralPath $store -Filter 'USMT.MIG' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     $newInfo = if ($mig) { [pscustomobject]@{ Path = $mig.FullName; Length = [long]$mig.Length; WriteUtc = $mig.LastWriteTimeUtc } } else { $null }
-    $fresh = Test-HMUsmtMigFresh -Old $oldInfo -New $newInfo -RunStartUtc $runStartUtc -Remote ([bool]$Ctx.IsRemote) -RemoteMig $remoteMig -CopyBack $copyBack
+    $fresh = Test-HMUsmtMigFresh -Old $oldInfo -New $newInfo -Remote ([bool]$Ctx.IsRemote) -RemoteMig $remoteMig -CopyBack $copyBack
     $why = Get-HMUsmtCodeText $code $uver
     if ($fresh.Fresh -and $code -eq 0) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'OK'; Msg = "ScanState OK, $(Format-HMSize $mig.Length)"; Bytes = $mig.Length; Source = $usmt } }
     if ($fresh.Fresh) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'Warning'; Msg = "ScanState Code $code$why (Details: $store\scanstate.log)"; Bytes = $mig.Length; Source = $usmt } }
@@ -2772,11 +2771,11 @@ function Backup-HMUsmt {
 }
 
 # Stammt das USMT.MIG in der Ablage aus diesem Lauf? (rein, testbar)
-# Lokal: neue Datei, oder Laenge bzw. Schreibzeit anders als vor dem Lauf und nicht aelter als der Start (Toleranz 2 s, FAT-Raster).
+# Lokal: vorher keines, oder Laenge bzw. Schreibzeit anders als vor dem Lauf (keine Uhrzeit-Vergleiche: Netzlaufwerke mit anderer Uhr).
 # Fernzugriff: ScanState schrieb in einen frisch angelegten Ordner am Ziel-PC (RemoteMig) und die Rueckkopie war fehlerfrei -
 # die Uhr des Ziel-PCs (Zeitstempel kopiert Robocopy mit) spielt keine Rolle.
 function Test-HMUsmtMigFresh {
-    param($Old, $New, [DateTime]$RunStartUtc, [bool]$Remote, [bool]$RemoteMig, $CopyBack)
+    param($Old, $New, [bool]$Remote, [bool]$RemoteMig, $CopyBack)
     if (-not $New) { return [pscustomobject]@{ Fresh = $false; Why = '' } }
     if ($Remote) {
         if (-not $RemoteMig) { return [pscustomobject]@{ Fresh = $false; Why = 'am Ziel-PC kein neues USMT.MIG' } }
@@ -2785,8 +2784,10 @@ function Test-HMUsmtMigFresh {
         }
         return [pscustomobject]@{ Fresh = $true; Why = '' }
     }
-    if ($New.WriteUtc -lt $RunStartUtc.AddSeconds(-2)) { return [pscustomobject]@{ Fresh = $false; Why = '' } }
-    if ($Old -and $Old.Length -eq $New.Length -and $Old.WriteUtc -eq $New.WriteUtc) { return [pscustomobject]@{ Fresh = $false; Why = '' } }
+    # vorher kein USMT.MIG: das jetzt vorhandene kann nur aus diesem Lauf stammen (Uhr eines Netzlaufwerks spielt keine Rolle)
+    if (-not $Old) { return [pscustomobject]@{ Fresh = $true; Why = '' } }
+    # vorher schon eines: nur wenn es sich seit dem Start veraendert hat (Laenge oder Schreibzeit), hat dieser Lauf es geschrieben
+    if ($Old.Length -eq $New.Length -and $Old.WriteUtc -eq $New.WriteUtc) { return [pscustomobject]@{ Fresh = $false; Why = '' } }
     return [pscustomobject]@{ Fresh = $true; Why = '' }
 }
 
@@ -4635,7 +4636,8 @@ function Restore-HMBuiltin {
     }
 }
 
-# Treiber-Restore: Robocopy-Ergebnis (Kopie zum Ziel-PC) und pnputil-Exitcode auswerten. 0 und 3010 (Neustart noetig) = OK, sonst Warnung
+# Treiber-Restore: Robocopy-Ergebnis (Kopie zum Ziel-PC) und pnputil-Exitcode auswerten. 0 und 3010 (Neustart noetig) = OK,
+# 259 (ERROR_NO_MORE_ITEMS: kein passendes Geraet bzw. Geraet hat schon einen besseren/neueren Treiber - laut Microsoft kein Fehler) = OK, sonst Warnung
 function Get-HMDriverRestoreResult($Copy, $Pnp) {
     $txt = if ($Pnp) { "$($Pnp.Text)" } else { '' }
     $code = $null; if ($Pnp -and "$($Pnp.Code)" -ne '') { $code = [int]"$($Pnp.Code)" }
@@ -4647,6 +4649,7 @@ function Get-HMDriverRestoreResult($Copy, $Pnp) {
     }
     if ($null -eq $code) { $st = 'Warning'; $msg += ' | pnputil-Ergebnis unbekannt - Geraete-Manager pruefen' }
     elseif ($code -eq 3010) { $msg += ' | Neustart noetig' }
+    elseif ($code -eq 259) { $msg += ' | kein passendes Geraet oder schon ein neuerer Treiber vorhanden' }
     elseif ($code -ne 0) { $st = 'Warning'; $msg += " | pnputil Code $code - nicht alle Treiber installiert, Geraete-Manager pruefen" }
     return [pscustomobject]@{ Status = $st; Msg = $msg }
 }

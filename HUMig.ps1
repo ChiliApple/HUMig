@@ -752,6 +752,12 @@ function Set-Status([string]$Text, [string]$Color = '#FFA6E3A1') {
     $ui.lblStatus.Text = $Text
     $ui.lblStatus.Foreground = Get-ConsoleBrush $Color
 }
+# Statuszeile beim Verbinden: verbindet ein Vorgang danach neu (z.B. nach dem Restore), bleibt sein Ergebnis vorn
+# in seiner Farbe sichtbar ($script:ConnectKeepStatus, gesetzt in Connect-Target waehrend OnFinished)
+function Set-ConnectStatus([string]$Text, [string]$Color = '#FFA6E3A1') {
+    $k = $script:ConnectKeepStatus
+    if ($k) { Set-Status "$($k.Text) - $Text" $k.Color } else { Set-Status $Text $Color }
+}
 function Confirm-Action([string]$Message, [string]$Title = 'HUMig') {
     return ((Show-HMDialogBox -Owner $script:Window -Text $Message -Title $Title -Mode 'YesNo' -Icon 'Warning') -eq 'Yes')
 }
@@ -1297,6 +1303,8 @@ $ui.cmbUser.Add_SelectionChanged({ $script:Window.Dispatcher.BeginInvoke([action
 $ui.cmbUser.Add_KeyUp({ Update-SidLabel })
 
 function Connect-Target {
+    # Ergebnis des gerade beendeten Vorgangs (nur waehrend dessen OnFinished gesetzt) beim Verbinden vorn behalten
+    $script:ConnectKeepStatus = $script:JobEndStatus
     if ($script:UserMode) {
         # Benutzer-Modus: nur das eigene Profil auf diesem PC (keine Profil-Abfrage anderer Benutzer)
         $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
@@ -1305,13 +1313,14 @@ function Connect-Target {
             Account = $id.Name; Loaded = $true; Interactive = $true; LastUse = (Get-Date).ToString('yyyy-MM-dd HH:mm') })
         $ui.cmbUser.Items.Clear(); [void]$ui.cmbUser.Items.Add((Format-ProfileEntry $script:Profiles[0])); $ui.cmbUser.SelectedIndex = 0
         Out-Console "Benutzer-Modus: $($id.Name) auf $env:COMPUTERNAME - vor dem Backup/Restore offene Programme (Outlook, Browser, Office) schliessen" 'Info'
-        Set-Status "Benutzer-Modus: $($id.Name)" '#FFA6E3A1'
+        Set-ConnectStatus "Benutzer-Modus: $($id.Name)" '#FFA6E3A1'
+        $script:ConnectKeepStatus = $null
         Update-SidLabel
         Start-HMAppDetect
         return
     }
     $comp = Get-TargetComputer
-    Set-Status "Verbinde mit $comp ..." '#FFF9E2AF'
+    Set-ConnectStatus "Verbinde mit $comp ..." '#FFF9E2AF'
     Out-Console "Benutzerprofile von $comp laden ..." 'Info'
     $ui.cmbUser.Items.Clear(); $script:Profiles = @(); $ui.lblSid.Text = ''
     Invoke-AsyncCommand -ScriptBlock {
@@ -1331,8 +1340,8 @@ function Connect-Target {
         [pscustomobject]$out
     } -ArgumentList @($script:Engine, $comp, $script:RemoteCred) -TimeoutSec 90 -State $comp -OnComplete {
         param($r, $comp)
-        if ($r -is [string]) { Out-Console "Verbindung zu ${comp}: $r" 'Error'; Set-Status 'Fehler' '#FFF38BA8'; return }
-        if ($r.Error -and -not @($r.Profiles).Count) { Out-Console "Profile von $comp nicht lesbar: $($r.Error)" 'Error'; Set-Status 'Fehler' '#FFF38BA8'; return }
+        if ($r -is [string]) { Out-Console "Verbindung zu ${comp}: $r" 'Error'; Set-ConnectStatus 'Fehler' '#FFF38BA8'; $script:ConnectKeepStatus = $null; return }
+        if ($r.Error -and -not @($r.Profiles).Count) { Out-Console "Profile von $comp nicht lesbar: $($r.Error)" 'Error'; Set-ConnectStatus 'Fehler' '#FFF38BA8'; $script:ConnectKeepStatus = $null; return }
         $script:Profiles = @($r.Profiles)
         foreach ($p in $script:Profiles) { [void]$ui.cmbUser.Items.Add((Format-ProfileEntry $p)) }
         # Vorauswahl: angemeldeter Benutzer, sonst zuletzt verwendet
@@ -1353,7 +1362,8 @@ function Connect-Target {
             $wm = @($script:Modules | Where-Object { $_.Id -eq 'Wlan' })[0]
             if ($wm.AutoOnLaptop) { $script:BackupChecks['Wlan'].IsChecked = [bool]$r.Laptop }
         }
-        Set-Status "Verbunden: $comp" '#FFA6E3A1'
+        Set-ConnectStatus "Verbunden: $comp" '#FFA6E3A1'
+        $script:ConnectKeepStatus = $null
         Update-SidLabel
         # Programm-Katalog: installierte Programme erkennen, passende Module einblenden
         if ($null -eq $r.WinRM -or $r.WinRM) { Start-HMAppDetect }
@@ -1427,7 +1437,9 @@ function Start-EngineJob {
         $ui.pbMain.Value = $(if ($rs -in @('Cancelled', 'NoSpace')) { 0 } else { 100 })
         $ui.lblElapsed.Text = ($j.Ended - $j.Started).ToString('hh\:mm\:ss')
         Set-HMTaskbarProgress 0 'None'
-        if ($script:JobOnFinished) { & $script:JobOnFinished $j }
+        # verbindet OnFinished neu (Restore), bleibt das Ergebnis vorn in der Statuszeile (Set-ConnectStatus)
+        $script:JobEndStatus = @{ Text = "$ttl $stTxt"; Color = $stCol }
+        try { if ($script:JobOnFinished) { & $script:JobOnFinished $j } } finally { $script:JobEndStatus = $null }
         # Benachrichtigung (Ton, Windows-Hinweis, Taskleiste blinkt) - bei laengeren Vorgaengen oder wenn das Fenster nicht aktiv ist
         $det = "Dauer $(Format-HMDuration ($j.Ended - $j.Started))"
         if ($res -and $res.SizeBytes) { $det = "$(Format-HMSize ([long]$res.SizeBytes)), $det" } elseif ($res -and $res.Total) { $det = "$(Format-HMSize ([long]$res.Total)), $det" }
