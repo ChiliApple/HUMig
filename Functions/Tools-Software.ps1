@@ -23,6 +23,47 @@ function Get-SwFolder {
     return (Join-Path $script:AppRoot 'Softwareverteilung')
 }
 
+# ----------------------------------------------------------------------------
+# Rechte der Paketablage: was dort liegt (Installer, Parameter, Deinstallations-Befehl), laeuft als Administrator auf
+# allen Ziel-PCs. Darf eine breite Gruppe (Jeder, Benutzer, Authentifizierte Benutzer, Domaenen-Benutzer, Gaeste,
+# Interaktiv, Anonym) dort schreiben, wird gewarnt - nichts wird verweigert.
+# ----------------------------------------------------------------------------
+# Breite Gruppen mit Schreibrecht in einer ACL (Allow-Regeln): Rueckgabe Liste der Namen (leer = keine)
+function Get-SwBroadWriters($Acl) {
+    $broad = @{ 'S-1-1-0' = 'Jeder'; 'S-1-5-11' = 'Authentifizierte Benutzer'; 'S-1-5-32-545' = 'Benutzer'; 'S-1-5-4' = 'Interaktiv'; 'S-1-5-32-546' = 'Gaeste'; 'S-1-5-7' = 'Anonym' }
+    # WriteData 0x2, AppendData 0x4, DeleteSubdirectoriesAndFiles 0x40, Delete 0x10000, ChangePermissions 0x40000,
+    # TakeOwnership 0x80000, GENERIC_ALL 0x10000000, GENERIC_WRITE 0x40000000
+    $wr = [int64](0x2 -bor 0x4 -bor 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
+    $hit = @()
+    foreach ($r in @($Acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
+        if ("$($r.AccessControlType)" -ne 'Allow') { continue }
+        if (([int64]$r.FileSystemRights -band $wr) -eq 0) { continue }
+        $sid = "$($r.IdentityReference.Value)"
+        $n = if ($broad.ContainsKey($sid)) { $broad[$sid] } elseif ($sid -match '^S-1-5-21-\d+-\d+-\d+-513$') { 'Domaenen-Benutzer' } else { '' }
+        if ($n -and $hit -notcontains $n) { $hit += $n }
+    }
+    return $hit
+}
+# Pfade der Ablage pruefen: Rueckgabe Hinweiszeilen ('' Liste = in Ordnung). Nicht lesbare Rechte = "nicht pruefbar"
+function Get-SwPathWriteRisk([string[]]$Paths) {
+    $out = @()
+    foreach ($p in @($Paths | Where-Object { "$_".Trim() } | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        try {
+            $w = @(Get-SwBroadWriters (Get-Acl -LiteralPath $p -ErrorAction Stop))
+            if ($w.Count) { $out += "$p - aendern duerfen: $($w -join ', ')" }
+        } catch { $out += "$p - Rechte nicht pruefbar ($($_.Exception.Message))" }
+    }
+    return $out
+}
+# Hinweistext fuer ein Paket (Ablage, Paketordner/-datei, Einstellungsdatei); '' = in Ordnung
+function Get-SwPackageRiskText($Package, [string]$Root) {
+    if (-not $Package) { return '' }
+    $r = @(Get-SwPathWriteRisk @($Root, "$($Package.SrcPath)", "$($Package.ConfigPath)"))
+    if (-not $r.Count) { return '' }
+    return "Paketablage fuer normale Benutzer beschreibbar oder nicht pruefbar - was dort liegt, laeuft als Administrator auf den Ziel-PCs: $($r -join '; ')"
+}
+
 # Installer analysieren: MSI-Eigenschaften (Windows Installer COM, nur lesend) bzw. EXE-Framework (Signaturen im Stub)
 $script:SwInfoCache = @{}
 function Get-SwInstallerInfo([string]$Path) {
@@ -341,6 +382,8 @@ function Confirm-SwDeploy($Package, [string[]]$Hosts, [bool]$Force) {
     if ($s.NoDesktop) { $extra += "`n  Desktop:   neue Verknuepfungen werden entfernt" }
     $ts = $null; try { $ts = Get-SwTestState $Package } catch { }
     if ($ts -and $ts.State -ne 'OK') { $extra += "`n  Sandbox:   $($ts.Text)" }
+    $rk = ''; try { $rk = Get-SwPackageRiskText $Package (Get-SwFolder) } catch { }
+    if ($rk) { $extra += "`n  ACHTUNG:   $rk" }
     return (Confirm-Action "Paket '$($s.Name)' installieren auf: $ziel`n`n  Befehl:    $cmd`n  Erkennung: $det$(if ($Force) { '  -> trotzdem installieren' } else { '  -> installierte werden uebersprungen' })`n  Erfolg:    ExitCode $($s.SuccessCodes) (3010/1641 = Neustart noetig)`n  Groesse:   $($Package.SizeMB) MB$(if ($Package.IsDir) { ' (ganzer Ordner)' })$extra`n`nFortfahren?" 'Softwareverteilung')
 }
 
@@ -633,6 +676,8 @@ function Start-SoftwareDeploy {
         }
     }
     Out-Console "Softwareverteilung '$($s.Name)' auf $($Hosts.Count) PC(s)$(if ($Label) { " [$Label]" })$(if ($Force) { ' - auch wenn installiert' })$(if ($depNames.Count) { " - vorher: $($depNames -join ', ')" }) ..." 'Info'
+    $rk = ''; try { $rk = Get-SwPackageRiskText $Package (Get-SwFolder) } catch { }
+    if ($rk) { Out-Console "  ACHTUNG: $rk" 'Warning' }
     $jobSec = [int][Math]::Max(1800, ([Math]::Ceiling($Hosts.Count / 8.0) * $perHost))
     Invoke-AsyncCommand -ScriptBlock {
         param($hostStr, $src, $isDir, $pkgJson, $force, $prepText, $instText, $cleanText, $workerText, $sizeMB, $timeoutMin, $deadlineSec, $cred)
@@ -820,6 +865,8 @@ function Start-SwPackageUninstall {
     $job = Get-SwUninstallJob -Package $Package
     if (-not $job) { Out-Console "Deinstallation '$($Package.Settings.Name)': kein Deinstallationsbefehl hinterlegt" 'Error'; return }
     Out-Console "Deinstallation '$($Package.Settings.Name)' auf $($Hosts.Count) PC(s) ..." 'Info'
+    $rk = ''; try { $rk = Get-SwPackageRiskText $Package (Get-SwFolder) } catch { }
+    if ($rk) { Out-Console "  ACHTUNG: $rk" 'Warning' }
     Start-SwParallel -Hosts $Hosts -ScriptText $job.ScriptText -ArgList @($job.ArgsJson, $job.TimeoutMin) -OpMin ($job.TimeoutMin + 2) `
         -State @{ Hosts = $Hosts; Package = $Package } -OnComplete {
         param($result, $st)
