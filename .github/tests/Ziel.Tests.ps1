@@ -142,7 +142,7 @@ Describe 'Ziel: Verbinden verwirft veraltete Antworten und behaelt die Auswahl' 
         $script:Lines = New-Object System.Collections.Generic.List[string]
         $script:Target = $null; $script:ConnectSeq = 0; $script:Profiles = @(); $script:UserMode = $false
         $script:BackupChecks = @{}; $script:JobEndStatus = $null; $script:Engine = 'x'; $script:RemoteCred = $null
-        $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC02' }; cmbUser = [pscustomobject]@{ Items = (New-Object System.Collections.ArrayList); SelectedIndex = -1 }; lblSid = [pscustomobject]@{ Text = '' } }
+        $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC02' }; cmbUser = [pscustomobject]@{ Items = (New-Object System.Collections.ArrayList); SelectedIndex = -1; Text = '' }; lblSid = [pscustomobject]@{ Text = '' } }
     }
     It 'Antwort von PC02 kommt nach dem Verbinden mit PC03 an: verworfen, Liste bleibt bei PC03' {
         Connect-Target -FromField
@@ -173,6 +173,15 @@ Describe 'Ziel: Verbinden verwirft veraltete Antworten und behaelt die Auswahl' 
         $p2 = @((New-ZielProfile 'S-A' 'PC01\anna' $true), (New-ZielProfile 'S-C' 'PC01\cara'), (New-ZielProfile 'S-B' 'PC01\bert'))
         & $script:Calls[1].OnComplete ([pscustomobject]@{ Profiles = $p2; Error = $null; WinRM = $null }) $script:Calls[1].State
         $ui.cmbUser.SelectedIndex | Should -Be 2
+    }
+    It 'anderer PC: eingetipptes Konto des bisherigen PCs wird geleert, gleicher PC behaelt es' {
+        $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
+        & $script:Calls[0].OnComplete ([pscustomobject]@{ Profiles = @(New-ZielProfile 'S-A' 'PC01\anna'); Error = $null; WinRM = $null }) $script:Calls[0].State
+        $ui.cmbUser.Text = 'PC01\neu'
+        Connect-Target
+        $ui.cmbUser.Text | Should -Be 'PC01\neu'
+        $ui.cmbComputer.Text = 'PC02'; Connect-Target -FromField
+        $ui.cmbUser.Text | Should -Be ''
     }
     It 'Gescheitertes Verbinden: Ziel ist der PC aus dem Feld, Benutzerliste leer' {
         Connect-Target -FromField
@@ -217,6 +226,7 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
         . ([scriptblock]::Create((Get-ZielFn 'Confirm-HMTarget')))
         function Out-Console { }
         function Update-HMTargetLabel { }
+        function Set-ConnectStatus { param($t, $c) $script:LastStatus = $t }
         function Connect-Target([switch]$FromField) { $script:Connected = "FromField=$([bool]$FromField)" }
         function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Asked = @{ Text = $Text; Mode = $Mode; Default = $Default }; return $script:Answer }
     }
@@ -260,7 +270,7 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
         $script:JobRunning = $false
     }
     It 'Wake-on-LAN, Netzwerktest, Fernwartung (-FieldOk): Ja fuehrt direkt auf dem PC im Feld aus, ohne Benutzer von PC01' {
-        $ui.cmbUser = [pscustomobject]@{ Items = (New-Object System.Collections.ArrayList) }; [void]$ui.cmbUser.Items.Add('PC01\anna'); $ui.lblSid = [pscustomobject]@{ Text = 'C:\Users\anna' }
+        $ui.cmbUser = [pscustomobject]@{ Items = (New-Object System.Collections.ArrayList); Text = 'PC01\anna' }; [void]$ui.cmbUser.Items.Add('PC01\anna'); $ui.lblSid = [pscustomobject]@{ Text = 'C:\Users\anna' }
         $script:Profiles = @(New-ZielProfile 'S-A' 'PC01\anna'); $script:ConnectSeq = 4
         $script:Answer = 'Yes'
         Confirm-HMTarget "'Wake-on-LAN'" -FieldOk | Should -BeTrue
@@ -273,6 +283,9 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
         @($script:Profiles).Count | Should -Be 0
         $ui.cmbUser.Items.Count | Should -Be 0
         $script:ConnectSeq | Should -Be 5
+        $ui.cmbUser.Text | Should -Be ''
+        $script:LastStatus | Should -Be 'Gewaehlt: PC02 (nicht verbunden)'
+        (Get-HMTargetLabel (Get-HMTargetState 'PC02' $script:Target 'EIGEN')).Text | Should -Be 'gewaehlt: PC02 (nicht verbunden, Benutzerliste leer)'
     }
     It 'Benutzer-Modus: keine Rueckfrage' {
         $script:UserMode = $true
@@ -348,11 +361,15 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
         Get-HMPathConflict @('X:\BACKUPS\A') @('X:\BACKUPS\A\_GELOESCHT') | Should -Be 'X:\BACKUPS\A'
         Get-HMPathConflict @('X:\BACKUPS\A') @('X:\BACKUPS\AB') | Should -BeNullOrEmpty
         Get-HMPathConflict @('X:\BACKUPS\A') @() | Should -BeNullOrEmpty
+        # mehrere gegen mehrere (Treffer nicht nur beim letzten Element)
+        Get-HMPathConflict @('X:\n', 'X:\b1') @('X:\b1', 'X:\b2') | Should -Be 'X:\b1'
+        Get-HMPathConflict @('X:\n', 'X:\m') @('X:\b1', 'X:\b2') | Should -BeNullOrEmpty
         Get-HMPathConflict @('') @('X:\BACKUPS\A') | Should -BeNullOrEmpty
     }
     It 'benutzte Pfade eines Vorgangs: Backup-Ziel, weitergefuehrtes Backup, Restore-Quelle' {
         @(Get-HMCtxPaths @{ BackupPath = 'X:\B\neu'; ExistingBackup = 'X:\B\alt' }) | Should -Be @('X:\B\neu', 'X:\B\alt')
         @(Get-HMCtxPaths @{ Backup = [pscustomobject]@{ Path = 'X:\B\r' } }) | Should -Be @('X:\B\r')
+        @(Get-HMCtxPaths @{ CompareA = 'X:\B\1'; CompareB = 'X:\B\2' }) | Should -Be @('X:\B\1', 'X:\B\2')
         @(Get-HMCtxPaths @{ Kind = 'Setup' }).Count | Should -Be 0
         @(Get-HMCtxPaths $null).Count | Should -Be 0
     }

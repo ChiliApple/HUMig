@@ -1269,7 +1269,7 @@ function Get-HMTargetState([string]$Field, $Target, [string]$Local = $env:COMPUT
     $f = "$Field".Trim(); if (-not $f) { $f = $Local }   # leeres Feld = dieser PC (wie bisher)
     $c = $(if ($Target) { "$($Target.Computer)".Trim() } else { '' })
     $kind = $(if (-not $c) { 'None' } elseif (Test-HMSameComputer $f $c $Local) { 'Match' } else { 'Differs' })
-    $conn = $(if (-not $c) { 'None' } elseif ($Target.Connected) { 'Connected' } elseif ($Target.Connecting) { 'Connecting' } else { 'Failed' })
+    $conn = $(if (-not $c) { 'None' } elseif ($Target.Connected) { 'Connected' } elseif ($Target.Connecting) { 'Connecting' } elseif ($Target.Chosen) { 'Chosen' } else { 'Failed' })
     return [pscustomobject]@{ Kind = $kind; Field = $f; Computer = $c; Conn = $conn }
 }
 # Dauerhafte Anzeige unter dem Feld Computer (wird von der Statuszeile nicht ueberschrieben)
@@ -1278,9 +1278,10 @@ function Get-HMTargetLabel($State) {
         'Connected'  { "verbunden mit $($State.Computer)" }
         'Connecting' { "verbinde mit $($State.Computer) ..." }
         'Failed'     { "nicht verbunden: $($State.Computer) (Verbindung fehlgeschlagen, Benutzerliste leer)" }
+        'Chosen'     { "gewaehlt: $($State.Computer) (nicht verbunden, Benutzerliste leer)" }
         default      { 'nicht verbunden' }
     }
-    $col = switch ("$($State.Conn)") { 'Connected' { '#FFA6E3A1' } 'Connecting' { '#FFF9E2AF' } 'Failed' { '#FFFAB387' } default { '#FFA6ADC8' } }
+    $col = switch ("$($State.Conn)") { 'Connected' { '#FFA6E3A1' } 'Connecting' { '#FFF9E2AF' } 'Failed' { '#FFFAB387' } 'Chosen' { '#FFF9E2AF' } default { '#FFA6ADC8' } }
     $tip = 'Auf diesen Computer und seine Benutzerliste wirken Backup, Restore und Werkzeuge.'
     if ("$($State.Kind)" -eq 'Differs') {
         # kurz halten (lange Namen, schmales Fenster): Namen vor dem ersten Punkt, wenn sie sich dann noch unterscheiden;
@@ -1288,7 +1289,7 @@ function Get-HMTargetLabel($State) {
         $sh = { param($n) if ("$n" -match '^\d{1,3}(\.\d{1,3}){3}$') { "$n" } else { ("$n" -split '\.')[0] } }
         $sf = & $sh $State.Field; $sc = & $sh $State.Computer
         if ($sf -ieq $sc) { $sf = $State.Field; $sc = $State.Computer }
-        $base = switch ("$($State.Conn)") { 'Connected' { "verbunden mit $sc" } 'Connecting' { "verbinde mit $sc ..." } 'Failed' { "nicht verbunden: $sc (fehlgeschlagen)" } default { 'nicht verbunden' } }
+        $base = switch ("$($State.Conn)") { 'Connected' { "verbunden mit $sc" } 'Connecting' { "verbinde mit $sc ..." } 'Failed' { "nicht verbunden: $sc (fehlgeschlagen)" } 'Chosen' { "gewaehlt: $sc (nicht verbunden)" } default { 'nicht verbunden' } }
         $t = "$base   |   im Feld: $sf (Enter = verbinden)"
         $tip = "Im Feld Computer steht $($State.Field), Ziel ist aber $($State.Computer). Enter oder Verbinden = mit $($State.Field) verbinden. Bis dahin fragt jeder Vorgang nach.`n`n$tip"
         if ("$($State.Conn)" -ne 'Failed') { $col = '#FFF9E2AF' }
@@ -1364,11 +1365,13 @@ function Test-HMProfileKept($Candidate, $Previous) {
 # Liegt einer der Pfade A im oder ueber einem der Pfade B (oder ist gleich)? Rueckgabe: erster Treffer (Pfad aus A) oder $null
 function Get-HMPathConflict([string[]]$A, [string[]]$B) {
     $n = { param($p) "$p".Trim().Replace('/', '\').TrimEnd('\').ToUpperInvariant() }
-    foreach ($a in @($A | Where-Object { "$_".Trim() })) {
-        $x = & $n $a
-        foreach ($b in @($B | Where-Object { "$_".Trim() })) {
-            $y = & $n $b
-            if ($x -eq $y -or $x.StartsWith("$y\") -or $y.StartsWith("$x\")) { return $a }
+    # Schleifenvariablen nicht $a/$b nennen: PowerShell unterscheidet nicht nach Gross/klein, sie wuerden $A/$B ueberschreiben
+    $listB = @($B | Where-Object { "$_".Trim() })
+    foreach ($pa in @($A | Where-Object { "$_".Trim() })) {
+        $x = & $n $pa
+        foreach ($pb in $listB) {
+            $y = & $n $pb
+            if ($x -eq $y -or $x.StartsWith("$y\") -or $y.StartsWith("$x\")) { return $pa }
         }
     }
     return $null
@@ -1377,7 +1380,7 @@ function Get-HMPathConflict([string[]]$A, [string[]]$B) {
 function Get-HMCtxPaths($Ctx) {
     if (-not $Ctx) { return @() }
     $out = @()
-    foreach ($k in @('BackupPath', 'ExistingBackup')) { try { if ("$($Ctx[$k])") { $out += "$($Ctx[$k])" } } catch { } }
+    foreach ($k in @('BackupPath', 'ExistingBackup', 'CompareA', 'CompareB')) { try { if ("$($Ctx[$k])") { $out += "$($Ctx[$k])" } } catch { } }
     try { if ($Ctx['Backup'] -and "$($Ctx['Backup'].Path)") { $out += "$($Ctx['Backup'].Path)" } } catch { }
     return $out
 }
@@ -1427,9 +1430,11 @@ function Confirm-HMTarget([string]$Action, [switch]$FieldOk) {
     if ($a -eq 'Yes' -and $FieldOk) {
         # PC im Feld wird Ziel, ohne Benutzerliste (wie nach einem gescheiterten Verbinden) - nichts von PC A bleibt stehen
         $script:ConnectSeq++
-        $script:Target = @{ Computer = $st.Field; Connected = $false; Connecting = $false; Seq = $script:ConnectSeq }
-        $script:Profiles = @(); $ui.cmbUser.Items.Clear(); $ui.lblSid.Text = ''
+        $script:Target = @{ Computer = $st.Field; Connected = $false; Connecting = $false; Chosen = $true; Seq = $script:ConnectSeq }
+        $script:Profiles = @(); $ui.cmbUser.Items.Clear(); $ui.cmbUser.Text = ''; $ui.lblSid.Text = ''
+        Set-ConnectStatus "Gewaehlt: $($st.Field) (nicht verbunden)" '#FFF9E2AF'
         Update-HMTargetLabel
+        try { Update-RestoreTargetLabel } catch { }
         Out-Console "$Action auf $($st.Field) (nicht verbunden, Benutzerliste leer - fuer Backup/Restore: Enter oder Verbinden)" 'Info'
         return $true
     }
@@ -1538,7 +1543,10 @@ function Connect-Target([switch]$FromField) {
     Set-ConnectStatus "Verbinde mit $comp ..." '#FFF9E2AF'
     Out-Console "Benutzerprofile von $comp laden ..." 'Info'
     $ui.cmbUser.Items.Clear(); $script:Profiles = @(); $ui.lblSid.Text = ''
+    # anderer PC: ein eingetipptes Konto des bisherigen PCs nicht stehen lassen
+    if (-not $same) { $ui.cmbUser.Text = '' }
     Update-HMTargetLabel
+    try { Update-RestoreTargetLabel } catch { }
     Invoke-AsyncCommand -ScriptBlock {
         param($eng, $comp, $cred)
         . $eng
@@ -1559,7 +1567,7 @@ function Connect-Target([switch]$FromField) {
         $comp = $st.Comp
         # inzwischen wird ein anderer PC verbunden (oder derselbe neu): diese Antwort ist veraltet und wird verworfen.
         # Statuszeile, Benutzerliste und $script:ConnectKeepStatus gehoeren dem neueren Verbinden.
-        if (-not (Test-HMConnectCurrent $st.Seq $script:ConnectSeq)) { Out-Console "Antwort von $comp verworfen - inzwischen wird mit $(Get-TargetComputer) verbunden" 'Info'; return }
+        if (-not (Test-HMConnectCurrent $st.Seq $script:ConnectSeq)) { Out-Console "Antwort von $comp verworfen - inzwischen ist $(Get-TargetComputer) das Ziel" 'Info'; return }
         $script:Target.Connecting = $false
         if ($r -is [string]) { Out-Console "Verbindung zu ${comp}: $r" 'Error'; Set-ConnectStatus 'Fehler' '#FFF38BA8'; $script:ConnectKeepStatus = $null; Update-HMTargetLabel; return }
         if ($r.Error -and -not @($r.Profiles).Count) { Out-Console "Profile von $comp nicht lesbar: $($r.Error)" 'Error'; Set-ConnectStatus 'Fehler' '#FFF38BA8'; $script:ConnectKeepStatus = $null; Update-HMTargetLabel; return }
@@ -2190,7 +2198,7 @@ $ui.btnEmptyDeleted.Add_Click({
         $fmt = { param($x) if ("$x" -match '^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})') { "$($Matches[3]).$($Matches[2]).$($Matches[1]) $($Matches[4]):$($Matches[5])" } else { "$x" } }
         if (-not (Confirm-Action "Backup '$($c.Name)': $($r.Files) beiseitegelegte Datei(en) ($(Format-HMSize $r.Bytes)) aus $($r.Runs) Lauf/Laeufen$(if ($r.First) { " ($(& $fmt $r.First) bis $(& $fmt $r.Last))" }).`n`nDas sind Dateien, die am Quell-PC geloescht wurden. Endgueltig loeschen?`n`nDanach sind sie auch ueber 'Im Backup suchen' nicht mehr auffindbar. Der aktuelle Stand des Backups bleibt unveraendert." 'Geloeschte leeren')) { return }
         # waehrend der Rueckfrage kann ein Vorgang gestartet worden sein, der in dieses Backup schreibt
-        if (-not (Confirm-HMBackupNotInUse @("$($c.Dir)") "$($c.Name)")) { return }
+        if (-not (Confirm-HMBackupNotInUse @("$($c.Dir)") "$($c.Name) (beiseitegelegte Dateien)")) { return }
         Out-Console "Loesche beiseitegelegte Dateien in $($c.Name) ..." 'Warning'
         Add-HMDeleting @("$($c.Dir)")
         Invoke-AsyncCommand -ScriptBlock {
