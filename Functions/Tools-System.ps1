@@ -419,7 +419,7 @@ $script:RS_GroupList = {
     foreach ($g in $groups.GetEnumerator()) {
         $sid = $g.Value
         $list = @()
-        try { $list = @(Get-LocalGroupMember -SID $sid -ErrorAction Stop | ForEach-Object { [pscustomobject]@{ Name = "$($_.Name)"; Type = "$($_.ObjectClass)"; Source = "$($_.PrincipalSource)" } }) }
+        try { $list = @(Get-LocalGroupMember -SID $sid -ErrorAction Stop | ForEach-Object { [pscustomobject]@{ Name = "$($_.Name)"; Type = "$($_.ObjectClass)"; Source = "$($_.PrincipalSource)"; MSid = "$($_.SID)" } }) }
         catch {
             try {
                 $gn = (New-Object System.Security.Principal.SecurityIdentifier($sid)).Translate([System.Security.Principal.NTAccount]).Value.Split('\')[-1]
@@ -427,8 +427,14 @@ $script:RS_GroupList = {
                 $list = @($ad.Invoke('Members') | ForEach-Object { [pscustomobject]@{ Name = (($_.GetType().InvokeMember('AdsPath', 'GetProperty', $null, $_, $null)) -replace '^WinNT://', '' -replace '/', '\'); Type = "$($_.GetType().InvokeMember('Class', 'GetProperty', $null, $_, $null))"; Source = '' } })
             } catch { $list = @([pscustomobject]@{ Name = "FEHLER: $($_.Exception.Message)"; Type = ''; Source = '' }) }
         }
-        foreach ($m in $list) { [pscustomobject]@{ Gruppe = $g.Key; Sid = $sid; Mitglied = $m.Name; Typ = $m.Type; Quelle = $m.Source } }
+        foreach ($m in $list) { [pscustomobject]@{ Gruppe = $g.Key; Sid = $sid; Mitglied = $m.Name; Typ = $m.Type; Quelle = $m.Source; MitgliedSid = "$($m.MSid)" } }
     }
+}
+# Eingebauter Administrator (RID 500) oder Domaenen-Admins (RID 512)? Ueber die SID sprachunabhaengig, ohne SID ueber den Namen
+# (auch "Domaenen-Admins" mit Umlaut und die franzoesische Form)
+function Test-HMCriticalAdmin([string]$Name, [string]$Sid) {
+    if ("$Sid" -match '^S-1-5-21-\d+-\d+-\d+-(500|512)$') { return $true }
+    return ("$Name" -match '\\Administrat(or|eur)$' -or "$Name" -match '(?i)\\(Domain Admins|Dom(ae|ä)nen-Admins|Admins du domaine)$')
 }
 $script:RS_GroupChange = {
     param($action, $sid, $member)
@@ -451,10 +457,11 @@ function Show-HMLocalGroups {
     Invoke-HMTool -Title 'Lokale Gruppen lesen' -Computer $c -ArgumentList @(, $script:HMLocalGroups) -Script $script:RS_GroupList -OnResult {
         param($r, $comp)
         $rows = New-Object System.Collections.Generic.List[object]
-        foreach ($m in @($r)) { if ($m -and $m.Gruppe) { $rows.Add(@($m.Gruppe, $m.Mitglied, $m.Typ, $m.Quelle)) } }
+        $sids = @{}
+        foreach ($m in @($r)) { if ($m -and $m.Gruppe) { $rows.Add(@($m.Gruppe, $m.Mitglied, $m.Typ, $m.Quelle)); $sids["$($m.Gruppe)|$($m.Mitglied)"] = "$($m.MitgliedSid)" } }
         Out-Console "$($rows.Count) Gruppenmitglieder auf $comp" 'Success'
         Show-DataGridWindow -Title "Lokale Gruppen - $comp" -Columns @('Gruppe', 'Mitglied', 'Typ', 'Quelle') -Rows $rows.ToArray() -Sort 'Gruppe ASC, Mitglied ASC' -Width 900 -Height 520 `
-            -ActionContext @{ Computer = $comp } -Actions @(
+            -ActionContext @{ Computer = $comp; Sids = $sids } -Actions @(
                 @{ Text = 'Hinzufuegen ...'; Color = '#FFA6E3A1'; NoSelection = $true; Handler = {
                     param($rows, $win, $ctx)
                     $f = Show-HMFormDialog -Title "Mitglied hinzufuegen - $($ctx.Computer)" -OkText 'Hinzufuegen' -Fields @(
@@ -469,7 +476,7 @@ function Show-HMLocalGroups {
                     param($rows, $win, $ctx)
                     $sel = @($rows | Where-Object { $_.Mitglied -and $_.Mitglied -notlike 'FEHLER*' })
                     if (-not $sel.Count) { return }
-                    $bad = @($sel | Where-Object { $_.Gruppe -eq 'Administratoren' -and ($_.Mitglied -match '\\Administrator$' -or $_.Mitglied -match '\\Domain Admins$|\\Domaenen-Admins$') })
+                    $bad = @($sel | Where-Object { $_.Gruppe -eq 'Administratoren' -and (Test-HMCriticalAdmin "$($_.Mitglied)" "$($ctx.Sids["$($_.Gruppe)|$($_.Mitglied)"])") })
                     $msg = "Auf $($ctx.Computer) entfernen?`n`n" + (($sel | ForEach-Object { "  $($_.Gruppe): $($_.Mitglied)" }) -join "`n")
                     if ($bad.Count) { $msg += "`n`nACHTUNG: eingebauter Administrator / Domaenen-Admins dabei - Zugriff kann verloren gehen!" }
                     if ("$((Show-HMDialogBox -Owner $win -Text $msg -Title 'Lokale Gruppen' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
@@ -545,6 +552,8 @@ $script:RS_Autologon = {
                 if ($p.AutoLogonCount) { "INFO Verbleibende Anmeldungen: $($p.AutoLogonCount)" }
             }
             'Enable' {
+                # lokales Konto: Domaene ist der Name dieses PCs (am Ziel bestimmt - ein eingetippter Name oder eine IP-Adresse taugt nicht)
+                if (-not "$domain".Trim() -or "$domain" -eq '.') { $domain = $env:COMPUTERNAME }
                 $pw = if ($cred) { $cred.GetNetworkCredential().Password } else { '' }
                 [HMLsa]::Store('DefaultPassword', $pw)
                 Set-ItemProperty -LiteralPath $k -Name AutoAdminLogon -Value '1' -Type String
@@ -580,11 +589,13 @@ function Start-HMAutologon {
     if ($act -eq 'Enable') {
         $u = "$($f.User)".Trim()
         if (-not $u) { Out-Console 'Benutzer fehlt' 'Warning'; return }
-        if ($u -match '^(.+)\\(.+)$') { $dom = $Matches[1]; $user = $Matches[2] } else { $dom = if ($c -and -not (Test-HMIsLocal $c)) { $c.Split('.')[0] } else { $env:COMPUTERNAME }; $user = $u }
-        if ($dom -eq '.') { $dom = if (Test-HMIsLocal $c) { $env:COMPUTERNAME } else { $c.Split('.')[0] } }
+        # lokales Konto (nur Name oder .\Name): Domaene leer lassen - das Ziel setzt seinen eigenen PC-Namen ein
+        # (aus dem Feld abgeleitet ergab eine IP-Adresse als Ziel sonst z.B. die Domaene "10")
+        if ($u -match '^(.+)\\(.+)$') { $dom = $Matches[1]; $user = $Matches[2] } else { $dom = ''; $user = $u }
+        if ($dom -eq '.') { $dom = '' }
         if ("$($f.Count)" -match '^\d+$') { $count = [int]$f.Count } elseif ("$($f.Count)".Trim()) { Out-Console "Anzahl ungueltig: '$($f.Count)'" 'Warning'; return }
-        $cred = New-Object System.Management.Automation.PSCredential ("$dom\$user", $f.Pw)
-        if (-not (Confirm-Action "Autologon auf $c fuer $dom\$user aktivieren?")) { return }
+        $cred = New-Object System.Management.Automation.PSCredential ("$(if ($dom) { $dom } else { '.' })\$user", $f.Pw)
+        if (-not (Confirm-Action "Autologon auf $c fuer $(if ($dom) { "$dom\$user" } else { "das lokale Konto $user" }) aktivieren?")) { return }
     }
     Invoke-HMTool -Title "Autologon ($($f.Action))" -Computer $c -ArgumentList @($act, $user, $dom, $cred, $count, $script:HMLsaSource) -Script $script:RS_Autologon
 }
@@ -1034,6 +1045,10 @@ function Set-HMFirewallRow($Rows, $Win, $Ctx, [string]$What) {
     if ($What -in @('Private', 'Public')) {
         if ($r.Art -ne 'Netzwerk') { [void](Show-HMDialogBox -Owner $Win -Text 'Bitte eine Zeile "Netzwerk" markieren.' -Title 'Firewall' -Mode 'OK' -Icon 'Information'); return }
         if ($r.Wert -eq 'DomainAuthenticated') { [void](Show-HMDialogBox -Owner $Win -Text 'Domaenennetzwerke werden automatisch erkannt und koennen nicht umgestellt werden.' -Title 'Firewall' -Mode 'OK' -Icon 'Information'); return }
+        # Ausnahmefall: anderer PC auf "Oeffentlich" - die Firewall laesst dann oft keine Fernwartung mehr zu (Standard Nein)
+        if (Test-HMFirewallPublicRisk $What "$($r.Wert)" $Ctx.Computer) {
+            if ("$((Show-HMDialogBox -Owner $Win -Text (Get-HMFirewallPublicText "$($r.Name)" $Ctx.Computer) -Title 'Firewall' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
+        }
         $arg = @{ Alias = "$($r.Name)"; Category = $What }; $act = 'Category'
     } else {
         if ($r.Art -ne 'Firewall-Profil') { [void](Show-HMDialogBox -Owner $Win -Text 'Bitte eine Zeile "Firewall-Profil" markieren.' -Title 'Firewall' -Mode 'OK' -Icon 'Information'); return }
@@ -1181,6 +1196,8 @@ $script:RS_ProfileAssign = {
             $out.Add("OK Registry $(Split-Path $h[0] -Leaf): $keys Schluessel geprueft, $changed angepasst$(if ($denied) { ", $denied nicht aenderbar" })")
         }
         foreach ($l in $loaded) { [GC]::Collect(); [GC]::WaitForPendingFinalizers(); for ($i = 0; $i -lt 5; $i++) { & reg.exe unload "HKU\$l" 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 } }
+        # noch geladen: die Datei bleibt bis zum Neustart gesperrt, die Anmeldung des Kontos bekaeme sonst ein temporaeres Profil
+        foreach ($l in $loaded) { if (Test-Path -LiteralPath "Registry::HKEY_USERS\$l") { $out.Add("WARN Registry-Datei (HKU\$l) liess sich nicht entladen - PC VOR der ersten Anmeldung mit dem neuen Konto neu starten") } }
         $loaded = @()
 
         # --- ProfileList: Eintrag auf das neue Konto umhaengen ---

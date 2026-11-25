@@ -142,3 +142,70 @@ function New-NetIPAddress { param($InterfaceIndex, $IPAddress, $PrefixLength, $D
         $script:RS_NetApply.ToString() | Should -Not -Match '"FEHLER: '
     }
 }
+
+Describe 'Profil anderem Konto zuweisen: Konto ohne Kennwort nur nach Rueckfrage' {
+    BeforeAll { . (Join-Path $script:Root 'Functions\Tools-System.ps1') }
+    It 'das Ziel fragt zurueck, bevor irgendetwas geaendert wird' {
+        $t = $script:RS_ProfileAssign.ToString()
+        $pos = $t.IndexOf("return 'FRAGE OHNE_KENNWORT'")
+        $pos | Should -BeGreaterThan 0
+        $before = (($t.Substring(0, $pos) -split "`n") | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+        # vor der Rueckfrage nur Lesen: kein Anlegen, kein Gruppen-, Rechte-, Registry- oder Datei-Schreiben
+        foreach ($w in @('New-LocalUser', 'Add-LocalGroupMember', 'icacls', 'reg.exe', 'New-Item', 'Remove-Item', 'Set-ItemProperty', 'New-ItemProperty', 'SetAccessControl')) {
+            $before | Should -Not -Match ([regex]::Escape($w)) -Because "$w steht vor der Rueckfrage"
+        }
+        # und die Rueckfrage kommt nur, wenn kein Kennwort da ist und nicht ausdruecklich erlaubt
+        $t | Should -Match ([regex]::Escape("-and -not `$allowBlank) { return 'FRAGE OHNE_KENNWORT' }"))
+    }
+    It 'erkennt die Rueckfrage in der Antwort (einzeln und in einer Liste)' {
+        Test-HMBlankPasswordQuestion 'FRAGE OHNE_KENNWORT' | Should -BeTrue
+        Test-HMBlankPasswordQuestion @('INFO x', 'FRAGE OHNE_KENNWORT') | Should -BeTrue
+        Test-HMBlankPasswordQuestion @('OK Lokales Konto angelegt: PC\x') | Should -BeFalse
+        Test-HMBlankPasswordQuestion $null | Should -BeFalse
+    }
+    It 'Rueckfrage nennt Konto, PC und Administrator, Nein bricht ab' {
+        $x = Get-HMBlankPasswordText '.\schueler' 'PC01' $true
+        $x | Should -Match 'OHNE Kennwort'
+        $x | Should -Match 'lokaler Administrator'
+        $x | Should -Match 'PC01'
+        $x | Should -Match 'Nein = abbrechen'
+        (Get-HMBlankPasswordText '.\schueler' 'PC01' $false) | Should -Not -Match 'Administrator'
+    }
+}
+
+Describe 'Werkzeuge: Firewall, lokale Gruppen, Profil-Zuweisung, Autologon' {
+    BeforeAll { . (Join-Path $script:Root 'Functions\Tools-System.ps1') }
+    It 'Firewall: Rueckfrage nur, wenn ein anderer PC auf Oeffentlich gestellt wird' {
+        Test-HMFirewallPublicRisk 'Public' 'Private' 'PC-ANDERS' | Should -BeTrue
+        Test-HMFirewallPublicRisk 'Public' 'Public' 'PC-ANDERS' | Should -BeFalse
+        Test-HMFirewallPublicRisk 'Private' 'Public' 'PC-ANDERS' | Should -BeFalse
+        Test-HMFirewallPublicRisk 'Public' 'Private' $env:COMPUTERNAME | Should -BeFalse
+        Test-HMFirewallPublicRisk 'Public' 'Private' 'localhost' | Should -BeFalse
+        Test-HMFirewallPublicRisk 'Public' 'Private' '' | Should -BeFalse
+        (Get-HMFirewallPublicText 'Ethernet' 'PC-ANDERS') | Should -Match 'PC-ANDERS'
+    }
+    It 'Gruppen: eingebauter Administrator und Domaenen-Admins werden erkannt (SID oder Name, auch mit Umlaut)' {
+        $dom = 'S-1-5-21-1111111111-2222222222-3333333333'
+        Test-HMCriticalAdmin 'DOM\Irgendwas' "$dom-512" | Should -BeTrue
+        Test-HMCriticalAdmin 'PC\Umbenannt' "$dom-500" | Should -BeTrue
+        Test-HMCriticalAdmin ("DOM\Dom" + [char]0xE4 + 'nen-Admins') '' | Should -BeTrue
+        Test-HMCriticalAdmin 'DOM\Domaenen-Admins' '' | Should -BeTrue
+        Test-HMCriticalAdmin 'DOM\Domain Admins' '' | Should -BeTrue
+        Test-HMCriticalAdmin 'PC\Administrator' '' | Should -BeTrue
+        Test-HMCriticalAdmin 'DOM\Lehrer' "$dom-1105" | Should -BeFalse
+        Test-HMCriticalAdmin 'DOM\Admins-Schule' '' | Should -BeFalse
+    }
+    It 'Gruppen: Liste liefert die SID der Mitglieder mit' {
+        $script:RS_GroupList.ToString() | Should -Match 'MitgliedSid'
+    }
+    It 'Profil-Zuweisung: nicht entladene Registry-Datei fuehrt zu einer Warnung mit Neustart' {
+        $t = $script:RS_ProfileAssign.ToString()
+        $t | Should -Match ([regex]::Escape('liess sich nicht entladen - PC VOR der ersten Anmeldung'))
+        $t.IndexOf('liess sich nicht entladen') | Should -BeGreaterThan $t.IndexOf('reg.exe unload')
+    }
+    It 'Autologon: lokale Domaene bestimmt das Ziel, nicht der eingetippte Name' {
+        $t = $script:RS_Autologon.ToString()
+        $t | Should -Match ([regex]::Escape("if (-not `"`$domain`".Trim() -or `"`$domain`" -eq '.') { `$domain = `$env:COMPUTERNAME }"))
+        ${function:Start-HMAutologon}.ToString() | Should -Not -Match ([regex]::Escape("Split('.')[0]"))
+    }
+}
