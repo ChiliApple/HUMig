@@ -190,25 +190,57 @@ function Get-HMRestorePreview {
     if (-not $Ctx.IsRemote) { $Ctx.Computer = $env:COMPUTERNAME }
     Write-HMLog $Job "RESTORE-VORSCHAU  $($Ctx.Backup.Name)  ->  $($Ctx.Computer) \ $($Ctx.UserFolder)" 'Header'
     $rows = New-Object System.Collections.Generic.List[object]
-    $cnt = @{ Neu = 0; Ueberschrieben = 0; ZielNeuer = 0; Gleich = 0 }
+    $cnt = @{ Neu = 0; Ueberschrieben = 0; ZielNeuer = 0; Gleich = 0; Nicht = 0 }
+    # Eintrag, der beim Restore NICHT zurueckgespielt wird (eigene Zeile - sonst zeigte die Vorschau "alles gleich")
+    $skipRow = { param($m, $z, $why) $cnt.Nicht++; $rows.Add([pscustomobject]@{ Aktion = "nicht zurueckgespielt: $why"; Modul = $m; Ziel = $z; Groesse = $null; Backup = $null; Ziel_Datei = $null }) }
     $shareRoot = $null
     $Ctx.HiveReady = $false
+    $Ctx.BrowserSameMachine = $null; $Ctx.BrowserCase = ''
     try {
         if ($Ctx.IsRemote -and $Ctx.Credential) { $shareRoot = "\\$($Ctx.Computer)\C$"; [void](Connect-HMShare $shareRoot $Ctx.Credential) }
         if ($Ctx.UserSid) { try { $Ctx.HiveReady = Mount-HMHive $Ctx $Job $Ctx.UserSid $Ctx.ProfilePath } catch { } }
         $tenv = Get-HMTargetEnv $Ctx $Ctx.UserSid $Ctx.ProfilePath
         $mf = $Ctx.Backup.Manifest
-        foreach ($mod in @($Ctx.Modules)) {
+        $mods = @($Ctx.Modules)
+        # wie Start-HMRestore: ohne Profil am Ziel entfallen alle Benutzer-Module (ausser USMT legt das Profil erst an)
+        $noProfile = (-not $Ctx.ProfilePath -or -not $Ctx.UserSid)
+        $usmtSel = [bool](@($mods | Where-Object { $_.Id -eq 'Usmt' }).Count)
+        if ($noProfile) {
+            foreach ($um in @($mods | Where-Object { $_.Scope -eq 'User' -and $_.Id -ne 'Usmt' })) {
+                if ($usmtSel) { & $skipRow $um.Name '' 'Vorschau nicht moeglich - der Zielbenutzer hat noch kein Profil, USMT legt es erst beim Restore an' }
+                else { & $skipRow $um.Name '' 'Zielbenutzer hat am Ziel-PC noch kein Profil (einmal anmelden lassen oder USMT mitwaehlen)' }
+            }
+            $mods = @($mods | Where-Object { $_.Scope -ne 'User' -or $_.Id -eq 'Usmt' })
+        }
+        foreach ($mod in $mods) {
             if (Test-HMCancel $Job) { break }
             $Job.Status = $mod.Name
             foreach ($it in @($mod.Items)) {
                 if ($it.Type -eq 'Reg') {
                     $src = Get-HMRestoreSource $Ctx $mod $it
-                    if ($src -and (Test-Path -LiteralPath $src)) { $rows.Add([pscustomobject]@{ Aktion = 'Registry-Import'; Modul = $mod.Name; Ziel = "$($it.Key)"; Groesse = $null; Backup = $null; Ziel_Datei = $null }) }
+                    if (-not $src -or -not (Test-Path -LiteralPath $src)) { continue }
+                    # wie Restore-HMRegItem: Benutzer-Registry nicht ladbar bzw. an PC und Konto gebundene Werte
+                    if ("$($it.Key)" -match '^HK(CU|EY_CURRENT_USER)' -and -not $Ctx.HiveReady) { & $skipRow $mod.Name "$($it.Key)" 'Benutzer-Registry am Ziel nicht verfuegbar (Benutzer angemeldet?)'; continue }
+                    if ($it.SameMachineOnly -and -not (Test-HMBrowserSameMachine $Ctx)) { & $skipRow $mod.Name "$($it.Key)" "an PC und Konto gebunden, gilt nur am gleichen PC ($($Ctx.BrowserCase))"; continue }
+                    $rows.Add([pscustomobject]@{ Aktion = 'Registry-Import'; Modul = $mod.Name; Ziel = "$($it.Key)"; Groesse = $null; Backup = $null; Ziel_Datei = $null })
                     continue
                 }
                 if ($it.Type -eq 'Builtin') {
-                    if ((Test-Path -LiteralPath (Join-Path $Ctx.Backup.Path $mod.Id)) -or $Ctx.Backup.Legacy) { $rows.Add([pscustomobject]@{ Aktion = 'Spezial-Wiederherstellung'; Modul = $mod.Name; Ziel = "$($it.Handler)"; Groesse = $null; Backup = $null; Ziel_Datei = $null }) }
+                    if (-not ((Test-Path -LiteralPath (Join-Path $Ctx.Backup.Path $mod.Id)) -or $Ctx.Backup.Legacy)) { continue }
+                    if ("$($it.Handler)" -eq 'ExtraFolders') {
+                        # Zusaetzliche Ordner: je Ordner das beim Restore gewaehlte Ziel (oder "ausgelassen")
+                        $ents = @(Get-HMExtraFolderEntries $Ctx.Backup.Path ([bool]$Ctx.Backup.Legacy))
+                        foreach ($e in $ents) {
+                            $chosen = $null
+                            if ($Ctx.ExtraTargets -and $Ctx.ExtraTargets.Count) { $ck = ConvertTo-HMExtraKey $e.Path; if ($Ctx.ExtraTargets.ContainsKey($ck)) { $chosen = "$($Ctx.ExtraTargets[$ck])".Trim() } }
+                            if ($null -ne $chosen -and -not $chosen) { & $skipRow $mod.Name "$($e.Path)" 'beim Restore abgewaehlt'; continue }
+                            if ($chosen -and (Test-HMExtraTargetPath $chosen)) { & $skipRow $mod.Name "$($e.Path)" "gewaehltes Ziel $chosen ungueltig ($(Test-HMExtraTargetPath $chosen))"; continue }
+                            $z = if ($chosen) { $chosen } else { "$($e.Path)" }
+                            $rows.Add([pscustomobject]@{ Aktion = 'Zusaetzlicher Ordner'; Modul = $mod.Name; Ziel = "$z$(if ($chosen -and (ConvertTo-HMExtraKey $chosen) -ne (ConvertTo-HMExtraKey $e.Path)) { " (statt $($e.Path))" })"; Groesse = $null; Backup = $null; Ziel_Datei = $null })
+                        }
+                        continue
+                    }
+                    $rows.Add([pscustomobject]@{ Aktion = 'Spezial-Wiederherstellung'; Modul = $mod.Name; Ziel = "$($it.Handler)"; Groesse = $null; Backup = $null; Ziel_Datei = $null })
                     continue
                 }
                 if ($null -eq $Ctx.UserSid -and $mod.Scope -eq 'User') { continue }
@@ -216,6 +248,20 @@ function Get-HMRestorePreview {
                 if (-not $src -or -not (Test-Path -LiteralPath $src)) { continue }
                 $dstLocal = Resolve-HMToken $tenv $it.Path
                 $dst = Convert-HMPath $Ctx $dstLocal
+                # wie Restore-HMFolderItem: Ziel-Laufwerk fehlt am Ziel-PC
+                if ($dstLocal -match '^([A-Za-z]):') {
+                    $drv = $Matches[1].ToUpper()
+                    if (-not (Test-Path -LiteralPath (Convert-HMPath $Ctx "${drv}:\"))) { & $skipRow $mod.Name "$dstLocal" "Laufwerk ${drv}: gibt es am Ziel-PC nicht"; continue }
+                }
+                # Chromium-Browser: anderer PC oder anderes Konto -> nur Lesezeichen werden zusammengefuehrt (keine Dateiliste)
+                $browser11 = $false
+                if ($it.Type -eq 'Folder' -and (Test-HMChromiumItem $it)) {
+                    if (-not (Test-HMBrowserSameMachine $Ctx)) {
+                        $rows.Add([pscustomobject]@{ Aktion = 'Browser: nur Lesezeichen zusammenfuehren'; Modul = $mod.Name; Ziel = "$dstLocal ($($Ctx.BrowserCase) - Kennwoerter, Cookies und Anmeldungen bleiben am Ziel, wie sie sind)"; Groesse = $null; Backup = $null; Ziel_Datei = $null })
+                        continue
+                    }
+                    $browser11 = $true   # gleicher PC und Konto: 1:1 und immer ueberschreiben (Option "neuere behalten" gilt hier nicht)
+                }
                 $skip = @()
                 if ($mf -and $mf.SyncRoots) { foreach ($s in @($mf.SyncRoots | Where-Object { $_ -and $_.Rel -and $_.Item -eq "$($mod.Id)/$($it.Name)" })) { $skip += (Join-Path $src $s.Rel).TrimEnd('\') + '\' } }
                 $pattern = if ($it.Type -eq 'Files') { @($it.Filter) } else { @('*') }
@@ -235,7 +281,7 @@ function Get-HMRestorePreview {
                     if ($si.Length -eq $di.Length -and [Math]::Abs($d) -le 20000000) { $cnt.Gleich++; continue }
                     if ($d -lt -20000000) {
                         $cnt.ZielNeuer++
-                        $a = if ($Ctx.Options.KeepNewer) { 'Ziel neuer - bleibt' } else { 'UEBERSCHREIBT neuere Zieldatei' }
+                        $a = if ($Ctx.Options.KeepNewer -and -not $browser11) { 'Ziel neuer - bleibt' } else { 'UEBERSCHREIBT neuere Zieldatei' }
                         $rows.Add([pscustomobject]@{ Aktion = $a; Modul = $mod.Name; Ziel = $target; Groesse = $si.Length; Backup = $si.LastWriteTime; Ziel_Datei = $di.LastWriteTime })
                     } else {
                         $cnt.Ueberschrieben++
@@ -249,7 +295,8 @@ function Get-HMRestorePreview {
         if ($shareRoot) { Disconnect-HMShare $shareRoot }
     }
     $sum = "{0} neu, {1} ueberschreiben aeltere Zieldateien, {2} Zieldatei NEUER{3}, {4} gleich (werden uebersprungen)" -f $cnt.Neu, $cnt.Ueberschrieben, $cnt.ZielNeuer, $(if ($Ctx.Options.KeepNewer) { ' (bleibt wegen Option)' } else { ' (wuerde ueberschrieben!)' }), $cnt.Gleich
-    Write-HMLog $Job "VORSCHAU: $sum" $(if ($cnt.ZielNeuer -and -not $Ctx.Options.KeepNewer) { 'Warning' } else { 'Success' })
+    if ($cnt.Nicht) { $sum += ", $($cnt.Nicht) Eintrag/Eintraege werden NICHT zurueckgespielt (siehe Aktion)" }
+    Write-HMLog $Job "VORSCHAU: $sum" $(if (($cnt.ZielNeuer -and -not $Ctx.Options.KeepNewer) -or $cnt.Nicht) { 'Warning' } else { 'Success' })
     $Job.Progress = 100
     $Job.Result = [pscustomobject]@{ Summary = $sum; Rows = $rows.ToArray(); Counts = $cnt }
 }

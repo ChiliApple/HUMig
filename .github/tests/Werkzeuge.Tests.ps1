@@ -431,3 +431,88 @@ Describe 'App-Updates: Abbrechen, Doppelstart, Zeitplan-Status, Zeitlimit' {
         $sw.Elapsed.TotalSeconds | Should -BeLessThan 20
     }
 }
+
+Describe 'Restore-Vorschau zeigt, was der Restore nicht zurueckspielt' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        . (Join-Path $script:Root 'Functions\Migration-Quality.ps1')
+        $script:Mk = { param([string]$P, [string]$T = 'x') New-Item -ItemType Directory -Path (Split-Path $P -Parent) -Force | Out-Null; [IO.File]::WriteAllText($P, $T) }
+        $script:FreeDrive = @('Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y') | Where-Object { -not (Test-Path -LiteralPath "$($_):\") } | Select-Object -First 1
+        $script:RunPreview = {
+            param([hashtable]$Ctx)
+            $job = @{ Cancel = $false; Status = ''; Progress = 0; Log = (New-Object System.Collections.Concurrent.ConcurrentQueue[object]); LogFile = $null }
+            Get-HMRestorePreview -Ctx $Ctx -Job $job
+            return $job.Result
+        }
+    }
+    BeforeEach {
+        $script:Bk = Join-Path $TestDrive ("BK_{0}" -f [guid]::NewGuid().ToString('N').Substring(0, 6))
+        $script:Ctx = @{
+            Computer = $env:COMPUTERNAME; UserFolder = 'max'; UserSid = $null; ProfilePath = $null; Account = ''; Credential = $null
+            Options = @{ KeepNewer = $false }; ExtraTargets = @{}
+            Backup = @{ Path = $script:Bk; Name = 'BK'; Legacy = $false; Manifest = [pscustomobject]@{ MachineGuid = 'nicht-dieser-pc'; UserSid = 'S-1-5-21-1-2-3-1001'; SourceComputerName = 'ANDERER-PC' } }
+            Modules = @()
+        }
+    }
+    It 'Ziel ohne Profil: Benutzer-Module erscheinen als "nicht zurueckgespielt"' {
+        & $script:Mk (Join-Path $script:Bk 'Docs\Eigene\a.txt')
+        $script:Ctx.Modules = @([pscustomobject]@{ Id = 'Docs'; Name = 'Dokumente'; Scope = 'User'; Items = @([pscustomobject]@{ Type = 'Folder'; Name = 'Eigene'; Path = '{PROFILE}\Documents' }) })
+        $r = & $script:RunPreview $script:Ctx
+        @($r.Rows).Count | Should -Be 1
+        $r.Rows[0].Aktion | Should -Match 'nicht zurueckgespielt: Zielbenutzer hat am Ziel-PC noch kein Profil'
+        $r.Counts.Nicht | Should -Be 1
+        $r.Summary | Should -Match 'NICHT zurueckgespielt'
+    }
+    It 'Ziel ohne Profil, aber USMT gewaehlt: Hinweis statt falscher Liste' {
+        $script:Ctx.Modules = @(
+            [pscustomobject]@{ Id = 'Usmt'; Name = 'Windows-Einstellungen (USMT)'; Scope = 'User'; Items = @() }
+            [pscustomobject]@{ Id = 'Docs'; Name = 'Dokumente'; Scope = 'User'; Items = @([pscustomobject]@{ Type = 'Folder'; Name = 'Eigene'; Path = '{PROFILE}\Documents' }) })
+        $r = & $script:RunPreview $script:Ctx
+        @($r.Rows | Where-Object { $_.Modul -eq 'Dokumente' })[0].Aktion | Should -Match 'USMT legt es erst beim Restore an'
+    }
+    It 'fehlendes Ziel-Laufwerk: Zeile statt Dateiliste' {
+        if (-not $script:FreeDrive) { Set-ItResult -Skipped -Because 'kein freier Laufwerksbuchstabe'; return }
+        & $script:Mk (Join-Path $script:Bk 'Daten\D1\a.txt')
+        $script:Ctx.Modules = @([pscustomobject]@{ Id = 'Daten'; Name = 'Daten'; Scope = 'Machine'; Items = @([pscustomobject]@{ Type = 'Folder'; Name = 'D1'; Path = "$($script:FreeDrive):\Daten" }) })
+        $r = & $script:RunPreview $script:Ctx
+        @($r.Rows).Count | Should -Be 1
+        $r.Rows[0].Aktion | Should -Match "Laufwerk $($script:FreeDrive): gibt es am Ziel-PC nicht"
+    }
+    It 'an PC und Konto gebundene Registry auf anderem PC: nicht zurueckgespielt' {
+        & $script:Mk (Join-Path $script:Bk 'BrReg\Prefs.reg')
+        $script:Ctx.Modules = @([pscustomobject]@{ Id = 'BrReg'; Name = 'Browser-Werte'; Scope = 'Machine'; Items = @([pscustomobject]@{ Type = 'Reg'; Name = 'Prefs'; Key = 'HKLM\SOFTWARE\HUMigTest'; SameMachineOnly = $true }) })
+        $r = & $script:RunPreview $script:Ctx
+        $r.Rows[0].Aktion | Should -Match 'an PC und Konto gebunden'
+    }
+    It 'Browser auf anderem PC: nur Lesezeichen zusammenfuehren, keine Dateiliste' {
+        $dst = Join-Path $TestDrive 'ZielBrowser'
+        & $script:Mk (Join-Path $script:Bk 'Chrome\UserData\Default\Bookmarks')
+        & $script:Mk (Join-Path $dst 'Default\Bookmarks')
+        $script:Ctx.Modules = @([pscustomobject]@{ Id = 'Chrome'; Name = 'Chrome'; Scope = 'Machine'; Group = 'Browser'; Items = @([pscustomobject]@{ Type = 'Folder'; Name = 'UserData'; Path = $dst; Chromium = '' }) })
+        $r = & $script:RunPreview $script:Ctx
+        @($r.Rows).Count | Should -Be 1
+        $r.Rows[0].Aktion | Should -Be 'Browser: nur Lesezeichen zusammenfuehren'
+    }
+    It 'Zusaetzliche Ordner: abgewaehlte als "nicht zurueckgespielt", geaenderte mit neuem Ziel' {
+        $ed = Join-Path $script:Bk 'ExtraFolders'
+        & $script:Mk (Join-Path $ed 'FOLDER1\a.txt'); & $script:Mk (Join-Path $ed 'FOLDER2\b.txt')
+        $p1 = 'D:\Projekte'; $p2 = 'D:\Archiv'
+        [IO.File]::WriteAllText((Join-Path $ed 'folders.json'), (ConvertTo-Json -InputObject @(@{ Index = 1; Path = $p1 }, @{ Index = 2; Path = $p2 })))
+        $script:Ctx.ExtraTargets = @{ (ConvertTo-HMExtraKey $p1) = ''; (ConvertTo-HMExtraKey $p2) = 'E:\Neu\Archiv' }
+        $script:Ctx.Modules = @([pscustomobject]@{ Id = 'ExtraFolders'; Name = 'Zusaetzliche Ordner'; Scope = 'Machine'; Items = @([pscustomobject]@{ Type = 'Builtin'; Name = 'ExtraFolders'; Handler = 'ExtraFolders' }) })
+        $r = & $script:RunPreview $script:Ctx
+        @($r.Rows | Where-Object { $_.Aktion -match 'beim Restore abgewaehlt' -and $_.Ziel -eq $p1 }).Count | Should -Be 1
+        @($r.Rows | Where-Object { $_.Aktion -eq 'Zusaetzlicher Ordner' -and $_.Ziel -match 'E:\\Neu\\Archiv \(statt D:\\Archiv\)' }).Count | Should -Be 1
+    }
+    It 'normaler Ordner: Dateivergleich wie bisher (aeltere Zieldatei wird ueberschrieben)' {
+        $dst = Join-Path $TestDrive ("ZielN_{0}" -f [guid]::NewGuid().ToString('N').Substring(0, 6))
+        & $script:Mk (Join-Path $script:Bk 'Norm\N1\a.txt') 'neu und laenger'
+        & $script:Mk (Join-Path $dst 'a.txt') 'alt'
+        (Get-Item (Join-Path $dst 'a.txt')).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddDays(-3)
+        $script:Ctx.Modules = @([pscustomobject]@{ Id = 'Norm'; Name = 'Normal'; Scope = 'Machine'; Items = @([pscustomobject]@{ Type = 'Folder'; Name = 'N1'; Path = $dst }) })
+        $r = & $script:RunPreview $script:Ctx
+        @($r.Rows).Count | Should -Be 1
+        $r.Rows[0].Aktion | Should -Be 'ueberschreibt (Ziel aelter)'
+        $r.Counts.Nicht | Should -Be 0
+    }
+}
