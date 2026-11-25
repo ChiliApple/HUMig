@@ -1246,17 +1246,11 @@ function Add-ComputerHistory([string]$Name) {
     if (-not $ui.cmbComputer.Items.Contains($Name)) { $ui.cmbComputer.Items.Insert(1, $Name) }
 }
 #region HMZiel - reine Funktionen (ohne Fenster testbar, .github\tests\Ziel.Tests.ps1)
-# Zwei Computernamen meinen denselben PC? Lokal (leer, '.', localhost, eigener Name) ist gleich; FQDN gegen kurzen Namen
-# gilt als gleich, wenn einer der beiden keinen Punkt hat; IP-Adressen werden nie gekuerzt.
+# Eine Regel fuer "derselbe PC" (Abgleich Feld gegen Ziel und Gedaechtnis PC -> Benutzer): gleich ohne Beachtung von Gross/klein,
+# oder beide sind nach der Regel von Test-HMIsLocal dieser PC. Kurzname gegen FQDN gilt nicht als gleich (die Domaene eines
+# Kurznamens ist unbekannt).
 function Test-HMSameComputer([string]$A, [string]$B, [string]$Local = $env:COMPUTERNAME) {
-    $ip = '^\d{1,3}(\.\d{1,3}){3}$'
-    $x = Get-HMComputerKey $A $Local; $y = Get-HMComputerKey $B $Local
-    if ($x -eq $y) { return $true }
-    if ($x -eq '.' -or $y -eq '.') { return $false }
-    if ($x -match $ip -or $y -match $ip) { return $false }
-    # zwei fremde FQDN: nur gleich, wenn ganz gleich (andere Domaene = anderer PC); kurzer Name gegen FQDN: kurzer Teil zaehlt
-    if ($x.Contains('.') -and $y.Contains('.')) { return $false }
-    return (($x -split '\.')[0] -eq ($y -split '\.')[0])
+    return ((Get-HMComputerKey $A $Local) -eq (Get-HMComputerKey $B $Local))
 }
 # Schluessel eines Computernamens: '.' fuer diesen PC - dieselbe Regel wie Test-HMIsLocal in der Engine (leer, '.', localhost,
 # 127.0.0.1, eigener Name, eigener Name mit beliebiger Domaene), damit Anzeige und Ausfuehrung uebereinstimmen; sonst Grossbuchstaben
@@ -1320,7 +1314,8 @@ function Get-HMTargetQuestion($State, [string]$Action, [string]$RunningJob = '',
         default      { "gewaehlt ist $c (nicht verbunden)" }
     }
     # -FieldLocked: ein Vorgang laeuft, Feld und Verbinden sind gesperrt
-    $hint = $(if ($RunningJob) { "Waehrend '$RunningJob' laeuft, wird nicht neu verbunden. Fuer ${f}: Nein, nach dem Vorgang im Feld Enter oder Verbinden." }
+    $hint = $(if ($RunningJob -and $FieldLocked) { "Waehrend '$RunningJob' laeuft, wird nicht neu verbunden. Fuer ${f}: Nein, nach dem Vorgang im Feld Enter oder Verbinden." }
+        elseif ($RunningJob) { "Waehrend '$RunningJob' laeuft, schaltet HUMig nicht von selbst um. Fuer ${f}: Nein, dann im Feld Enter oder Verbinden." }
         elseif ($FieldLocked) { "Fuer ${f}: Nein, nach dem laufenden Vorgang im Feld Enter oder Verbinden." }
         else { "Fuer ${f}: Nein, dann im Feld Enter oder Verbinden." })
     return ("Im Feld Computer steht $f, $was.`n`n$Action wuerde auf $c laufen, nicht auf $f.`n`n" +
@@ -1414,7 +1409,11 @@ function Get-HMDeletingWarning([string]$Name, [string]$Action) {
 #endregion HMZiel
 # PC -> zuletzt gewaehlter Benutzer (Get-HMUserMemoryEntry); gemerkt bei jeder Auswahl, solange der PC verbunden ist
 $script:HMUserMemory = @{}
-function Save-HMUserMemory { if ($script:Target -and $script:Target.Connected) { try { Set-HMUserMemoryEntry $script:HMUserMemory "$($script:Target.Computer)" (Get-SelectedProfile) } catch { } } }
+function Save-HMUserMemory {
+    # nur eine wirklich getroffene Auswahl aus der Liste merken, keine (halb) getippten Konten
+    if (-not ($script:Target -and $script:Target.Connected)) { return }
+    try { $i = [int]$ui.cmbUser.SelectedIndex; if ($i -ge 0 -and $i -lt @($script:Profiles).Count) { Set-HMUserMemoryEntry $script:HMUserMemory "$($script:Target.Computer)" $script:Profiles[$i] } } catch { }
+}
 
 # Text im Feld Computer (nur fuer Verbinden, Anmeldedaten und die Anzeige - Ziel einer Aktion ist Get-TargetComputer)
 function Get-HMFieldComputer {
@@ -1427,6 +1426,13 @@ function Get-HMFieldComputer {
 function Get-TargetComputer {
     if ($script:Target -and "$($script:Target.Computer)") { return "$($script:Target.Computer)" }
     return (Get-HMFieldComputer)
+}
+# Beschriftung fuer Fenster, die das Ziel nur anzeigen (z.B. "Gewaehlter Computer: $(Get-HMTargetCaption)"): "PC01" bzw.
+# "PC01, im Feld: PC02". Umgeschaltet wird erst beim Klick auf eine Aktion (Use-HMPcTarget).
+function Get-HMTargetCaption {
+    $st = Get-HMTargetState (Get-HMFieldComputer) $script:Target
+    if ("$($st.Kind)" -eq 'Differs') { return "$($st.Computer), im Feld: $($st.Field)" }
+    return (Get-TargetComputer)
 }
 function Update-HMTargetLabel {
     if (-not $ui.lblConnected) { return }
@@ -1529,7 +1535,6 @@ function Get-SelectedProfile {
 }
 function Update-SidLabel {
     $p = Get-SelectedProfile
-    Save-HMUserMemory
     if (-not $p) { $ui.lblSid.Text = ''; return }
     if ($p.NoProfile) { $ui.lblSid.Text = 'kein Profil an diesem PC (nur Restore mit USMT)'; $ui.lblSid.Foreground = Get-ConsoleBrush '#FFF9E2AF' }
     else {
@@ -1544,7 +1549,7 @@ function Update-SidLabel {
     Update-IncrementalInfo
 }
 $ui.lblSid.Add_MouseLeftButtonUp({ $p = Get-SelectedProfile; if ($p -and $p.SID) { [System.Windows.Clipboard]::SetText("$($p.SID)"); Out-Console "SID kopiert: $($p.SID)" 'Success' } })
-$ui.cmbUser.Add_SelectionChanged({ $script:Window.Dispatcher.BeginInvoke([action]{ Update-SidLabel }) | Out-Null })
+$ui.cmbUser.Add_SelectionChanged({ $script:Window.Dispatcher.BeginInvoke([action]{ Save-HMUserMemory; Update-SidLabel }) | Out-Null })
 $ui.cmbUser.Add_KeyUp({ Update-SidLabel })
 
 # Verbinden. -FromField: mit dem PC im Feld Computer (Verbinden, Enter, Lokal, Geraete-Dialog).
@@ -1616,6 +1621,10 @@ function Connect-Target([switch]$FromField) {
         $prev = Get-HMUserMemoryEntry $script:HMUserMemory $comp
         $ix = Select-HMProfileIndex $script:Profiles $prev ([bool]$prev) (Test-HMIsLocal $comp) $me
         if ($ix -ge 0) { $ui.cmbUser.SelectedIndex = $ix }
+        # gemerkter Benutzer statt der ueblichen Vorauswahl: sagen, warum
+        if ($prev -and $ix -ge 0 -and (Test-HMProfileKept $script:Profiles[$ix] $prev) -and $ix -ne (Select-HMProfileIndex $script:Profiles $null $false (Test-HMIsLocal $comp) $me)) {
+            Out-Console "Benutzer $($script:Profiles[$ix].Account) wie zuletzt an diesem PC gewaehlt" 'Info'
+        }
         if ($prev -and "$($prev.Account)" -and $ix -ge 0 -and -not (Test-HMProfileKept $script:Profiles[$ix] $prev)) {
             if ($prev.NoProfile) { Out-Console "Konto $($prev.Account) hat an $comp noch kein Profil - Auswahl: $($script:Profiles[$ix].Account)" 'Warning' }
             else { Out-Console "Benutzer $($prev.Account) hat an $comp kein Profil mehr - Auswahl: $($script:Profiles[$ix].Account)" 'Warning' }
@@ -1743,10 +1752,15 @@ function Start-EngineJob {
     }
     } catch {
         # Start gescheitert: Oberflaeche nicht gesperrt lassen ("Vorgang laeuft" zuruecksetzen)
+        $err = $_.Exception.Message
         Set-JobUi $false
         $script:CurrentJob = $null; $script:JobCtx = $null
         Set-Status "$Title nicht gestartet" '#FFF38BA8'
-        Out-Console "$Title konnte nicht gestartet werden: $($_.Exception.Message)" 'Error'
+        Out-Console "$Title konnte nicht gestartet werden: $err" 'Error'
+        # OnFinished wie bei einem abgebrochenen Vorgang aufrufen, damit Folgeaktionen sauber enden
+        # (z.B. Installation vor dem Restore: Merkmal zurueck, Restore wird nicht gestartet)
+        $job.Cancel = $true; $job.Error = "$err"; $job.Ended = Get-Date
+        if ($OnFinished) { try { & $OnFinished $job } catch { Out-Console "${Title}: $($_.Exception.Message)" 'Error' } }
     }
 }
 # Laufenden Vorgang abbrechen. -Confirmed: ohne Rueckfrage (z.B. am Handy schon bestaetigt)

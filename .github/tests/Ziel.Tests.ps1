@@ -36,7 +36,9 @@ Describe 'Ziel: Computernamen vergleichen' {
         Test-HMSameComputer 'pc01' 'PC01' 'EIGEN' | Should -BeTrue
         Test-HMSameComputer '' 'EIGEN' 'EIGEN' | Should -BeTrue
         Test-HMSameComputer 'localhost' '.' 'EIGEN' | Should -BeTrue
-        Test-HMSameComputer 'PC01.schule.local' 'PC01' 'EIGEN' | Should -BeTrue
+        # Kurzname gegen FQDN: nicht gleich (Domaene des Kurznamens unbekannt)
+        Test-HMSameComputer 'PC01.schule.local' 'PC01' 'EIGEN' | Should -BeFalse
+        Test-HMSameComputer 'PC01' 'PC01.b.local' 'EIGEN' | Should -BeFalse
         Test-HMSameComputer 'PC01' 'PC02' 'EIGEN' | Should -BeFalse
         Test-HMSameComputer 'PC01' 'EIGEN' 'EIGEN' | Should -BeFalse
         Test-HMSameComputer '203.0.113.5' '203' 'EIGEN' | Should -BeFalse
@@ -51,6 +53,18 @@ Describe 'Ziel: Computernamen vergleichen' {
             ((Get-HMComputerKey $n) -eq '.') | Should -Be (Test-HMIsLocal $n) -Because "Name '$n'"
         }
         Test-HMSameComputer "$($env:COMPUTERNAME).andere.domaene" $env:COMPUTERNAME | Should -BeTrue
+    }
+    It 'eine Regel fuer Abgleich und Gedaechtnis: FQDN eines anderen Namens ist ein anderer PC, auch fuer das Gedaechtnis' {
+        $m = @{}
+        Set-HMUserMemoryEntry $m 'PC01' (New-ZielProfile 'S-B' 'DOM\bert') 'EIGEN'
+        foreach ($n in @('pc01', 'PC01.dom.local', 'PC01.b.local', 'PC02')) {
+            ([bool](Get-HMUserMemoryEntry $m $n 'EIGEN')) | Should -Be (Test-HMSameComputer $n 'PC01' 'EIGEN') -Because "Name '$n'"
+        }
+        # Feld PC01.b.local, Ziel PC01: Unterschied wird angezeigt, ein PC-Werkzeug schaltet auf den getippten PC um
+        $s = Get-HMTargetState 'PC01.b.local' @{ Computer = 'PC01'; Connected = $true } 'EIGEN'
+        $s.Kind | Should -Be 'Differs'
+        (Get-HMTargetLabel $s).Text | Should -Match 'im Feld: PC01\.b\.local'
+        Get-HMToolDecision 'Pc' $s $false | Should -Be 'Switch'
     }
     It 'Gedaechtnis PC -> Benutzer: je PC ein Eintrag, anderer PC findet nichts' {
         $m = @{}
@@ -102,7 +116,7 @@ Describe 'Ziel: Feld gegen verbundenen PC' {
         (Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connecting = $true } 'EIGEN') 'Restore') | Should -Match 'die Verbindung zu PC01 wird gerade aufgebaut'
         (Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01' } 'EIGEN') 'Restore') | Should -Match 'gewaehlt ist PC01 \(nicht verbunden\)'
         # waehrend Backup/Restore: dieselbe Belegung, Hinweis auf spaeteres Verbinden
-        $j = Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connected = $true } 'EIGEN') "'Netzwerktest'" 'Restore'
+        $j = Get-HMTargetQuestion (Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connected = $true } 'EIGEN') "'Netzwerktest'" 'Restore' -FieldLocked
         $j | Should -Match "Ja = 'Netzwerktest' auf PC01 ausfuehren \(das Feld wird auf PC01 zurueckgesetzt\)"
         $j | Should -Match 'Nein = nichts tun'
         $j | Should -Match "Waehrend 'Restore' laeuft, wird nicht neu verbunden\. Fuer PC02: Nein, nach dem Vorgang im Feld Enter oder Verbinden\.$"
@@ -242,6 +256,20 @@ Describe 'Ziel: Verbinden verwirft veraltete Antworten und behaelt die Auswahl' 
         $ui.cmbUser.SelectedIndex | Should -Be 0
         (($script:Lines -join "`n") -match 'kein Profil mehr') | Should -BeFalse
     }
+    It 'nur eine Auswahl aus der Liste wird gemerkt, kein getipptes Konto; gemerkter Benutzer mit Infozeile' {
+        $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
+        $p = @((New-ZielProfile 'S-A' 'DOM\anna' $true), (New-ZielProfile 'S-B' 'DOM\bert'))
+        & $script:Calls[0].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[0].State
+        $ui.cmbUser.SelectedIndex = -1; $ui.cmbUser.Text = 'DOM\be'   # halb getippt
+        Save-HMUserMemory
+        $script:HMUserMemory.Count | Should -Be 0
+        $ui.cmbUser.SelectedIndex = 1; Save-HMUserMemory
+        (Get-HMUserMemoryEntry $script:HMUserMemory 'PC01').SID | Should -Be 'S-B'
+        Connect-Target
+        & $script:Calls[1].OnComplete ([pscustomobject]@{ Profiles = $p; Error = $null; WinRM = $null }) $script:Calls[1].State
+        $ui.cmbUser.SelectedIndex | Should -Be 1
+        ($script:Lines -join "`n") | Should -Match 'Info\|Benutzer DOM\\bert wie zuletzt an diesem PC gewaehlt'
+    }
     It 'Werkzeugklick mit Tippfehler schaltet still um; zurueck auf PC01 ist derselbe Benutzer wieder gewaehlt' {
         $ui.cmbComputer.Text = 'PC01'; Connect-Target -FromField
         $p = @((New-ZielProfile 'S-A' 'DOM\anna' $true), (New-ZielProfile 'S-B' 'DOM\bert'))
@@ -345,7 +373,8 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
         # Phase 'erst Programme installieren, dann Restore' zaehlt zum Restore
         $script:JobRunning = $false; $script:RestoreAfterInstall = @{ Computer = 'PC01' }
         Confirm-HMTarget "'Netzwerktest'" | Should -BeFalse
-        $script:Asked.Text | Should -Match "Waehrend 'Restore \(vorher Programme installieren\)' laeuft"
+        $script:Asked.Text | Should -Match "Waehrend 'Restore \(vorher Programme installieren\)' laeuft, schaltet HUMig nicht von selbst um\. Fuer PC02: Nein, dann im Feld Enter oder Verbinden\.$"
+        $script:Asked.Text | Should -Not -Match 'wird nicht neu verbunden'
         $script:RestoreAfterInstall = $null; $script:JobRunning = $true
         $script:Answer = 'Yes'; $script:JobTitle = 'Restore'
         Confirm-HMTarget "'Netzwerktest'" | Should -BeTrue
@@ -617,8 +646,12 @@ Describe 'Ziel: Backups nicht still loeschen, die gerade benutzt werden' {
         }
         It 'Start wirft: Oberflaeche wird wieder freigegeben ("Vorgang laeuft" zurueck)' {
             $script:LongJobThrows = $true
-            Start-EngineJob -Command 'x' -Ctx @{} -Title 'Backup' -ScriptFiles @('a')
+            $script:Finished = $null
+            Start-EngineJob -Command 'x' -Ctx @{} -Title 'Backup' -ScriptFiles @('a') -OnFinished { param($j) $script:Finished = $j }
             @($script:UiCalls) | Should -Be @($true, $false)
+            # OnFinished wie bei Abbruch: Folgeaktionen (z.B. Restore nach der Installation) enden sauber
+            $script:Finished.Cancel | Should -BeTrue
+            $script:Finished.Error | Should -Be 'kaputt'
             $script:CurrentJob | Should -BeNullOrEmpty
             $script:Status | Should -Be 'Backup nicht gestartet'
         }
@@ -709,5 +742,61 @@ Describe 'Ziel: Hinweistexte nach stillem Umschalten' {
         $l.Tip | Should -Not -Match 'jeder Vorgang'
         $x = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'XAML\MainWindow.xaml') -Encoding UTF8
         $x | Should -Match 'x:Name="lblConnected"[^>]*Werkzeuge, die nur den PC brauchen, nehmen den PC im Feld'
+    }
+}
+
+Describe 'Ziel: Installations-Warteschlange vor dem Restore bleibt nicht haengen' {
+    BeforeAll {
+        $ua = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\UI-Apps.ps1'), [ref]$null, [ref]$null)
+        foreach ($n in @('Invoke-HMSwQueueNext', 'Stop-HMInstallQueue')) { . ([scriptblock]::Create(@($ua.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true))[0].Extent.Text)) }
+        function Out-Console { param($m, $l) $script:Lines.Add("$l|$m") }
+        function Complete-HMInstallQueue([bool]$Cancelled) { $script:Completed = $Cancelled }
+        function Start-SoftwareDeploy { param($Hosts, $Package, $Label) $script:Deployed.Add("$($Package.Settings.Name)"); if ($Package.Settings.Name -eq 'kaputt') { throw 'Fehler beim Start' } }
+        function Start-HMAuInstall { param($c, $i) throw 'WinGet-Fehler' }
+    }
+    BeforeEach {
+        $script:Lines = New-Object System.Collections.Generic.List[string]; $script:Deployed = New-Object System.Collections.Generic.List[string]; $script:Completed = $null; $script:SwQueueThen = $null
+        $script:SwQueue = New-Object System.Collections.Generic.Queue[object]; $script:SwQueueTotal = 2
+    }
+    It 'Ausnahme beim Start eines Pakets: Warteschlange endet als abgebrochen, Rest verworfen' {
+        $script:SwQueue.Enqueue(@{ Host = 'PC01'; Package = @{ Settings = @{ Name = 'kaputt' } } })
+        $script:SwQueue.Enqueue(@{ Host = 'PC01'; Package = @{ Settings = @{ Name = 'B' } } })
+        $script:SwQueueThen = @{ Computer = 'PC01'; Items = @('w') }
+        Invoke-HMSwQueueNext
+        $script:Completed | Should -BeTrue
+        $script:SwQueue | Should -BeNullOrEmpty
+        $script:SwQueueThen | Should -BeNullOrEmpty
+        @($script:Deployed) | Should -Be @('kaputt')
+        ($script:Lines -join "`n") | Should -Match "Error\|Installations-Warteschlange abgebrochen - Paket 'kaputt' nicht gestartet: Fehler beim Start"
+    }
+    It 'Eintrag ohne PC oder Paket: ausgelassen, das naechste Paket startet' {
+        $script:SwQueue.Enqueue(@{ Host = ''; Package = @{ Settings = @{ Name = 'A' } } })
+        $script:SwQueue.Enqueue(@{ Host = 'PC01'; Package = @{ Settings = @{ Name = 'B' } } })
+        Invoke-HMSwQueueNext
+        @($script:Deployed) | Should -Be @('B')
+        $script:Completed | Should -BeNullOrEmpty
+    }
+    It 'WinGet-Schritt wirft beim Start: Warteschlange endet als abgebrochen' {
+        $script:SwQueue = New-Object System.Collections.Generic.Queue[object]
+        $script:SwQueueThen = @{ Computer = 'PC01'; Items = @('w') }
+        Invoke-HMSwQueueNext
+        $script:Completed | Should -BeTrue
+        ($script:Lines -join "`n") | Should -Match 'WinGet-Installation nicht gestartet: WinGet-Fehler'
+    }
+}
+
+Describe 'Ziel: Beschriftung fuer Fenster, die das Ziel nur anzeigen' {
+    BeforeAll {
+        . ([scriptblock]::Create((Get-ZielFn 'Get-HMFieldComputer')))
+        . ([scriptblock]::Create((Get-ZielFn 'Get-TargetComputer')))
+        . ([scriptblock]::Create((Get-ZielFn 'Get-HMTargetCaption')))
+    }
+    It 'Ziel allein bzw. Ziel und abweichendes Feld, ohne umzuschalten' {
+        $ui = @{ cmbComputer = [pscustomobject]@{ Text = 'PC01' } }
+        $script:Target = @{ Computer = 'PC01'; Connected = $true }
+        Get-HMTargetCaption | Should -Be 'PC01'
+        $ui.cmbComputer.Text = 'PC02'
+        Get-HMTargetCaption | Should -Be 'PC01, im Feld: PC02'
+        $script:Target.Computer | Should -Be 'PC01'
     }
 }
