@@ -129,7 +129,7 @@ function Get-HMStatusData {
             if ($arcDue -and $mine.Count) { $warn.Add([pscustomobject]@{ Level = 'Warning'; Area = 'Server-Backup'; Text = "Server-Backup '$($p.Name)': Archiv-Sicherung faellig$(if ($null -ne $arcAge) { " (letzte vor $arcAge Tagen)" })" }) }
         }
         $level = 'OK'
-        if (-not $lastOk) { $level = $(if ($mine.Count) { 'Error' } else { 'Warning' }) }
+        if (-not $lastOk) { $level = $(if ($mine.Count) { 'Error' } else { 'Info' }) }   # ohne jeden Lauf: Hinweis, keine Warnung
         elseif ($okAge -gt $wd) { $level = 'Error' }
         elseif ($lastAny -and "$($lastAny.Status)" -eq 'Error') { $level = 'Error' }
         # noch kein Lauf (z. B. am Tag der Anlage): nur Hinweis, zaehlt nicht gegen "Alles in Ordnung"

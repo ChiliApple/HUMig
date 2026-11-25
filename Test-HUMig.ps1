@@ -243,7 +243,7 @@ T 'Werkzeug: Inventar lokal (v0.0.5)' { $r = & $script:RS_Inventory $false; if (
 # 4d. Handy-Fernbedienung (v2.0.136) - nur lesend, nichts wird eingerichtet
 . (Join-Path $root 'Functions\Remote-Core.ps1')
 . (Join-Path $root 'Functions\Remote-Web.ps1')
-T 'Fernbedienung: QR-Code und Webseite' { $q = ConvertTo-HMQrMatrix 'https://10.1.1.5:8443/#c=123456'; $f = Get-HMRemoteWebFiles -Version '1' -Pc 'X'; if ($q.Size -ne 29 -or -not $f['/index.html']) { throw 'falsch' }; "QR Version $($q.Version), $($f.Count) Dateien" }
+T 'Fernbedienung: QR-Code und Webseite' { $q = ConvertTo-HMQrMatrix 'https://192.0.2.5:843/#c=123456'; $f = Get-HMRemoteWebFiles -Version '1' -Pc 'X'; if ($q.Size -ne 29 -or -not $f['/index.html']) { throw 'falsch' }; "QR Version $($q.Version), $($f.Count) Dateien" }
 T 'Fernbedienung: Adressen und Port' { $ips = @(Get-HMRemoteIPv4List); $p = @($ips | Where-Object { $_.Private }); "$($ips.Count) IPv4-Adresse(n), $($p.Count) privat$(if ($p.Count) { " (z.B. $($p[0].IP), Netzwerkprofil $(Get-HMRemoteNetCategory $p[0].Index))" }), Port 8443 $(if (Test-HMRemotePortFree 8443) { 'frei' } else { 'belegt' })" }
 T 'Fernbedienung: Zertifikat und Bindung (Bestand)' { $ca = Get-HMRemoteCa; $b = Get-HMRemoteBinding 8443; "CA $(if ($ca) { "vorhanden (bis $($ca.NotAfter.ToString('yyyy-MM-dd')))" } else { 'noch nicht angelegt' }), Bindung 8443: $($b.State)" }
 
@@ -342,6 +342,12 @@ T 'Starter HUMig.exe erzeugen (TEMP)' {
 $out.Add('')
 $out.Add($(if ($fail) { "ERGEBNIS: $fail FEHLER" } else { 'ERGEBNIS: alles OK' }))
 $outFile = Join-Path $root 'Test-HUMig.result.txt'
-$out | Set-Content -LiteralPath $outFile -Encoding UTF8
+# Programmordner nur fuer Administratoren beschreibbar (z. B. C:\Tools\HUMig ohne Adminrechte): Ausweichort Temp statt Abbruch
+try { $out | Set-Content -LiteralPath $outFile -Encoding UTF8 -ErrorAction Stop }
+catch {
+    $outFile = Join-Path $env:TEMP 'Test-HUMig.result.txt'
+    $out.Add("Hinweis: Ergebnis nicht im Programmordner speicherbar ($($_.Exception.Message)) - abgelegt in $outFile")
+    try { $out | Set-Content -LiteralPath $outFile -Encoding UTF8 -ErrorAction Stop } catch { $out.Add("Hinweis: Ergebnis auch in $outFile nicht speicherbar") }
+}
 $out | ForEach-Object { if ($_ -like 'FAIL*') { Write-Host $_ -ForegroundColor Red } elseif ($_ -like 'OK*') { Write-Host $_ -ForegroundColor Green } else { Write-Host $_ } }
 exit $fail

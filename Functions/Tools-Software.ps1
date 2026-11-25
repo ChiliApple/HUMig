@@ -424,13 +424,13 @@ $script:RS_SwInstall = {
     $ErrorActionPreference = 'SilentlyContinue'
     # Versionen vergleichbar machen: fuehrendes "v" und Anhaenge weg, auf vier Stellen auffuellen ("1.2.3" = "1.2.3.0"); nicht lesbar = $null
     function ConvertTo-HUVer([string]$v) {
-        $s = "$v".Trim() -replace '^[vV]\s*', ''
-        if ($s -match '^\d+(\.\d+){0,3}') {
-            $p = @($Matches[0].Split('.') | ForEach-Object { [int64]$_ })
-            while ($p.Count -lt 4) { $p += [int64]0 }
-            try { return New-Object System.Version ([int]$p[0]), ([int]$p[1]), ([int]$p[2]), ([int]$p[3]) } catch { }
-        }
-        return $null
+        # nur reine Punkt-Zahlen-Versionen (nach fuehrendem "v" und einem Anhang wie "-beta", "+build" oder " (x64)");
+        # Datumsform ("06/21/2006"), Text oder Stellen mit mehr als 9 Ziffern sind nicht vergleichbar
+        $s = (("$v".Trim() -replace '^[vV]\s*', '') -split '[-+ ]', 2)[0]
+        if ($s -notmatch '^\d{1,9}(\.\d{1,9}){0,3}$') { return $null }
+        $p = @($s.Split('.') | ForEach-Object { [int]$_ })
+        while ($p.Count -lt 4) { $p += 0 }
+        try { return New-Object System.Version $p[0], $p[1], $p[2], $p[3] } catch { return $null }
     }
     # ProductCode gesetzt -> NUR danach (exakt). Sonst DisplayName-Muster + optional Mindestversion (aeltere Version = nicht installiert -> Update)
     function Find-HUApp([string]$Name, [string]$Code, [string]$MinVer) {

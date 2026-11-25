@@ -290,14 +290,15 @@ $script:RS_NetPoll = {
         Start-Sleep -Seconds 3
     }
     if ($isLocal) { return "WARN Ergebnis liegt nach $deadlineSec Sekunden noch nicht vor - die Aenderung laeuft evtl. noch. Ergebnis: $res" }
-    $out = @()
-    if ($lost) { $out += "INFO Verbindung getrennt, wie bei einer Adressaenderung zu erwarten. Ergebnis am PC: $res" }
-    else { $out += "INFO Ergebnis liegt nach $deadlineSec Sekunden noch nicht vor - die Aenderung laeuft evtl. noch. Ergebnis am PC: $res" }
+    # Verbindung stand, aber kein Ergebnis: die Aufgabe lief nicht (oder haengt) - Warnung
+    if (-not $lost) { return "WARN Verbindung zum PC steht, aber nach $deadlineSec Sekunden liegt kein Ergebnis vor - die Aufgabe lief vermutlich nicht. Am PC pruefen: $res" }
     if ($newIp) {
         $ok = $false; try { $ok = [bool](Test-Connection -ComputerName $newIp -Count 2 -Quiet -ErrorAction Stop) } catch { $ok = $false }
-        $out += $(if ($ok) { "INFO Nachkontrolle: die neue Adresse $newIp antwortet (Ping)" } else { "INFO Nachkontrolle: die neue Adresse $newIp antwortet nicht auf Ping (Firewall?) - Ergebnis offen" })
-    } else { $out += 'INFO Ergebnis offen - nach dem Neu-Verbinden zeigt "IP-Adresse" den aktuellen Stand' }
-    return $out
+        # Verbindung weg und neue Adresse antwortet nicht: Warnung (Hinweis nur, wenn die neue Adresse antwortet)
+        if (-not $ok) { return @("WARN PC unter beiden Adressen nicht erreichbar (Name und neue Adresse $newIp antworten nicht) - bitte am PC pruefen. Ergebnis am PC: $res") }
+        return @("INFO Verbindung getrennt, wie bei einer Adressaenderung zu erwarten. Ergebnis am PC: $res", "INFO Nachkontrolle: die neue Adresse $newIp antwortet (Ping)")
+    }
+    return @("INFO Verbindung getrennt, wie bei einer Adressaenderung zu erwarten. Ergebnis am PC: $res", 'INFO Ergebnis offen - nach dem Neu-Verbinden zeigt "IP-Adresse" den aktuellen Stand')
 }
 # Am Ziel-PC: Aufgabe als SYSTEM anlegen und starten. Die Aufgabe laeuft ueber -Command mit einem Skriptblock aus der Textdatei -
 # eine Ausfuehrungsrichtlinie (z. B. AllSigned per Gruppenrichtlinie) gilt nur fuer Skriptdateien, nicht fuer Befehle.
@@ -316,7 +317,13 @@ $script:RS_NetApply = {
         $p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
         $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
         Register-ScheduledTask -TaskName $name -Action $a -Principal $p -Settings $s -Force -ErrorAction Stop | Out-Null
-        Start-ScheduledTask -TaskName $name -ErrorAction Stop
+        # scheitert der Start, Aufgabe und Hilfsdatei wieder entfernen (sonst bleiben beide liegen)
+        try { Start-ScheduledTask -TaskName $name -ErrorAction Stop }
+        catch {
+            Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $tf -Force -ErrorAction SilentlyContinue
+            throw
+        }
         "STARTED|$res"
     } catch { "FEHLER - Aufgabe nicht ausfuehrbar: $($_.Exception.Message)" }
 }# Text der SYSTEM-Aufgabe fuer "IP-Adresse": alten Zustand merken, aendern, Ergebnis pruefen, bei Fehlschlag alten Zustand

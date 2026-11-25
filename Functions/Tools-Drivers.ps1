@@ -35,13 +35,13 @@ $script:DrvLibText = @'
 # Versionen vergleichbar machen: fuehrendes "v" und Anhaenge weg, auf vier Stellen auffuellen ("1.02.0003" = "1.2.3" = "1.2.3.0");
 # nicht lesbar = $null
 function ConvertTo-HUVer([string]$v) {
-    $s = "$v".Trim() -replace '^[vV]\s*', ''
-    if ($s -match '^\d+(\.\d+){0,3}') {
-        $p = @($Matches[0].Split('.') | ForEach-Object { [int64]$_ })
-        while ($p.Count -lt 4) { $p += [int64]0 }
-        try { return New-Object System.Version ([int]$p[0]), ([int]$p[1]), ([int]$p[2]), ([int]$p[3]) } catch { }
-    }
-    return $null
+    # nur reine Punkt-Zahlen-Versionen (nach fuehrendem "v" und einem Anhang wie "-beta", "+build" oder " (x64)");
+    # Datumsform ("06/21/2006"), Text oder Stellen mit mehr als 9 Ziffern sind nicht vergleichbar
+    $s = (("$v".Trim() -replace '^[vV]\s*', '') -split '[-+ ]', 2)[0]
+    if ($s -notmatch '^\d{1,9}(\.\d{1,9}){0,3}$') { return $null }
+    $p = @($s.Split('.') | ForEach-Object { [int]$_ })
+    while ($p.Count -lt 4) { $p += 0 }
+    try { return New-Object System.Version $p[0], $p[1], $p[2], $p[3] } catch { return $null }
 }
 # Ist $Ver eine der Versionen in $List? Vergleich ueber ConvertTo-HUVer, sonst Text. Rueckgabe $true / $false / $null (nicht vergleichbar)
 function Test-HUVerIn([string]$Ver, $List) {
@@ -339,10 +339,11 @@ function Confirm-DrvDeploy($Package, [string[]]$Hosts, [bool]$Force) {
 # ----------------------------------------------------------------------------
 $script:RS_DrvInstallBody = {
     $ErrorActionPreference = 'SilentlyContinue'
-    # Nachkontrolle: 'NoneNew' = passende Geraete da, keines mit der Paketversion, kein Neustart angekuendigt; sonst 'Ok'
-    function Get-HUDrvVerdict([int]$Matching, [int]$WithNew, [bool]$Reboot, [bool]$NotComparable = $false) {
-        if ($NotComparable) { return 'Ok' }
-        if ($Matching -gt 0 -and $WithNew -eq 0 -and -not $Reboot) { return 'NoneNew' }
+    # Nachkontrolle: Urteil nur aus den VERGLEICHBAREN Geraeten. 'NoneNew' = vergleichbare Geraete da, keines mit der Paketversion,
+    # kein Neustart angekuendigt; sonst 'Ok'. Nicht vergleichbare Geraete ueberdecken das nie (nur Zusatz im Text); ist KEIN Geraet
+    # vergleichbar, bleibt es wie bisher 'Ok' mit Hinweis.
+    function Get-HUDrvVerdict([int]$Comparable, [int]$WithNew, [bool]$Reboot) {
+        if ($Comparable -gt 0 -and $WithNew -eq 0 -and -not $Reboot) { return 'NoneNew' }
         return 'Ok'
     }
     function Format-HUState($rows) {
@@ -488,13 +489,14 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
         $after = @(Get-HUDrvState $map @() $extIds)
         $am = @($after | Where-Object { $_.Match -and -not $_.Ext })
         $newOk = @($am | Where-Object { $_.Version -and (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true })
-        $notNew = @($am | Where-Object { -not ($_.Version -and (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true) })
-        # Paket- oder Geraeteversion nicht lesbar/vergleichbar: wie bisher OK, aber mit Hinweis
+        # Paket- oder Geraeteversion nicht lesbar/vergleichbar (leere Version, Geraet ohne Treiber): nur als Zusatz nennen
         $noCmp = @($am | Where-Object { $null -eq (Test-HUVerIn $_.Version $map[$_.Hw]) })
+        $notNew = @($am | Where-Object { (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $false })
+        $ncTxt = if ($noCmp.Count) { " | $($noCmp.Count) Geraet(e) nicht pruefbar (Version nicht vergleichbar)" } else { '' }
         # kein passendes Geraet hat die Paketversion und kein Neustart angekuendigt: nicht als "installiert" zaehlen
         # (vor der Sperren-Buchfuehrung: $lockRestore bleibt gesetzt, finally stellt die vorherigen Sperren wieder her)
-        $nv = Get-HUDrvVerdict $am.Count $newOk.Count $reboot ($noCmp.Count -gt 0)
-        if ($nv -eq 'NoneNew') { return "SKIP|nicht wirksam: kein passendes Geraet hat danach die Paketversion aktiv - aktiv: $(Format-HUState $after). Windows hat einen anderen Treiber behalten (oder er greift erst nach einem Neustart); $(if ("$($p.Mode)" -eq 'Inf') { "fuer diese Version 'Treiber erzwingen' einschalten" } else { 'Setup und Geraete-Manager pruefen' }) ($dur)$note | Log: $log" }
+        $nv = Get-HUDrvVerdict ($am.Count - $noCmp.Count) $newOk.Count $reboot
+        if ($nv -eq 'NoneNew') { return "SKIP|nicht wirksam: kein passendes Geraet hat danach die Paketversion aktiv - aktiv: $(Format-HUState $after). Windows hat einen anderen Treiber behalten (oder er greift erst nach einem Neustart); $(if ("$($p.Mode)" -eq 'Inf') { "fuer diese Version 'Treiber erzwingen' einschalten" } else { 'Setup und Geraete-Manager pruefen' }) ($dur)$ncTxt$note | Log: $log" }
         $warn = if ($am.Count -gt 0 -and $notNew.Count -gt 0 -and -not $reboot) { " | ACHTUNG: $($notNew.Count) Geraet(e) noch mit anderer Version - Neustart pruefen" } else { '' }
         # Schutz setzen: nur Geraete, auf denen die Paket-Version jetzt aktiv ist
         if ($protect) {
@@ -510,7 +512,7 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
             $lockNote = ' | bisherige Geraete-Sperre aufgehoben (Paket ohne Schutz)'
         }
         $lockRestore = $false
-        return "OK|installiert$rbTxt ($dur) - aktiv: $(Format-HUState $after)$warn$note$lockNote$(if ($noCmp.Count) { " | Version nicht pruefbar (Paket- oder Geraeteversion nicht vergleichbar)" })"
+        return "OK|installiert$rbTxt ($dur) - aktiv: $(Format-HUState $after)$warn$note$lockNote$(if ($noCmp.Count -and $noCmp.Count -eq $am.Count) { " | Version nicht pruefbar (Paket- oder Geraeteversion nicht vergleichbar)" } else { $ncTxt })"
     } catch { return "FEHLER|$($_.Exception.Message -replace '[\r\n|]+', ' ')" }
     finally {
         # Installation fehlgeschlagen/abgebrochen: vorherige Geraete-Sperren wiederherstellen
@@ -545,11 +547,13 @@ $script:RS_DrvCheckBody = {
         $st = 'passt - wuerde installiert'
         if (-not $r.Match) { $st = 'passt nicht' }
         elseif ($r.Ext) { $st = 'Erweiterung - wird mitinstalliert (Version am Geraet nicht pruefbar)' }
-        elseif ($r.Version -and (@($map[$r.Hw]) -contains $r.Version)) { $st = 'gleiche Version aktiv' }
+        elseif ($r.Version -and (Test-HUVerIn $r.Version $map[$r.Hw]) -eq $true) { $st = 'gleiche Version aktiv' }
         else {
-            $cv = $null; try { $cv = [version]$r.Version } catch { }
-            $pv = @(foreach ($v in @($map[$r.Hw])) { try { [version]$v } catch { } })
+            # gleiche Vergleichsfunktion wie bei der Installation (ConvertTo-HUVer), sonst widersprechen sich Anzeige und Ergebnis
+            $cv = ConvertTo-HUVer "$($r.Version)"
+            $pv = @(foreach ($v in @($map[$r.Hw])) { $x = ConvertTo-HUVer "$v"; if ($x) { $x } })
             if ($cv -and $pv.Count -and @($pv | Where-Object { $_ -ge $cv }).Count -eq 0) { $st = 'passt - NEUERER Treiber aktiv (nur mit Erzwingen)' }
+            elseif ($r.Version -and $null -eq (Test-HUVerIn $r.Version $map[$r.Hw])) { $st = 'passt - wuerde installiert (Version nicht vergleichbar)' }
         }
         if ($r.Err) { $st += " (Geraetefehler $($r.Err))" }
         'ROW|' + ((@($r.Name, $st, $r.Version, $r.PkgVer, $lk, $r.Provider, $r.Date, $r.Inf, $(if ($r.Hw) { $r.Hw } else { $r.FirstHw }), $r.Id) | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|')

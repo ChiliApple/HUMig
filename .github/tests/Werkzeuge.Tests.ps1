@@ -177,6 +177,31 @@ function New-NetIPAddress { param($InterfaceIndex, $IPAddress, $PrefixLength, $D
         $r = @(& $script:RS_NetPoll 'PC-ANDERS' $null 'x.txt' 30 '' $false)
         $r | Should -Be @('OK statische Adresse ...')
     }
+    It 'Abholen: Verbindung steht, aber kein Ergebnis -> Warnung (Aufgabe lief vermutlich nicht)' {
+        Mock Invoke-Command { 'NOCH-NICHT' }
+        Mock Start-Sleep { }
+        $r = @(& $script:RS_NetPoll 'PC-ANDERS' $null 'x.txt' 1 $script:NewIp $false)
+        $r.Count | Should -Be 1
+        $r[0] | Should -Match '^WARN Verbindung zum PC steht, aber nach 1 Sekunden liegt kein Ergebnis vor'
+    }
+    It 'Abholen: Verbindung weg und neue Adresse antwortet nicht -> Warnung "unter beiden Adressen nicht erreichbar"' {
+        Mock Invoke-Command { throw 'weg' }
+        Mock Test-Connection { $false }
+        Mock Start-Sleep { }
+        $r = @(& $script:RS_NetPoll 'PC-ANDERS' $null 'x.txt' 1 $script:NewIp $false)
+        $r[0] | Should -Match '^WARN PC unter beiden Adressen nicht erreichbar'
+        @($r | Where-Object { $_ -match '^INFO' }).Count | Should -Be 0
+    }
+    It 'Start am Ziel scheitert nach dem Anlegen: Aufgabe und Hilfsdatei werden entfernt, Fehler bleibt Fehler' {
+        $d = Join-Path $TestDrive 'pdnet'
+        # New-ScheduledTask* erzeugen nur Objekte (nichts am PC); angelegt, gestartet und entfernt wird nur ueber Ersatzbefehle
+        Mock Register-ScheduledTask { }; Mock Start-ScheduledTask { throw 'Start verweigert' }; Mock Unregister-ScheduledTask { }
+        $old = $env:ProgramData
+        try { $env:ProgramData = $d; $r = @(& $script:RS_NetApply 'Write-Output 1' 'HUMig_Netzwerk_test') } finally { $env:ProgramData = $old }
+        $r[0] | Should -Match '^FEHLER - Aufgabe nicht ausfuehrbar: Start verweigert'
+        Should -Invoke Unregister-ScheduledTask -Times 1 -Exactly
+        Test-Path (Join-Path $d 'HUMig\Netzwerk\HUMig_Netzwerk_test.task.txt') | Should -BeFalse
+    }
     It 'Abholen: DHCP ohne Antwort und ohne neue Adresse -> "Ergebnis offen", kein Ping' {
         Mock Invoke-Command { throw 'weg' }
         Mock Test-Connection { $true }
@@ -323,6 +348,16 @@ Describe 'Softwareverteilung: Nachkontrolle mit Mindestversion und Rechte der Pa
         (ConvertTo-HUVer '1.2.3') -lt (ConvertTo-HUVer '1.2.10') | Should -BeTrue
         ConvertTo-HUVer '' | Should -BeNullOrEmpty
         ConvertTo-HUVer 'Version unbekannt' | Should -BeNullOrEmpty
+        # Datumsform und uebergrosse Stellen: nicht vergleichbar, kein Fehler
+        ConvertTo-HUVer '06/21/2006' | Should -BeNullOrEmpty
+        { ConvertTo-HUVer '1234567890123456789.1' } | Should -Not -Throw
+        ConvertTo-HUVer '1234567890123456789.1' | Should -BeNullOrEmpty
+        (ConvertTo-HUVer '1.2.3 (x64)') -eq (ConvertTo-HUVer '1.2.3.0') | Should -BeTrue
+        (ConvertTo-HUVer 'v2.5+build7') -eq (ConvertTo-HUVer '2.5') | Should -BeTrue
+    }
+    It 'Version in Datumsform: OK mit "Version nicht pruefbar" statt "Update nicht wirksam"' {
+        $r = Get-HUInstallVerdict 0 @(0) (& $script:Det $true '06/21/2006') (& $script:Det $false '') '2.0' '5 s' '' '' ''
+        $r | Should -Match '^OK\|.*Version nicht pruefbar'
     }
     It 'Erkennung mit Mindestversion: 1.2.3.0 gegen DisplayVersion 1.2.3 gilt als erreicht' {
         Mock Get-ItemProperty { [pscustomobject]@{ PSChildName = '{X}'; DisplayName = 'Testprogramm'; DisplayVersion = '1.2.3' } }
@@ -390,12 +425,33 @@ Describe 'Treiberverteilung: Nachkontrolle und Hinweis zur Geraete-Sperre' {
         Test-HUVerIn '1.2.4.0' @('1.2.3') | Should -BeFalse
         Test-HUVerIn '1.2.3.0' @('?') | Should -BeNullOrEmpty
         Test-HUVerIn '' @('1.2.3') | Should -BeNullOrEmpty
-        Get-HUDrvVerdict 2 0 $false $true | Should -Be 'Ok'
+        Get-HUDrvVerdict 0 0 $false | Should -Be 'Ok'
     }
     It 'Nachkontrolle und Vorpruefung nutzen den normalisierten Vergleich, Hinweis bei nicht vergleichbarer Version' {
-        ([regex]::Matches($script:DrvBody, [regex]::Escape('(Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true'))).Count | Should -BeGreaterThan 2
+        ([regex]::Matches($script:DrvBody, [regex]::Escape('(Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true'))).Count | Should -BeGreaterOrEqual 2
         $script:RS_DrvPreBody.ToString() | Should -Match ([regex]::Escape('Test-HUVerIn $_.Version $map[$_.Hw]'))
         $script:DrvBody | Should -Match 'Version nicht pruefbar'
+    }
+    It 'ein nicht vergleichbares Geraet ueberdeckt die vergleichbaren nicht (Urteil nur aus vergleichbaren Geraeten)' {
+        # zwei Geraete behalten nachweislich die alte Version, eines hat keine lesbare Version
+        $map = @{ 'PCI\A' = @('2.0.0.0') }
+        $am = @([pscustomobject]@{ Hw = 'PCI\A'; Version = '1.0.0.0' }, [pscustomobject]@{ Hw = 'PCI\A'; Version = '1.0.0.0' }, [pscustomobject]@{ Hw = 'PCI\A'; Version = '' })
+        $noCmp = @($am | Where-Object { $null -eq (Test-HUVerIn $_.Version $map[$_.Hw]) })
+        $newOk = @($am | Where-Object { $_.Version -and (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true })
+        $noCmp.Count | Should -Be 1
+        Get-HUDrvVerdict ($am.Count - $noCmp.Count) $newOk.Count $false | Should -Be 'NoneNew'
+        # nur nicht vergleichbare Geraete: wie bisher OK mit Hinweis
+        $am2 = @([pscustomobject]@{ Hw = 'PCI\A'; Version = '' })
+        $nc2 = @($am2 | Where-Object { $null -eq (Test-HUVerIn $_.Version $map[$_.Hw]) })
+        Get-HUDrvVerdict ($am2.Count - $nc2.Count) 0 $false | Should -Be 'Ok'
+        # die Installation nutzt genau diese Zaehlung
+        $script:DrvBody | Should -Match ([regex]::Escape('$nv = Get-HUDrvVerdict ($am.Count - $noCmp.Count) $newOk.Count $reboot'))
+    }
+    It '"Treiber pruefen" vergleicht mit derselben Funktion wie die Installation' {
+        $c = $script:RS_DrvCheckBody.ToString()
+        $c | Should -Match ([regex]::Escape('(Test-HUVerIn $r.Version $map[$r.Hw]) -eq $true'))
+        $c | Should -Match ([regex]::Escape('$cv = ConvertTo-HUVer'))
+        $c | Should -Not -Match ([regex]::Escape('[version]$r.Version'))
     }
     It 'kein Geraet mit der neuen Version und kein Neustart: nicht installiert' {
         Get-HUDrvVerdict 2 0 $false | Should -Be 'NoneNew'
@@ -664,6 +720,8 @@ Describe 'Status-Reiter: nicht lesbare Quellen und Profile ohne Lauf' {
     It 'Server-Backup-Profil ohne jeden Lauf ergibt einen Hinweis, keine Warnung' {
         $p = [pscustomobject]@{ Name = 'Neu'; DiskPrefix = 'HUMIG-NEU'; Disks = 2; WarnDays = 14; ArchiveDisks = 0; ArchiveDays = 30 }
         $s = Get-HMStatusData -SbProfiles @($p) -SbHistory @() -Now ([datetime]'2026-11-26 10:00')
+        # auch die Zeile des Profils in der Tabelle: Hinweis, nicht Warnung
+        $s.Server[0].Level | Should -Be 'Info'
         @($s.Notes | Where-Object { $_.Text -match "Server-Backup 'Neu': noch kein Lauf" -and $_.Level -eq 'Info' }).Count | Should -Be 1
         @($s.Warnings | Where-Object { $_.Text -match 'noch kein Lauf' }).Count | Should -Be 0
     }
@@ -679,5 +737,26 @@ Describe 'Status-Reiter: nicht lesbare Quellen und Profile ohne Lauf' {
         $t = ${function:Update-HMStatusPage}.ToString()
         $t | Should -Match ([regex]::Escape('-Unreadable $unread'))
         $t | Should -Match ([regex]::Escape("catch { `$unread += 'App-Updates-Verlauf' }"))
+    }
+}
+
+Describe 'Selbsttest und Testdateien: keine privaten Adressen, Ergebnisdatei mit Ausweichort' {
+    It 'Test-HUMig.ps1 und diese Testdatei enthalten keine Adressen aus privaten Netzen' {
+        # Muster aus Teilen gebaut, damit es selbst nicht als Adresse in der Datei steht
+        $o = '(\d{1,3})'
+        $priv = '(?<![\d.])(' + ('1' + '0') + '\.' + $o + '\.' + $o + '\.' + $o + '|' + ('19' + '2\.168') + '\.' + $o + '\.' + $o + '|' + ('17' + '2') + '\.(1[6-9]|2\d|3[01])\.' + $o + '\.' + $o + ')(?![\d])'
+        foreach ($f in @((Join-Path $script:Root 'Test-HUMig.ps1'), (Join-Path $PSScriptRoot 'Werkzeuge.Tests.ps1'))) {
+            @([regex]::Matches([IO.File]::ReadAllText($f), $priv) | ForEach-Object { $_.Value }) | Should -BeNullOrEmpty -Because (Split-Path $f -Leaf)
+        }
+    }
+    It 'Ergebnisdatei: im nur fuer Administratoren beschreibbaren Programmordner Ausweichort Temp statt Abbruch' {
+        $t = [IO.File]::ReadAllText((Join-Path $script:Root 'Test-HUMig.ps1'))
+        $t | Should -Match ([regex]::Escape("try { `$out | Set-Content -LiteralPath `$outFile -Encoding UTF8 -ErrorAction Stop }"))
+        $t | Should -Match ([regex]::Escape("`$outFile = Join-Path `$env:TEMP 'Test-HUMig.result.txt'"))
+    }
+    It 'der Selbsttest-Schritt der App-Updates arbeitet nur im Ersatzordner (nichts am PC)' {
+        $t = [IO.File]::ReadAllText((Join-Path $script:Root 'Test-HUMig.ps1'))
+        $t | Should -Match ([regex]::Escape("Replace(`$protLine, 'if (`$false) {')"))
+        $t | Should -Not -Match ([regex]::Escape("Invoke-HMAuTarget @(`$env:COMPUTERNAME) 'ScheduleGet'"))
     }
 }
