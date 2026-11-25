@@ -314,16 +314,19 @@ T 'Update: Kanal Stabil/Test, Pruefsumme, Signatur (v2.0.55)' {
 }
 T 'Installer-Erkennung (EXE)' { $i = Get-SwInstallerInfo (Join-Path $env:windir 'System32\robocopy.exe'); if (-not $i -or $i.Type -ne 'EXE') { throw 'keine Info' }; "$($i.Framework)" }
 T 'Starter HUMig.exe erzeugen (TEMP)' {
-    . (Join-Path $root 'Functions\UI-Shell.ps1')
+    # Kompilieren in einem eigenen Prozess: Add-Type laedt die erzeugte HUMig.exe in den Prozess, sie bliebe bis zu
+    # dessen Ende gesperrt und der TEMP-Ordner liesse sich nicht aufraeumen
     $tmpRoot = Join-Path $env:TEMP "HUMigLauncherTest_$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path (Join-Path $tmpRoot 'Assets') -Force | Out-Null
     Copy-Item (Join-Path $root 'Assets\icon.ico') (Join-Path $tmpRoot 'Assets\icon.ico')
-    $saveRoot = $script:AppRoot; $script:AppRoot = $tmpRoot
     try {
-        if (-not (New-HMLauncher -Force)) { throw 'Kompilieren fehlgeschlagen' }
+        $sh = (Join-Path $root 'Functions\UI-Shell.ps1') -replace "'", "''"
+        $cmd = "`$ErrorActionPreference = 'Stop'; . '$sh'; `$script:AppRoot = '$($tmpRoot -replace "'", "''")'; if (New-HMLauncher -Force) { exit 0 } else { exit 2 }"
+        $msg = @(& (Get-Process -Id $PID).Path -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))) 2>&1 | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -ne 0) { throw "Kompilieren fehlgeschlagen (Code $LASTEXITCODE) $($msg -join ' ')" }
         $len = (Get-Item (Join-Path $tmpRoot 'HUMig.exe')).Length
         "$len Bytes"
-    } finally { $script:AppRoot = $saveRoot; Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    } finally { Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 $out.Add('')
