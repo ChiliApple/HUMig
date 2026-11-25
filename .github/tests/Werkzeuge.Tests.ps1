@@ -209,3 +209,16 @@ Describe 'Werkzeuge: Firewall, lokale Gruppen, Profil-Zuweisung, Autologon' {
         ${function:Start-HMAutologon}.ToString() | Should -Not -Match ([regex]::Escape("Split('.')[0]"))
     }
 }
+
+Describe 'Werkzeuge: Druckspooler und Systemdatei-Reparatur' {
+    BeforeAll { . (Join-Path $script:Root 'Functions\Tools-System.ps1') }
+    It 'Druckspooler: laufende abhaengige Dienste werden gemerkt und wieder gestartet' {
+        $t = ${function:Start-HMSpoolerReset}.ToString()
+        $t | Should -Match 'DependentServices'
+        $t.IndexOf('DependentServices') | Should -BeLessThan $t.IndexOf('Stop-Service Spooler')
+        $t | Should -Match ([regex]::Escape('abhaengiger Dienst $n wieder gestartet'))
+    }
+    It 'Systemdatei-Reparatur: Code ungleich 0 erscheint als WARN' {
+        ${function:Start-HMSystemRepair}.ToString() | Should -Match ([regex]::Escape("(DISM|SFC) Code (-?\d+)' -and `$Matches[2] -ne '0') { `"WARN"))
+    }
+}

@@ -1540,6 +1540,8 @@ function Start-HMSpoolerReset {
     $c = Get-TargetComputer
     if (-not (Confirm-Action "Druckwarteschlange auf $c leeren und Druckspooler neu starten?`n`nAlle wartenden Druckauftraege gehen verloren.")) { return }
     Invoke-HMTool -Title 'Druckspooler' -Computer $c -Script {
+        # abhaengige Dienste (z.B. Fax, Druckerdienste von Herstellern) stoppt -Force mit - danach wieder starten
+        $dep = @(); try { $dep = @(Get-Service Spooler -DependentServices -ErrorAction Stop | Where-Object { "$($_.Status)" -eq 'Running' } | ForEach-Object { "$($_.Name)" }) } catch { }
         try {
             Stop-Service Spooler -Force -ErrorAction Stop
             $d = Join-Path $env:windir 'System32\spool\PRINTERS'
@@ -1548,6 +1550,7 @@ function Start-HMSpoolerReset {
             Start-Service Spooler -ErrorAction Stop
             "OK $($f.Count) Datei(en) aus der Warteschlange geloescht, Spooler laeuft"
         } catch { "FEHLER: $($_.Exception.Message)"; try { Start-Service Spooler -ErrorAction SilentlyContinue } catch { } }
+        foreach ($n in $dep) { try { Start-Service -Name $n -ErrorAction Stop; "OK abhaengiger Dienst $n wieder gestartet" } catch { "WARN abhaengiger Dienst $n nicht wieder gestartet: $($_.Exception.Message)" } }
     }
 }
 
@@ -1659,7 +1662,8 @@ function Start-HMSystemRepair([bool]$StatusOnly) {
         $t = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($status) {
             if ($t -and $t.State -eq 'Running') { 'INFO laeuft noch ...' }
-            if (Test-Path $log) { Get-Content -LiteralPath $log -Tail 12 | ForEach-Object { "INFO $_" } } else { 'INFO noch keine Reparatur gelaufen' }
+            # Rueckgabecode ungleich 0 bei DISM/SFC nicht als neutrale Info zeigen
+            if (Test-Path $log) { Get-Content -LiteralPath $log -Tail 12 | ForEach-Object { if ("$_" -match '^(DISM|SFC) Code (-?\d+)' -and $Matches[2] -ne '0') { "WARN $_ (Code ungleich 0 - Protokoll pruefen)" } else { "INFO $_" } } } else { 'INFO noch keine Reparatur gelaufen' }
             return
         }
         if ($t -and $t.State -eq 'Running') { return 'WARN Reparatur laeuft bereits' }
