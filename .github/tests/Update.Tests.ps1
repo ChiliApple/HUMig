@@ -316,25 +316,39 @@ Describe 'Signieren: Invoke-HMReleaseSigning im Ganzen (ohne Zertifikat, ohne Ne
         $r[0].Text | Should -Match 'lokal abgeglichen'
         Should -Invoke Publish-HMReleaseSignature -Times 1 -Exactly
     }
-    It 'Aufruf wie in der Oberflaeche (fuenf Werte), lokaler Stand weicht ab: nicht signiert, nichts hochgeladen' {
+    It 'gleiche Version, Inhalt weicht ab: Standard signiert wie bisher mit deutlicher Meldung, -OnMismatch Skip signiert nicht' {
         New-HMTestFile "$script:S\HUMig.ps1" 'H anders'
         try {
             $r = @(Invoke-HMReleaseSigning 'o' 'r' 'AB' 't' @('v9.0.5') -LocalRoot $script:S)
+            $r[0].Ok | Should -BeTrue
+            $r[0].Text | Should -Match 'ACHTUNG'
+            $r[0].Text | Should -Match 'HUMig\.ps1: Inhalt anders'
+            Should -Invoke Publish-HMReleaseSignature -Times 1 -Exactly
+            $r = @(Invoke-HMReleaseSigning 'o' 'r' 'AB' 't' @('v9.0.5') -LocalRoot $script:S -OnMismatch Skip)
             $r[0].Ok | Should -BeFalse
             $r[0].Text | Should -Match 'nicht signiert'
-            $r[0].Text | Should -Not -Match 'Schreibrecht'
-            Should -Invoke Publish-HMReleaseSignature -Times 0 -Exactly
-            # mit -OnMismatch Sign: signiert, der Grund steht im Ergebnis
-            $r = @(Invoke-HMReleaseSigning 'o' 'r' 'AB' 't' @('v9.0.5') -LocalRoot $script:S -OnMismatch Sign)
-            $r[0].Ok | Should -BeTrue
-            $r[0].Text | Should -Match 'OHNE lokalen Abgleich'
+            $r[0].Text | Should -Not -Match 'Schreibrecht'   # dieses Wort loescht in HUMig den gespeicherten Schreib-Token
             Should -Invoke Publish-HMReleaseSignature -Times 1 -Exactly
         } finally { New-HMTestFile "$script:S\HUMig.ps1" 'H' }
     }
-    It 'ohne -LocalRoot gilt der Programmordner von Core-Update.ps1 (hier: andere Version = nicht abgleichbar, nicht signiert)' {
+    It 'Aufruf wie in der Oberflaeche (fuenf Werte) aus einer Installation mit anderer Version: signiert wie bisher, Hinweis im Ergebnis' {
         $r = @(Invoke-HMReleaseSigning 'o' 'r' 'AB' 't' @('v9.0.5'))
-        $r[0].Ok | Should -BeFalse
-        $r[0].Text | Should -Match 'kein Abgleich moeglich'
+        $r[0].Ok | Should -BeTrue
+        $r[0].Text | Should -Match 'nicht mit lokalem Stand abgeglichen, lokal ist Version'
+        $r[0].Text | Should -Not -Match 'ACHTUNG'
+        Should -Invoke Publish-HMReleaseSignature -Times 1 -Exactly
+    }
+    It 'Abgleich fuer die Bestaetigung vorab: je Release gleich, nicht abgleichbar oder Fehler' {
+        $rels = @(
+            [pscustomobject]@{ Version = [Version]'9.0.5'; Tag = 'v9.0.5'; ManifestUrl = 'm'; ManifestApi = 'm' },
+            [pscustomobject]@{ Version = [Version]'9.0.6'; Tag = 'v9.0.6'; ManifestUrl = 'm'; ManifestApi = 'm' },
+            [pscustomobject]@{ Version = [Version]'9.0.7'; Tag = 'v9.0.7'; ManifestUrl = ''; ManifestApi = '' })
+        $c = @(Get-HMReleaseSignCheck $rels 't' $script:S)
+        $c.Count | Should -Be 3
+        $c[0].State | Should -Be 'gleich'
+        $c[1].State | Should -Be 'nicht abgleichbar'
+        $c[1].Text | Should -Match 'lokal ist Version 9\.0\.5'
+        $c[2].State | Should -Be 'Fehler'
         Should -Invoke Publish-HMReleaseSignature -Times 0 -Exactly
     }
 }

@@ -199,7 +199,8 @@ function Get-HMSigningCert([string]$Thumbprint) {
     } catch { } finally { if ($st) { $st.Close() } }
     return $null
 }
-# Abweichung vom lokalen Stand: signieren? 'Sign' = ja, 'Ask' = in der Konsole nachfragen (Liste der Abweichungen), sonst nein
+# Echte Abweichung vom lokalen Stand (gleiche Version, andere Inhalte): signieren? 'Sign' = ja, 'Ask' = in der Konsole
+# nachfragen (Liste der Abweichungen, Standard Nein), sonst nein
 function Confirm-HMSignMismatch([string]$Tag, $Cmp, [string]$Mode) {
     if ($Mode -eq 'Sign') { return $true }
     if ($Mode -ne 'Ask') { return $false }
@@ -239,10 +240,10 @@ function Compare-HMReleaseManifest([string]$ManifestText, $Version, [string]$Loc
     $res = [pscustomobject]@{ State = 'nicht abgleichbar'; Diff = @(); Text = '' }
     $want = ConvertTo-HMVersion "$Version"
     $root = "$LocalRoot".TrimEnd('\')
-    if (-not $root -or -not (Test-Path -LiteralPath $root -PathType Container)) { $res.Text = "kein lokaler Stand zum Abgleich ($LocalRoot)"; return $res }
+    if (-not $root -or -not (Test-Path -LiteralPath $root -PathType Container)) { $res.Text = "nicht mit lokalem Stand abgeglichen, kein lokaler Stand ($LocalRoot)"; return $res }
     $have = $null
     try { $have = ConvertTo-HMVersion "$((Get-Content -LiteralPath (Join-Path $root 'Config\version.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version)" } catch { }
-    if (-not $want -or -not $have -or $have -ne $want) { $res.Text = "lokaler Stand ($root) ist Version $(if ($have) { $have } else { 'unbekannt' }), nicht $Version - kein Abgleich moeglich"; return $res }
+    if (-not $want -or -not $have -or $have -ne $want) { $res.Text = "nicht mit lokalem Stand abgeglichen, lokal ist Version $(if ($have) { $have } else { 'unbekannt' }) ($root)"; return $res }
     $m = ConvertFrom-HMManifest $ManifestText
     if (-not $m.Count) { $res.Text = 'Pruefsummen-Datei leer oder beschaedigt'; return $res }
     $diff = New-Object System.Collections.Generic.List[string]
@@ -269,16 +270,32 @@ function Compare-HMReleaseManifest([string]$ManifestText, $Version, [string]$Loc
     else { $res.State = 'gleich'; $res.Text = "gleich wie der lokale Stand ($root, $($m.Count) Dateien)" }
     return $res
 }
+# Abgleich fuer die Bestaetigung VOR dem Signieren (z.B. im Hintergrundlauf, der die unsignierten Releases sucht):
+# laedt je Release die Pruefsummen-Datei und vergleicht sie mit dem lokalen Stand. $Releases = Liste aus Get-HMReleases.
+# Rueckgabe je Release: Tag, Version, State ('gleich' | 'nicht abgleichbar' | 'abweichend' | 'Fehler'), Text, Diff
+function Get-HMReleaseSignCheck($Releases, [string]$Token, [string]$LocalRoot = '') {
+    if (-not $LocalRoot) { $LocalRoot = $script:HMUpdateAppRoot }
+    foreach ($r in @($Releases | Where-Object { $_ })) {
+        try {
+            if (-not $r.ManifestUrl) { throw 'keine Pruefsummen-Datei' }
+            $man = [System.Text.Encoding]::UTF8.GetString((Get-HMReleaseAsset $r.ManifestUrl $r.ManifestApi $Token))
+            $c = Compare-HMReleaseManifest $man $r.Version $LocalRoot
+            [pscustomobject]@{ Tag = $r.Tag; Version = $r.Version; State = $c.State; Text = $c.Text; Diff = @($c.Diff) }
+        } catch { [pscustomobject]@{ Tag = $r.Tag; Version = $r.Version; State = 'Fehler'; Text = "$($_.Exception.Message)"; Diff = @() } }
+    }
+}
 # Releases signieren: ohne -Tags alle Releases mit Pruefsummen-Datei, die noch keine Signatur haben.
 # Rueckgabe je Release: Tag, Ok, Text. Jede Signatur wird vor dem Hochladen geprueft.
 # Vor dem Signieren wird die Pruefsummen-Datei mit dem lokalen Stand verglichen (Compare-HMReleaseManifest, $LocalRoot,
-# Standard: dieser Programmordner). Weicht sie ab oder ist kein Abgleich moeglich, entscheidet $OnMismatch:
-#   'Skip' (Standard) = nicht signieren, Grund melden; 'Ask' = je Release nachfragen (Konsole); 'Sign' = trotzdem signieren
-#   (der Grund steht im Ergebnis). So signiert die Signatur nie still, was nur auf GitHub liegt.
+# Standard: dieser Programmordner). Das Ergebnis nennt den Abgleich immer:
+#   - gleich: signiert, "lokal abgeglichen"
+#   - nicht abgleichbar (lokal eine andere Version, z.B. aeltere Installation): signiert wie bisher, Hinweis im Ergebnis
+#   - abweichend (gleiche Version, andere Inhalte): $OnMismatch entscheidet - 'Sign' (Standard, wie bisher, mit deutlicher
+#     Meldung), 'Skip' = nicht signieren, 'Ask' = in der Konsole nachfragen (Standard Nein)
 function Invoke-HMReleaseSigning([string]$Owner, [string]$Repo, [string]$Thumbprint, [string]$Token, [string[]]$Tags = @(), [string]$LocalRoot = '', [ValidateSet('', 'Skip', 'Ask', 'Sign')][string]$OnMismatch = '') {
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
     if (-not $LocalRoot) { $LocalRoot = $script:HMUpdateAppRoot }
-    if (-not $OnMismatch) { $OnMismatch = 'Skip' }
+    if (-not $OnMismatch) { $OnMismatch = 'Sign' }
     $cert = Get-HMSigningCert $Thumbprint
     if (-not $cert) { throw "Signatur-Zertifikat $Thumbprint mit privatem Schluessel ist auf diesem PC nicht vorhanden (oder abgelaufen)." }
     $list = @(Get-HMReleases $Owner $Repo $Token)
@@ -296,10 +313,11 @@ function Invoke-HMReleaseSigning([string]$Owner, [string]$Repo, [string]$Thumbpr
             # Abgleich mit dem lokalen Stand
             $cmp = Compare-HMReleaseManifest ([System.Text.Encoding]::UTF8.GetString($man)) $r.Version $LocalRoot
             $note = ''
-            if ($cmp.State -ne 'gleich') {
-                if (-not (Confirm-HMSignMismatch $r.Tag $cmp $OnMismatch)) { throw "nicht signiert: $($cmp.Text). Signieren erst nach Abgleich: getesteten Stand dieser Version einspielen oder Tools\Sign-HUMigRelease.ps1 -Version $($r.Version) (fragt bei Abweichung nach)." }
-                $note = " - OHNE lokalen Abgleich ($($cmp.Text))"
-            } else { $note = " (lokal abgeglichen: $($cmp.Text))" }
+            if ($cmp.State -eq 'abweichend') {
+                if (-not (Confirm-HMSignMismatch $r.Tag $cmp $OnMismatch)) { throw "nicht signiert: $($cmp.Text)" }
+                $note = " - ACHTUNG, Pruefsummen-Datei $($cmp.Text)"
+            } elseif ($cmp.State -eq 'gleich') { $note = " (lokal abgeglichen: $($cmp.Text))" }
+            else { $note = " ($($cmp.Text))" }
             $sig = New-HMManifestSignature $man $cert
             $why = Test-HMManifestSignature $man $sig $cert.Thumbprint
             if ($why) { throw "Signatur-Pruefung fehlgeschlagen: $why" }
