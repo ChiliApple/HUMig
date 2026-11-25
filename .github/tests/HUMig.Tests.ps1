@@ -3982,6 +3982,23 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
         }
     }
 
+    Context 'Pruefung nach dem Backup mit echtem Robocopy (nur TestDrive)' {
+        It 'Punkt 7 (Backup): vollstaendiges Backup bleibt OK ohne "Pruefung nicht moeglich" (Ordner und einzelne Dateien)' {
+            $src = New-TDir 'echtQ'; $dst = New-TDir 'echtZ'
+            New-Item -ItemType Directory -Path (Join-Path $src 'sub') -Force | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $src 'a.txt'), 'eins'); [System.IO.File]::WriteAllText((Join-Path $src 'sub\b.txt'), 'zwei')
+            $null = robocopy.exe $src $dst /E /COPY:DAT /DCOPY:T /R:0 /W:0 /NP /NFL /NDL /NJH /NJS
+            $map = @(
+                [pscustomobject]@{ Module = 'M'; Name = 'Ordner'; Src = $src; Dst = $dst; Files = @(); XD = @(); XF = @(); NoHidden = $false; NoRecurse = $false },
+                [pscustomobject]@{ Module = 'M'; Name = 'Dateien'; Src = $src; Dst = $dst; Files = @('a.txt'); XD = @(); XF = @(); NoHidden = $false; NoRecurse = $true })
+            $v = Test-HMBackupIntegrity @{ Threads = 2 } (New-TJob) $map 5
+            $v.Problem | Should -BeNullOrEmpty
+            $v.Status | Should -Be 'OK'
+            $v.Sampled | Should -BeGreaterThan 0
+            $v.DiffFiles | Should -Be 0
+        }
+    }
+
     Context 'Einzelne Schritte (mit ersetzten USMT-, Robocopy- und Ziel-PC-Aufrufen)' {
         BeforeAll {
             Mock Invoke-HMTarget { throw 'Test: Invoke-HMTarget nicht ersetzt' }
@@ -4092,6 +4109,7 @@ Describe '2.1.21: Status von Backup und Restore stimmt' {
             $mf = Get-Content -LiteralPath (Join-Path $bp 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
             $mf.Status | Should -Be 'Error'
             @($mf.Modules | Where-Object { $_ }).Count | Should -Be 0
+            Get-Content -LiteralPath (Join-Path $bp 'HUMig.log') -Raw -Encoding UTF8 | Should -Match 'Quelle nicht erreichbar'
         }
         It 'Punkt 7 (Backup): Vergleich nicht moeglich ergibt Warnung statt vollstaendig' {
             Mock Invoke-HMRobocopy { [pscustomobject]@{ ExitCode = 16; Level = 'Error'; FilesCopied = 0; BytesCopied = 0; HaveDirs = $false } }

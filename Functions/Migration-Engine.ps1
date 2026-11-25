@@ -1282,7 +1282,8 @@ function Exit-HMModule([hashtable]$Ctx, $Job, [hashtable]$State) {
 # Nach Exit-HMModule: nicht wieder gestartete Dienste als Warnung im Modul-Ergebnis (Rueckgabe: Eintraege fuer die Liste)
 function Get-HMServiceRestartItems([hashtable]$State) {
     if (-not $State) { return @() }
-    return @(@($State.RestartFailed) | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Name = 'Dienste'; Status = 'Warning'; Msg = "$_"; Bytes = [long]0; Source = '' } })
+    # Name 'Hinweis' wie die uebrigen Vorab-Warnungen: zaehlt nicht als gefundener Eintrag in der Katalog-Statistik
+    return @(@($State.RestartFailed) | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Name = 'Hinweis'; Status = 'Warning'; Msg = "$_"; Bytes = [long]0; Source = '' } })
 }
 
 # ============================================================================
@@ -2917,6 +2918,10 @@ function Start-HMBackup {
         elseif ($acl.Skipped) { Write-HMLog $Job "Backup-Ordner-Rechte: $($acl.Error) - wer das Backup lesen darf, regeln die Rechte der Freigabe am Server" 'Info' }
         else { Write-HMLog $Job "Backup-Ordner-Rechte NICHT gesetzt ($($acl.Error)) - das Backup (u. a. Browser-Daten) ist fuer alle lesbar, die auf diesen Speicherort zugreifen koennen. Fuer ein geschuetztes Backup ein NTFS-Ziel verwenden." 'Warning' }
         $Job.LogFile = Join-Path $Ctx.BackupPath 'HUMig.log'
+        # Lauf-Eintraege von vor dem Anlegen des Ordners (Quelle, Verbindung) auch ins HUMig.log
+        foreach ($re in @($Ctx.RunResults.ToArray())) {
+            try { Add-Content -LiteralPath $Job.LogFile -Value ('{0} [{1}] {2}: {3}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), "$($re.Status)".ToUpper(), $re.Name, (@($re.Items)[0].Msg)) -Encoding UTF8 } catch { }
+        }
         $Ctx.RoboLog = Join-Path $Ctx.BackupPath 'Robocopy.log'
         try {
             Add-Content -LiteralPath $Ctx.RoboLog -Encoding UTF8 -Value @(
