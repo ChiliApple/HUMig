@@ -1297,7 +1297,9 @@ function Get-HMTargetLabel($State) {
 }
 # Rueckfrage, wenn ein Vorgang startet, waehrend im Feld ein anderer PC steht als das Ziel ($null = keine Rueckfrage noetig)
 # -RunningJob: waehrend eines Vorgangs wird nicht neu verbunden - dann nur Ja (auf dem Ziel) oder Nein (nichts tun)
-function Get-HMTargetQuestion($State, [string]$Action, [string]$RunningJob = '') {
+# -FieldOk: Werkzeug ohne Benutzerdaten fuer PCs, die oft nicht verbindbar sind (Wake-on-LAN, Netzwerktest, Fernwartung
+# aktivieren) - Ja fuehrt es direkt auf dem PC im Feld aus (wie bisher, ohne vorher zu verbinden)
+function Get-HMTargetQuestion($State, [string]$Action, [string]$RunningJob = '', [switch]$FieldOk) {
     if ("$($State.Kind)" -ne 'Differs') { return $null }
     $f = $State.Field; $c = $State.Computer
     $was = switch ("$($State.Conn)") {
@@ -1309,6 +1311,12 @@ function Get-HMTargetQuestion($State, [string]$Action, [string]$RunningJob = '')
         return ("Im Feld Computer steht $f, $was.`n`n$Action wuerde auf $c laufen, nicht auf $f. Waehrend '$RunningJob' laeuft, wird nicht neu verbunden.`n`n" +
             "Ja = $Action auf $c ausfuehren (das Feld wird auf $c zurueckgesetzt)`n" +
             "Nein = nichts tun (mit $f erst nach dem Vorgang verbinden: Enter oder Verbinden)")
+    }
+    if ($FieldOk) {
+        return ("Im Feld Computer steht $f, $was.`n`n" +
+            "Ja = $Action auf $f ausfuehren ($f wird gewaehlt, ohne Benutzerliste)`n" +
+            "Nein = $Action auf $c ausfuehren (das Feld wird auf $c zurueckgesetzt)`n" +
+            'Abbrechen = nichts tun')
     }
     return ("Im Feld Computer steht $f, $was.`n`n$Action wuerde auf $c laufen, nicht auf $f.`n`n" +
         "Ja = zuerst mit $f verbinden ($Action startet danach nicht von selbst)`n" +
@@ -1402,7 +1410,7 @@ function Update-HMTargetLabel {
     $ui.lblConnected.ToolTip = $l.Tip
 }
 # Vor jedem Vorgang: steht im Feld ein anderer PC als das Ziel, nachfragen statt still zu mischen. $true = Vorgang starten
-function Confirm-HMTarget([string]$Action) {
+function Confirm-HMTarget([string]$Action, [switch]$FieldOk) {
     if ($script:UserMode) { return $true }
     $st = Get-HMTargetState (Get-HMFieldComputer) $script:Target
     # laeuft ein Vorgang (z.B. Werkzeug waehrend des Restores), nicht neu verbinden: sonst wechselt das Ziel mitten im Vorgang
@@ -1413,9 +1421,18 @@ function Confirm-HMTarget([string]$Action) {
         $ui.cmbComputer.Text = $st.Computer; Update-HMTargetLabel; Out-Console "$Action auf $($st.Computer) (Feld Computer zurueckgesetzt)" 'Info'
         return $true
     }
-    $q = Get-HMTargetQuestion $st $Action
+    $q = Get-HMTargetQuestion $st $Action -FieldOk:$FieldOk
     if (-not $q) { return $true }
     $a = "$((Show-HMDialogBox -Owner $script:Window -Text $q -Title 'Welcher Computer?' -Mode 'YesNoCancel' -Icon 'Question' -Default 'Cancel'))"
+    if ($a -eq 'Yes' -and $FieldOk) {
+        # PC im Feld wird Ziel, ohne Benutzerliste (wie nach einem gescheiterten Verbinden) - nichts von PC A bleibt stehen
+        $script:ConnectSeq++
+        $script:Target = @{ Computer = $st.Field; Connected = $false; Connecting = $false; Seq = $script:ConnectSeq }
+        $script:Profiles = @(); $ui.cmbUser.Items.Clear(); $ui.lblSid.Text = ''
+        Update-HMTargetLabel
+        Out-Console "$Action auf $($st.Field) (nicht verbunden, Benutzerliste leer - fuer Backup/Restore: Enter oder Verbinden)" 'Info'
+        return $true
+    }
     if ($a -eq 'Yes') { Out-Console "Verbinde mit $($st.Field) - $Action danach erneut starten." 'Info'; Connect-Target -FromField; return $false }
     if ($a -eq 'No') { $ui.cmbComputer.Text = $st.Computer; Update-HMTargetLabel; Out-Console "$Action auf $($st.Computer) (Feld Computer zurueckgesetzt)" 'Info'; return $true }
     return $false
@@ -2339,10 +2356,11 @@ $ui.btnToolCredList.Add_Click({ Show-HMCredentials })
 # Werkzeug-Knoepfe (Text, Stil, Tooltip, Linksklick, Rechtsklick).
 # -Busy: greift in PC oder Profil ein - waehrend Backup/Restore Rueckfrage "Trotzdem ausfuehren?" (Standard Nein).
 # -NoTarget: wirkt nicht auf den gewaehlten PC (mehrere PCs, dieser PC, ein Backup) - keine Rueckfrage zum Feld Computer.
-function Add-ToolButton($Panel, [string]$Text, [string]$Style, [string]$Tip, [scriptblock]$Click, [scriptblock]$Right = $null, [switch]$Busy, [switch]$NoTarget) {
+# -FieldOk: ohne Benutzerdaten, oft fuer nicht verbindbare PCs - in der Rueckfrage fuehrt Ja direkt auf dem PC im Feld aus.
+function Add-ToolButton($Panel, [string]$Text, [string]$Style, [string]$Tip, [scriptblock]$Click, [scriptblock]$Right = $null, [switch]$Busy, [switch]$NoTarget, [switch]$FieldOk) {
     $b = New-Object System.Windows.Controls.Button
     $b.Content = $Text; $b.Style = $script:Window.FindResource($Style); $b.ToolTip = $Tip
-    $b.Tag = @{ Click = $Click; Right = $Right; Busy = [bool]$Busy; Target = -not $NoTarget; Name = $Text }
+    $b.Tag = @{ Click = $Click; Right = $Right; Busy = [bool]$Busy; Target = -not $NoTarget; FieldOk = [bool]$FieldOk; Name = $Text }
     $b.Add_Click({ param($src) if (-not (Test-HMToolStart $src.Tag)) { return }; try { & $src.Tag.Click } catch { Out-Console "$($src.Content): $($_.Exception.Message)" 'Error' } })
     if ($Right) { $b.Add_MouseRightButtonUp({ param($src, $e) $e.Handled = $true; if (-not (Test-HMToolStart $src.Tag)) { return }; try { & $src.Tag.Right } catch { Out-Console "$($src.Content): $($_.Exception.Message)" 'Error' } }) }
     [void]$Panel.Children.Add($b)
@@ -2354,11 +2372,11 @@ function Test-HMToolStart($Tag) {
         if ($a -ne 'Yes') { return $false }
         Out-Console "'$($Tag.Name)' waehrend '$($script:JobTitle)' ausgefuehrt (bestaetigt)." 'Warning'
     }
-    if ($Tag.Target -and -not (Confirm-HMTarget "'$($Tag.Name)'")) { return $false }
+    if ($Tag.Target -and -not (Confirm-HMTarget "'$($Tag.Name)'" -FieldOk:([bool]$Tag.FieldOk))) { return $false }
     return $true
 }
 $tc = $ui.pnlToolsComputer
-Add-ToolButton $tc 'Fernwartung aktivieren' 'BtnGreen' 'Am gewaehlten PC WinRM, Remotedesktop, SMB/C$, Remoteregistrierung und Firewall-Regeln aktivieren - Start ueber WMI (Port 135), auch wenn WinRM noch aus ist' { Start-HMEnableRemote }
+Add-ToolButton $tc 'Fernwartung aktivieren' 'BtnGreen' 'Am gewaehlten PC WinRM, Remotedesktop, SMB/C$, Remoteregistrierung und Firewall-Regeln aktivieren - Start ueber WMI (Port 135), auch wenn WinRM noch aus ist' { Start-HMEnableRemote } -FieldOk
 Add-ToolButton $tc 'Umbenennen' 'BtnPeach' 'Computernamen aendern (Domaenen-PC: Domaenen-Anmeldedaten), optional Neustart' { Start-HMRenameComputer } -Busy
 Add-ToolButton $tc 'IP-Adresse / DHCP' 'BtnPeach' 'Statische IP oder DHCP - wird als SYSTEM-Aufgabe am Ziel ausgefuehrt (Verbindungsabbruch egal)' { Start-HMNetworkConfig } -Busy
 Add-ToolButton $tc 'Lokale Gruppen' 'BtnBlue' 'Administratoren, Netzwerkkonfigurations-Operatoren, Remotedesktopbenutzer, Benutzer: anzeigen, hinzufuegen, entfernen' { Show-HMLocalGroups }
@@ -2368,7 +2386,7 @@ Add-ToolButton $tc 'Firewall / Netzwerkprofil' 'BtnDefault' 'Firewall-Profile un
 Add-ToolButton $tc 'Angemeldete Benutzer' 'BtnTeal' 'Wer ist angemeldet? Sitzungen abmelden (z.B. vor einem Backup)' { Show-HMSessions }
 Add-ToolButton $tc 'Nachricht senden' 'BtnTeal' 'Nachricht an alle angemeldeten Benutzer' { Start-HMMessage }
 Add-ToolButton $tc 'Neustart / Herunterfahren' 'BtnRed' 'Mit Wartezeit und Nachricht - oder geplanten Neustart abbrechen' { Start-HMShutdown } -Busy
-Add-ToolButton $tc 'Netzwerktest' 'BtnDefault' 'Von diesem PC zum Ziel: DNS (vor/rueckwaerts), Ping, Ports 445/5985/135/3389, WinRM' { Start-HMNetTest }
+Add-ToolButton $tc 'Netzwerktest' 'BtnDefault' 'Von diesem PC zum Ziel: DNS (vor/rueckwaerts), Ping, Ports 445/5985/135/3389, WinRM' { Start-HMNetTest } -FieldOk
 Add-ToolButton $tc 'Geraete (AD) / Mehrfach' 'BtnGreen' 'PCs aus dem Active Directory (Filter, OU) anhaken und Aktionen parallel ausfuehren: Online-Check, Fernwartung, Inventar, Autopilot, Uebermittlungsoptimierung, Aufraeumen, Software, GPUpdate, Intune, Nachricht, Neustart' { Show-HMMultiDialog } -NoTarget
 Add-ToolButton $tc 'Remote-PowerShell' 'BtnTeal' 'Links: PowerShell-Sitzung am gewaehlten PC (Enter-PSSession) | Rechts: CMD (winrs)' { Start-HMRemoteShell $false } { Start-HMRemoteShell $true }
 Add-ToolButton $tc 'Uebermittlungsoptimierung' 'BtnDefault' 'Delivery Optimization: Updates zwischen PCs im Netz teilen (LAN/Gruppe) - lokale Richtlinie setzen und Status anzeigen' { Start-HMDeliveryOpt }
@@ -2378,7 +2396,7 @@ Add-ToolButton $tc 'Inventar (mehrere PCs)' 'BtnMauve' 'Links: Hardware, Windows
 Add-ToolButton $tc 'BitLocker-Schluessel' 'BtnBlue' 'Status und Schluesselschutz aller Laufwerke, Wiederherstellungskennwort in AD oder Entra ID sichern' { Show-HMBitLockerKeys }
 Add-ToolButton $tc 'Autopilot-Hash' 'BtnDefault' 'Hardware-Hash fuer Intune/Autopilot als CSV (Backup-Ordner\Autopilot) - ist HUPilot eingetragen, auf Wunsch auch an HUPilot uebergeben' { Start-HMAutopilotHash }
 Add-ToolButton $tc 'HUPilot ...' 'BtnDefault' 'Links: HUPilot-Setup an diesem PC oeffnen (Autopilot per USB-Stick - eigenes Werkzeug; noch nicht eingetragen: suchen oder Anleitung) | Rechts: HUPilot-Ordner neu waehlen' { Start-HMHUPilot } { Start-HMHUPilot -Choose } -NoTarget
-Add-ToolButton $tc 'Wake-on-LAN' 'BtnDefault' 'PC aufwecken (MAC aus Inventar/Backup) - optional ueber einen PC im Zielnetz senden' { Start-HMWakeOnLan }
+Add-ToolButton $tc 'Wake-on-LAN' 'BtnDefault' 'PC aufwecken (MAC aus Inventar/Backup) - optional ueber einen PC im Zielnetz senden' { Start-HMWakeOnLan } -FieldOk
 Add-ToolButton $tc 'Laufwerke (C$)' 'BtnBlue' 'Links: Laufwerk C: des gewaehlten PCs im Explorer oeffnen (remote \\PC\C$) | Rechts: Laufwerk oder Freigabe waehlen - auch USB-Sticks am Remote-PC. Der angemeldete Windows-Benutzer braucht Adminrechte am Ziel-PC.' { Open-HMAdminShare } { Show-HMDriveMenu }
 $tp = $ui.pnlToolsProfile
 Add-ToolButton $tp 'Profil erneuern (Test)' 'BtnPeach' 'Profilordner umbenennen + Registry-Eintrag sichern/entfernen: Benutzer bekommt beim Anmelden ein frisches Profil (z.B. bei defektem Profil). Rueckgaengig: Profil zurueckholen' { Start-HMProfileRenew } -Busy

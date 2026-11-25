@@ -259,6 +259,21 @@ Describe 'Ziel: Rueckfrage beim Start eines Vorgangs' {
         $ui.cmbComputer.Text | Should -Be 'PC01'
         $script:JobRunning = $false
     }
+    It 'Wake-on-LAN, Netzwerktest, Fernwartung (-FieldOk): Ja fuehrt direkt auf dem PC im Feld aus, ohne Benutzer von PC01' {
+        $ui.cmbUser = [pscustomobject]@{ Items = (New-Object System.Collections.ArrayList) }; [void]$ui.cmbUser.Items.Add('PC01\anna'); $ui.lblSid = [pscustomobject]@{ Text = 'C:\Users\anna' }
+        $script:Profiles = @(New-ZielProfile 'S-A' 'PC01\anna'); $script:ConnectSeq = 4
+        $script:Answer = 'Yes'
+        Confirm-HMTarget "'Wake-on-LAN'" -FieldOk | Should -BeTrue
+        $script:Asked.Text | Should -Match "Ja = 'Wake-on-LAN' auf PC02 ausfuehren \(PC02 wird gewaehlt, ohne Benutzerliste\)"
+        $script:Asked.Text | Should -Match "Nein = 'Wake-on-LAN' auf PC01 ausfuehren"
+        $script:Asked.Default | Should -Be 'Cancel'
+        $script:Connected | Should -BeNullOrEmpty
+        $script:Target.Computer | Should -Be 'PC02'
+        $script:Target.Connected | Should -BeFalse
+        @($script:Profiles).Count | Should -Be 0
+        $ui.cmbUser.Items.Count | Should -Be 0
+        $script:ConnectSeq | Should -Be 5
+    }
     It 'Benutzer-Modus: keine Rueckfrage' {
         $script:UserMode = $true
         Confirm-HMTarget 'Backup' | Should -BeTrue
@@ -318,6 +333,8 @@ Describe 'Ziel: Werkzeuge waehrend Backup/Restore (Merkmal Busy)' {
         foreach ($n in @('Umbenennen', 'IP-Adresse / DHCP', 'Neustart / Herunterfahren', 'Profil erneuern \(Test\)', 'Profil zurueckholen', 'Profilordner umbenennen', 'Profil anderem Konto zuweisen', 'Alte Profile loeschen')) {
             $script:MainSrc | Should -Match "(?m)^Add-ToolButton \`$t[cp] '$n' .* -Busy\r?$"
         }
+        foreach ($n in @('Fernwartung aktivieren', 'Netzwerktest', 'Wake-on-LAN')) { $script:MainSrc | Should -Match ('(?m)^Add-ToolButton \$tc ''' + $n + ''' .* -FieldOk\r?$') }
+        (Get-ZielFn 'Test-HMToolStart') | Should -Match '-FieldOk:\(\[bool\]\$Tag\.FieldOk\)'
         foreach ($n in @('Geraete \(AD\) / Mehrfach', 'USMT einrichten \(ADK\)', 'Inventar \(mehrere PCs\)', 'HUPilot \.\.\.', 'Im Backup suchen')) {
             $script:MainSrc | Should -Match "(?m)^Add-ToolButton \`$t[cp] '$n' .* -NoTarget\r?$"
         }
