@@ -74,21 +74,25 @@ function Get-HMAuModuleSigFiles([string]$Dir) {
     return @(Get-ChildItem -LiteralPath $Dir -Recurse -File -ErrorAction Stop | Where-Object { @('.psd1', '.psm1', '.ps1', '.ps1xml', '.dll', '.winmd', '.cat') -contains $_.Extension.ToLowerInvariant() } |
         ForEach-Object { $s = Get-AuthenticodeSignature -LiteralPath $_.FullName; @{ Path = $_.FullName; Status = "$($s.Status)"; Subject = "$($s.SignerCertificate.Subject)" } })
 }
+# Eigene Dateien des Moduls (.psd1, .psm1, .ps1xml, DLLs "Microsoft.WinGet.*") brauchen den Herausgeber, sonst laden mit
+# Hinweis; fremde mitgelieferte Bibliotheken zaehlen nur mit dem Status. Gesperrt nur bei HashMismatch, NotSigned, ohne .psd1.
+function Test-HMAuModuleOwnFile([string]$Name) { return ($Name -match '(?i)\.(psd1|psm1|ps1xml)$' -or $Name -match '(?i)^Microsoft\.WinGet\..*\.dll$') }
 function Test-HMAuModuleSignature($Sigs, [string]$Publisher) {
     $all = @($Sigs | Where-Object { $_ })
     if (-not $all.Count) { return @{ State = 'Ungueltig'; Reason = 'keine signierten Dateien' } }
     if (-not @($all | Where-Object { "$($_.Path)" -like '*.psd1' }).Count) { return @{ State = 'Ungueltig'; Reason = 'Modulbeschreibung (.psd1) fehlt' } }
-    $bad = ''; $unk = ''
+    $bad = ''; $pub = ''; $unk = ''
     foreach ($s in $all) {
         $n = Split-Path "$($s.Path)" -Leaf
         switch ("$($s.Status)") {
-            'Valid' { if (-not $bad -and (-not $Publisher -or -not "$($s.Subject)".EndsWith($Publisher, [StringComparison]::OrdinalIgnoreCase))) { $bad = "${n}: anderer Herausgeber" } }
+            'Valid' { if (-not $pub -and (Test-HMAuModuleOwnFile $n) -and (-not $Publisher -or -not "$($s.Subject)".EndsWith($Publisher, [StringComparison]::OrdinalIgnoreCase))) { $pub = "${n}: gueltig signiert, aber anderer Herausgeber ($("$($s.Subject)" -replace ',.*$', ''))" } }
             'HashMismatch' { if (-not $bad) { $bad = "${n}: HashMismatch" } }
             'NotSigned' { if (-not $bad) { $bad = "${n}: NotSigned" } }
             default { if (-not $unk) { $unk = "${n}: $($s.Status)" } }
         }
     }
     if ($bad) { return @{ State = 'Ungueltig'; Reason = $bad } }
+    if ($pub) { return @{ State = 'NichtPruefbar'; Reason = $pub } }
     if ($unk) { return @{ State = 'NichtPruefbar'; Reason = $unk } }
     return @{ State = 'Ok'; Reason = '' }
 }

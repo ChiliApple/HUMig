@@ -733,7 +733,7 @@ foreach ($n in @('Get-AuthenticodeSignature', 'Register-ScheduledTask', 'Start-S
 
 Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur geprueft, Rueckfall auf eine vorhandene Version' {
     BeforeAll {
-        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad',
+        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Resolve-TModuleLoad',
             'Get-TModOtherDir', 'Test-TModRetryDue', 'Set-TModRetryMarker', 'Clear-TModRetryMarker', 'Get-TModSigState', 'Get-TModBlockedText',
             'Get-TModOther', 'Test-TRetryDue', 'Set-TRetryMarker', 'Clear-TRetryMarker', 'Repair-TModuleFixed', 'Move-TDir', 'Remove-TDir', 'Get-TModRepairText')
         function global:Get-TNow { $global:T_Now }
@@ -789,7 +789,7 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
     }
     AfterAll {
         $env:ProgramFiles = $script:PF0
-        foreach ($n in @('Out-L', 'Get-TNow', 'Get-PackageProvider', 'Install-PackageProvider', 'Install-Module', 'Find-Module', 'Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Get-TModOtherDir', 'Test-TModRetryDue', 'Set-TModRetryMarker', 'Clear-TModRetryMarker', 'Get-TModSigState', 'Get-TModBlockedText',
+        foreach ($n in @('Out-L', 'Get-TNow', 'Get-PackageProvider', 'Install-PackageProvider', 'Install-Module', 'Find-Module', 'Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Get-TModOtherDir', 'Test-TModRetryDue', 'Set-TModRetryMarker', 'Clear-TModRetryMarker', 'Get-TModSigState', 'Get-TModBlockedText',
                 'Get-TModOther', 'Test-TRetryDue', 'Set-TRetryMarker', 'Clear-TRetryMarker', 'Repair-TModuleFixed', 'Move-TDir', 'Remove-TDir', 'Save-TModuleTo', 'Get-TModRepairText')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
     }
     AfterEach { $env:ProgramFiles = $script:PF0 }
@@ -864,8 +864,14 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
         @{ Fall = 'alle gueltig, Microsoft'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\a.dll'; Status = 'Valid'; Subject = 'CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Erg = 'Ok' }
         @{ Fall = 'eine Datei veraendert (HashMismatch)'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\a.dll'; Status = 'HashMismatch'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Erg = 'Ungueltig' }
         @{ Fall = 'nicht signiert (NotSigned)'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'NotSigned'; Subject = '' }); Erg = 'Ungueltig' }
-        @{ Fall = 'anderer Herausgeber'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Fremd, O=Fremd GmbH, L=Wien, C=AT' }); Erg = 'Ungueltig' }
-        @{ Fall = 'Herausgeber nur als Teil im Namen'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US, OU=Fremd' }); Erg = 'Ungueltig' }
+        @{ Fall = 'anderer Herausgeber'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Fremd, O=Fremd GmbH, L=Wien, C=AT' }); Erg = 'NichtPruefbar' }
+        @{ Fall = 'Herausgeber nur als Teil im Namen'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US, OU=Fremd' }); Erg = 'NichtPruefbar' }
+        @{ Fall = 'fremde mitgelieferte Bibliothek, gueltig, anderer Herausgeber (Newtonsoft.Json ohne Windows-Katalog)'; Sigs = @(@{ Path = 'x\Microsoft.WinGet.Client.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\net48\SharedDependencies\Newtonsoft.Json.dll'; Status = 'Valid'; Subject = 'CN=Json.NET (.NET Foundation), O=Json.NET (.NET Foundation), L=Redmond, S=wa, C=US' }, @{ Path = 'x\Octokit.dll'; Status = 'Valid'; Subject = 'CN=Microsoft 3rd Party Application Component, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Erg = 'Ok' }
+        @{ Fall = 'eigene DLL (Microsoft.WinGet.*), gueltig, anderer Herausgeber'; Sigs = @(@{ Path = 'x\Microsoft.WinGet.Client.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\net48\Microsoft.WinGet.Client.Cmdlets.dll'; Status = 'Valid'; Subject = 'CN=Fremd, O=Fremd GmbH, C=AT' }); Erg = 'NichtPruefbar' }
+        @{ Fall = 'eigene Format.ps1xml, gueltig, anderer Herausgeber'; Sigs = @(@{ Path = 'x\Microsoft.WinGet.Client.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\Format.ps1xml'; Status = 'Valid'; Subject = 'CN=Fremd, O=Fremd GmbH, C=AT' }); Erg = 'NichtPruefbar' }
+        @{ Fall = 'fremde Bibliothek veraendert (HashMismatch)'; Sigs = @(@{ Path = 'x\Microsoft.WinGet.Client.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\Newtonsoft.Json.dll'; Status = 'HashMismatch'; Subject = 'CN=Json.NET' }); Erg = 'Ungueltig' }
+        @{ Fall = 'fremde Bibliothek unsigniert (NotSigned)'; Sigs = @(@{ Path = 'x\Microsoft.WinGet.Client.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\Semver.dll'; Status = 'NotSigned'; Subject = '' }); Erg = 'Ungueltig' }
+        @{ Fall = 'eigene Datei anderer Herausgeber und andere Datei HashMismatch: eindeutig geht vor'; Sigs = @(@{ Path = 'x\Microsoft.WinGet.Client.psd1'; Status = 'Valid'; Subject = 'CN=Fremd, O=Fremd GmbH, C=AT' }, @{ Path = 'x\a.dll'; Status = 'HashMismatch'; Subject = '' }); Erg = 'Ungueltig' }
         @{ Fall = 'ohne .psd1'; Sigs = @(@{ Path = 'x\a.dll'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Erg = 'Ungueltig' }
         @{ Fall = 'leer'; Sigs = @(); Erg = 'Ungueltig' }
         @{ Fall = 'Stammzertifikat fehlt (NotTrusted)'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'NotTrusted'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Erg = 'NichtPruefbar' }
@@ -891,6 +897,39 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
         $ld.Path | Should -Be (Join-Path $global:ModRoot '1.29.380\Microsoft.WinGet.Client.psd1')
         $ld.Blocked | Should -BeFalse
         $ld.Note | Should -Match '^Warnung: WinGet-Modul 1\.29\.380: Signatur nicht pruefbar \(Microsoft\.WinGet\.Client\.psd1: NotTrusted\) - wird wie bisher geladen'
+    }
+    It 'Herausgeber: fremde Bibliothek mit anderem gueltigem Herausgeber laedt ohne Hinweis, eigene Datei mit anderem gueltigem Herausgeber laedt mit Hinweis, nie gesperrt, kein Ersetzen (Ziel-PC und HUMig-PC gleich)' {
+        $ms = "CN=Microsoft Corporation$script:Pub"
+        foreach ($c in @(
+                @{ Sigs = @(@{ Path = 'Microsoft.WinGet.Client.psd1'; Status = 'Valid'; Subject = $ms }, @{ Path = 'Newtonsoft.Json.dll'; Status = 'Valid'; Subject = 'CN=Json.NET (.NET Foundation), O=Json.NET (.NET Foundation)' }); Note = $false }
+                @{ Sigs = @(@{ Path = 'Microsoft.WinGet.Client.psd1'; Status = 'Valid'; Subject = 'CN=Fremd, O=Fremd GmbH, C=AT' }); Note = $true })) {
+            & $script:Setup @('1.29.380')
+            $global:T_Fake = $c.Sigs
+            function global:Get-TModuleSigFiles([string]$Dir) { @($global:T_Fake | ForEach-Object { @{ Path = (Join-Path $Dir $_.Path); Status = $_.Status; Subject = $_.Subject } }) }
+            try {
+                Install-TModule
+                @($global:T_Calls).Count | Should -Be 0
+                $ld = Get-TModuleLoad
+                $ld.Path | Should -Be (Join-Path $global:ModRoot '1.29.380\Microsoft.WinGet.Client.psd1')
+                $ld.Blocked | Should -BeFalse
+                if ($c.Note) { $ld.Note | Should -Match 'gueltig signiert, aber anderer Herausgeber \(CN=Fremd\)\) - wird wie bisher geladen' } else { $ld.Note | Should -Be '' }
+                # HUMig-PC nach derselben Regel
+                Mock Get-HMAuModuleSigFiles { @($global:T_Fake | ForEach-Object { @{ Path = (Join-Path $Dir $_.Path); Status = $_.Status; Subject = $_.Subject } }) }
+                Reset-HMAuModuleCheck
+                $el = Get-HMAuModuleLoad @{ Version = '1.29.380'; Name = 'Microsoft.WinGet.Client'; Herausgeber = $script:Pub }
+                $el.Path | Should -Be $ld.Path
+                $el.Blocked | Should -BeFalse
+                [bool]$el.Note | Should -Be $c.Note
+            } finally {
+                function global:Get-TModuleSigFiles([string]$Dir) {
+                    $global:T_SigCalls++
+                    if ($global:T_SigThrow) { throw 'Zertifikatspruefung nicht moeglich (Ersatz)' }
+                    $v = Split-Path $Dir -Leaf
+                    $st = if (Test-Path -LiteralPath (Join-Path $Dir 'gut.txt')) { 'Valid' } elseif ($global:T_BadSig -contains $v) { 'HashMismatch' } elseif ($global:T_UnkSig -contains $v) { 'NotTrusted' } else { 'Valid' }
+                    return @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = $st; Subject = "CN=Microsoft Corporation$script:Pub" }, @{ Path = (Join-Path $Dir 'a.dll'); Status = 'Valid'; Subject = "CN=Microsoft Corporation$script:Pub" })
+                }
+            }
+        }
     }
     It 'Pruefung wirft eine Ausnahme: nicht pruefbar, Modul wird wie bisher geladen' {
         & $script:Setup @('1.29.380')
@@ -1376,7 +1415,7 @@ Describe 'WinGet-Modul gesperrt (ungueltige Signatur, keine andere Version): nie
 
 Describe 'WinGet einrichten am Ziel-PC (Install-TWinGet): feste Modulversion vor der Reparatur, gesperrt keine Reparatur' {
     BeforeAll {
-        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther', 'Get-TModRepairText')
+        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther', 'Get-TModRepairText')
         function global:Out-L([string]$t) { $global:T_Log += $t }
         function global:Get-TModuleSigFiles([string]$Dir) { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = $(if ($global:T_Bad) { 'HashMismatch' } else { 'Valid' }); Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }) }
         # Ersatz fuer den eigenen Prozess: merkt den Befehl, startet nichts
@@ -1395,7 +1434,7 @@ Describe 'WinGet einrichten am Ziel-PC (Install-TWinGet): feste Modulversion vor
     }
     AfterAll {
         $env:ProgramFiles = $script:PF0
-        foreach ($n in @('Out-L', 'Get-TModuleSigFiles', 'Invoke-TPsEncoded', 'Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther', 'Get-TModRepairText')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
+        foreach ($n in @('Out-L', 'Get-TModuleSigFiles', 'Invoke-TPsEncoded', 'Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther', 'Get-TModRepairText')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
     }
     AfterEach { $env:ProgramFiles = $script:PF0 }
     It 'WinGet fehlt: der eigene Prozess laedt die feste Modulversion ueber ihren Pfad und repariert' -Skip:([Environment]::OSVersion.Version.Build -lt 17763) {

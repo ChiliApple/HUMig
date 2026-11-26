@@ -132,25 +132,31 @@ function Get-TModuleSigFiles([string]$Dir) {
         ForEach-Object { $s = Get-AuthenticodeSignature -LiteralPath $_.FullName; @{ Path = $_.FullName; Status = "$($s.Status)"; Subject = "$($s.SignerCertificate.Subject)" } })
 }
 # Signatur bewerten (rein). $Sigs: @{ Path; Status; Subject } je Datei. Rueckgabe @{ State; Reason }:
-#   Ungueltig     eindeutiger Befund: HashMismatch, NotSigned, gueltig signiert von einem anderen Herausgeber, .psd1 fehlt
-#   NichtPruefbar kann an der Umgebung liegen: UnknownError, NotTrusted, Incompatible, NotSupportedFileFormat (Stammzertifikate, kein Netz)
-#   Ok            jede Datei gueltig signiert, Zertifikat-Subject endet auf den Herausgeber
+#   Ungueltig     eindeutiger Befund: HashMismatch, NotSigned, .psd1 fehlt
+#   NichtPruefbar laedt mit Hinweis: UnknownError, NotTrusted, Incompatible, NotSupportedFileFormat (Stammzertifikate, kein Netz),
+#                 oder eine eigene Datei des Moduls ist gueltig signiert, aber nicht vom Herausgeber aus tools.json
+#   Ok            jede Datei gueltig signiert, die eigenen Dateien vom Herausgeber
+# Eigene Dateien des Moduls: .psd1, .psm1, .ps1xml und DLLs "Microsoft.WinGet.*". Mitgelieferte fremde Bibliotheken
+# (Newtonsoft.Json, Octokit, ...) zaehlen nur mit dem Status: Valid ist in Ordnung, egal von wem - welcher Herausgeber dort
+# erscheint, haengt vom Windows-Katalog des PCs ab (eine Datei, die Windows selbst kennt, meldet "Microsoft Windows").
 # Ein eindeutiger Befund geht vor.
+function Test-TModuleOwnFile([string]$Name) { return ($Name -match '(?i)\.(psd1|psm1|ps1xml)$' -or $Name -match '(?i)^Microsoft\.WinGet\..*\.dll$') }
 function Test-TModuleSignature($Sigs, [string]$Publisher) {
     $all = @($Sigs | Where-Object { $_ })
     if (-not $all.Count) { return @{ State = 'Ungueltig'; Reason = 'keine signierten Dateien' } }
     if (-not @($all | Where-Object { "$($_.Path)" -like '*.psd1' }).Count) { return @{ State = 'Ungueltig'; Reason = 'Modulbeschreibung (.psd1) fehlt' } }
-    $bad = ''; $unk = ''
+    $bad = ''; $pub = ''; $unk = ''
     foreach ($s in $all) {
         $n = Split-Path "$($s.Path)" -Leaf
         switch ("$($s.Status)") {
-            'Valid' { if (-not $bad -and (-not $Publisher -or -not "$($s.Subject)".EndsWith($Publisher, [StringComparison]::OrdinalIgnoreCase))) { $bad = "${n}: anderer Herausgeber" } }
+            'Valid' { if (-not $pub -and (Test-TModuleOwnFile $n) -and (-not $Publisher -or -not "$($s.Subject)".EndsWith($Publisher, [StringComparison]::OrdinalIgnoreCase))) { $pub = "${n}: gueltig signiert, aber anderer Herausgeber ($("$($s.Subject)" -replace ',.*$', ''))" } }
             'HashMismatch' { if (-not $bad) { $bad = "${n}: HashMismatch" } }
             'NotSigned' { if (-not $bad) { $bad = "${n}: NotSigned" } }
             default { if (-not $unk) { $unk = "${n}: $($s.Status)" } }
         }
     }
     if ($bad) { return @{ State = 'Ungueltig'; Reason = $bad } }
+    if ($pub) { return @{ State = 'NichtPruefbar'; Reason = $pub } }
     if ($unk) { return @{ State = 'NichtPruefbar'; Reason = $unk } }
     return @{ State = 'Ok'; Reason = '' }
 }
