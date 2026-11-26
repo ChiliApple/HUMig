@@ -74,9 +74,19 @@ function Get-HMAuModuleSigFiles([string]$Dir) {
     return @(Get-ChildItem -LiteralPath $Dir -Recurse -File -ErrorAction Stop | Where-Object { @('.psd1', '.psm1', '.ps1', '.ps1xml', '.dll', '.winmd', '.cat') -contains $_.Extension.ToLowerInvariant() } |
         ForEach-Object { $s = Get-AuthenticodeSignature -LiteralPath $_.FullName; @{ Path = $_.FullName; Status = "$($s.Status)"; Subject = "$($s.SignerCertificate.Subject)" } })
 }
-# Eigene Dateien des Moduls (.psd1, .psm1, .ps1xml, DLLs "Microsoft.WinGet.*") brauchen den Herausgeber, sonst laden mit
-# Hinweis; fremde mitgelieferte Bibliotheken zaehlen nur mit dem Status. Gesperrt nur bei HashMismatch, NotSigned, ohne .psd1.
-function Test-HMAuModuleOwnFile([string]$Name) { return ($Name -match '(?i)\.(psd1|psm1|ps1xml)$' -or $Name -match '(?i)^Microsoft\.WinGet\..*\.dll$') }
+# Eigene Dateien des Moduls (.psd1, .psm1, .ps1xml, DLLs "Microsoft.WinGet.*", WindowsPackageManager.dll,
+# Microsoft.Management.Deployment.dll/.winmd, winrtact.dll) brauchen den Herausgeber, sonst laden mit Hinweis; fremde
+# mitgelieferte Bibliotheken zaehlen nur mit dem Status. Gesperrt nur bei HashMismatch, NotSigned, ohne .psd1.
+# Gleiche Regel wie Test-TModuleOwnFile am Ziel-PC.
+function Test-HMAuModuleOwnFile([string]$Name) {
+    return ($Name -match '(?i)\.(psd1|psm1|ps1xml)$' -or $Name -match '(?i)^Microsoft\.WinGet\..*\.dll$' -or
+        $Name -match '(?i)^(WindowsPackageManager\.dll|Microsoft\.Management\.Deployment\.(dll|winmd)|winrtact\.dll)$')
+}
+# Hinweistext beim Laden fuer ein nicht eindeutiges Pruefergebnis (gleich wie Get-TModuleSigNote am Ziel-PC)
+function Get-HMAuModuleSigNote($Sig) {
+    if ("$($Sig.Kind)" -eq 'Herausgeber') { return "Signatur gueltig, aber von einem anderen Herausgeber als erwartet ($($Sig.Reason)) - wird wie bisher geladen" }
+    return "Signatur nicht pruefbar ($($Sig.Reason)) - wird wie bisher geladen"
+}
 function Test-HMAuModuleSignature($Sigs, [string]$Publisher) {
     $all = @($Sigs | Where-Object { $_ })
     if (-not $all.Count) { return @{ State = 'Ungueltig'; Reason = 'keine signierten Dateien' } }
@@ -85,16 +95,16 @@ function Test-HMAuModuleSignature($Sigs, [string]$Publisher) {
     foreach ($s in $all) {
         $n = Split-Path "$($s.Path)" -Leaf
         switch ("$($s.Status)") {
-            'Valid' { if (-not $pub -and (Test-HMAuModuleOwnFile $n) -and (-not $Publisher -or -not "$($s.Subject)".EndsWith($Publisher, [StringComparison]::OrdinalIgnoreCase))) { $pub = "${n}: gueltig signiert, aber anderer Herausgeber ($("$($s.Subject)" -replace ',.*$', ''))" } }
+            'Valid' { if (-not $pub -and (Test-HMAuModuleOwnFile $n) -and (-not $Publisher -or -not "$($s.Subject)".EndsWith($Publisher, [StringComparison]::OrdinalIgnoreCase))) { $pub = "${n}: $("$($s.Subject)" -replace ',.*$', '')" } }
             'HashMismatch' { if (-not $bad) { $bad = "${n}: HashMismatch" } }
             'NotSigned' { if (-not $bad) { $bad = "${n}: NotSigned" } }
             default { if (-not $unk) { $unk = "${n}: $($s.Status)" } }
         }
     }
-    if ($bad) { return @{ State = 'Ungueltig'; Reason = $bad } }
-    if ($pub) { return @{ State = 'NichtPruefbar'; Reason = $pub } }
-    if ($unk) { return @{ State = 'NichtPruefbar'; Reason = $unk } }
-    return @{ State = 'Ok'; Reason = '' }
+    if ($bad) { return @{ State = 'Ungueltig'; Reason = $bad; Kind = '' } }
+    if ($pub) { return @{ State = 'NichtPruefbar'; Reason = $pub; Kind = 'Herausgeber' } }
+    if ($unk) { return @{ State = 'NichtPruefbar'; Reason = $unk; Kind = '' } }
+    return @{ State = 'Ok'; Reason = ''; Kind = '' }
 }
 # Pruefergebnis der festen Version, einmal je Lauf: Reset-HMAuModuleCheck an jedem Einstieg (Status, Einrichten, Hilfsaufgabe)
 $script:HMAuSigCache = $null
@@ -122,7 +132,7 @@ function Get-HMAuModuleLoad($Fixed = (Get-HMAuTools).WinGet) {
         if (Test-Path -LiteralPath $psd) {
             $sg = Get-HMAuModuleSigState $Fixed
             if ($sg.State -eq 'Ok') { return @{ Path = $psd; Note = ''; Blocked = $false } }
-            if ($sg.State -eq 'NichtPruefbar') { return @{ Path = $psd; Note = "WinGet-Modul $($Fixed.Version): Signatur nicht pruefbar ($($sg.Reason)) - wird wie bisher geladen"; Blocked = $false } }
+            if ($sg.State -eq 'NichtPruefbar') { return @{ Path = $psd; Note = "WinGet-Modul $($Fixed.Version): $(Get-HMAuModuleSigNote $sg)"; Blocked = $false } }
             $note = "WinGet-Modul $($Fixed.Version) wird nicht geladen, Signatur ungueltig ($($sg.Reason)), Ordner $(Split-Path $psd -Parent)"
         }
     }

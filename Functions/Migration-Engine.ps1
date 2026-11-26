@@ -1594,51 +1594,70 @@ function Save-HMManifest([hashtable]$Manifest, [string]$BackupPath) {
 # Module ohne Statusangabe bleiben wie bisher aus.
 # Mit BackupPath zusaetzlich fuer Error: mindestens eine Datei unter <Backup>\<Id> (Bytes aus Robocopy zaehlen auch gescheiterte
 # Dateien mit - sind alle gescheitert, laege sonst ein Modul ohne Datei als "mit Fehlern gesichert" in der Auswahl).
-function Test-HMBackupModuleHasData($Module, [string]$BackupPath = '') {
-    if (-not $Module) { return $false }
+function Test-HMBackupModuleHasData($Module, [string]$BackupPath = '') { return [bool](Get-HMBackupModuleDataState $Module $BackupPath).Has }
+# wie Test-HMBackupModuleHasData, dazu Certain: $false, wenn die Ordnerpruefung nicht sicher war (Zeitgrenze, Ordner nicht lesbar)
+function Get-HMBackupModuleDataState($Module, [string]$BackupPath = '') {
+    if (-not $Module) { return [pscustomobject]@{ Has = $false; Certain = $true } }
     $st = "$($Module.Status)"
-    if ($st -in @('OK', 'Warning')) { return $true }
-    if ($st -ne 'Error' -or "$($Module.Id)" -eq 'Usmt') { return $false }
+    if ($st -in @('OK', 'Warning')) { return [pscustomobject]@{ Has = $true; Certain = $true } }
+    if ($st -ne 'Error' -or "$($Module.Id)" -eq 'Usmt') { return [pscustomobject]@{ Has = $false; Certain = $true } }
     $by = [long]0
     $saved = ([long]::TryParse("$($Module.Bytes)", [ref]$by) -and $by -gt 0) -or
         (@(@($Module.Items) | Where-Object { $_ -and "$($_.Name)" -ne 'Hinweis' -and "$($_.Status)" -eq 'OK' }).Count -gt 0)
-    if (-not $saved -or -not $BackupPath) { return [bool]$saved }
-    return (Test-HMDirHasFile (Join-Path $BackupPath "$($Module.Id)"))
+    if (-not $saved -or -not $BackupPath) { return [pscustomobject]@{ Has = [bool]$saved; Certain = $true } }
+    $ds = Get-HMDirFileState (Join-Path $BackupPath "$($Module.Id)")
+    return [pscustomobject]@{ Has = [bool]$ds.HasFile; Certain = [bool]$ds.Certain }
 }
 # Liegt unter einem Ordner mindestens eine Datei? Eigene Aufzaehlung mit Zeitgrenze (Freigabe ueber VPN mit tausenden leeren
-# Ordnern dauert sonst Minuten). Zeit abgelaufen = $true ("mit Daten": der Restore meldet fehlende Eintraege als "nicht im Backup").
-# Verknuepfungen (Junction/Symlink) werden nicht verfolgt, nicht lesbare Ordner uebersprungen.
-function Test-HMDirHasFile([string]$Dir, [int]$TimeoutMs = 2000) {
-    if (-not $Dir -or -not [System.IO.Directory]::Exists($Dir)) { return $false }
+# Ordnern dauert sonst Minuten). Verknuepfungen (Junction/Symlink) werden nicht verfolgt.
+# Rueckgabe @{ HasFile; Certain }: Zeit abgelaufen oder ein Ordner nicht (ganz) lesbar und sonst keine Datei gefunden =
+# HasFile $true, Certain $false ("mit Daten": lieber waehlbar und markiert als ausgeblendet; der Restore meldet fehlende
+# Eintraege als "nicht im Backup").
+function Get-HMDirFileState([string]$Dir, [int]$TimeoutMs = 2000) {
+    if (-not $Dir -or -not [System.IO.Directory]::Exists($Dir)) { return [pscustomobject]@{ HasFile = $false; Certain = $true } }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $todo = New-Object System.Collections.Generic.Stack[string]
     $todo.Push($Dir)
+    $unk = $false
     while ($todo.Count) {
-        if ($sw.ElapsedMilliseconds -ge $TimeoutMs) { return $true }
+        if ($sw.ElapsedMilliseconds -ge $TimeoutMs) { return [pscustomobject]@{ HasFile = $true; Certain = $false } }
         $d = $todo.Pop()
         try {
             # eine Aufzaehlung je Ordner (Dateien und Unterordner zusammen)
-            foreach ($e in [System.IO.DirectoryInfo]::new($d).EnumerateFileSystemInfos()) {
-                if ($sw.ElapsedMilliseconds -ge $TimeoutMs) { return $true }
+            foreach ($e in (Get-HMDirEntries $d)) {
+                if ($sw.ElapsedMilliseconds -ge $TimeoutMs) { return [pscustomobject]@{ HasFile = $true; Certain = $false } }
                 $a = $e.Attributes
-                if (($a -band [System.IO.FileAttributes]::Directory) -eq 0) { return $true }
+                if (($a -band [System.IO.FileAttributes]::Directory) -eq 0) { return [pscustomobject]@{ HasFile = $true; Certain = $true } }
                 if (($a -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) { $todo.Push($e.FullName) }
             }
-        } catch { }
+        } catch { $unk = $true }   # Ordner (oder Rest davon) nicht lesbar: Ergebnis unsicher
     }
-    return $false
+    if ($unk) { return [pscustomobject]@{ HasFile = $true; Certain = $false } }
+    return [pscustomobject]@{ HasFile = $false; Certain = $true }
 }
-# Zwischenspeicher fuer die waehlbaren Module je Backup (Laufzeit der App): Schluessel Pfad, Groesse und Aenderungszeit der manifest.json
+# Eintraege eines Ordners, laufend aufgezaehlt (Komma: nicht vorab als Liste einlesen, sonst greift die Zeitgrenze nicht).
+# Ersetzbar in den Tests.
+function Get-HMDirEntries([string]$Dir) { return , ([System.IO.DirectoryInfo]::new($Dir).EnumerateFileSystemInfos()) }
+function Test-HMDirHasFile([string]$Dir, [int]$TimeoutMs = 2000) { return [bool](Get-HMDirFileState $Dir $TimeoutMs).HasFile }
+# Zwischenspeicher fuer die waehlbaren Module je Backup (Laufzeit der App): Schluessel Pfad, Groesse und Aenderungszeit der
+# manifest.json. Auch unsichere Ergebnisse (Zeitgrenze, nicht lesbarer Ordner: "waehlbar und markiert") werden gespeichert,
+# damit das Fenster bei einer langsamen Freigabe nicht bei jedem Laden der Liste erneut wartet. Geleert nur mit "Neu laden"
+# im Reiter Restore, dann wird neu geprueft.
 $script:HMBackupModuleSetCache = @{}
-# Module eines Manifests fuer den Restore: Modules = waehlbar, ErrorModules = davon mit Fehlern gesichert (Markierung, Rueckfrage)
+function Clear-HMBackupModuleSetCache { $script:HMBackupModuleSetCache = @{} }
+# Module eines Manifests fuer den Restore: Modules = waehlbar, ErrorModules = davon mit Fehlern gesichert (Markierung, Rueckfrage),
+# Certain = alle Ordnerpruefungen sicher (fuer Tests und eine spaetere Anzeige; gespeichert wird beides)
 function Get-HMBackupModuleSets($Manifest, [string]$BackupPath = '') {
-    $ids = @(); $err = @()
+    $ids = @(); $err = @(); $sure = $true
     foreach ($m in @($Manifest.Modules)) {
-        if (-not $m -or -not "$($m.Id)" -or -not (Test-HMBackupModuleHasData $m $BackupPath)) { continue }
+        if (-not $m -or -not "$($m.Id)") { continue }
+        $ds = Get-HMBackupModuleDataState $m $BackupPath
+        if (-not $ds.Certain) { $sure = $false }
+        if (-not $ds.Has) { continue }
         $ids += "$($m.Id)"
         if ("$($m.Status)" -eq 'Error') { $err += "$($m.Id)" }
     }
-    return [pscustomobject]@{ Modules = $ids; ErrorModules = $err }
+    return [pscustomobject]@{ Modules = $ids; ErrorModules = $err; Certain = $sure }
 }
 # Hinweistext zu einem mit Fehlern gesicherten Modul (Manifest-Eintrag): betroffene Eintraege mit Grund, gekuerzt (rein, testbar)
 function Get-HMModuleErrorHint($Module) {
@@ -1672,11 +1691,12 @@ function Read-HMBackupInfo {
             # waehlbar: Module mit OK/Warning und mit Fehlern gesicherte, von denen Daten im Backup liegen (Get-HMBackupModuleSets)
             if ($NoFileCheck) { $set = Get-HMBackupModuleSets $m }
             else {
-                $fi = Get-Item -LiteralPath $mf -Force
-                $ck = '{0}|{1}|{2}' -f $Path.ToUpperInvariant(), $fi.Length, $fi.LastWriteTimeUtc.Ticks
+                # Schluessel aus der manifest.json; nicht lesbar: ohne Zwischenspeicher rechnen, das Backup bleibt in der Liste
+                $ck = ''
+                try { $fi = Get-Item -LiteralPath $mf -Force -ErrorAction Stop; $ck = '{0}|{1}|{2}' -f $Path.ToUpperInvariant(), $fi.Length, $fi.LastWriteTimeUtc.Ticks } catch { $ck = '' }
                 if ($null -eq $script:HMBackupModuleSetCache) { $script:HMBackupModuleSetCache = @{} }
-                if ($script:HMBackupModuleSetCache.ContainsKey($ck)) { $set = $script:HMBackupModuleSetCache[$ck] }
-                else { $set = Get-HMBackupModuleSets $m $Path; $script:HMBackupModuleSetCache[$ck] = $set }
+                if ($ck -and $script:HMBackupModuleSetCache.ContainsKey($ck)) { $set = $script:HMBackupModuleSetCache[$ck] }
+                else { $set = Get-HMBackupModuleSets $m $Path; if ($ck) { $script:HMBackupModuleSetCache[$ck] = $set } }
             }
             return [pscustomobject]@{ Path = $Path; Name = (Split-Path $Path -Leaf); Legacy = $false; Created = $m.Created
                 Computer = $m.SourceComputer; User = $m.UserName; Account = $m.Account; Sid = $m.UserSid; ProfilePath = $m.ProfilePath
@@ -5270,7 +5290,7 @@ function Start-HMRestore {
     $notes = @('Benutzer ab- und wieder anmelden bzw. Neustart, damit alle Einstellungen wirken.')
     if ($Ctx.MissingAfter -and $Ctx.MissingAfter.Count) { $notes += "Kontrolle: $($Ctx.MissingAfter.Count) Datei(en) aus dem Backup fehlen am Ziel$(if ($missList) { " - Liste: $(Split-Path $missList -Leaf) im Backup-Ordner" })." }
     if (@($Ctx.VerifyFailed | Where-Object { $_ }).Count) { $notes += "Kontrolle bei $(@($Ctx.VerifyFailed | Where-Object { $_ }).Count) Ordner(n) nicht moeglich - dort ist nicht geprueft, ob alle Dateien am Ziel liegen." }
-    if ($errMods.Count) { $notes += "Im Backup mit Fehlern gesichert: $($errMods -join ', ') - was beim Backup nicht gesichert wurde, fehlt auch am Ziel (Details: Bericht_Backup.html im Backup-Ordner)." }
+    if ($errMods.Count) { $notes += "Im Backup mit Fehlern gesichert: $($errMods -join ', ') - was beim Backup nicht gesichert wurde, fehlt auch nach dem Restore (Details: Bericht_Backup.html im Backup-Ordner)." }
     if ($skipApps.Count) { $notes += "Programm-Einstellungen ausgelassen (Programm fehlt am Ziel): $($skipApps -join ', ') - Programm installieren, dann Restore nur mit diesen Programm-Modulen wiederholen." }
     if (@($Ctx.LogonActions).Count -and -not @($results | Where-Object { "$($_.Id)" -eq 'LogonActions' }).Count) { $notes += 'Einige Einstellungen werden bei der naechsten Anmeldung des Benutzers automatisch uebernommen (einmalige Aufgabe).' }
     $rep = New-HMReport -Ctx $Ctx -Kind Restore -OutFile (Join-Path $Ctx.Backup.Path ("Bericht_Restore_{0}_{1}.html" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))) -Modules $results -Facts $facts -Notes $notes -Status $st

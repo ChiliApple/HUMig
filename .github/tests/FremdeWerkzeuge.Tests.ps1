@@ -733,7 +733,7 @@ foreach ($n in @('Get-AuthenticodeSignature', 'Register-ScheduledTask', 'Start-S
 
 Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur geprueft, Rueckfall auf eine vorhandene Version' {
     BeforeAll {
-        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Resolve-TModuleLoad',
+        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Get-TModuleSigNote', 'Resolve-TModuleLoad',
             'Get-TModOtherDir', 'Test-TModRetryDue', 'Set-TModRetryMarker', 'Clear-TModRetryMarker', 'Get-TModSigState', 'Get-TModBlockedText',
             'Get-TModOther', 'Test-TRetryDue', 'Set-TRetryMarker', 'Clear-TRetryMarker', 'Repair-TModuleFixed', 'Move-TDir', 'Remove-TDir', 'Get-TModRepairText')
         function global:Get-TNow { $global:T_Now }
@@ -789,7 +789,7 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
     }
     AfterAll {
         $env:ProgramFiles = $script:PF0
-        foreach ($n in @('Out-L', 'Get-TNow', 'Get-PackageProvider', 'Install-PackageProvider', 'Install-Module', 'Find-Module', 'Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Get-TModOtherDir', 'Test-TModRetryDue', 'Set-TModRetryMarker', 'Clear-TModRetryMarker', 'Get-TModSigState', 'Get-TModBlockedText',
+        foreach ($n in @('Out-L', 'Get-TNow', 'Get-PackageProvider', 'Install-PackageProvider', 'Install-Module', 'Find-Module', 'Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Get-TModuleSigNote', 'Resolve-TModuleLoad', 'Get-TModOtherDir', 'Test-TModRetryDue', 'Set-TModRetryMarker', 'Clear-TModRetryMarker', 'Get-TModSigState', 'Get-TModBlockedText',
                 'Get-TModOther', 'Test-TRetryDue', 'Set-TRetryMarker', 'Clear-TRetryMarker', 'Repair-TModuleFixed', 'Move-TDir', 'Remove-TDir', 'Save-TModuleTo', 'Get-TModRepairText')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
     }
     AfterEach { $env:ProgramFiles = $script:PF0 }
@@ -912,7 +912,7 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
                 $ld = Get-TModuleLoad
                 $ld.Path | Should -Be (Join-Path $global:ModRoot '1.29.380\Microsoft.WinGet.Client.psd1')
                 $ld.Blocked | Should -BeFalse
-                if ($c.Note) { $ld.Note | Should -Match 'gueltig signiert, aber anderer Herausgeber \(CN=Fremd\)\) - wird wie bisher geladen' } else { $ld.Note | Should -Be '' }
+                if ($c.Note) { $ld.Note | Should -Match '^Warnung: WinGet-Modul 1\.29\.380: Signatur gueltig, aber von einem anderen Herausgeber als erwartet \(Microsoft\.WinGet\.Client\.psd1: CN=Fremd\) - wird wie bisher geladen$' } else { $ld.Note | Should -Be '' }
                 # HUMig-PC nach derselben Regel
                 Mock Get-HMAuModuleSigFiles { @($global:T_Fake | ForEach-Object { @{ Path = (Join-Path $Dir $_.Path); Status = $_.Status; Subject = $_.Subject } }) }
                 Reset-HMAuModuleCheck
@@ -920,6 +920,8 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
                 $el.Path | Should -Be $ld.Path
                 $el.Blocked | Should -BeFalse
                 [bool]$el.Note | Should -Be $c.Note
+                # Status-Hinweis der Engine mit demselben Satz wie am Ziel-PC
+                if ($c.Note) { $el.Note | Should -Be 'WinGet-Modul 1.29.380: Signatur gueltig, aber von einem anderen Herausgeber als erwartet (Microsoft.WinGet.Client.psd1: CN=Fremd) - wird wie bisher geladen' }
             } finally {
                 function global:Get-TModuleSigFiles([string]$Dir) {
                     $global:T_SigCalls++
@@ -1415,7 +1417,7 @@ Describe 'WinGet-Modul gesperrt (ungueltige Signatur, keine andere Version): nie
 
 Describe 'WinGet einrichten am Ziel-PC (Install-TWinGet): feste Modulversion vor der Reparatur, gesperrt keine Reparatur' {
     BeforeAll {
-        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther', 'Get-TModRepairText')
+        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Get-TModuleSigNote', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther', 'Get-TModRepairText')
         function global:Out-L([string]$t) { $global:T_Log += $t }
         function global:Get-TModuleSigFiles([string]$Dir) { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = $(if ($global:T_Bad) { 'HashMismatch' } else { 'Valid' }); Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }) }
         # Ersatz fuer den eigenen Prozess: merkt den Befehl, startet nichts
@@ -1434,7 +1436,7 @@ Describe 'WinGet einrichten am Ziel-PC (Install-TWinGet): feste Modulversion vor
     }
     AfterAll {
         $env:ProgramFiles = $script:PF0
-        foreach ($n in @('Out-L', 'Get-TModuleSigFiles', 'Invoke-TPsEncoded', 'Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther', 'Get-TModRepairText')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
+        foreach ($n in @('Out-L', 'Get-TModuleSigFiles', 'Invoke-TPsEncoded', 'Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleLoad', 'Get-TModuleSigNote', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther', 'Get-TModRepairText')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
     }
     AfterEach { $env:ProgramFiles = $script:PF0 }
     It 'WinGet fehlt: der eigene Prozess laedt die feste Modulversion ueber ihren Pfad und repariert' -Skip:([Environment]::OSVersion.Version.Build -lt 17763) {
@@ -1687,5 +1689,115 @@ Describe 'Nachbesserung: Engine pruefbar/nicht pruefbar, einmal je Lauf, Hinweis
             $ps.pakete.$a.url | Should -Match ([regex]::Escape("PowerShell-$($ps.version)-win-$a.zip") + '$') -Because $a
         }
         @($j.dateien | Where-Object { $_.id -eq 'winget-modul' })[0].version | Should -Match '^\d+\.\d+\.\d+$'
+    }
+}
+
+Describe 'WinGet-Modul: Signaturpruefung mit der echten Dateiliste von 1.29.380 (frisches Windows und Entwicklungs-PC)' {
+    BeforeAll {
+        Import-TargetFunction @('Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleSigNote')
+        . (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1')
+        $script:Subj = @{
+            C = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
+            T = 'CN=Microsoft 3rd Party Application Component, O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
+            W = 'CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
+            H = 'CN=Microsoft Windows Hardware Compatibility Publisher, O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
+            J = 'CN=Json.NET (.NET Foundation), O=Json.NET (.NET Foundation), L=Redmond, S=Washington, C=US, SERIALNUMBER=603 389 068, OID.1.3.6.1.4.1.311.60.2.1.2=Washington, OID.1.3.6.1.4.1.311.60.2.1.3=US, OID.2.5.4.15=Private Organization'
+            F = 'CN=Fremd GmbH, O=Fremd GmbH, L=Wien, C=AT'
+        }
+        # Get-AuthenticodeSignature am frischen Windows der Sandbox (Sandbox-Lauf, signaturen.txt): relativer Pfad | Signierer
+        $script:Fresh = @(
+            'Format.ps1xml|C'
+            'Microsoft.WinGet.Client.psd1|C'
+            'net48\DirectDependencies\Microsoft.WinGet.Client.Engine.dll|C'
+            'net48\Microsoft.WinGet.Client.Cmdlets.dll|C'
+            'net48\SharedDependencies\arm64\Microsoft.Management.Deployment.dll|C'
+            'net48\SharedDependencies\arm64\Microsoft.Management.Deployment.winmd|C'
+            'net48\SharedDependencies\arm64\WindowsPackageManager.dll|C'
+            'net48\SharedDependencies\arm64\winrtact.dll|C'
+            'net48\SharedDependencies\Microsoft.Win32.Registry.dll|C'
+            'net48\SharedDependencies\Microsoft.WinGet.SharedLib.dll|C'
+            'net48\SharedDependencies\Newtonsoft.Json.dll|W'
+            'net48\SharedDependencies\Octokit.dll|T'
+            'net48\SharedDependencies\Semver.dll|T'
+            'net48\SharedDependencies\x64\Microsoft.Management.Deployment.dll|C'
+            'net48\SharedDependencies\x64\Microsoft.Management.Deployment.winmd|C'
+            'net48\SharedDependencies\x64\WindowsPackageManager.dll|C'
+            'net48\SharedDependencies\x64\winrtact.dll|C'
+            'net48\SharedDependencies\x86\Microsoft.Management.Deployment.dll|C'
+            'net48\SharedDependencies\x86\Microsoft.Management.Deployment.winmd|C'
+            'net48\SharedDependencies\x86\WindowsPackageManager.dll|C'
+            'net48\SharedDependencies\x86\winrtact.dll|C'
+            'net8.0-windows10.0.26100.0\DirectDependencies\Microsoft.WinGet.Client.Engine.dll|C'
+            'net8.0-windows10.0.26100.0\Microsoft.WinGet.Client.Cmdlets.dll|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\arm64\Microsoft.Management.Deployment.dll|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\arm64\Microsoft.Management.Deployment.winmd|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\arm64\WindowsPackageManager.dll|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\arm64\winrtact.dll|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\Microsoft.WinGet.SharedLib.dll|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\Newtonsoft.Json.dll|J'
+            'net8.0-windows10.0.26100.0\SharedDependencies\Octokit.dll|T'
+            'net8.0-windows10.0.26100.0\SharedDependencies\Semver.dll|T'
+            'net8.0-windows10.0.26100.0\SharedDependencies\x64\Microsoft.Management.Deployment.dll|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\x64\Microsoft.Management.Deployment.winmd|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\x64\WindowsPackageManager.dll|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\x64\winrtact.dll|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\x86\Microsoft.Management.Deployment.dll|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\x86\Microsoft.Management.Deployment.winmd|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\x86\WindowsPackageManager.dll|C'
+            'net8.0-windows10.0.26100.0\SharedDependencies\x86\winrtact.dll|C'
+        )
+        # Entwicklungs-PC: gleiche Dateien, zwei Dateien mit anderem Signierer (Katalog von Windows)
+        $script:Dev = @($script:Fresh | ForEach-Object {
+                if ($_ -like 'net48\SharedDependencies\Microsoft.Win32.Registry.dll|*' -or $_ -like 'net8.0-windows10.0.26100.0\SharedDependencies\Newtonsoft.Json.dll|*') { ($_ -split '\|')[0] + '|H' } else { $_ } })
+        $script:ToSigs = { param([string[]]$Rows, [hashtable]$Change = @{}) @(foreach ($r in $Rows) { $f = $r -split '\|'; $st = 'Valid'; $k = $f[1]; if ($Change.ContainsKey($f[0])) { $st = $Change[$f[0]].Status; $k = $Change[$f[0]].Key }; @{ Path = "C:\M\1.29.380\$($f[0])"; Status = $st; Subject = $script:Subj[$k] } }) }
+        $script:Pub = (Get-HMAuTools (Join-Path $script:Root 'Config\tools.json')).WinGet.Herausgeber
+    }
+    AfterAll { foreach ($n in @('Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleSigNote')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue } }
+    It 'Herausgeber in Config\tools.json passt genau zum Signierer der Modulbeschreibung (Tippfehler faellt auf)' {
+        $psd = @($script:Fresh | Where-Object { $_ -like 'Microsoft.WinGet.Client.psd1|*' })[0]
+        $sub = $script:Subj[($psd -split '\|')[1]]
+        $script:Pub | Should -Be ', O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
+        $sub.EndsWith($script:Pub, [StringComparison]::Ordinal) | Should -BeTrue
+        $sub.Substring($sub.IndexOf(',')) | Should -BeExactly $script:Pub
+    }
+    It 'Eigene Dateien: genau diese Namen (beide Regeln gleich), fremde Bibliotheken nicht' {
+        $own = @($script:Fresh | ForEach-Object { Split-Path (($_ -split '\|')[0]) -Leaf } | Sort-Object -Unique | Where-Object { Test-TModuleOwnFile $_ })
+        $own | Should -Be @(@('Format.ps1xml', 'Microsoft.Management.Deployment.dll', 'Microsoft.Management.Deployment.winmd', 'Microsoft.WinGet.Client.Cmdlets.dll', 'Microsoft.WinGet.Client.Engine.dll', 'Microsoft.WinGet.Client.psd1', 'Microsoft.WinGet.SharedLib.dll', 'winrtact.dll', 'WindowsPackageManager.dll') | Sort-Object -Unique)
+        foreach ($r in $script:Fresh) { $n = Split-Path (($r -split '\|')[0]) -Leaf; (Test-HMAuModuleOwnFile $n) | Should -Be (Test-TModuleOwnFile $n) -Because $n }
+        foreach ($n in @('Newtonsoft.Json.dll', 'Octokit.dll', 'Semver.dll', 'Microsoft.Win32.Registry.dll')) { Test-TModuleOwnFile $n | Should -BeFalse -Because $n }
+        # jede eigene Datei ist am frischen Windows von Microsoft Corporation signiert
+        foreach ($r in $script:Fresh) { $f = $r -split '\|'; if (Test-TModuleOwnFile (Split-Path $f[0] -Leaf)) { $f[1] | Should -Be 'C' -Because $f[0] } }
+    }
+    It 'Echte Werte frisches Windows und Entwicklungs-PC: Ok ohne Hinweis (Ziel-PC und HUMig-PC gleich)' {
+        foreach ($rows in @($script:Fresh, $script:Dev)) {
+            $s = & $script:ToSigs $rows
+            $s.Count | Should -Be 39
+            $t = Test-TModuleSignature $s $script:Pub; $e = Test-HMAuModuleSignature $s $script:Pub
+            $t.State | Should -Be 'Ok'; $e.State | Should -Be 'Ok'
+        }
+    }
+    It 'Fremder gueltiger Herausgeber auf WindowsPackageManager.dll: nicht pruefbar mit eigenem Hinweistext, laedt' {
+        $s = & $script:ToSigs $script:Fresh @{ 'net48\SharedDependencies\x64\WindowsPackageManager.dll' = @{ Status = 'Valid'; Key = 'F' } }
+        foreach ($r in @((Test-TModuleSignature $s $script:Pub), (Test-HMAuModuleSignature $s $script:Pub))) {
+            $r.State | Should -Be 'NichtPruefbar'
+            $r.Kind | Should -Be 'Herausgeber'
+            $r.Reason | Should -Be 'WindowsPackageManager.dll: CN=Fremd GmbH'
+        }
+        Get-TModuleSigNote (Test-TModuleSignature $s $script:Pub) | Should -Be 'Signatur gueltig, aber von einem anderen Herausgeber als erwartet (WindowsPackageManager.dll: CN=Fremd GmbH) - wird wie bisher geladen'
+        Get-HMAuModuleSigNote (Test-HMAuModuleSignature $s $script:Pub) | Should -Be (Get-TModuleSigNote (Test-TModuleSignature $s $script:Pub))
+        # fremder Herausgeber auf einer fremden Bibliothek: weiter Ok
+        $s2 = & $script:ToSigs $script:Fresh @{ 'net48\SharedDependencies\Octokit.dll' = @{ Status = 'Valid'; Key = 'F' } }
+        (Test-TModuleSignature $s2 $script:Pub).State | Should -Be 'Ok'
+        (Test-HMAuModuleSignature $s2 $script:Pub).State | Should -Be 'Ok'
+        # nicht pruefbar (z. B. NotTrusted) behaelt seinen Text
+        $s3 = & $script:ToSigs $script:Fresh @{ 'Format.ps1xml' = @{ Status = 'NotTrusted'; Key = 'C' } }
+        Get-TModuleSigNote (Test-TModuleSignature $s3 $script:Pub) | Should -Be 'Signatur nicht pruefbar (Format.ps1xml: NotTrusted) - wird wie bisher geladen'
+    }
+    It 'HashMismatch und NotSigned sperren weiter, auch bei fremden Bibliotheken' {
+        foreach ($c in @(@{ F = 'net48\SharedDependencies\x86\winrtact.dll'; S = 'HashMismatch' }, @{ F = 'net8.0-windows10.0.26100.0\SharedDependencies\Newtonsoft.Json.dll'; S = 'NotSigned' }, @{ F = 'Microsoft.WinGet.Client.psd1'; S = 'HashMismatch' })) {
+            $s = & $script:ToSigs $script:Fresh @{ ($c.F) = @{ Status = $c.S; Key = 'C' } }
+            (Test-TModuleSignature $s $script:Pub).State | Should -Be 'Ungueltig' -Because $c.F
+            (Test-HMAuModuleSignature $s $script:Pub).State | Should -Be 'Ungueltig' -Because $c.F
+        }
     }
 }

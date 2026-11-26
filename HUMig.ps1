@@ -2205,7 +2205,7 @@ $ui.dgBackups.Add_SelectionChanged({
     Update-RestoreTargetLabel
     Update-HMExtraTargetsUi
 })
-$ui.btnRefreshBackups.Add_Click({ Update-BackupList; Update-BackupRootInfo })
+$ui.btnRefreshBackups.Add_Click({ Clear-HMBackupModuleSetCache; Update-BackupList; Update-BackupRootInfo })   # Neu laden: Ordnerpruefung der Module neu
 # markiertes Backup oeffnen, sonst den Backup-Ordner
 $ui.btnOpenBackup.Add_Click({
     $f = if ($script:SelectedBackup -and (Test-Path -LiteralPath "$($script:SelectedBackup.Path)")) { "$($script:SelectedBackup.Path)" } else { Get-BackupRoot }
@@ -2441,7 +2441,7 @@ function Start-RestoreJob([hashtable]$Ctx) {
         if ($j.Result -and $j.Result.Report) { Out-Console "Protokoll: $($j.Result.Report)  (Knopf 'Bericht')" 'Info' }
         Connect-Target
         if ($script:Settings.OverviewAuto -ne $false) { Update-HMBackupOverview -Quiet }
-        if ($j.Result -and @($j.Result.ErrorModules | Where-Object { $_ }).Count) { Out-Console "Im Backup mit Fehlern gesichert: $(@($j.Result.ErrorModules) -join ', ') - was beim Backup nicht gesichert wurde, fehlt auch am Ziel (Hinweis im Bericht)" 'Warning' }
+        # Hinweis 'Im Backup mit Fehlern gesichert' steht schon am Anfang des Laufs in der Konsole (Protokollzeile des Restore)
         if ($j.Result -and [int]$j.Result.MissingFiles -gt 0) { Out-Console "Kontrolle nach dem Restore: $([int]$j.Result.MissingFiles) Datei(en) aus dem Backup fehlen am Ziel - Liste: $($j.Result.MissingList)" 'Warning' }
         try { Update-HMWizardAfterJob 'Restore' $j } catch { }
         $skNames = @(@($script:RestoreSkippedApps) | Where-Object { $_ } | ForEach-Object { "$($_.Name)" })

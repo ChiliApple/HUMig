@@ -1,5 +1,17 @@
 ﻿# Changelog
 
+## v2.1.33 - 2026-11-26
+### 🧰 Fremde Werkzeuge
+- **WinGet-Modul, Prüfung des Herausgebers:** Auch die von Microsoft signierten Laufzeitdateien des Moduls (WindowsPackageManager.dll, Microsoft.Management.Deployment, winrtact.dll) müssen vom erwarteten Herausgeber stammen.
+  - Weicht er ab, lädt HUMig das Modul wie bisher, mit dem Hinweis "Signatur gültig, aber von einem anderen Herausgeber als erwartet".
+  - Mitgelieferte fremde Bibliotheken zählen weiter nur mit einer gültigen Signatur.
+### ♻️ Restore
+- **Module mit Fehlern im Backup:** Ist ein Modulordner nicht ganz lesbar, bleibt das Modul im Restore wählbar und markiert, statt zu verschwinden.
+- **Neu laden:** Das Ergebnis der Prüfung der Modulordner merkt sich HUMig bis zum Knopf "Neu laden" im Reiter Restore, auch wenn eine langsame Freigabe die Prüfung abbrechen ließ. Das Fenster wartet dadurch nicht bei jedem Auffrischen der Liste. "Neu laden" prüft die Modulordner neu.
+- **Konsole:** Der Hinweis auf im Backup mit Fehlern gesicherte Module steht nur noch einmal in der Konsole, mit gleichem Wortlaut wie im Bericht.
+### ✅ Qualität
+- **Tests:** 837 bestanden.
+
 ## v2.1.32 - 2026-11-26
 ### 💾 Backup und Restore
 - **Module mit Fehlern bleiben wählbar:** Ein Modul, bei dem im Backup einzelne Dateien nicht gesichert wurden (z. B. gesperrt), ist im Reiter Restore wieder sichtbar und angehakt wie ein Modul mit Warnung.

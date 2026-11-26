@@ -168,11 +168,122 @@ Describe 'Restore mit Fehler-Modulen: Backup aus Start-HMBackup (Robocopy ersetz
         $p = New-TDir 'viele'
         for ($i = 0; $i -lt 300; $i++) { [void][System.IO.Directory]::CreateDirectory((Join-Path $p ("a\b{0:D3}" -f $i))) }
         Test-HMDirHasFile $p 60000 | Should -BeFalse
-        Test-HMDirHasFile $p 1 | Should -BeTrue
+        # Zeitgrenze 0: greift bei der ersten Pruefung, unabhaengig von der Geschwindigkeit des Rechners
+        Test-HMDirHasFile $p 0 | Should -BeTrue
+        $s = Get-HMDirFileState $p 0
+        $s.HasFile | Should -BeTrue; $s.Certain | Should -BeFalse
+        $s = Get-HMDirFileState $p 60000
+        $s.HasFile | Should -BeFalse; $s.Certain | Should -BeTrue
         Test-HMDirHasFile (Join-Path $p 'gibtsnicht') 1000 | Should -BeFalse
         $z = New-TDir 'ziel'; [System.IO.File]::WriteAllText((Join-Path $z 'x.txt'), 'x')
         $null = & cmd.exe /c mklink /J (Join-Path $p 'a\link') $z
         if (Test-Path -LiteralPath (Join-Path $p 'a\link\x.txt')) { Test-HMDirHasFile $p 60000 | Should -BeFalse }
+    }
+    It 'Ordnerpruefung: Fehler beim Aufzaehlen (beim Oeffnen und mitten im Ordner) und sonst keine Datei = mit Daten, aber unsicher; eine gefundene Datei ist sicher' {
+        # Aufzaehlung, die einen Eintrag liefert und dann scheitert (wie ein Ordner, dessen Rest nicht lesbar ist)
+        if (-not ('HMTWirftNach' -as [type])) {
+            Add-Type -TypeDefinition @"
+public class HMTWirftNach : System.Collections.IEnumerable {
+    private object[] a; public HMTWirftNach(object[] x) { a = x; }
+    public System.Collections.IEnumerator GetEnumerator() { return new E(a); }
+    private class E : System.Collections.IEnumerator {
+        private object[] a; private int i = -1; public E(object[] x) { a = x; }
+        public bool MoveNext() { i++; if (i >= a.Length) { throw new System.UnauthorizedAccessException("Zugriff verweigert (Ersatz)"); } return true; }
+        public object Current { get { return a[i]; } }
+        public void Reset() { i = -1; }
+    }
+}
+"@
+        }
+        $p = New-TDir 'fehl'
+        foreach ($n in @('a', 'b\c')) { [void][System.IO.Directory]::CreateDirectory((Join-Path $p $n)) }
+        $script:Real = ${function:Get-HMDirEntries}
+        $script:Bad = Join-Path $p 'b'; $script:Open = Join-Path $p 'a'
+        $script:Seen = @()
+        try {
+            function Get-HMDirEntries([string]$Dir) {
+                $script:Seen += $Dir
+                if ($Dir -eq $script:Open) { throw 'Zugriff verweigert beim Oeffnen (Ersatz)' }
+                if ($Dir -eq $script:Bad) { return , ([HMTWirftNach]::new(@([System.IO.DirectoryInfo]::new((Join-Path $script:Bad 'c'))))) }
+                return , ([System.IO.DirectoryInfo]::new($Dir).EnumerateFileSystemInfos())
+            }
+            $s = Get-HMDirFileState $p 60000
+            $s.HasFile | Should -BeTrue
+            $s.Certain | Should -BeFalse
+            # der vor dem Fehler gelieferte Unterordner wurde trotzdem durchsucht
+            $script:Seen | Should -Contain (Join-Path $p 'b\c')
+            Test-HMDirHasFile $p 60000 | Should -BeTrue
+            # liegt im noch gelieferten Unterordner eine Datei, ist das Ergebnis sicher
+            [System.IO.File]::WriteAllText((Join-Path $p 'b\c\x.txt'), 'x')
+            $s = Get-HMDirFileState $p 60000
+            $s.HasFile | Should -BeTrue
+            $s.Certain | Should -BeTrue
+        } finally { Set-Item -Path Function:\Get-HMDirEntries -Value $script:Real }
+        # ohne Fehler und ohne Datei: sicher leer
+        $q = New-TDir 'leer2'; [void][System.IO.Directory]::CreateDirectory((Join-Path $q 'a'))
+        $s = Get-HMDirFileState $q 60000
+        $s.HasFile | Should -BeFalse; $s.Certain | Should -BeTrue
+    }
+    It 'Aufzaehlung je Ordner laeuft schrittweise (nicht vorab als Liste): Zeitgrenze greift mitten in einem grossen Ordner' {
+        $e = Get-HMDirEntries $TestDrive
+        $e -is [System.Collections.IList] | Should -BeFalse
+        $e.GetType().GetInterfaces().Name | Should -Contain 'IEnumerable'
+    }
+    It 'Zwischenspeicher: auch unsichere Ergebnisse (Zeitgrenze, nicht lesbarer Ordner) werden gespeichert, kein erneutes Warten; Neu laden rechnet neu' {
+        $p = New-TBackup 'Error' @(New-TModRes 'Daten' 'Error' @(New-TItem 'A' 'Error' 300 'alle gescheitert'))
+        New-Item -ItemType Directory -Path (Join-Path $p 'Daten\A') -Force | Out-Null
+        Clear-HMBackupModuleSetCache
+        # unsicher: waehlbar, gespeichert; weitere Aufrufe pruefen den Ordner nicht noch einmal
+        Mock Get-HMDirFileState { [pscustomobject]@{ HasFile = $true; Certain = $false } }
+        $ri = Read-HMBackupInfo -Path $p -Modules @()
+        @($ri.Modules) | Should -Be @('Daten')
+        $script:HMBackupModuleSetCache.Count | Should -Be 1
+        @($script:HMBackupModuleSetCache.Values)[0].Certain | Should -BeFalse
+        @((Read-HMBackupInfo -Path $p -Modules @()).Modules) | Should -Be @('Daten')
+        @((Read-HMBackupInfo -Path $p -Modules @()).Modules) | Should -Be @('Daten')
+        Should -Invoke Get-HMDirFileState -Times 1 -Exactly
+        # Neu laden: geleert, naechstes Lesen prueft die Ordner neu (jetzt sicher leer) und speichert das
+        Clear-HMBackupModuleSetCache
+        $script:HMBackupModuleSetCache.Count | Should -Be 0
+        Mock Get-HMDirFileState { [pscustomobject]@{ HasFile = $false; Certain = $true } }
+        @((Read-HMBackupInfo -Path $p -Modules @()).Modules).Count | Should -Be 0
+        $script:HMBackupModuleSetCache.Count | Should -Be 1
+        @($script:HMBackupModuleSetCache.Values)[0].Certain | Should -BeTrue
+        # sicheres Ergebnis wie bisher: gespeichert, bis Neu laden
+        @((Read-HMBackupInfo -Path $p -Modules @()).Modules).Count | Should -Be 0
+        Should -Invoke Get-HMDirFileState -Times 2 -Exactly   # zusammen im Test: einmal vor und einmal nach Neu laden
+        Clear-HMBackupModuleSetCache
+        Mock Get-HMDirFileState { [pscustomobject]@{ HasFile = $true; Certain = $true } }
+        @((Read-HMBackupInfo -Path $p -Modules @()).Modules) | Should -Be @('Daten')
+        # nur der Knopf "Neu laden" leert ihn, nicht das automatische Auffrischen der Liste
+        $hm = [IO.File]::ReadAllText((Join-Path $script:Root 'HUMig.ps1'))
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($hm, [ref]$null, [ref]$null)
+        $calls = @($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.CommandAst] -and $x.GetCommandName() -eq 'Clear-HMBackupModuleSetCache' }, $true))
+        $calls.Count | Should -Be 1
+        $up = $calls[0]; while ($up -and $up -isnot [System.Management.Automation.Language.InvokeMemberExpressionAst]) { $up = $up.Parent }
+        $up.Extent.Text | Should -Match '^\$ui\.btnRefreshBackups\.Add_Click\('
+    }
+    It 'Neu laden (echter Klick-Block aus HUMig.ps1): leert den Zwischenspeicher, laedt dann die Liste' {
+        $hm = [IO.File]::ReadAllText((Join-Path $script:Root 'HUMig.ps1'))
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($hm, [ref]$null, [ref]$null)
+        $inv = @($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and "$($x.Expression)" -eq '$ui.btnRefreshBackups' -and "$($x.Member)" -eq 'Add_Click' }, $true))[0]
+        $sb = $inv.Arguments[0].ScriptBlock.GetScriptBlock()
+        $script:Order = @()
+        $script:HMBackupModuleSetCache = @{ 'X' = 1 }
+        function Update-BackupList { $script:Order += "Liste:$($script:HMBackupModuleSetCache.Count)" }
+        function Update-BackupRootInfo { $script:Order += 'Info' }
+        & $sb
+        $script:Order | Should -Be @('Liste:0', 'Info')
+    }
+    It 'manifest.json nicht abfragbar (Get-Item scheitert): Backup bleibt in der Liste, ohne Zwischenspeicher gerechnet' {
+        $p = New-TBackup 'Error' @(New-TModRes 'Daten' 'Error' @(New-TItem 'A' 'Error' 300 'alle gescheitert')) @('Daten')
+        Clear-HMBackupModuleSetCache
+        Mock Get-Item { throw 'Zugriff verweigert (Ersatz)' } -ParameterFilter { "$LiteralPath" -like '*manifest.json' }
+        $ri = Read-HMBackupInfo -Path $p -Modules @()
+        $ri | Should -Not -BeNullOrEmpty
+        $ri.Legacy | Should -BeFalse
+        @($ri.Modules) | Should -Be @('Daten')
+        $script:HMBackupModuleSetCache.Count | Should -Be 0
     }
     It 'Zwischenspeicher je Backup: gleiche manifest.json = gleiches Ergebnis ohne neue Ordnerpruefung, geaenderte = neu; geplante Laeufe ohne Ordnerpruefung' {
         $p = New-TBackup 'Error' @(New-TModRes 'Daten' 'Error' @(New-TItem 'A' 'Error' 300 'alle gescheitert'))
@@ -286,7 +397,7 @@ Describe 'Restore mit Fehler-Modulen: Ablauf und Status' {
         @($j.Result.Modules | Where-Object { $_.Id -eq 'Daten' })[0].Status | Should -Be 'OK'
         (Get-TLog $j) | Should -Match 'Im Backup mit Fehlern gesichert: Daten - was beim Backup nicht gesichert wurde, fehlt auch nach dem Restore'
         (Get-TLog $j) | Should -Not -Match 'Fehlern gesichert: .*Profil'
-        @($script:RepNotes | Where-Object { $_ -match '^Im Backup mit Fehlern gesichert: Daten - was beim Backup nicht gesichert wurde, fehlt auch am Ziel' }).Count | Should -Be 1
+        @($script:RepNotes | Where-Object { $_ -match '^Im Backup mit Fehlern gesichert: Daten - was beim Backup nicht gesichert wurde, fehlt auch nach dem Restore \(Details: Bericht_Backup\.html im Backup-Ordner\)\.$' }).Count | Should -Be 1
         @($j.Result.ErrorModules) | Should -Be @('Daten')
     }
     It 'Backup OK mit uebernommenem Fehler-Modul: Restore OK, Hinweis im Bericht' {
