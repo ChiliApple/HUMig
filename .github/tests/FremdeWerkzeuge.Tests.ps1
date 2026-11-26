@@ -877,3 +877,64 @@ Describe 'WinGet-Modul: Einrichten auf diesem PC (Engine) nur in der festen Vers
         } finally { $env:ProgramData = $pd0 }
     }
 }
+
+Describe 'USMT-Version: Einstellungen, Manifest, Backup- und Restore-Bericht' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Migration-Engine.ps1')
+        # Text unter dem USMT-Ordner (UI-Settings.ps1) einzeln laden
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\UI-Settings.ps1'), [ref]$null, [ref]$null)
+        $fn = @($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq 'Get-HMUsmtLabel' }, $true))[0]
+        . ([scriptblock]::Create($fn.Extent.Text))
+        $script:AppRoot = $TestDrive
+        # Ausdruck der Fakten des Backup-Berichts (aus Migration-Engine.ps1) zum Auswerten mit eigenen Werten
+        $me = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\Migration-Engine.ps1'), [ref]$null, [ref]$null)
+        $script:BackupFacts = @($me.FindAll({ param($x) $x -is [System.Management.Automation.Language.AssignmentStatementAst] -and "$($x.Left)" -eq '$facts' -and $x.Extent.Text -match "'Computer \(Quelle\)'" }, $true))[0].Extent.Text
+        $script:RestoreUsmt = @($me.FindAll({ param($x) $x -is [System.Management.Automation.Language.IfStatementAst] -and $x.Extent.Text -like 'if ($Ctx.UsmtVersion)*' }, $true))[0].Extent.Text
+    }
+    It 'Version aus der Datei lesen, nicht lesbar ergibt leer' {
+        Mock Get-Item { [pscustomobject]@{ VersionInfo = [pscustomobject]@{ ProductVersion = ' 10.0.26100.1 (WinBuild.160101.0800) ' } } } -ParameterFilter { "$LiteralPath" -like '*scanstate.exe' }
+        Get-HMUsmtVersion 'C:\USMT\amd64' | Should -Be '10.0.26100.1 (WinBuild.160101.0800)'
+        Get-HMUsmtVersion (Join-Path $TestDrive 'fehlt') 'loadstate.exe' | Should -Be ''
+    }
+    It 'Einstellungen: Text unter dem USMT-Ordner nennt die Version, ohne lesbare Version wie bisher' {
+        Mock Find-HMUsmt { 'C:\USMT\amd64' }
+        Mock Get-HMUsmtVersion { '10.0.26100.1' }
+        Get-HMUsmtLabel '' | Should -Be 'gefunden: C:\USMT\amd64 (Version 10.0.26100.1)'
+        Mock Get-HMUsmtVersion { '' }
+        Get-HMUsmtLabel '' | Should -Be 'gefunden: C:\USMT\amd64'
+        Mock Find-HMUsmt { $null }
+        Get-HMUsmtLabel '' | Should -Match '^USMT nicht gefunden'
+    }
+    It 'Backup: die Version kommt ins Manifest (UsmtVersion), ScanState-Aufruf bleibt dahinter' {
+        Mock Find-HMUsmt { 'C:\USMT\amd64' }
+        Mock Get-HMUsmtVersion { '10.0.26100.1' } -ParameterFilter { $Exe -eq 'scanstate.exe' }
+        Mock Write-HMLog { throw 'Halt nach der Versionszeile' } -ParameterFilter { $Msg -like '*USMT: C:\USMT\amd64 (Version 10.0.26100.1)*' }
+        $ctx = @{ Account = 'PC\anna'; ToolRoot = $TestDrive; BackupPath = (Join-Path $TestDrive 'B1'); Manifest = [ordered]@{ Status = '' }; IsRemote = $false }
+        { Backup-HMUsmt -Ctx $ctx -Job $null -Module ([pscustomobject]@{ Id = 'Usmt' }) } | Should -Throw 'Halt nach der Versionszeile'
+        $ctx.Manifest.UsmtVersion | Should -Be '10.0.26100.1'
+    }
+    It 'Backup-Bericht: Zeile "USMT" mit Version, ohne Version keine Zeile (leere Fakten zeigt der Bericht nicht)' {
+        $allBytes = 0; $verify = $null; $Ctx = @{ BackupPath = 'X' }
+        $m = @{ UsmtVersion = '10.0.26100.1'; SyncRoots = @(); Catalog = $null }
+        . ([scriptblock]::Create($script:BackupFacts))
+        $facts['USMT'] | Should -Be 'Version 10.0.26100.1'
+        $m = @{ SyncRoots = @(); Catalog = $null }
+        . ([scriptblock]::Create($script:BackupFacts))
+        "$($facts['USMT'])" | Should -Be ''
+    }
+    It 'Restore: Version von loadstate.exe, Zeile "USMT" im Bericht' {
+        Mock Find-HMUsmt { 'C:\USMT\amd64' }
+        Mock Get-HMUsmtVersion { '10.0.26100.2' } -ParameterFilter { $Exe -eq 'loadstate.exe' }
+        Mock Write-HMLog { throw 'Halt vor LoadState' } -ParameterFilter { $Msg -like 'Windows-Einstellungen (USMT LoadState)*' }
+        $st = Join-Path $TestDrive 'B2\Usmt\STORE'; New-Item -ItemType Directory -Path $st -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $st 'USMT.MIG'), 'x')
+        $ctx = @{ Account = 'PC\anna'; ToolRoot = $TestDrive; Backup = @{ Path = (Join-Path $TestDrive 'B2'); Legacy = $false; Account = 'PC\anna' }; IsRemote = $false }
+        { Restore-HMUsmt -Ctx $ctx -Job $null } | Should -Throw 'Halt vor LoadState'
+        $ctx.UsmtVersion | Should -Be '10.0.26100.2'
+        $Ctx = $ctx; $facts = [ordered]@{}
+        . ([scriptblock]::Create($script:RestoreUsmt))
+        $facts['USMT'] | Should -Be 'Version 10.0.26100.2'
+        $Ctx = @{}; $facts = [ordered]@{}
+        . ([scriptblock]::Create($script:RestoreUsmt))
+        $facts.Contains('USMT') | Should -BeFalse
+    }
+}
