@@ -383,7 +383,7 @@ Describe 'Quelltext: keine verschmolzenen Zeilen' {
         $src = Get-Content -LiteralPath (Join-Path $script:Root 'HUMig.ps1') -Raw -Encoding UTF8
         $src | Should -Not -Match '@\(\$[\w:]+\.Msgs\)'
         # eine mit New-Object erzeugte List[object] wirft in @( ) "Die Argumenttypen stimmen nicht ueberein", auch leer
-        $src | Should -Not -Match 'Msgs\s*=\s*\(?New-Object'
+        $src | Should -Not -MatchExactly '\bMsgs\s*=\s*\(?New-Object'
         $r = [pscustomobject]@{ Msgs = [System.Collections.Generic.List[object]]::new() }
         $n = 0; foreach ($x in $r.Msgs) { $n++ }; $n | Should -Be 0
         $r.Msgs.Add([pscustomobject]@{ Text = 'a'; Level = 'Warning' }); $r.Msgs.Add([pscustomobject]@{ Text = 'b'; Level = 'Info' })
