@@ -189,6 +189,7 @@ function New-HMStatusHeader([string]$Text, $Tab) {
         $b.Padding = [System.Windows.Thickness]::new(10, 1, 10, 1)
         $b.HorizontalAlignment = 'Left'
         $b.Tag = $Tab
+        $b.ToolTip = "Reiter '$($Tab.Header)' oeffnen"
         $b.Add_Click({ param($s) $ui.tabMain.SelectedItem = $s.Tag })
         [System.Windows.Controls.DockPanel]::SetDock($b, 'Left')
         [void]$dp.Children.Add($tb); [void]$dp.Children.Add($b)

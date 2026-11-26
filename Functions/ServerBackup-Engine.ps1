@@ -1738,7 +1738,7 @@ function Invoke-HMSbAfterBackup([string]$Letter, [string]$Mode, [string]$Label) 
     if ($Mode -eq 'Offline') {
         try {
             Set-HMSbDiskOffline -Number $disk.Number -Label $Label
-            Write-HMSbLog "Platte $Label offline geschaltet (Datentraeger $($disk.Number), kein Laufwerksbuchstabe mehr). Wieder online: HUMig ""Aktualisieren"", naechster geplanter Lauf oder Datentraegerverwaltung." 'Success'
+            Write-HMSbLog "Platte $Label offline geschaltet (Datentraeger $($disk.Number), kein Laufwerksbuchstabe mehr). Wieder online: HUMig ""Neu laden"", naechster geplanter Lauf oder Datentraegerverwaltung." 'Success'
         } catch { Write-HMSbLog "Platte $Label konnte nicht offline geschaltet werden: $($_.Exception.Message)" 'Warning' }
     } else {
         try {

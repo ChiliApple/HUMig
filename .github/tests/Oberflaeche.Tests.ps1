@@ -138,7 +138,7 @@ Describe 'Oberflaeche: Set-JobUi schaltet Start und Abbrechen' {
             "$($ui[$p[1]].Visibility)" | Should -Be 'Visible'
             $ui[$p[1]].IsEnabled | Should -BeTrue
             # jeder Reiter nennt den laufenden Vorgang (ein Klick bricht ihn ab, wie bisher)
-            "$($ui[$p[1]].Content.Text)" | Should -Be 'Backup abbrechen'
+            "$($ui[$p[1]].Content.Text)" | Should -Be 'Abbrechen: Backup'
             "$($ui[$p[1]].ToolTip)" | Should -Match "'Backup'"
         }
         Set-JobUi $false
@@ -190,6 +190,14 @@ Describe 'Oberflaeche: Werkzeuge stehen im Abschnitt ihrer Einstufung' {
             $script:MainSrc | Should -Not -Match ('\$ui\.' + $n + '\.Add_Click\(\{[^\r\n]*(Use-HMPcTarget|Get-SelectedProfilePath|Confirm-HMTarget)')
         }
     }
+    It 'Ueberschriften ziehen nach: Ziel-Anzeige und Benutzerwahl rufen Update-HMToolHeads auf' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'HUMig.ps1'), [ref]$null, [ref]$null)
+        foreach ($n in 'Update-HMTargetLabel', 'Update-SidLabel', 'Set-HMUserModeUi') {
+            $fn = @($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true))[0]
+            $fn | Should -Not -BeNullOrEmpty
+            $fn.Extent.Text | Should -Match 'Update-HMToolHeads'
+        }
+    }
     It 'Ueberschriften nennen PC und Benutzer' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'HUMig.ps1'), [ref]$null, [ref]$null)
         $fn = @($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq 'Update-HMToolHeads' }, $true))[0]
@@ -228,6 +236,29 @@ Describe 'Oberflaeche: ausgeblendet statt gesperrt' {
         $ui.btnBigFiles.Visibility | Should -Be 'Visible'
         $ui.lblBigFilesHint.Visibility | Should -Be 'Collapsed'
     }
+    It 'Restore: Module, die das Backup nicht enthaelt, und leere Gruppen sind ausgeblendet (echtes Build-ModulePanel)' -Skip:(-not $script:StaD) {
+        Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'HUMig.ps1'), [ref]$null, [ref]$null)
+        function Get-ConsoleBrush { param($c) New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($c)) }
+        foreach ($n in 'Build-ModulePanel', 'Set-HMRestoreModulesForBackup', 'Get-CheckedModules', 'New-Brush') { . ([scriptblock]::Create(@($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true))[0].Extent.Text)) }
+        $script:UserMode = $false
+        $script:Groups = @('Profil', 'Browser')
+        $script:Modules = @([pscustomobject]@{ Id = 'Profile'; Name = 'Benutzerprofil'; Group = 'Profil'; Show = $true; Default = $true }, [pscustomobject]@{ Id = 'Edge'; Name = 'Edge'; Group = 'Browser'; Show = $true; Default = $true }, [pscustomobject]@{ Id = 'Chrome'; Name = 'Chrome'; Group = 'Browser'; Show = $true; Default = $true })
+        $script:RestoreChecks = @{}
+        $ui = @{ pnlRestoreModules = New-Object System.Windows.Controls.StackPanel }
+        Build-ModulePanel $ui.pnlRestoreModules $script:RestoreChecks -Restore
+        $n = Set-HMRestoreModulesForBackup ([pscustomobject]@{ Modules = @('Profile') })
+        $n | Should -Be 2
+        "$($script:RestoreChecks['Edge'].Parent.Visibility)" | Should -Be 'Collapsed'
+        "$($script:RestoreChecks['Profile'].Parent.Visibility)" | Should -Be 'Visible'
+        "$($ui.pnlRestoreModules.Children[1].Visibility)" | Should -Be 'Collapsed'
+        "$($ui.pnlRestoreModules.Children[0].Visibility)" | Should -Be 'Visible'
+        @(Get-CheckedModules $script:RestoreChecks | ForEach-Object { $_.Id }) | Should -Be @('Profile')
+        [void](Set-HMRestoreModulesForBackup ([pscustomobject]@{ Modules = @('Profile', 'Chrome') }))
+        "$($ui.pnlRestoreModules.Children[1].Visibility)" | Should -Be 'Visible'
+        "$($script:RestoreChecks['Chrome'].Parent.Visibility)" | Should -Be 'Visible'
+        "$($script:RestoreChecks['Edge'].Parent.Visibility)" | Should -Be 'Collapsed'
+    }
     It 'Grosse Dateien ist im XAML ausgeblendet und nie gesperrt' {
         $b = @($script:MainXml.SelectNodes('//*') | Where-Object { (Get-UiName $_) -eq 'btnBigFiles' })[0]
         $b.GetAttribute('Visibility') | Should -Be 'Collapsed'
@@ -251,9 +282,13 @@ Describe 'Oberflaeche: Rueckfragen mit eigenen Knopftexten' {
             # jede neue Rueckfrage: Knopftexte merken und je nach $script:Press Enter, Esc oder Schliessen ausloesen
             $script:Seen = New-Object System.Collections.ArrayList
             $script:Press = 'Enter'
+            # nur waehrend dieser Tests aktiv (der Handler bleibt im Prozess registriert); Zeitgrenze schliesst haengende Rueckfragen
+            $script:DlgActive = $true; $script:DlgTimeout = $false
             [System.Windows.EventManager]::RegisterClassHandler([System.Windows.Window], [System.Windows.FrameworkElement]::LoadedEvent, [System.Windows.RoutedEventHandler] {
                 param($sd, $e)
-                if ([object]::ReferenceEquals($sd, $script:OwnerWin)) { return }
+                if (-not $script:DlgActive -or [object]::ReferenceEquals($sd, $script:OwnerWin)) { return }
+                $wd = New-Object System.Windows.Threading.DispatcherTimer; $wd.Interval = [TimeSpan]::FromSeconds(10)
+                $wd.Add_Tick({ param($tm) $tm.Stop(); if ($sd.IsVisible) { $script:DlgTimeout = $true; $sd.Close() } }.GetNewClosure()); $wd.Start()
                 $btns = New-Object System.Collections.ArrayList
                 $walk = { param($v) if ($v -is [System.Windows.Controls.Button]) { [void]$btns.Add($v) }; for ($i = 0; $i -lt [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($v); $i++) { & $walk ([System.Windows.Media.VisualTreeHelper]::GetChild($v, $i)) } }
                 & $walk $sd
@@ -265,7 +300,7 @@ Describe 'Oberflaeche: Rueckfragen mit eigenen Knopftexten' {
             })
         }
     }
-    AfterAll { if ($script:OwnerWin) { $script:OwnerWin.Close() } }
+    AfterAll { $script:DlgActive = $false; if ($script:OwnerWin) { $script:OwnerWin.Close() } }
     It 'gleiche Rueckgabe mit und ohne eigene Texte (<Mode>, <Icon>, Standard <Def>, Taste <Key>)' -Skip:(-not $script:StaD) -ForEach @(
         @{ Mode = 'YesNo'; Icon = 'Warning'; Def = ''; Key = 'Enter' }, @{ Mode = 'YesNo'; Icon = 'Warning'; Def = ''; Key = 'Esc' }, @{ Mode = 'YesNo'; Icon = 'Warning'; Def = ''; Key = 'Close' },
         @{ Mode = 'YesNo'; Icon = 'Warning'; Def = 'No'; Key = 'Enter' }, @{ Mode = 'YesNo'; Icon = 'Question'; Def = 'Yes'; Key = 'Enter' },
@@ -277,6 +312,7 @@ Describe 'Oberflaeche: Rueckfragen mit eigenen Knopftexten' {
         $lab = @{ Yes = 'Machen'; No = 'Lassen'; Cancel = 'Zurueck'; OK = 'Weiter' }
         $b = Show-HMDialogBox -Owner $script:OwnerWin -Text 'Test' -Title 'Test' -Mode $Mode -Icon $Icon -Default $Def -Labels $lab
         $b | Should -Be $a
+        $script:DlgTimeout | Should -BeFalse
         $plain.Count | Should -BeGreaterThan 1
         @($script:Seen).Count | Should -Be $plain.Count
         @($script:Seen) | Should -Not -Contain 'Ja'

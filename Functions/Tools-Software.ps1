@@ -1731,7 +1731,7 @@ function Show-SoftwareWindow {
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
         <Button x:Name="btnAdd" Content="Datei hinzufuegen" Background="#FFA6E3A1" ToolTip="Setup-Dateien (MSI/EXE/MSP) in die Softwareverteilung kopieren - Dateien oder ganze Ordner koennen auch auf die Paketliste gezogen werden. Ziehen aus dem Explorer geht nur, wenn der Explorer ebenfalls als Administrator laeuft (Windows-Sperre) - sonst 'Datei hinzufuegen'"/>
         <Button x:Name="btnOpen" Content="Ordner oeffnen" Background="#FF89B4FA"/>
-        <Button x:Name="btnReload" Content="Aktualisieren" Background="#FF89B4FA" Margin="0"/>
+        <Button x:Name="btnReload" Content="Neu laden" Background="#FF89B4FA" Margin="0"/>
       </StackPanel>
       <TextBlock x:Name="lblFolder" TextTrimming="CharacterEllipsis"/>
     </DockPanel>
@@ -2061,7 +2061,7 @@ function Show-InstalledSoftware([string]$Computer) {
             -Sort 'Name ASC' -CountText "$($rows.Count) Programme" -Width 1150 -Height 640 -ActionContext @{ Computer = $h; Map = $map } `
             -Actions @(
                 @{ Text = 'Deinstallieren (markierte)'; Color = '#FFF38BA8'; Handler = { param($rows, $win, $ctx) Start-SoftwareUninstall -Rows $rows -Win $win -Ctx $ctx } },
-                @{ Text = 'Aktualisieren'; Color = '#FF89B4FA'; NoSelection = $true; Handler = { param($rows, $win, $ctx) $win.Close(); Show-InstalledSoftware $ctx.Computer } }
+                @{ Text = 'Neu laden'; Color = '#FF89B4FA'; NoSelection = $true; Handler = { param($rows, $win, $ctx) $win.Close(); Show-InstalledSoftware $ctx.Computer } }
             )
     }
 }

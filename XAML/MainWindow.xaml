@@ -151,7 +151,7 @@
                     <!-- dunkles Auswahlfeld, Aufbau wie DarkComboBox in HU-MultiTenant, Farben aus dieser Palette -->
                     <ControlTemplate TargetType="ComboBox">
                         <Grid>
-                            <ToggleButton x:Name="ToggleButton" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" ClickMode="Press">
+                            <ToggleButton x:Name="ToggleButton" Focusable="False" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" ClickMode="Press">
                                 <ToggleButton.Template>
                                     <ControlTemplate TargetType="ToggleButton">
                                         <Border x:Name="Border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="2">
@@ -372,7 +372,7 @@
                                 <TextBlock x:Name="lblScopeBackup" Text="" Foreground="{StaticResource CatText}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4" ToolTip="PC und Benutzer, die Backup starten sichert - aendern ueber Computer und Benutzer oben"/>
                                 <Grid>
                                     <Button x:Name="btnBackup" Content="Backup starten" Style="{StaticResource BtnMain}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4" ToolTip="Angehakte Module des gewaehlten Benutzers in den Backup-Ordner sichern"/>
-                                    <Button x:Name="btnCancel" Content="Abbrechen" Style="{StaticResource BtnDanger}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed" ToolTip="Laufenden Vorgang abbrechen (mit Rueckfrage), bereits gesicherte Dateien bleiben im Backup-Ordner"/>
+                                    <Button x:Name="btnCancel" MaxWidth="{Binding ActualWidth, ElementName=btnBackup}" Content="Abbrechen" Style="{StaticResource BtnDanger}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed" ToolTip="Laufenden Vorgang abbrechen (mit Rueckfrage), bereits gesicherte Dateien bleiben im Backup-Ordner"/>
                                 </Grid>
                                 <Button x:Name="btnBackupSchedule" Content="Zeitplan ..." Style="{StaticResource BtnDefault}" Margin="0,10,0,2" ToolTip="Links: dieses Backup (angehakte Module, Optionen, Zusaetzliche Ordner, Backup-Ordner) automatisch ausfuehren - taeglich, woechentlich oder bei Anmeldung. Nur eigenes Profil an diesem PC, HUMig muss dafuer nicht offen sein. | Rechts: Zeitplaene verwalten (jetzt starten, Protokoll, Bericht, loeschen)"/>
                                 <TextBlock x:Name="lblBackupSchedule" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,4"/>
@@ -477,7 +477,7 @@
                             <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
                                 <Grid>
                                     <Button x:Name="btnRestore" Content="Restore starten" Style="{StaticResource BtnMain}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4" ToolTip="Angehakte Module des markierten Backups zum gewaehlten Benutzer zurueckspielen"/>
-                                    <Button x:Name="btnCancelRestore" Content="Abbrechen" Style="{StaticResource BtnDanger}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed" ToolTip="Laufenden Vorgang abbrechen (mit Rueckfrage), bereits zurueckgespielte Dateien bleiben am Ziel"/>
+                                    <Button x:Name="btnCancelRestore" MaxWidth="{Binding ActualWidth, ElementName=btnRestore}" Content="Abbrechen" Style="{StaticResource BtnDanger}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed" ToolTip="Laufenden Vorgang abbrechen (mit Rueckfrage), bereits zurueckgespielte Dateien bleiben am Ziel"/>
                                 </Grid>
                             </StackPanel>
                             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -593,7 +593,7 @@
                                     <Button x:Name="btnAuSearch" Content="Updates suchen" Style="{StaticResource BtnDefault}" Padding="12,6" ToolTip="Verfuegbare Updates der installierten Programme lesen (WinGet, angehakte Quellen)"/>
                                     <Grid>
                                         <Button x:Name="btnAuUpdateSel" Content="Angehakte aktualisieren" Style="{StaticResource BtnMain}" FontWeight="SemiBold" Padding="14,6" ToolTip="Angehakte Programme still aktualisieren - Ausnahmen werden nie aktualisiert"/>
-                                        <Button x:Name="btnAuCancel" Content="Abbrechen" Style="{StaticResource BtnDanger}" Padding="14,6" ToolTip="Nach dem laufenden Programm abbrechen" FontWeight="SemiBold" Visibility="Collapsed"/>
+                                        <Button x:Name="btnAuCancel" MaxWidth="{Binding ActualWidth, ElementName=btnAuUpdateSel}" Content="Abbrechen" Style="{StaticResource BtnDanger}" Padding="14,6" ToolTip="Nach dem laufenden Programm abbrechen" FontWeight="SemiBold" Visibility="Collapsed"/>
                                     </Grid>
                                     <Button x:Name="btnAuUpdateAll" Content="Alle aktualisieren" Style="{StaticResource BtnMain}" Padding="12,6" ToolTip="Alle gefundenen Updates ausser den Ausnahmen"/>
                                     <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkAuUnknown" Content="Programme ohne bekannte Version zeigen" VerticalAlignment="Center" Margin="10,0,0,4" ToolTip="WinGet kennt die installierte Version nicht - die Zuordnung zum Paket ist dann unsicher (Variante, Sprache, x86/x64). Nur gezielt verwenden."/>
@@ -678,7 +678,7 @@
                             <WrapPanel>
                                 <Grid>
                                     <Button x:Name="btnSbBackup" Content="Server-Backup starten" Style="{StaticResource BtnMain}" FontWeight="SemiBold" Padding="18,6" ToolTip="Angehakte VMs online (VSS) auf die Ziel-Platte sichern - Windows Server-Sicherung (wbadmin)"/>
-                                    <Button x:Name="btnSbCancel" Content="Abbrechen" Style="{StaticResource BtnDanger}" Padding="18,6" FontWeight="SemiBold" Visibility="Collapsed" ToolTip="Laufenden Vorgang abbrechen (mit Rueckfrage), auch eine laufende Server-Sicherung"/>
+                                    <Button x:Name="btnSbCancel" MaxWidth="{Binding ActualWidth, ElementName=btnSbBackup}" Content="Abbrechen" Style="{StaticResource BtnDanger}" Padding="18,6" FontWeight="SemiBold" Visibility="Collapsed" ToolTip="Laufenden Vorgang abbrechen (mit Rueckfrage), auch eine laufende Server-Sicherung"/>
                                 </Grid>
                                 <Button x:Name="btnSbHostOnly" Content="Nur Host-Konfiguration" Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Switches, VLANs, Netzwerk, VM-Einstellungen sofort exportieren (Ziel-Platte oder Tool-Ordner\Logs\ServerBackup)"/>
                                 <Button x:Name="btnSbExport" Content="VMs exportieren ..." Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Ausgewaehlte VMs mit Hyper-V exportieren (vollstaendige Kopie, mit 'VM importieren' an jedem Hyper-V-Host wiederherstellbar) - auf die Platte oder in einen Ordner. Im Profil auch automatisch nach jeder Sicherung (Zeitplan)."/>

@@ -913,7 +913,27 @@ function Build-ModulePanel {
         [void]$Panel.Children.Add($b)
     }
 }
-function Get-CheckedModules([hashtable]$Store) {
+# Restore: Module, die das markierte Backup nicht enthaelt, sind gesperrt (fuer die Auswahl) und ausgeblendet, leere Gruppen ebenso.
+# Aufbau wie Build-ModulePanel: Gruppe = Border > StackPanel (Ueberschrift, WrapPanel mit Zeilen), Zeile = Grid mit dem Haken.
+# Rueckgabe: Zahl der ausgeblendeten Module
+function Set-HMRestoreModulesForBackup($Backup) {
+    $absent = 0
+    foreach ($k in @($script:RestoreChecks.Keys)) {
+        $has = @($Backup.Modules) -contains $k
+        $script:RestoreChecks[$k].IsEnabled = $has
+        $script:RestoreChecks[$k].IsChecked = ($has -and $k -notin @('Info', 'Drivers', 'Tasks', 'PrintersFull'))
+        $rowEl = $script:RestoreChecks[$k].Parent
+        if ($rowEl -is [System.Windows.UIElement]) { $rowEl.Visibility = $(if ($has) { 'Visible' } else { 'Collapsed' }) }
+        if (-not $has) { $absent++ }
+    }
+    foreach ($grp in @($ui.pnlRestoreModules.Children)) {
+        if (-not ($grp -is [System.Windows.Controls.Border]) -or -not ($grp.Child -is [System.Windows.Controls.Panel])) { continue }
+        $wp = @($grp.Child.Children | Where-Object { $_ -is [System.Windows.Controls.WrapPanel] })[0]
+        if (-not $wp) { continue }
+        $grp.Visibility = $(if (@($wp.Children | Where-Object { $_.Visibility -eq 'Visible' }).Count) { 'Visible' } else { 'Collapsed' })
+    }
+    return $absent
+}function Get-CheckedModules([hashtable]$Store) {
     # IsEnabled nur im Reiter Restore relevant (Module, die das Backup nicht enthaelt, sind dort gesperrt)
     $isRestore = [object]::ReferenceEquals($Store, $script:RestoreChecks)
     $ids = @($Store.Keys | Where-Object { $Store[$_].IsChecked -eq $true -and (-not $isRestore -or $Store[$_].IsEnabled) } | ForEach-Object { "$_" })
@@ -1699,11 +1719,12 @@ function Set-JobUi([bool]$Running) {
         if ($Running) {
             $jt = "$($script:JobTitle)".Trim()
             $tb = New-Object System.Windows.Controls.TextBlock
-            $tb.Text = $(if ($jt) { "$jt abbrechen" } else { "$($cancelBtn.Tag.Text)" }); $tb.TextTrimming = 'CharacterEllipsis'
+            $tb.Text = $(if ($jt) { "Abbrechen: $jt" } else { "$($cancelBtn.Tag.Text)" }); $tb.TextTrimming = 'CharacterEllipsis'
             $cancelBtn.Content = $tb
-            $cancelBtn.ToolTip = $(if ($jt) { "Laufenden Vorgang '$jt' abbrechen (mit Rueckfrage) - wirkt aus jedem Reiter. Bereits kopierte Daten bleiben erhalten." } else { $cancelBtn.Tag.Tip })
-            # nicht breiter als der Startknopf, dessen Platz es einnimmt (sonst verschiebt sich die Knopfreihe)
-            if ($startBtn -and $startBtn.ActualWidth -gt 0) { $cancelBtn.MaxWidth = $startBtn.ActualWidth } else { $cancelBtn.ClearValue([System.Windows.FrameworkElement]::MaxWidthProperty) }
+            # Tooltip: der laufende Vorgang; gehoert er zu diesem Reiter, dazu der Hinweis aus dem XAML (z.B. "nach dem laufenden Programm")
+            $own = switch ($cancelBtn) { $ui.btnCancel { '^Backup$' } $ui.btnCancelRestore { '^Restore$' } $ui.btnSbCancel { '^(Server-Backup|VM-Export)$' } $ui.btnAuCancel { '^App-Updates' } default { '^$' } }
+            $cancelBtn.ToolTip = $(if (-not $jt) { $cancelBtn.Tag.Tip } elseif ($jt -match $own) { "Laufenden Vorgang '$jt' abbrechen, wirkt aus jedem Reiter.`n$($cancelBtn.Tag.Tip)" } else { "Laufenden Vorgang '$jt' abbrechen (mit Rueckfrage), wirkt aus jedem Reiter." })
+            # die Breite begrenzt das XAML (MaxWidth = Breite des Startknopfs), langer Text wird mit ... gekuerzt
         } else {
             $cancelBtn.Content = $cancelBtn.Tag.Text; $cancelBtn.ToolTip = $cancelBtn.Tag.Tip
         }
@@ -2148,23 +2169,10 @@ $ui.dgBackups.Add_SelectionChanged({
         $script:RestoreExtraIds = @(@($script:RestoreExtraIds) + $hidden | Where-Object { $_ } | Select-Object -Unique)
         Build-ModulePanel $ui.pnlRestoreModules $script:RestoreChecks -Restore -Extra $script:RestoreExtraIds
     }
-    # Module, die das Backup nicht enthaelt: gesperrt (fuer die Auswahl) und ausgeblendet, leere Gruppen ebenso
-    $absent = 0
-    foreach ($k in $script:RestoreChecks.Keys) {
-        $has = @($b.Modules) -contains $k
-        $script:RestoreChecks[$k].IsEnabled = $has
-        $script:RestoreChecks[$k].IsChecked = ($has -and $k -notin @('Info', 'Drivers', 'Tasks', 'PrintersFull'))
-        $rowEl = $script:RestoreChecks[$k].Parent
-        if ($rowEl -is [System.Windows.UIElement]) { $rowEl.Visibility = $(if ($has) { 'Visible' } else { 'Collapsed' }) }
-        if (-not $has) { $absent++ }
-    }
-    foreach ($grp in @($ui.pnlRestoreModules.Children)) {
-        $rows = @(); try { $rows = @($grp.Child.Children[1].Children) } catch { }
-        if ($rows.Count) { $grp.Visibility = $(if (@($rows | Where-Object { $_.Visibility -eq 'Visible' }).Count) { 'Visible' } else { 'Collapsed' }) }
-    }
+    $absent = Set-HMRestoreModulesForBackup $b
     $txt = "Backup: $($b.Name)"
     if ($absent) { $txt += "  |  $absent Module nicht in diesem Backup (ausgeblendet)" }
-    if ($b.Archived) { $txt += '  |  ARCHIV: wird nicht weitergefuehrt, nicht geloescht, _GELOESCHT bleibt erhalten' }
+    if ($b.Archived) { $txt += '  |  ARCHIV: kein fortlaufendes Backup schreibt mehr hinein, nicht geloescht, _GELOESCHT bleibt erhalten' }
     if ($b.Legacy) { $txt += '  |  Format der Vorgaengerversion' }
     if ($b.Manifest -and $b.Manifest.SourceOS) { $txt += "  |  Quelle: $($b.Manifest.SourceOS)" }
     if ($b.Manifest -and $b.Manifest.OneDriveFolders) { $txt += "  |  OneDrive-Ordner nicht enthalten" }
@@ -2203,8 +2211,9 @@ $ui.btnDeleteBackup.Add_Click({
     if (-not (Confirm-HMBackupNotInUse @("$($b.Path)") "$($b.Name)")) { return }
     # unvollstaendig bzw. "laeuft": z.B. ein geplantes Backup in einem anderen Prozess schreibt gerade hinein
     $runTxt = $(if ("$($b.Status)" -eq 'Running') { "`n`nACHTUNG: Dieses Backup ist unvollstaendig oder wird gerade geschrieben (z.B. von einem geplanten Backup)." } else { '' })
-    $det = @(); if ($b.Created) { $det += "Datum: $($b.Created)" }; if ($b.Computer) { $det += "PC: $($b.Computer)" }; if ($b.User) { $det += "Benutzer: $($b.User)" }
-    if ([long]"0$($b.SizeBytes)" -gt 0) { $det += "Groesse: $(Format-HMSize ([long]$b.SizeBytes))" }; if ($b.Status) { $det += "Status: $($b.Status)" }
+    # Angaben wie in der Backup-Liste (markierte Zeile)
+    $det = @(); $rw = $ui.dgBackups.SelectedItem
+    if ($rw) { foreach ($pair in @(@('Datum', 'Datum'), @('Computer', 'PC'), @('Benutzer', 'Benutzer'), @('Groesse', 'Groesse'), @('Status', 'Status'))) { $v = "$($rw.($pair[0]))".Trim(); if ($v) { $det += "$($pair[1]): $v" } } }
     if (-not (Confirm-Action "Backup '$($b.Name)' endgueltig loeschen?$(if ($det.Count) { "`n`n" + ($det -join "`n") })$runTxt" -Labels @{ Yes = 'Endgueltig loeschen'; No = 'Nicht loeschen' })) { return }
     Out-Console "Loesche $($b.Path) ..." 'Warning'
     Add-HMDeleting @("$($b.Path)")
