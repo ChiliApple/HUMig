@@ -11,7 +11,7 @@
 - **Kein zweiter Ablauf:** Ein weiterer Klick auf "Release signieren", während ein Ablauf läuft, meldet "Signieren läuft bereits".
 - **Nichts zu signieren:** Werden alle Releases ausgelassen, steht dort eine Hinweiszeile, es wird nichts gestartet.
 ### ✅ Qualität
-- **Tests:** PLATZHALTER
+- **Tests:** 596 bestanden.
 
 ## v2.1.25 - 2026-11-26
 ### 🛠️ Werkzeuge
