@@ -250,6 +250,19 @@ function Stop-HMRemote([string]$Why = '', [switch]$Silent) {
     if ($script:HMRemoteDlg) { try { Update-HMRemoteDialog } catch { } }
 }
 
+# Ereignisse vom Webserver in der Konsole ausgeben (aus Update-HMRemoteTick)
+function Show-HMRemoteEvents($S) {
+    while ($S.Events.Count -gt 0) {
+        $ev = $S.Events.Dequeue()
+        switch ("$($ev.Kind)") {
+            'Paired' { Out-Console "Fernbedienung: Handy '$($ev.Name)' gekoppelt ($($ev.Ip))" 'Success' }
+            'PairLocked' { Out-Console 'Fernbedienung: Kopplung gesperrt - 5 falsche Codes. Im Fenster Handy einen neuen Code erzeugen.' 'Warning' }
+            'Unpaired' { Out-Console "Fernbedienung: Handy '$($ev.Name)' hat sich entkoppelt" 'Info' }
+            # Zugriffsprotokoll nicht schreibbar (Verknuepfung im Ordner Logs): hoechstens einmal je Sitzung der Fernbedienung
+            'LogBlocked' { if (-not $S.LogBlockedShown) { $S.LogBlockedShown = $true; Out-Console "Fernbedienung: $($ev.Text)" 'Warning' } }
+        }
+    }
+}
 # jede Sekunde (Oberflaeche): Schnappschuss ablegen, Aktionen vom Handy ausfuehren
 function Update-HMRemoteTick {
     $r = $script:HMRemote; if (-not $r) { return }
@@ -257,14 +270,7 @@ function Update-HMRemoteTick {
     if (-not $S.Listening -and $S.Error) { $e = $S.Error; Stop-HMRemote -Silent; Out-Console "Fernbedienung beendet: $e" 'Error'; return }
     if ($S.StopAt -and (Get-Date) -ge [datetime]$S.StopAt) { Stop-HMRemote 'eingestellte Laufzeit abgelaufen'; return }
     # Ereignisse vom Webserver
-    while ($S.Events.Count -gt 0) {
-        $ev = $S.Events.Dequeue()
-        switch ("$($ev.Kind)") {
-            'Paired' { Out-Console "Fernbedienung: Handy '$($ev.Name)' gekoppelt ($($ev.Ip))" 'Success' }
-            'PairLocked' { Out-Console 'Fernbedienung: Kopplung gesperrt - 5 falsche Codes. Im Fenster Handy einen neuen Code erzeugen.' 'Warning' }
-            'Unpaired' { Out-Console "Fernbedienung: Handy '$($ev.Name)' hat sich entkoppelt" 'Info' }
-        }
-    }
+    Show-HMRemoteEvents $S
     if ($S.Pair -and $S.Pair.Until -lt (Get-Date)) { Close-HMRemotePairing $S }
     # Abbrechen vom Handy (dort bestaetigt)
     $cr = $S.CancelReq

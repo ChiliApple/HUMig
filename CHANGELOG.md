@@ -1,5 +1,25 @@
 ﻿# Changelog
 
+## v2.1.27 - 2026-11-26
+### 📱 Fernbedienung
+- **Zugriffsprotokoll abgesichert:** Das Zugriffsprotokoll wird vor jedem Eintrag geprüft und enthält keine eingeschleusten Zeilen oder Steuerzeichen mehr.
+  - Kann ein Eintrag nicht sicher geschrieben werden, meldet HUMig das einmal in der Konsole, die Fernbedienung läuft weiter.
+### ✅ Qualität
+- **Tests:** 601 bestanden.
+
+## v2.1.26 - 2026-11-26
+### 🔐 Herausgeber
+- **Release signieren zeigt den Abgleich:** Die Bestätigung nennt je Release, ob die Prüfsummen-Datei gleich wie der lokale Stand ist, nicht abgeglichen werden konnte (z. B. andere Version installiert) oder abweicht.
+  - Im Normalfall bleibt es bei einer Bestätigung, kein zusätzlicher Klick.
+- **Rückfrage nur bei echter Abweichung:** Weicht die Prüfsummen-Datei bei gleicher Version vom lokalen Stand ab, fragt HUMig mit den betroffenen Dateien nach, Standard ist Nein.
+  - Nein lässt diese Releases aus und signiert die anderen.
+  - Erkennt erst das Signieren selbst eine Abweichung, wird dieses Release nicht ohne Rückfrage signiert. HUMig sagt dann, dass es beim nächsten Start nachfragt.
+- **Signieren wird nie verhindert:** Scheitert der Abgleich oder dauert er zu lange, wird wie bisher signiert, die Bestätigung sagt "nicht abgeglichen".
+- **Kein zweiter Ablauf:** Ein weiterer Klick auf "Release signieren", während ein Ablauf läuft, meldet "Signieren läuft bereits".
+- **Nichts zu signieren:** Werden alle Releases ausgelassen, steht dort eine Hinweiszeile, es wird nichts gestartet.
+### ✅ Qualität
+- **Tests:** 596 bestanden.
+
 ## v2.1.25 - 2026-11-26
 ### 🛠️ Werkzeuge
 - **IP-Adresse ändern prüft das Ergebnis:** Meldet erst nach der Kontrolle am PC, ob Adresse, Gateway und DNS eingetragen sind.
