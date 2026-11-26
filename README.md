@@ -34,7 +34,7 @@ Hyper-V-VMs und Host auf rotierende USB-Platten sichern – mit Zeitplan, Prüfu
 
 ## Schnellstart
 
-**Portabel vom USB-Laufwerk** – dafür wurde HUMig gebaut und so läuft es am besten: `Pull.ps1` in einen leeren Ordner auf einer USB-SSD oder einem Stick legen und ausführen (siehe [INSTALL.md](INSTALL.md)), danach `Start.cmd` – keine Installation am PC, die Backups landen direkt am Laufwerk (`BACKUPS` neben dem Programm). Am alten PC sichern, am neuen anstecken und zurückspielen. Eine USB-SSD (NVMe) ist deutlich schneller als ein Stick – in der Praxis wurden mit USB4, schneller SSD und schnellem Quell-PC rund 75 GB in 3–4 Minuten gesichert (≈ 320–430 MB/s, 32 parallele Kopierthreads).
+**Portabel vom USB-Laufwerk** – dafür wurde HUMig gebaut und so läuft es am besten: `Pull.ps1` in einen leeren Ordner auf einer USB-SSD oder einem Stick legen und ausführen (siehe [INSTALL.md](INSTALL.md)), Pull startet HUMig am Ende selbst – keine Installation am PC, die Backups landen direkt am Laufwerk (`BACKUPS` neben dem Programm). Am alten PC sichern, am neuen anstecken und zurückspielen. Eine USB-SSD (NVMe) ist deutlich schneller als ein Stick – in der Praxis wurden mit USB4, schneller SSD und schnellem Quell-PC rund 75 GB in 3–4 Minuten gesichert (≈ 320–430 MB/s, 32 parallele Kopierthreads).
 
 **Fix am PC** (z. B. für Server-Backup und Zeitpläne): PowerShell **als Administrator** öffnen und einfügen:
 
