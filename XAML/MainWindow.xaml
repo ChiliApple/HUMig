@@ -154,7 +154,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
-                        <Border x:Name="Bd" Background="{StaticResource CatMantle}" CornerRadius="6,6,0,0" Padding="16,6" Margin="0,0,2,0" Cursor="Hand">
+                        <Border x:Name="Bd" Background="{StaticResource CatMantle}" CornerRadius="6,6,0,0" Padding="16,2" Margin="0,0,2,0" Cursor="Hand">
                             <ContentPresenter ContentSource="Header" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -171,7 +171,7 @@
         <Style TargetType="TabControl">
             <Setter Property="Background" Value="{StaticResource CatSection}"/>
             <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="8"/>
+            <Setter Property="Padding" Value="8,5,8,5"/>
         </Style>
 
         <Style TargetType="ListBox">
@@ -227,7 +227,7 @@
         </Border>
 
         <!-- Kopfzeile mit Logo -->
-        <Border DockPanel.Dock="Top" Background="{StaticResource CatMantle}" Padding="10,6">
+        <Border DockPanel.Dock="Top" Background="{StaticResource CatMantle}" Padding="10,2">
             <DockPanel>
                 <Image x:Name="imgLogo" DockPanel.Dock="Left" Width="46" Height="46" Margin="0,0,10,0" RenderOptions.BitmapScalingMode="HighQuality" Cursor="Hand" ToolTip="Info"/>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
@@ -247,7 +247,7 @@
             </DockPanel>
         </Border>
 
-        <Grid x:Name="grdMain" Margin="8,6,8,4">
+        <Grid x:Name="grdMain" Margin="8,2,8,3">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*" MinHeight="260"/>
@@ -255,36 +255,43 @@
                 <RowDefinition x:Name="rowConsole" Height="200" MinHeight="90"/>
             </Grid.RowDefinitions>
 
-            <!-- Quelle / Ziel -->
-            <Border Grid.Row="0" Style="{StaticResource SectionBorder}">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/><ColumnDefinition Width="230"/><ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Computer:" Style="{StaticResource Lbl}"/>
-                    <TextBlock x:Name="lblConnected" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="5" Text="nicht verbunden" Foreground="{StaticResource CatSubtext}" FontSize="11" Margin="2,0,4,4" TextTrimming="CharacterEllipsis" ToolTip="Ziel von Backup, Restore und Werkzeugen. Steht im Feld ein anderer Name: Enter oder Verbinden verbindet; Werkzeuge, die nur den PC brauchen, nehmen den PC im Feld, Backup, Restore und Werkzeuge mit Benutzer fragen nach."/>
-                    <ComboBox x:Name="cmbComputer" Grid.Row="0" Grid.Column="1" IsEditable="True" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Dieser PC (lokal) oder Name/IP eines anderen PCs (Remote-Backup/-Restore ueber C$ und WinRM). Enter = Verbinden"/>
-                    <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal">
-                        <Button x:Name="btnConnect" Content="Verbinden" Style="{StaticResource BtnBlue}" ToolTip="Links: Benutzerprofile des PCs laden + Verbindung pruefen | Rechts: andere Anmeldedaten fuer diesen PC"/>
-                        <Button x:Name="btnLocal" Content="Lokal" Style="{StaticResource BtnDefault}" ToolTip="Zurueck auf diesen PC"/>
-                        <Button x:Name="btnADDevices" Content="Geraete (AD) ..." Style="{StaticResource BtnMauve}" ToolTip="PCs aus dem Active Directory: einen waehlen (Doppelklick) oder mehrere anhaken und Aktionen parallel ausfuehren"/>
-                    </StackPanel>
-                    <TextBlock Grid.Row="0" Grid.Column="3" Text="Benutzer:" Style="{StaticResource Lbl}" Margin="12,0,6,0"/>
-                    <ComboBox x:Name="cmbUser" Grid.Row="0" Grid.Column="4" IsEditable="True" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Benutzerprofil am gewaehlten PC. Fuer Restore auf einen neuen PC ohne Profil: Konto als DOMAENE\Benutzer eintragen (dann USMT mitwaehlen)."/>
-                    <TextBlock x:Name="lblSid" Grid.Row="0" Grid.Column="5" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" MaxWidth="420" TextTrimming="CharacterEllipsis" Cursor="Hand"/>
-
-                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Backup-Ordner:" Style="{StaticResource Lbl}"/>
-                    <DockPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="4" Margin="0,0,4,0">
-                        <Button x:Name="btnBrowseRoot" DockPanel.Dock="Right" Content="..." Style="{StaticResource BtnDefault}" Width="34" Margin="4,0,0,0" ToolTip="Links: Ordner waehlen (USB-NVMe, Freigabe ...) | Rechts: Standard (Tool-Ordner\BACKUPS)"/>
-                        <Button x:Name="btnOpenRoot" DockPanel.Dock="Right" Content="Oeffnen" Style="{StaticResource BtnDefault}" Margin="4,0,0,0"/>
-                        <Button x:Name="btnBitLocker" DockPanel.Dock="Right" Content="Verschluesseln ..." Style="{StaticResource BtnPeach}" Margin="4,0,0,0" Visibility="Collapsed" ToolTip="USB-Laufwerk mit BitLocker To Go verschluesseln (Kennwort + Wiederherstellungsschluessel)"/>
-                        <TextBox x:Name="txtBackupRoot" Style="{StaticResource DarkTextBox}" IsReadOnly="True"/>
-                    </DockPanel>
-                    <TextBlock x:Name="lblFree" Grid.Row="2" Grid.Column="5" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center"/>
-                </Grid>
+            <!-- Quelle / Ziel: drei Zeilen mit gemeinsamer Beschriftungsspalte (Computer/Benutzer, Verbindung, Backup-Ordner) -->
+            <Border Grid.Row="0" Style="{StaticResource SectionBorder}" Padding="10,3" Margin="0,1">
+                <StackPanel Grid.IsSharedSizeScope="True">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="hdrLbl"/><ColumnDefinition Width="1.3*" MinWidth="230"/><ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*" MinWidth="150"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Computer:" Style="{StaticResource Lbl}"/>
+                        <ComboBox Grid.Column="1" x:Name="cmbComputer" IsEditable="True" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Dieser PC (lokal) oder Name/IP eines anderen PCs (Remote-Backup/-Restore ueber C$ und WinRM). Enter = Verbinden"/>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                            <Button x:Name="btnConnect" Content="Verbinden" Style="{StaticResource BtnBlue}" ToolTip="Links: Benutzerprofile des PCs laden + Verbindung pruefen | Rechts: andere Anmeldedaten fuer diesen PC"/>
+                            <Button x:Name="btnLocal" Content="Lokal" Style="{StaticResource BtnDefault}" ToolTip="Zurueck auf diesen PC"/>
+                            <Button x:Name="btnADDevices" Content="Geraete (AD) ..." Style="{StaticResource BtnMauve}" ToolTip="PCs aus dem Active Directory: einen waehlen (Doppelklick) oder mehrere anhaken und Aktionen parallel ausfuehren"/>
+                        </StackPanel>
+                        <TextBlock Grid.Column="3" Text="Benutzer:" Style="{StaticResource Lbl}" Margin="12,0,6,0"/>
+                        <ComboBox Grid.Column="4" x:Name="cmbUser" IsEditable="True" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Benutzerprofil am gewaehlten PC. Fuer Restore auf einen neuen PC ohne Profil: Konto als DOMAENE\Benutzer eintragen (dann USMT mitwaehlen)."/>
+                    </Grid>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" SharedSizeGroup="hdrLbl"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <DockPanel Grid.Column="1" Margin="0,0,0,4">
+                            <TextBlock x:Name="lblSid" DockPanel.Dock="Right" MaxWidth="330" Margin="12,0,4,0" TextWrapping="Wrap" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Cursor="Hand"/>
+                            <TextBlock x:Name="lblConnected" Text="nicht verbunden" Foreground="{StaticResource CatSubtext}" FontSize="11" Margin="2,0,4,0" TextWrapping="Wrap" ToolTip="Ziel von Backup, Restore und Werkzeugen. Steht im Feld ein anderer Name: Enter oder Verbinden verbindet; Werkzeuge, die nur den PC brauchen, nehmen den PC im Feld, Backup, Restore und Werkzeuge mit Benutzer fragen nach."/>
+                        </DockPanel>
+                    </Grid>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" SharedSizeGroup="hdrLbl"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Backup-Ordner:" Style="{StaticResource Lbl}"/>
+                        <DockPanel Grid.Column="1" Margin="0,0,4,0">
+                            <TextBlock x:Name="lblFree" DockPanel.Dock="Right" Margin="8,0,0,0" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center"/>
+                            <Button x:Name="btnBrowseRoot" DockPanel.Dock="Right" Content="..." Style="{StaticResource BtnDefault}" Width="34" Margin="4,0,0,0" ToolTip="Links: Ordner waehlen (USB-NVMe, Freigabe ...) | Rechts: Standard (Tool-Ordner\BACKUPS)"/>
+                            <Button x:Name="btnOpenRoot" DockPanel.Dock="Right" Content="Oeffnen" Style="{StaticResource BtnDefault}" Margin="4,0,0,0"/>
+                            <Button x:Name="btnBitLocker" DockPanel.Dock="Right" Content="Verschluesseln ..." Style="{StaticResource BtnPeach}" Margin="4,0,0,0" Visibility="Collapsed" ToolTip="USB-Laufwerk mit BitLocker To Go verschluesseln (Kennwort + Wiederherstellungsschluessel)"/>
+                            <TextBox x:Name="txtBackupRoot" Style="{StaticResource DarkTextBox}" IsReadOnly="True"/>
+                        </DockPanel>
+                    </Grid>
+                </StackPanel>
             </Border>
 
             <TabControl x:Name="tabMain" Grid.Row="1" Margin="0,4,0,0">
