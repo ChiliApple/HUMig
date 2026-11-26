@@ -344,3 +344,29 @@ Describe 'Oberflaeche: drei Begriffe einheitlich' {
         $script:AllXamlText | Should -Not -Match 'Restore-Protokoll|Backup-/Restore-Protokoll|im Protokoll\)'
     }
 }
+
+Describe 'Quelltext: keine verschmolzenen Zeilen' {
+    BeforeAll {
+        $script:SrcFiles = @(Get-Item (Join-Path $script:Root 'HUMig.ps1')) + @(Get-ChildItem (Join-Path $script:Root 'Functions') -Filter *.ps1)
+        $script:Defs = @{}; $script:Calls = New-Object System.Collections.ArrayList
+        foreach ($f in $script:SrcFiles) {
+            $a = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$null)
+            foreach ($d in $a.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) { $script:Defs[$d.Name] = 1 }
+            foreach ($c in $a.FindAll({ param($x) $x -is [System.Management.Automation.Language.CommandAst] }, $true)) { $n = $c.GetCommandName(); if ($n) { [void]$script:Calls.Add([pscustomobject]@{ Name = $n; Where = "$($f.Name):$($c.Extent.StartLineNumber)" }) } }
+        }
+        # Funktionen, die als Text in Skriptbloecken stehen (z.B. fuer entfernte PCs), zaehlen ebenfalls als definiert
+        $txt = ($script:SrcFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }) -join "`n"
+        foreach ($m in [regex]::Matches($txt, 'function\s+(?:global:|script:)?([\w-]+)')) { $script:Defs[$m.Groups[1].Value] = 1 }
+    }
+    It 'kein Befehlsname enthaelt $ oder = (z.B. "Update-HMToolHeads$sysTools")' {
+        @($script:Calls | Where-Object { $_.Name -match '[\$=]' } | ForEach-Object { "$($_.Where) $($_.Name)" }) | Should -BeNullOrEmpty
+    }
+    It 'jeder Aufruf einer Projektfunktion (Verb-HM...) ist im Projekt definiert' {
+        @($script:Calls | Where-Object { $_.Name -match '^[A-Z][a-z]+-HM' -and -not $script:Defs.ContainsKey($_.Name) } | ForEach-Object { "$($_.Where) $($_.Name)" }) | Should -BeNullOrEmpty
+    }
+    It 'keine Funktion beginnt direkt hinter einer schliessenden Klammer' {
+        $hits = @()
+        foreach ($f in $script:SrcFiles) { $i = 0; foreach ($l in (Get-Content -LiteralPath $f.FullName -Encoding UTF8)) { $i++; if ($l -match '[\}\)]function\s') { $hits += "$($f.Name):$i" } } }
+        $hits | Should -BeNullOrEmpty
+    }
+}

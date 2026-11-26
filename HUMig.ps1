@@ -933,7 +933,8 @@ function Set-HMRestoreModulesForBackup($Backup) {
         $grp.Visibility = $(if (@($wp.Children | Where-Object { $_.Visibility -eq 'Visible' }).Count) { 'Visible' } else { 'Collapsed' })
     }
     return $absent
-}function Get-CheckedModules([hashtable]$Store) {
+}
+function Get-CheckedModules([hashtable]$Store) {
     # IsEnabled nur im Reiter Restore relevant (Module, die das Backup nicht enthaelt, sind dort gesperrt)
     $isRestore = [object]::ReferenceEquals($Store, $script:RestoreChecks)
     $ids = @($Store.Keys | Where-Object { $Store[$_].IsChecked -eq $true -and (-not $isRestore -or $Store[$_].IsEnabled) } | ForEach-Object { "$_" })
@@ -2563,7 +2564,8 @@ function Update-HMToolHeads {
     # Bezug im Reiter Backup, direkt ueber dem Startknopf
     if ($ui.lblScopeBackup) { $ui.lblScopeBackup.Text = $(if ($acc) { "Sichert $acc von $pc" } else { "Kein Benutzer gewaehlt - oben einen Benutzer waehlen." }) }
 }
-Update-HMToolHeads$sysTools = @(
+Update-HMToolHeads
+$sysTools = @(
     @('Taskmanager', 'taskmgr.exe', ''), @('Autostart-Apps', 'ms-settings:startupapps', ''), @('Netzwerkadapter', 'ncpa.cpl', ''),
     @('Systemsteuerung', 'control.exe', ''), @('Verwaltung', 'control.exe', 'admintools'), @('Firewall', 'firewall.cpl', ''),
     @('Ereignisanzeige', 'eventvwr.msc', ''), @('Maus', 'main.cpl', ''), @('Geraete-Manager', 'devmgmt.msc', ''), @('Dienste', 'services.msc', ''),
