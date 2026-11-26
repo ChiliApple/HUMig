@@ -103,6 +103,7 @@ function Install-TModule {
         }
         Install-Module -Name $ModName -RequiredVersion $fx.Version -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop
         Out-L "WinGet-Modul $($fx.Version) installiert"
+        $script:TModLoad = $null
     } catch {
         if ($had) { Out-L "Warnung: WinGet-Modul $($fx.Version) nicht installierbar ($($_.Exception.Message)) - die vorhandene Version wird verwendet" }
         else { $script:TErr += "WinGet-Modul nicht installierbar (Internet/Proxy?): $($_.Exception.Message)" }
@@ -126,7 +127,8 @@ function Test-TModuleSignature($Sigs, [string]$Publisher) {
     return ''
 }
 # welches Modul laden? Feste Version mit gueltiger Signatur, sonst die hoechste andere fuer alle Benutzer (mit Hinweis), sonst ''
-# (dann wie bisher nach Namen). Rueckgabe @{ Path; Note } - gibt selbst nichts aus. Ungueltige Signatur: nicht laden, nichts loeschen.
+# (dann wie bisher nach Namen). Rueckgabe @{ Path; Note; Blocked } - gibt selbst nichts aus. Ungueltige Signatur: nicht laden,
+# nichts loeschen. Ist dann keine andere Version da, ist das Modul gesperrt (Blocked): nie nach Namen laden, wie ohne Modul.
 function Get-TModuleLoad {
     $fx = Get-TModFixed
     $note = ''
@@ -135,7 +137,7 @@ function Get-TModuleLoad {
         if (Test-Path -LiteralPath $psd) {
             $why = 'nicht pruefbar'
             try { $why = Test-TModuleSignature (Get-TModuleSigFiles (Split-Path $psd -Parent)) $fx.Herausgeber } catch { $why = "nicht pruefbar ($($_.Exception.Message))" }
-            if (-not $why) { return @{ Path = $psd; Note = '' } }
+            if (-not $why) { return @{ Path = $psd; Note = ''; Blocked = $false } }
             $note = "Warnung: WinGet-Modul $($fx.Version) wird nicht geladen, Signatur ungueltig ($why)"
         }
     }
@@ -144,10 +146,11 @@ function Get-TModuleLoad {
         Sort-Object { [version]$_.Name } -Descending)[0]
     if ($oth) {
         $why = if ($note) { $note } elseif ($fx) { "WinGet-Modul: feste Version $($fx.Version) fehlt" } else { 'WinGet-Modul: keine gueltige feste Version' }
-        return @{ Path = (Join-Path $oth.FullName "$ModName.psd1"); Note = "$why - die vorhandene Version $($oth.Name) wird verwendet" }
+        return @{ Path = (Join-Path $oth.FullName "$ModName.psd1"); Note = "$why - die vorhandene Version $($oth.Name) wird verwendet"; Blocked = $false }
     }
-    return @{ Path = ''; Note = $note }
+    return @{ Path = ''; Note = $note; Blocked = [bool]$note }
 }
+$TModBlockedText = 'WinGet-Modul nicht nutzbar: die feste Version hat eine ungueltige Signatur und wird nicht geladen, eine andere Version ist nicht vorhanden'
 # einmal je Lauf bestimmen und den Hinweis ins Protokoll schreiben
 $script:TModLoad = $null
 function Resolve-TModuleLoad {
@@ -168,6 +171,11 @@ function Test-TOsExperimental {
     $srv = $false; try { $srv = ([int](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).ProductType -ne 1) } catch { }
     return ($srv -and [Environment]::OSVersion.Version.Build -lt 20348)
 }
+# Windows PowerShell mit einem Befehl (Base64) in eigenem Prozess; Rueckgabe @{ Out; Code } (ersetzbar in den Tests)
+function Invoke-TPsEncoded([string]$Enc) {
+    $o = (@(& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $Enc 2>&1) | ForEach-Object { "$_" }) -join ' '
+    return @{ Out = $o; Code = $LASTEXITCODE }
+}
 # Fehlt WinGet (z.B. Windows Server 2022 - dort nicht mitgeliefert), fuer alle Benutzer einrichten: Repair-WinGetPackageManager -AllUsers
 # (laedt App Installer und Abhaengigkeiten von GitHub). Nur mit Modul; Fehler landen in $script:TErr
 function Install-TWinGet {
@@ -179,6 +187,7 @@ function Install-TWinGet {
     # sonst den aufrufenden Prozess (HUMig bzw. die Remote-Sitzung) mitreissen; keine Absturz-Dialoge (Fehlermodus wird vererbt)
     # Modul in der festen Version (Signatur geprueft), sonst wie bisher den Modulordner
     Resolve-TModuleLoad
+    if ($script:TModLoad.Blocked) { $script:TErr += $TModBlockedText; return }
     $mp = $(if ($script:TModLoad.Path) { $script:TModLoad.Path } else { Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$ModName" }) -replace "'", "''"
     # Ausnahme von den festen Versionen: Repair-WinGetPackageManager -Latest laedt den App Installer (WinGet) in der neuesten Fassung
     # von Microsoft. Der App Installer ist ein Windows-Bestandteil, den Microsoft selbst aktuell haelt; eine feste aeltere Fassung
@@ -195,8 +204,8 @@ function Install-TWinGet {
     try {
         # stderr des Unterprozesses darf unter Windows PowerShell 5.1 (2>&1 bei EAP=Stop) nicht als Abbruch zaehlen - es zaehlt der Exitcode
         $ErrorActionPreference = 'Continue'
-        $out = (@(& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $enc 2>&1) | ForEach-Object { "$_" }) -join ' '
-        $code = $LASTEXITCODE
+        $rr = Invoke-TPsEncoded $enc
+        $out = $rr.Out; $code = $rr.Code
     } catch { $out = $_.Exception.Message; $code = 1 }
     finally { $ErrorActionPreference = $eap; if ($null -ne $old) { try { [void][HMAuT.ErrMode]::SetErrorMode($old) } catch { } } }
     if ($code -eq 0) {
@@ -225,7 +234,7 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec, 
         [System.IO.File]::WriteAllText((Join-Path $dir 'worker.ps1'), $WorkerText, (New-Object System.Text.UTF8Encoding($true)))
         # Modul in der festen Version laden (Pfad), sonst wie bisher nach Namen
         Resolve-TModuleLoad
-        if ($Request -is [hashtable] -and -not $Request.ContainsKey('ModulePath')) { $Request = $Request.Clone(); $Request.ModulePath = "$($script:TModLoad.Path)" }
+        if ($Request -is [hashtable] -and -not $Request.ContainsKey('ModulePath')) { $Request = $Request.Clone(); $Request.ModulePath = "$($script:TModLoad.Path)"; $Request.ModuleBlocked = [bool]$script:TModLoad.Blocked }
         $Request | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $dir 'request.json') -Encoding UTF8
         if (-not $sys) { & icacls.exe "$dir" /grant "*${Who}:(OI)(CI)M" | Out-Null }
         $exe = if ($UsePwsh) { Get-TPwsh } else { $WinPs }
@@ -301,7 +310,10 @@ $PwshInfo = 'humig-pwsh.json'
 function Get-TPwshZip([string]$Url, [string]$OutFile) { Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -ErrorAction Stop }
 function Get-TFileSha256([string]$Path) { return "$((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash)".ToUpperInvariant() }
 function Expand-TPwshZip([string]$Zip, [string]$Dest) { Expand-Archive -LiteralPath $Zip -DestinationPath $Dest -Force }
-function Move-TDir([string]$From, [string]$To) { Move-Item -LiteralPath $From -Destination $To -ErrorAction Stop }
+function Move-TDir([string]$From, [string]$To) {
+    # kurze Wiederholung: ein Virenscanner haelt frisch entpackte Dateien oft einen Moment offen
+    for ($i = 1; ; $i++) { try { Move-Item -LiteralPath $From -Destination $To -ErrorAction Stop; return } catch { if ($i -ge 3) { throw }; Start-Sleep -Milliseconds 700 } }
+}
 function Remove-TDir([string]$Path) { if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop } }
 function Get-TProcessPaths { return @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | ForEach-Object { "$($_.ExecutablePath)" } | Where-Object { $_ }) }
 function Get-TFileProductVersion([string]$Path) {
@@ -553,7 +565,9 @@ try {
     switch ($Op) {
         'Search' {
             Install-TModule
-            if (-not (Test-TModule)) { Out-R ([pscustomobject]@{ Items = @(); Sources = @(); Errors = $script:TErr; ReadAs = ''; UserSid = ''; UserAccount = '' }); break }
+            Resolve-TModuleLoad
+            if ($script:TModLoad.Blocked) { $script:TErr += $TModBlockedText }
+            if (-not (Test-TModule) -or $script:TModLoad.Blocked) { Out-R ([pscustomobject]@{ Items = @(); Sources = @(); Errors = $script:TErr; ReadAs = ''; UserSid = ''; UserAccount = '' }); break }
             Install-TWinGet
             $sid = Get-TUserSid
             $req = @{ Mode = 'List'; Sources = @($My.Sources); IncludeUnknown = [bool]$My.IncludeUnknown }
@@ -743,7 +757,9 @@ try {
         'ScheduleSet' {
             Install-TModule
             Install-TPwsh
-            if (-not (Test-TModule) -or -not (Get-TPwsh)) { Out-R ([pscustomobject]@{ Ok = $false; Errors = $script:TErr }); break }
+            Resolve-TModuleLoad
+            if ($script:TModLoad.Blocked) { $script:TErr += $TModBlockedText }
+            if (-not (Test-TModule) -or $script:TModLoad.Blocked -or -not (Get-TPwsh)) { Out-R ([pscustomobject]@{ Ok = $false; Errors = $script:TErr }); break }
             $dir = Join-Path $Base 'auto'
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
             [System.IO.File]::WriteAllText((Join-Path $dir 'auto.ps1'), $AutoText, (New-Object System.Text.UTF8Encoding($true)))

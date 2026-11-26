@@ -506,8 +506,8 @@ function global:Invoke-WebRequest { [Console]::Out.WriteLine('C|Invoke-WebReques
 function global:Invoke-RestMethod { [Console]::Out.WriteLine('C|Invoke-RestMethod ' + ($args -join ' ')); throw 'kein Netz (Ersatz)' }
 function global:Expand-Archive { [Console]::Out.WriteLine('C|Expand-Archive'); throw 'nicht erwartet' }
 function global:Register-ScheduledTask { param($TaskName, $TaskPath, $Action, $Trigger, $Principal, $Settings, $Description, [switch]$Force, $ErrorAction) $global:T_Act = $Action; [Console]::Out.WriteLine('C|Register|' + $TaskName + '|' + $Action.Execute) }
-function global:Get-AuthenticodeSignature { param($LiteralPath) [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' } } }
-function global:Start-ScheduledTask { param($TaskPath, $TaskName) $m = [regex]::Match("$($global:T_Act.Arguments)", '-Dir "([^"]+)"'); if ($m.Success) { [Console]::Out.WriteLine('C|Request|' + ([IO.File]::ReadAllText((Join-Path $m.Groups[1].Value 'request.json')) -replace '\s+', ' ')); [IO.File]::WriteAllText((Join-Path $m.Groups[1].Value 'result.json'), '{"Items":[{"Id":"Test.App","Name":"Test App","Scope":"User"}],"Errors":[]}') } }
+function global:Get-AuthenticodeSignature { param($LiteralPath) [pscustomobject]@{ Status = $(if ($env:T_BADSIG) { 'HashMismatch' } else { 'Valid' }); SignerCertificate = [pscustomobject]@{ Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' } } }
+function global:Start-ScheduledTask { param($TaskPath, $TaskName) $m = [regex]::Match("$($global:T_Act.Arguments)", '-Dir "([^"]+)"'); if ($m.Success) { [Console]::Out.WriteLine('C|Request|' + ([IO.File]::ReadAllText((Join-Path $m.Groups[1].Value 'request.json')) -replace '\s+', ' ')); [IO.File]::WriteAllText((Join-Path $m.Groups[1].Value 'result.json'), '{"Items":[{"Id":"Test.App","Name":"Test App","Scope":"User"}],"Errors":[],"Notes":["Hinweis aus dem Worker (Test)"]}') } }
 function global:Stop-ScheduledTask { }
 function global:Unregister-ScheduledTask { }
 function global:Get-ScheduledTask { [pscustomobject]@{ State = 'Running' } }
@@ -601,7 +601,26 @@ foreach ($n in @('Get-AuthenticodeSignature', 'Register-ScheduledTask', 'Start-S
         # die Hilfsaufgabe laedt das Modul ueber den Pfad der festen Version
         $rq = @($r.Out | Where-Object { $_ -like 'C|Request|*' })[0].Substring(10) | ConvertFrom-Json
         $rq.ModulePath | Should -Be $r.Psd
+        $rq.ModuleBlocked | Should -BeFalse
         $rq.Mode | Should -Be 'List'
+        # Hinweise des Workers (z. B. Modul nicht ladbar) kommen ins Protokoll
+        @($r.Out | Where-Object { $_ -eq 'L|Hinweis aus dem Worker (Test)' }).Count | Should -Be 1
+    }
+    It 'feste Modulversion mit ungueltiger Signatur, keine andere: Lesen bricht ab wie ohne Modul, kein Worker, nichts nach Namen geladen' {
+        $env:T_BADSIG = '1'
+        try { $r = & $script:RunTarget 'Search' $script:SearchPayload } finally { $env:T_BADSIG = '' }
+        $r.R.ReadAs | Should -Be ''
+        @($r.R.Items).Count | Should -Be 0
+        @($r.R.Errors) -join ' ' | Should -Match 'WinGet-Modul nicht nutzbar'
+        @($r.Out | Where-Object { $_ -like 'C|Register|*' }).Count | Should -Be 0
+        @($r.Out | Where-Object { $_ -like 'L|Warnung: WinGet-Modul 1.29.380 wird nicht geladen, Signatur ungueltig*' }).Count | Should -Be 1
+    }
+    It 'feste Modulversion mit ungueltiger Signatur, keine andere: Zeitplan wird nicht angelegt (Ok = falsch)' {
+        $env:T_BADSIG = '1'
+        try { $r = & $script:RunTarget 'ScheduleSet' $script:SchedPayload } finally { $env:T_BADSIG = '' }
+        $r.R.Ok | Should -BeFalse
+        @($r.R.Errors) -join ' ' | Should -Match 'WinGet-Modul nicht nutzbar'
+        @($r.Out | Where-Object { $_ -like 'C|Register|*' }).Count | Should -Be 0
     }
 }
 
@@ -693,13 +712,15 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
         & $script:Setup @('1.29.380', '1.9.2411') -BadSig @('1.29.380')
         $ld = Get-TModuleLoad
         $ld.Path | Should -Be (Join-Path $global:ModRoot '1.9.2411\Microsoft.WinGet.Client.psd1')
+        $ld.Blocked | Should -BeFalse
         $ld.Note | Should -Match 'Signatur ungueltig .*HashMismatch.* - die vorhandene Version 1\.9\.2411 wird verwendet'
         Test-Path -LiteralPath (Join-Path $global:ModRoot '1.29.380\Microsoft.WinGet.Client.psd1') | Should -BeTrue
     }
-    It 'feste Version mit ungueltiger Signatur und keine andere: kein Pfad (wie bisher nach Namen), Warnung, nichts geloescht' {
+    It 'feste Version mit ungueltiger Signatur und keine andere: gesperrt (nie nach Namen laden), Warnung, nichts geloescht' {
         & $script:Setup @('1.29.380') -BadSig @('1.29.380')
         $ld = Get-TModuleLoad
         $ld.Path | Should -Be ''
+        $ld.Blocked | Should -BeTrue
         $ld.Note | Should -Match '^Warnung: WinGet-Modul 1\.29\.380 wird nicht geladen, Signatur ungueltig'
         Test-Path -LiteralPath (Join-Path $global:ModRoot '1.29.380') | Should -BeTrue
     }
@@ -960,5 +981,92 @@ Describe 'Waechter: Liste der fremden Werkzeuge und Aufruf' {
         $script:Y | Should -Match '(?m)^\s+issues:\s*write\s*$'
         $script:Y | Should -Not -Match 'contents:\s*write'
         $script:Y | Should -Match 'uses: ChiliApple/HU-Amt/\.github/workflows/waechter\.yml@main'
+    }
+}
+
+Describe 'WinGet-Modul gesperrt (ungueltige Signatur, keine andere Version): nie nach Namen laden' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1')
+        $script:WinPs = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $script:PF0 = $env:ProgramFiles
+        $script:Pub = ', O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
+    }
+    AfterEach { $env:ProgramFiles = $script:PF0 }
+    It 'Worker: Auftrag mit Sperre laedt kein Modul und meldet den Fehler wie ohne Modul' -Skip:([Environment]::OSVersion.Platform -ne 'Win32NT') {
+        $d = Join-Path $TestDrive ('wb_' + [guid]::NewGuid().ToString('N').Substring(0, 6)); New-Item -ItemType Directory -Path $d -Force | Out-Null
+        @{ Mode = 'List'; Sources = @(); IncludeUnknown = $false; ModulePath = ''; ModuleBlocked = $true } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $d 'request.json') -Encoding UTF8
+        $pre = "`$ErrorActionPreference = 'Stop'`r`nfunction global:Import-Module { param([Parameter(Position = 0)]`$Name, [switch]`$Force) [Console]::Out.WriteLine(`"C|Import|`$Name`") }`r`n"
+        $f = Join-Path $TestDrive ("run_{0}.ps1" -f [guid]::NewGuid().ToString('N'))
+        [IO.File]::WriteAllText($f, $pre + "& '$((Join-Path $script:Root 'Functions\AppUpdates-Worker.ps1') -replace "'", "''")' -Dir '$($d -replace "'", "''")'", (New-Object System.Text.UTF8Encoding($true)))
+        $o = @(& $script:WinPs -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $f 2>&1 | ForEach-Object { "$_" })
+        @($o | Where-Object { $_ -like 'C|Import|*' }).Count | Should -Be 0
+        $r = Get-Content -LiteralPath (Join-Path $d 'result.json') -Raw | ConvertFrom-Json
+        @($r.Errors) -join ' ' | Should -Match 'WinGet-Modul nicht nutzbar'
+    }
+    It 'Engine, WinGet einrichten: gesperrt -> Fehler, kein Laden im eigenen Prozess' {
+        $pf = Join-Path $TestDrive ('eb_' + [guid]::NewGuid().ToString('N').Substring(0, 6)); $env:ProgramFiles = $pf
+        $root = Join-Path $pf 'WindowsPowerShell\Modules\Microsoft.WinGet.Client\1.29.380'; New-Item -ItemType Directory -Path $root -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $root 'Microsoft.WinGet.Client.psd1'), '@{}')
+        $job = [pscustomobject]@{ Log = New-Object System.Collections.Concurrent.ConcurrentQueue[object]; Result = $null; Cancel = $false }
+        Mock Get-AppxPackage { @([pscustomobject]@{ Version = '1.0' }) }
+        Mock Get-Module { @([pscustomobject]@{ Version = [version]'1.29.380'; ModuleBase = $root }) }
+        Mock Install-Module { }
+        Mock Get-HMAuTools { @{ Ok = $true; Errors = @(); Pwsh = $null; WinGet = @{ Version = '1.29.380'; Name = 'Microsoft.WinGet.Client'; Herausgeber = $script:Pub } } }
+        Mock Get-HMAuModuleSigFiles { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = 'HashMismatch'; Subject = "CN=Microsoft Corporation$script:Pub" }) }
+        Mock Invoke-HMAuIsolated { [pscustomobject]@{ Ok = $true } }
+        Install-HMAuWinGet $job | Should -BeFalse
+        Should -Invoke Invoke-HMAuIsolated -Times 0
+        @($job.Log.ToArray() | ForEach-Object { "$($_.Lvl)|$($_.Msg)" }) -join "`n" | Should -Match 'Error\|WinGet-Modul nicht nutzbar'
+    }
+    It 'Engine, Status: gesperrt -> nicht bereit mit Hinweis, kein Laden' {
+        $pf = Join-Path $TestDrive ('es_' + [guid]::NewGuid().ToString('N').Substring(0, 6)); $env:ProgramFiles = $pf
+        $root = Join-Path $pf 'WindowsPowerShell\Modules\Microsoft.WinGet.Client\1.29.380'; New-Item -ItemType Directory -Path $root -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $root 'Microsoft.WinGet.Client.psd1'), '@{}')
+        Mock Get-Module { @([pscustomobject]@{ Version = [version]'1.29.380'; ModuleBase = $root }) }
+        Mock Get-AppxPackage { @() }
+        Mock Test-HMAuOsSupported { $true }
+        Mock Test-HMAuOsExperimental { $false }
+        Mock Get-HMAuTools { @{ Ok = $true; Errors = @(); Pwsh = $null; WinGet = @{ Version = '1.29.380'; Name = 'Microsoft.WinGet.Client'; Herausgeber = $script:Pub } } }
+        Mock Get-HMAuModuleSigFiles { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = 'NotSigned'; Subject = '' }) }
+        Mock Invoke-HMAuIsolated { [pscustomobject]@{ Ok = $true; Result = '1.0' } }
+        $s = Get-HMAuState
+        $s.Ready | Should -BeFalse
+        $s.Problem | Should -Match 'Signatur ungueltig.*eine andere Version ist nicht vorhanden'
+        Should -Invoke Invoke-HMAuIsolated -Times 0
+    }
+}
+
+Describe 'WinGet einrichten am Ziel-PC (Install-TWinGet): feste Modulversion vor der Reparatur, gesperrt keine Reparatur' {
+    BeforeAll {
+        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet')
+        function global:Out-L([string]$t) { $global:T_Log += $t }
+        function global:Get-TModuleSigFiles([string]$Dir) { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = $(if ($global:T_Bad) { 'HashMismatch' } else { 'Valid' }); Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }) }
+        # Ersatz fuer den eigenen Prozess: merkt den Befehl, startet nichts
+        function global:Invoke-TPsEncoded([string]$Enc) { $global:T_Cmd = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Enc)); return @{ Out = ''; Code = 0 } }
+        $script:PF0 = $env:ProgramFiles
+        $script:Setup = {
+            param([bool]$Bad = $false)
+            $pf = Join-Path $TestDrive ('wg_' + [guid]::NewGuid().ToString('N').Substring(0, 6)); $env:ProgramFiles = $pf
+            $global:ModName = 'Microsoft.WinGet.Client'; $global:ModRoot = Join-Path $pf 'WindowsPowerShell\Modules\Microsoft.WinGet.Client'
+            $d = Join-Path $global:ModRoot '1.29.380'; New-Item -ItemType Directory -Path $d -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $d 'Microsoft.WinGet.Client.psd1'), '@{}')
+            $global:T_Bad = $Bad; $global:T_Cmd = $null; $global:T_Log = @(); $script:TErr = @(); $global:TErr = @(); $script:TModLoad = $null; $global:TModLoad = $null
+            $global:TModBlockedText = 'WinGet-Modul nicht nutzbar: Test'
+            $global:Payload = @{ Tools = @{ WinGet = @{ Version = '1.29.380'; Name = 'Microsoft.WinGet.Client'; Herausgeber = ', O=Microsoft Corporation, L=Redmond, S=Washington, C=US' } } }
+        }
+    }
+    AfterAll {
+        $env:ProgramFiles = $script:PF0
+        foreach ($n in @('Out-L', 'Get-TModuleSigFiles', 'Invoke-TPsEncoded', 'Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
+    }
+    AfterEach { $env:ProgramFiles = $script:PF0 }
+    It 'WinGet fehlt: der eigene Prozess laedt die feste Modulversion ueber ihren Pfad und repariert' -Skip:([Environment]::OSVersion.Version.Build -lt 17763) {
+        & $script:Setup
+        Install-TWinGet
+        $global:T_Cmd | Should -Match ([regex]::Escape("Import-Module '$(Join-Path $global:ModRoot '1.29.380\Microsoft.WinGet.Client.psd1')'"))
+        $global:T_Cmd | Should -Match 'Repair-WinGetPackageManager -AllUsers -Latest -Force'
+    }
+    It 'WinGet fehlt, Modul gesperrt: keine Reparatur, Fehler wie ohne Modul' -Skip:([Environment]::OSVersion.Version.Build -lt 17763) {
+        & $script:Setup $true
+        Install-TWinGet
+        $global:T_Cmd | Should -BeNullOrEmpty
+        @(@($script:TErr) + @($global:TErr) | Where-Object { $_ }) | Should -Contain 'WinGet-Modul nicht nutzbar: Test'
     }
 }

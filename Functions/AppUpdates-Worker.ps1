@@ -59,6 +59,7 @@ try {
     $req = Get-Content -LiteralPath (Join-Path $Dir 'request.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if (-not [bool]$req.Cli) {
         # Modul in der festen Version (Pfad aus dem Auftrag); fehlt er oder laedt er nicht, wie bisher nach Namen (mit Hinweis)
+        if ([bool]$req.ModuleBlocked) { throw 'WinGet-Modul nicht nutzbar: die feste Version hat eine ungueltige Signatur und wird nicht geladen' }
         $mp = "$($req.ModulePath)"; $mok = $false
         if ($mp -and (Test-Path -LiteralPath $mp)) { try { Import-Module $mp -ErrorAction Stop; $mok = $true } catch { $res.Notes += "Warnung: WinGet-Modul $mp nicht ladbar ($($_.Exception.Message)) - die vorhandene Version wird verwendet" } }
         if (-not $mok) { try { Import-Module Microsoft.WinGet.Client -ErrorAction Stop } catch { Import-Module (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\Microsoft.WinGet.Client') -ErrorAction Stop } }

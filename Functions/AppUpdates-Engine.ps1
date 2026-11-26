@@ -85,7 +85,7 @@ function Test-HMAuModuleSignature($Sigs, [string]$Publisher) {
     return ''
 }
 # welches Modul laden (fuer alle Benutzer, Programme\WindowsPowerShell\Modules)? Feste Version mit gueltiger Signatur, sonst die
-# hoechste andere (mit Hinweis), sonst '' (dann wie bisher nach Namen). Rueckgabe @{ Path; Note }
+# hoechste andere (mit Hinweis), sonst '' (dann wie bisher nach Namen). Rueckgabe @{ Path; Note; Blocked }
 function Get-HMAuModuleLoad($Fixed = (Get-HMAuTools).WinGet) {
     $root = Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$($script:HMAuModule)"
     $note = ''
@@ -94,7 +94,7 @@ function Get-HMAuModuleLoad($Fixed = (Get-HMAuTools).WinGet) {
         if (Test-Path -LiteralPath $psd) {
             $why = 'nicht pruefbar'
             try { $why = Test-HMAuModuleSignature (Get-HMAuModuleSigFiles (Split-Path $psd -Parent)) "$($Fixed.Herausgeber)" } catch { $why = "nicht pruefbar ($($_.Exception.Message))" }
-            if (-not $why) { return @{ Path = $psd; Note = '' } }
+            if (-not $why) { return @{ Path = $psd; Note = ''; Blocked = $false } }
             $note = "WinGet-Modul $($Fixed.Version) wird nicht geladen, Signatur ungueltig ($why)"
         }
     }
@@ -103,9 +103,10 @@ function Get-HMAuModuleLoad($Fixed = (Get-HMAuTools).WinGet) {
         Sort-Object { [version]$_.Name } -Descending)[0]
     if ($oth) {
         $why = if ($note) { $note } elseif ($Fixed) { "WinGet-Modul: feste Version $($Fixed.Version) fehlt" } else { 'WinGet-Modul: keine gueltige feste Version' }
-        return @{ Path = (Join-Path $oth.FullName "$($script:HMAuModule).psd1"); Note = "$why - die vorhandene Version $($oth.Name) wird verwendet" }
+        return @{ Path = (Join-Path $oth.FullName "$($script:HMAuModule).psd1"); Note = "$why - die vorhandene Version $($oth.Name) wird verwendet"; Blocked = $false }
     }
-    return @{ Path = ''; Note = $note }
+    # feste Version mit ungueltiger Signatur und keine andere: gesperrt (nie nach Namen laden, wie ohne Modul)
+    return @{ Path = ''; Note = $note; Blocked = [bool]$note }
 }
 # Argument fuer Import-Module in den Skripten fuer den eigenen Prozess: Pfad der festen Version, sonst der Modulname (wie bisher)
 function Get-HMAuImportArg($Load) {
@@ -313,9 +314,10 @@ function Get-HMAuState {
     if (-not $s.OsOk) { $s.Problem = 'WinGet wird auf dieser Windows-Version nicht unterstuetzt (Windows 10 1809+/11, Windows Server 2019 (experimentell)/2022/2025).' }
     elseif (-not $s.Module) { $s.Problem = "PowerShell-Modul $($script:HMAuModule) fehlt - 'WinGet einrichten'." }
     elseif (-not $s.ModuleAllUsers) { $s.Problem = "PowerShell-Modul $($script:HMAuModule) ist nur fuer einzelne Benutzer installiert - SYSTEM und andere Benutzer finden es nicht. 'WinGet einrichten' installiert es fuer alle Benutzer." }
+    elseif (($ld = Get-HMAuModuleLoad).Blocked) { $s.Problem = "$($ld.Note), eine andere Version ist nicht vorhanden. Modulordner pruefen (Programme\WindowsPowerShell\Modules\$($script:HMAuModule))." }
     else {
         # Modul nur im eigenen Prozess laden (Absturz auf nicht unterstuetzten Systemen beendet sonst HUMig)
-        $iso = Invoke-HMAuIsolated "Import-Module $(Get-HMAuImportArg (Get-HMAuModuleLoad)); [Console]::Out.WriteLine('R|' + (Get-WinGetVersion))" 60
+        $iso = Invoke-HMAuIsolated "Import-Module $(Get-HMAuImportArg $ld); [Console]::Out.WriteLine('R|' + (Get-WinGetVersion))" 60
         if ($iso.Ok -and "$($iso.Result)".Trim()) { $s.WinGet = "$($iso.Result)".Trim(); $s.Ready = $true }
         elseif ($iso.Crashed) { $s.Crashed = $true; $s.Problem = "$(Format-HMAuCrash $iso)." }
         elseif ($iso.TimedOut) { $s.Problem = "WinGet antwortet nicht (Zeitlimit) - 'WinGet einrichten'." }
@@ -376,6 +378,9 @@ function Install-HMAuWinGet($Job) {
         $isAdm = $false; try { $isAdm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
         $ld = Get-HMAuModuleLoad $fx
         if ($ld.Note) { & $log $ld.Note 'Warning' }
+    }
+    if ($ok -and $ld.Blocked) { $ok = $false; & $log 'WinGet-Modul nicht nutzbar: keine andere Version vorhanden - WinGet nicht eingerichtet' 'Error' }
+    if ($ok) {
         $imp = Get-HMAuImportArg $ld
         # Ausnahme von den festen Versionen: Repair-WinGetPackageManager -Latest laedt den App Installer (WinGet) in der neuesten
         # Fassung von Microsoft. Der App Installer ist ein Windows-Bestandteil, den Microsoft selbst aktuell haelt; eine feste aeltere
@@ -452,7 +457,7 @@ function Start-HMAuTask([string]$Account, [string]$Sid, $Request) {
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     Copy-Item -LiteralPath $script:HMAuWorker -Destination (Join-Path $dir 'worker.ps1') -Force
     # Modul in der festen Version laden (Pfad), sonst wie bisher nach Namen
-    if ($Request -is [hashtable] -and -not $Request.ContainsKey('ModulePath')) { $Request = $Request.Clone(); $Request.ModulePath = "$((Get-HMAuModuleLoad).Path)" }
+    if ($Request -is [hashtable] -and -not $Request.ContainsKey('ModulePath')) { $ld = Get-HMAuModuleLoad; $Request = $Request.Clone(); $Request.ModulePath = "$($ld.Path)"; $Request.ModuleBlocked = [bool]$ld.Blocked }
     $Request | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $dir 'request.json') -Encoding UTF8
     $sys = ($Account -eq 'SYSTEM')
     if (-not $sys) {
