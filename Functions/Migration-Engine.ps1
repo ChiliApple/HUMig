@@ -1592,20 +1592,25 @@ function Save-HMManifest([hashtable]$Manifest, [string]$BackupPath) {
 # und "Quelle nicht erreichbar" (Error, 0 Bytes), auch wenn bei einem fortlaufenden Backup noch ein aelterer Stand im Ordner liegt.
 # USMT mit Fehler bleibt immer aus: kein oder ein unbrauchbares USMT.MIG (ein brauchbarer alter Stand ist Warning).
 # Module ohne Statusangabe bleiben wie bisher aus.
-function Test-HMBackupModuleHasData($Module) {
+# Mit BackupPath zusaetzlich fuer Error: mindestens eine Datei unter <Backup>\<Id> (Bytes aus Robocopy zaehlen auch gescheiterte
+# Dateien mit - sind alle gescheitert, laege sonst ein Modul ohne Datei als "mit Fehlern gesichert" in der Auswahl).
+function Test-HMBackupModuleHasData($Module, [string]$BackupPath = '') {
     if (-not $Module) { return $false }
     $st = "$($Module.Status)"
     if ($st -in @('OK', 'Warning')) { return $true }
     if ($st -ne 'Error' -or "$($Module.Id)" -eq 'Usmt') { return $false }
     $by = [long]0
-    if ([long]::TryParse("$($Module.Bytes)", [ref]$by) -and $by -gt 0) { return $true }
-    return (@(@($Module.Items) | Where-Object { $_ -and "$($_.Name)" -ne 'Hinweis' -and "$($_.Status)" -eq 'OK' }).Count -gt 0)
+    $saved = ([long]::TryParse("$($Module.Bytes)", [ref]$by) -and $by -gt 0) -or
+        (@(@($Module.Items) | Where-Object { $_ -and "$($_.Name)" -ne 'Hinweis' -and "$($_.Status)" -eq 'OK' }).Count -gt 0)
+    if (-not $saved -or -not $BackupPath) { return [bool]$saved }
+    $d = Join-Path $BackupPath "$($Module.Id)"
+    return [bool](@(Get-ChildItem -LiteralPath $d -Recurse -File -Force -ErrorAction SilentlyContinue | Select-Object -First 1).Count)
 }
 # Module eines Manifests fuer den Restore: Modules = waehlbar, ErrorModules = davon mit Fehlern gesichert (Markierung, Rueckfrage)
-function Get-HMBackupModuleSets($Manifest) {
+function Get-HMBackupModuleSets($Manifest, [string]$BackupPath = '') {
     $ids = @(); $err = @()
     foreach ($m in @($Manifest.Modules)) {
-        if (-not $m -or -not "$($m.Id)" -or -not (Test-HMBackupModuleHasData $m)) { continue }
+        if (-not $m -or -not "$($m.Id)" -or -not (Test-HMBackupModuleHasData $m $BackupPath)) { continue }
         $ids += "$($m.Id)"
         if ("$($m.Status)" -eq 'Error') { $err += "$($m.Id)" }
     }
@@ -1640,7 +1645,7 @@ function Read-HMBackupInfo {
         try {
             $m = Get-Content -LiteralPath $mf -Raw -Encoding UTF8 | ConvertFrom-Json
             # waehlbar: Module mit OK/Warning und mit Fehlern gesicherte, von denen Daten im Backup liegen (Get-HMBackupModuleSets)
-            $set = Get-HMBackupModuleSets $m
+            $set = Get-HMBackupModuleSets $m $Path
             return [pscustomobject]@{ Path = $Path; Name = (Split-Path $Path -Leaf); Legacy = $false; Created = $m.Created
                 Computer = $m.SourceComputer; User = $m.UserName; Account = $m.Account; Sid = $m.UserSid; ProfilePath = $m.ProfilePath
                 Modules = @($set.Modules); ErrorModules = @($set.ErrorModules); SizeBytes = [long]$m.SizeBytes; Status = $m.Status; Manifest = $m; Archived = (Test-HMBackupArchived $Path) }
@@ -2874,7 +2879,7 @@ function Backup-HMUsmt {
     }
     if ($mig) {
         # nur der unveraenderte aeltere Stand liegt vor: Warnung, damit der brauchbare
-        # alte Stand im Restore waehlbar bleibt (Read-HMBackupInfo nimmt nur Module mit OK/Warning)
+        # alte Stand im Restore waehlbar bleibt (Read-HMBackupInfo nimmt USMT nur mit OK/Warning)
         $dt = $newInfo.WriteUtc.ToLocalTime().ToString('dd.MM.yyyy HH:mm')
         return [pscustomobject]@{ Name = 'Usmt'; Status = 'Warning'; Msg = "USMT-Stand stammt vom $dt, dieser Lauf hat keinen neuen erzeugt - ein Restore spielt diesen aelteren Stand ein (ScanState Code $code$why$(if ($fresh.Why) { "; $($fresh.Why)" })). Log: $store\scanstate.log - Ursache beheben und Backup wiederholen"; Bytes = $mig.Length; Source = $usmt }
     }

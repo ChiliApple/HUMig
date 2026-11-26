@@ -100,11 +100,66 @@ Describe 'Restore mit Fehler-Modulen: Erkennung im Backup' {
         $mk = { param($dir, $st, $mods) [System.IO.File]::WriteAllText((Join-Path $dir 'manifest.json'), ([ordered]@{ Status = $st; Modules = @($mods) } | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($true))) }
         & $mk (Join-Path $root '2026-11-01_1000_QPC_quelle') 'OK' @(New-TModRes 'Daten' 'OK' @(New-TItem 'A' 'OK' 5))
         & $mk (Join-Path $root '2026-11-02_1000_QPC_quelle') 'Error' @(New-TModRes 'Daten' 'Error' @(New-TItem 'A' 'Error' 5 'teilweise'))
+        New-Item -ItemType Directory -Path (Join-Path $root '2026-11-02_1000_QPC_quelle\Daten\A') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $root '2026-11-02_1000_QPC_quelle\Daten\A\a.txt'), 'x')
         $l = @(Get-HMBackupList -Root $root -Modules @())
         $l.Count | Should -Be 2
         @($l[0].ErrorModules) | Should -Be @('Daten')
         @($l[1].ErrorModules).Count | Should -Be 0
         @($l[1].Modules) | Should -Be @('Daten')
+    }
+}
+
+Describe 'Restore mit Fehler-Modulen: Backup aus Start-HMBackup (Robocopy ersetzt)' {
+    BeforeAll {
+        Mock Get-HMTargetEnv { @{ WINDIR = (Join-Path $TestDrive 'win'); PROFILE = '' } }
+        Mock Get-HMSyncRoots { @() }
+        Mock Get-HMMachineGuid { '' }
+        Mock Get-HMTargetComputerName { '' }
+        Mock Dismount-HMHive { }
+        Mock Set-HMBackupFolderAcl { [pscustomobject]@{ Ok = $true; Who = @('Test'); Extra = @(); Notes = @(); Unchanged = $true; Skipped = $false; Error = '' } }
+        Mock Update-HMCatalogStats { 0 }
+        # Ordner A: Robocopy kopiert eine Datei und meldet 2 gescheiterte; Ordner B: alle Dateien gescheitert, nichts kopiert
+        Mock Invoke-HMRobocopy {
+            $part = ("$Source" -like '*\A')
+            if ($part) { New-Item -ItemType Directory -Path $Dest -Force | Out-Null; [System.IO.File]::WriteAllText((Join-Path $Dest 'a.txt'), 'x') }
+            [pscustomobject]@{ ExitCode = 9; Level = 'Error'; FilesTotal = 3; FilesCopied = $(if ($part) { 1 } else { 0 }); FilesSkipped = 0; FilesFailed = $(if ($part) { 2 } else { 3 })
+                BytesTotal = 300; BytesCopied = $(if ($part) { 100 } else { 0 }); BytesSkipped = 0; FilesExtra = 0; DirsExtra = 0; HaveDirs = $true
+                FailedFiles = @("$Source\b.db"); ErrorCodes = @(5) }
+        }
+        $script:RunBackup = {
+            param([string[]]$Folders)
+            $prof = New-TDir 'prof'; $root = New-TDir 'BKR'
+            $mods = @(foreach ($f in $Folders) {
+                New-Item -ItemType Directory -Path (Join-Path $prof $f) -Force | Out-Null
+                [pscustomobject]@{ Id = "M$f"; Name = "Modul $f"; Scope = 'User'; Items = @([pscustomobject]@{ Name = $f; Type = 'Folder'; Path = (Join-Path $prof $f) }) }
+            })
+            $ctx = @{ Computer = $env:COMPUTERNAME; BackupPath = (Join-Path $root 'neu'); BackupRoot = $root; Options = @{ SkipSpaceCheck = $true }; Settings = @{}; Modules = $mods
+                      ToolRoot = $TestDrive; ToolVersion = 'Test'; UserFolder = 'u'; Account = 'u'; UserSid = 'S-1-5-21-1-2-3-1001'; ProfilePath = $prof; Threads = 2 }
+            $j = New-TJob
+            Start-HMBackup -Ctx $ctx -Job $j
+            [pscustomobject]@{ Result = $j.Result; Info = (Read-HMBackupInfo -Path $ctx.BackupPath -Modules @()) }
+        }
+    }
+    It 'Einzelne Dateien gescheitert: Modul Fehler, im Restore waehlbar und markiert; alle gescheitert: ausgeblendet' {
+        $o = & $script:RunBackup @('A', 'B')
+        @($o.Result.Modules | Where-Object { $_.Id -eq 'MA' })[0].Status | Should -Be 'Error'
+        @($o.Result.Modules | Where-Object { $_.Id -eq 'MB' })[0].Status | Should -Be 'Error'
+        # B traegt Bytes > 0 (Robocopy zaehlt gescheiterte Dateien mit), liegt aber mit keiner Datei im Backup
+        [long]@($o.Result.Modules | Where-Object { $_.Id -eq 'MB' })[0].Bytes | Should -BeGreaterThan 0
+        $o.Result.Status | Should -Be 'Error'
+        @($o.Info.Modules) | Should -Be @('MA')
+        @($o.Info.ErrorModules) | Should -Be @('MA')
+    }
+    It 'Ohne Backup-Ordner (nur Manifest) entscheidet das Manifest, mit Ordner zaehlt nur eine Datei im Modulordner' {
+        $m = New-TModRes 'X' 'Error' @(New-TItem 'A' 'Error' 300 'alle gescheitert')
+        Test-HMBackupModuleHasData $m | Should -BeTrue
+        $p = New-TDir 'leer'
+        Test-HMBackupModuleHasData $m $p | Should -BeFalse
+        New-Item -ItemType Directory -Path (Join-Path $p 'X\A') -Force | Out-Null
+        Test-HMBackupModuleHasData $m $p | Should -BeFalse
+        [System.IO.File]::WriteAllText((Join-Path $p 'X\A\a.txt'), 'x')
+        Test-HMBackupModuleHasData $m $p | Should -BeTrue
     }
 }
 
