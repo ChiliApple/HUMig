@@ -831,47 +831,116 @@ Describe 'Selbsttest und Testdateien: keine privaten Adressen, Ergebnisdatei mit
 Describe 'Fenster Softwareverteilung und Treiber folgen dem Feld Computer (erst bei einer Aktion)' {
     BeforeAll {
         . (Join-Path $script:Root 'Functions\Tools-Software.ps1')
-        # Entscheidung der PC-Werkzeuge aus HUMig.ps1 (unveraendert) fuer den Durchlauf-Test laden
+        . (Join-Path $script:Root 'Functions\Tools-Drivers.ps1')
+        # Entscheidung der PC-Werkzeuge aus HUMig.ps1 (unveraendert) zum Abgleich laden
         $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'HUMig.ps1'), [ref]$null, [ref]$null)
         foreach ($n in @('Get-HMToolDecision', 'Get-HMTargetState', 'Test-HMSameComputer', 'Get-HMComputerKey')) {
             $fn = $ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true) | Select-Object -First 1
             if ($fn) { . ([scriptblock]::Create($fn.Extent.Text.Replace("function $n", "function global:$n"))) }
         }
-        $script:SwSrc = [IO.File]::ReadAllText((Join-Path $script:Root 'Functions\Tools-Software.ps1'))
-        $script:DrvSrc = [IO.File]::ReadAllText((Join-Path $script:Root 'Functions\Tools-Drivers.ps1'))
+        # Ersatz fuer das Hauptfenster: Ziel PC01, im Feld $global:T_Feld; Use-HMPcTarget schaltet um bzw. lehnt ab und protokolliert
+        function global:Get-TargetComputer { $global:T_Ziel }
+        function global:Get-HMFieldComputer { $global:T_Feld }
+        function global:Test-HMBackupRestoreRunning { [bool]$global:T_Busy }
+        function global:Use-HMPcTarget([string]$Action) {
+            $global:T_Log += "USE:$Action"
+            if (-not $global:T_UseOk) { return $false }
+            if (-not $global:T_Busy) { $global:T_Ziel = $global:T_Feld }   # still umgeschaltet (Select-HMFieldTarget)
+            return $true
+        }
+        # Faelle: Feld = anderer PC ohne Vorgang (umschalten nach Ja), Bestaetigung abgelehnt, Vorgang laeuft und Rueckfrage abgelehnt
+        $script:Reset = { param([string]$Feld = 'PC02', [bool]$Busy = $false, [bool]$UseOk = $true, [bool]$ConfirmOk = $true)
+            $global:T_Ziel = 'PC01'; $global:T_Feld = $Feld; $global:T_Busy = $Busy; $global:T_UseOk = $UseOk; $global:T_ConfirmOk = $ConfirmOk; $global:T_Log = @()
+            $global:Target = @{ Computer = 'PC01'; Connected = $true }; $script:Target = $global:Target
+        }
+        $script:SwUi = [pscustomobject]@{ LblTarget = $null; ChkForce = [pscustomobject]@{ IsChecked = $false } }
+        $script:DrvUi = [pscustomobject]@{ LblTarget = $null; ChkForce = [pscustomobject]@{ IsChecked = $false }; Lst = [pscustomobject]@{ SelectedIndex = 0 }; Pkgs = @([pscustomobject]@{ Id = 'drv1' }) }
+        $script:Pkg = [pscustomobject]@{ Id = 'p1'; Settings = [pscustomobject]@{ Name = 'Paket' } }
     }
-    It 'Anzeige: gleicher PC ohne Zusatz, anderer PC im Feld mit Zusatz "im Feld", ohne Zustand das Ziel' {
+    AfterAll { Remove-Item Function:\global:Get-TargetComputer, Function:\global:Get-HMFieldComputer, Function:\global:Test-HMBackupRestoreRunning, Function:\global:Use-HMPcTarget -ErrorAction SilentlyContinue }
+    BeforeEach {
+        Mock Save-SwForm { $script:Pkg }; Mock Save-DrvForm { $script:Pkg }
+        Mock Confirm-SwDeploy { $global:T_Log += "CONFIRM:$($Hosts -join ',')"; $global:T_ConfirmOk }
+        Mock Confirm-DrvDeploy { $global:T_Log += "CONFIRM:$($Hosts -join ',')"; $global:T_ConfirmOk }
+        Mock Confirm-SwUninstall { $global:T_Log += "CONFIRM:$($Hosts -join ',')"; $global:T_ConfirmOk }
+        Mock Start-SoftwareDeploy { $global:T_Log += "RUN:$($Hosts -join ',')" }
+        Mock Start-DriverDeploy { $global:T_Log += "RUN:$($Hosts -join ',')" }
+        Mock Start-SwPackageStatus { $global:T_Log += "RUN:$($Hosts -join ',')" }
+        Mock Start-SwPackageUninstall { $global:T_Log += "RUN:$($Hosts -join ',')" }
+        Mock Start-DriverCheck { $global:T_Log += "RUN:$Computer" }
+        Mock Show-DriverLocks { $global:T_Log += "RUN:$Computer" }
+        Mock Get-SwUninstallItem { [pscustomobject]@{ Cmd = 'x.exe'; Args = '/S' } }
+    }
+    It 'Anzeige: gleicher PC ohne Zusatz, anderer PC im Feld nur mit "im Feld: Y", ohne Zustand das Ziel' {
         $a = Get-SwTargetDisplay ([pscustomobject]@{ Kind = 'Match'; Field = 'PC01'; Computer = 'PC01' }) 'X'
         $a.Main | Should -Be 'Gewaehlter Computer: PC01'; $a.Hint | Should -Be ''
         $b = Get-SwTargetDisplay ([pscustomobject]@{ Kind = 'Differs'; Field = 'PC02'; Computer = 'PC01' }) 'X'
-        $b.Main | Should -Be 'Gewaehlter Computer: PC01'; $b.Hint | Should -Match '^im Feld: PC02'
+        $b.Main | Should -Be 'Gewaehlter Computer: PC01'; $b.Hint | Should -Be 'im Feld: PC02'
         (Get-SwTargetDisplay $null 'PC09').Main | Should -Be 'Gewaehlter Computer: PC09'
     }
-    It 'Entscheidung der PC-Werkzeuge: anderer PC im Feld -> umschalten, waehrend Backup/Restore -> nachfragen, gleicher PC -> ausfuehren' {
-        $st = Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connected = $true } 'LOKAL'
-        $st.Kind | Should -Be 'Differs'
-        Get-HMToolDecision 'Pc' $st $false | Should -Be 'Switch'
-        Get-HMToolDecision 'Pc' $st $true | Should -Be 'Ask'
-        Get-HMToolDecision 'Pc' (Get-HMTargetState 'PC01' @{ Computer = 'PC01'; Connected = $true } 'LOKAL') $false | Should -Be 'Run'
+    It 'Entscheidung wie bei den PC-Werkzeugen in HUMig.ps1 (umschalten, nachfragen, ausfuehren)' {
+        foreach ($c in @(@('PC02', $false), @('PC02', $true), @('PC01', $false), @('PC01', $true))) {
+            $st = Get-HMTargetState $c[0] @{ Computer = 'PC01'; Connected = $true } 'LOKAL'
+            Get-SwTargetDecision $st $c[1] | Should -Be (Get-HMToolDecision 'Pc' $st $c[1])
+        }
     }
-    It 'Aktion: nach dem stillen Umschalten laeuft sie auf dem PC im Feld, abgelehnt laeuft nichts' {
-        $script:T_Ziel = 'PC01'
-        function global:Get-TargetComputer { $script:T_Ziel }
-        function global:Use-HMPcTarget([string]$Action) { if ($script:T_Antwort) { $script:T_Ziel = 'PC02'; return $true }; return $false }
-        try {
-            $script:T_Antwort = $true
-            Resolve-SwActionTarget 'Softwareverteilung' | Should -Be 'PC02'
-            $script:T_Ziel = 'PC01'; $script:T_Antwort = $false
-            Resolve-SwActionTarget 'Treiber' | Should -Be ''
-        } finally { Remove-Item Function:\global:Get-TargetComputer, Function:\global:Use-HMPcTarget -ErrorAction SilentlyContinue }
+    # Aktionen mit eigener Bestaetigung: Verteilen (Software, Treiber), Deinstallieren
+    $withConfirm = @(
+        @{ Name = 'Software verteilen'; Do = { Invoke-SwDeployChosen } }
+        @{ Name = 'Treiber verteilen'; Do = { Invoke-DrvDeployChosen } }
+        @{ Name = 'Software deinstallieren'; Do = { Invoke-SwTargetAction 'Uninstall' $false } }
+    )
+    It '<Name>: anderer PC im Feld - die Bestaetigung nennt ihn, erst nach dem Ja wird umgeschaltet und dort ausgefuehrt' -TestCases $withConfirm {
+        param($Name, $Do)
+        & $script:Reset 'PC02' $false $true $true
+        & $Do
+        $global:T_Log | Should -Be @('CONFIRM:PC02', "USE:$(if ($Name -like 'Treiber*') { 'Treiber' } else { 'Softwareverteilung' })", 'RUN:PC02')
+        $global:T_Ziel | Should -Be 'PC02'
     }
-    It 'Aktivieren und Oeffnen zeigen nur an (kein Umschalten), alle Aktionen fuer den gewaehlten Computer gehen ueber die Regel' {
-        $script:SwSrc | Should -Match ([regex]::Escape('$w.Add_Activated({ if ($script:SwUi) { Set-SwTargetLabel $script:SwUi.LblTarget; Update-SwSandboxButton } })'))
-        $script:DrvSrc | Should -Match ([regex]::Escape('$w.Add_Activated({ if ($script:DrvUi) { Set-SwTargetLabel $script:DrvUi.LblTarget } })'))
-        foreach ($src in @($script:SwSrc, $script:DrvSrc)) { $src | Should -Not -Match 'Add_Activated\(\{[^\r\n]*Resolve-SwActionTarget' }
-        ([regex]::Matches($script:SwSrc, [regex]::Escape("Resolve-SwActionTarget 'Softwareverteilung'"))).Count | Should -Be 2
-        ([regex]::Matches($script:DrvSrc, [regex]::Escape("Resolve-SwActionTarget 'Treiber'"))).Count | Should -Be 3
-        # nirgends mehr direkt "Gewaehlter Computer: $(Get-TargetComputer)"
-        ($script:SwSrc + $script:DrvSrc) | Should -Not -Match ([regex]::Escape('"Gewaehlter Computer: $(Get-TargetComputer)"'))
+    It '<Name>: Bestaetigung abgelehnt - nichts umgeschaltet, nichts ausgefuehrt' -TestCases $withConfirm {
+        param($Name, $Do)
+        & $script:Reset 'PC02' $false $true $false
+        & $Do
+        $global:T_Log | Should -Be @('CONFIRM:PC02')
+        $global:T_Ziel | Should -Be 'PC01'
+    }
+    It '<Name>: Backup oder Restore laeuft und die Rueckfrage wird abgelehnt - keine Bestaetigung, nichts ausgefuehrt' -TestCases $withConfirm {
+        param($Name, $Do)
+        & $script:Reset 'PC02' $true $false $true
+        & $Do
+        @($global:T_Log | Where-Object { $_ -like 'USE:*' }).Count | Should -Be 1
+        @($global:T_Log | Where-Object { $_ -like 'CONFIRM:*' -or $_ -like 'RUN:*' }).Count | Should -Be 0
+    }
+    It '<Name>: gleicher PC im Feld - laeuft auf dem Ziel, ohne Umschalten' -TestCases $withConfirm {
+        param($Name, $Do)
+        & $script:Reset 'PC01' $false $true $true
+        & $Do
+        $global:T_Log | Should -Be @('CONFIRM:PC01', 'RUN:PC01')
+    }
+    # Aktionen ohne eigene Bestaetigung: Status, Treiber pruefen, Sperren am PC
+    $noConfirm = @(
+        @{ Name = 'Status'; Do = { Invoke-SwTargetAction 'Status' $false } }
+        @{ Name = 'Treiber pruefen'; Do = { Invoke-DrvCheckChosen } }
+        @{ Name = 'Sperren am PC'; Do = { Invoke-DrvLocksChosen } }
+    )
+    It '<Name>: anderer PC im Feld - umschalten und die Aktion mit diesem PC aufrufen' -TestCases $noConfirm {
+        param($Name, $Do)
+        & $script:Reset 'PC02' $false $true $true
+        & $Do
+        @($global:T_Log | Where-Object { $_ -like 'RUN:*' }) | Should -Be @('RUN:PC02')
+        $global:T_Ziel | Should -Be 'PC02'
+    }
+    It '<Name>: Rueckfrage waehrend Backup/Restore abgelehnt - nichts aufgerufen' -TestCases $noConfirm {
+        param($Name, $Do)
+        & $script:Reset 'PC02' $true $false $true
+        & $Do
+        @($global:T_Log | Where-Object { $_ -like 'RUN:*' }).Count | Should -Be 0
+    }
+    It 'Aktivieren und Oeffnen zeigen nur an, die Knoepfe rufen die Aktionsfunktionen auf' {
+        $sw = [IO.File]::ReadAllText((Join-Path $script:Root 'Functions\Tools-Software.ps1')); $dr = [IO.File]::ReadAllText((Join-Path $script:Root 'Functions\Tools-Drivers.ps1'))
+        $sw | Should -Match ([regex]::Escape('$w.Add_Activated({ if ($script:SwUi) { Set-SwTargetLabel $script:SwUi.LblTarget; Update-SwSandboxButton } })'))
+        $dr | Should -Match ([regex]::Escape('$w.Add_Activated({ if ($script:DrvUi) { Set-SwTargetLabel $script:DrvUi.LblTarget } })'))
+        $sw | Should -Match ([regex]::Escape("`$w.FindName('btnClient').Add_Click({ Invoke-SwDeployChosen })"))
+        foreach ($x in @("`$w.FindName('btnCheck').Add_Click({ Invoke-DrvCheckChosen })", "`$w.FindName('btnLocks').Add_Click({ Invoke-DrvLocksChosen })", "`$w.FindName('btnClient').Add_Click({ Invoke-DrvDeployChosen })")) { $dr | Should -Match ([regex]::Escape($x)) }
     }
 }

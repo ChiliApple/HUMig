@@ -25,7 +25,7 @@
 # Anzeige als reine Funktion: Zustand aus Get-HMTargetState (Kind, Field, Computer) -> Haupttext und Zusatz ('' = keiner)
 function Get-SwTargetDisplay($State, [string]$Fallback) {
     $c = if ($State -and "$($State.Computer)".Trim()) { "$($State.Computer)".Trim() } else { "$Fallback".Trim() }
-    $hint = if ($State -and "$($State.Kind)" -eq 'Differs') { "im Feld: $($State.Field) - wird bei der naechsten Aktion uebernommen" } else { '' }
+    $hint = if ($State -and "$($State.Kind)" -eq 'Differs') { "im Feld: $($State.Field)" } else { '' }
     return [pscustomobject]@{ Main = "Gewaehlter Computer: $(if ($c) { $c } else { '(keiner)' })"; Hint = $hint; Computer = $c; Field = $(if ($State) { "$($State.Field)" } else { '' }) }
 }
 # aktueller Zustand (ohne HUMig.ps1, z. B. in Tests: nur das Ziel)
@@ -47,6 +47,35 @@ function Resolve-SwActionTarget([string]$Action, $Label = $null) {
     if (Get-Command Use-HMPcTarget -ErrorAction SilentlyContinue) { if (-not (Use-HMPcTarget $Action)) { return '' } }
     if ($Label) { Set-SwTargetLabel $Label }
     return "$(Get-TargetComputer)".Trim()
+}
+# Entscheidung wie bei den PC-Werkzeugen (Get-HMToolDecision 'Pc' in HUMig.ps1): gleicher PC = 'Run', anderer PC im Feld =
+# 'Switch' (still umschalten), waehrend Backup/Restore = 'Ask' (Rueckfrage)
+function Get-SwTargetDecision($State, [bool]$BackupRestoreRunning) {
+    if (-not $State -or "$($State.Kind)" -ne 'Differs') { return 'Run' }
+    if (-not $BackupRestoreRunning) { return 'Switch' }
+    return 'Ask'
+}
+# Welcher PC waere es? Nur ermitteln, nichts umschalten. Rueckgabe Decision und Computer
+function Get-SwPendingTarget {
+    $cur = "$(Get-TargetComputer)".Trim()
+    if ($script:UserMode -or -not (Get-Command Get-HMTargetState -ErrorAction SilentlyContinue)) { return [pscustomobject]@{ Decision = 'Run'; Computer = $cur } }
+    $st = Get-HMTargetState (Get-HMFieldComputer) $script:Target
+    $busy = $false; if (Get-Command Test-HMBackupRestoreRunning -ErrorAction SilentlyContinue) { $busy = [bool](Test-HMBackupRestoreRunning) }
+    $d = Get-SwTargetDecision $st $busy
+    return [pscustomobject]@{ Decision = $d; Computer = $(if ($d -eq 'Switch') { "$($st.Field)".Trim() } else { $cur }) }
+}
+# Aktion fuer den gewaehlten Computer: Rueckfrage waehrend Backup/Restore zuerst; dann die eigene Bestaetigung ($Confirm, mit dem
+# PC, auf dem es laufen wird); erst nach dem Ja wird auf den PC im Feld umgeschaltet und $Run mit diesem PC ausgefuehrt.
+# Abgelehnt: nichts umgeschaltet, nichts ausgefuehrt. Rueckgabe $true = ausgefuehrt
+function Invoke-SwOnTarget([string]$Action, $Label, [scriptblock]$Confirm, [scriptblock]$Run) {
+    $pend = Get-SwPendingTarget
+    $pc = $pend.Computer
+    if ($pend.Decision -eq 'Ask') { $pc = Resolve-SwActionTarget $Action $Label; if (-not $pc) { return $false } }
+    if (-not $pc) { return $false }
+    if ($Confirm -and -not (& $Confirm $pc)) { return $false }
+    if ($pend.Decision -eq 'Switch') { $pc = Resolve-SwActionTarget $Action $Label; if (-not $pc) { return $false } }
+    & $Run $pc
+    return $true
 }
 
 function Get-SwFolder {
@@ -1425,7 +1454,7 @@ function Show-SwTargetMenu($Button, [string]$Kind) {
     $cm = New-Object System.Windows.Controls.ContextMenu
     $d = Get-SwTargetDisplayNow; $h = $d.Computer
     $m1 = New-Object System.Windows.Controls.MenuItem
-    $m1.Header = $(if ($d.Hint) { "Gewaehlter Computer ($h, im Feld: $($d.Field) - wird uebernommen)" } elseif ($h) { "Gewaehlter Computer ($h)" } else { 'Gewaehlter Computer (keiner gewaehlt)' }); $m1.IsEnabled = [bool]$h; $m1.Tag = $Kind
+    $m1.Header = $(if ($d.Hint) { "Gewaehlter Computer ($h, im Feld: $($d.Field))" } elseif ($h) { "Gewaehlter Computer ($h)" } else { 'Gewaehlter Computer (keiner gewaehlt)' }); $m1.IsEnabled = [bool]$h; $m1.Tag = $Kind
     $m1.Add_Click({ param($s, $e) Invoke-SwTargetAction "$($s.Tag)" $false })
     $m2 = New-Object System.Windows.Controls.MenuItem
     $m2.Header = 'Mehrere PCs ...'; $m2.Tag = $Kind
@@ -1442,8 +1471,8 @@ function Invoke-SwTargetAction([string]$Kind, [bool]$Multi) {
         return
     }
     if (-not $Multi) {
-        $h = Resolve-SwActionTarget 'Softwareverteilung' $sw.LblTarget; if (-not $h) { return }
-        Invoke-SwTargetRun $Kind $p @($h)
+        $swConf = if ($Kind -eq 'Uninstall') { { param($pc) Confirm-SwUninstall $p @($pc) } } else { $null }
+        [void](Invoke-SwOnTarget 'Softwareverteilung' $sw.LblTarget $swConf { param($pc) Invoke-SwTargetRun $Kind $p @($pc) -Confirmed })
         return
     }
     $script:SwPickX = @{ Package = $p; Kind = $Kind }
@@ -1455,14 +1484,25 @@ function Invoke-SwTargetAction([string]$Kind, [bool]$Multi) {
         Invoke-SwTargetRun $pp.Kind $pp.Package $hosts
     }
 }
-function Invoke-SwTargetRun([string]$Kind, $Package, [string[]]$Hosts) {
+# -Confirmed: die Rueckfrage zur Deinstallation kam schon (Invoke-SwOnTarget, mit dem PC, auf dem es laufen wird)
+function Invoke-SwTargetRun([string]$Kind, $Package, [string[]]$Hosts, [switch]$Confirmed) {
     if ($Kind -eq 'Status') { Start-SwPackageStatus -Hosts $Hosts -Package $Package; return }
+    if (-not $Confirmed -and -not (Confirm-SwUninstall $Package $Hosts)) { return }
+    Start-SwPackageUninstall -Hosts $Hosts -Package $Package
+}
+function Confirm-SwUninstall($Package, [string[]]$Hosts) {
     $it = Get-SwUninstallItem $Package
-    if (-not $it) { return }
+    if (-not $it) { return $false }
     $ziel = if ($Hosts.Count -le 5) { $Hosts -join ', ' } else { "$($Hosts.Count) PCs" }
     $cmd = "$($it.Cmd) $($it.Args)".Trim()
-    if (-not (Confirm-Action "Paket '$($Package.Settings.Name)' DEINSTALLIEREN auf: $ziel`n`n  Befehl: $cmd`n`nStill, ohne automatischen Neustart. Fortfahren?" 'Deinstallation')) { return }
-    Start-SwPackageUninstall -Hosts $Hosts -Package $Package
+    return [bool](Confirm-Action "Paket '$($Package.Settings.Name)' DEINSTALLIEREN auf: $ziel`n`n  Befehl: $cmd`n`nStill, ohne automatischen Neustart. Fortfahren?" 'Deinstallation')
+}
+# Verteilen auf den gewaehlten Computer (Knopf "Gewaehlten Computer")
+function Invoke-SwDeployChosen {
+    $sw = $script:SwUi; if (-not $sw) { return }
+    $p = Save-SwForm; if (-not $p) { return }
+    $force = [bool]$sw.ChkForce.IsChecked
+    [void](Invoke-SwOnTarget 'Softwareverteilung' $sw.LblTarget { param($pc) Confirm-SwDeploy -Package $p -Hosts @($pc) -Force $force } { param($pc) Start-SoftwareDeploy -Hosts @($pc) -Package $p -Force $force })
 }
 
 # Dateien/Ordner uebernehmen (Knopf und Drag&Drop)
@@ -1830,14 +1870,7 @@ function Show-SoftwareWindow {
     $w.FindName('btnWinget').Add_Click({ Update-SwFromWinget })
     $w.FindName('btnUninst').Add_Click({ param($s, $e) Show-SwTargetMenu $s 'Uninstall' })
     $w.FindName('btnStatus').Add_Click({ param($s, $e) Show-SwTargetMenu $s 'Status' })
-    $w.FindName('btnClient').Add_Click({
-        $sw = $script:SwUi
-        $h = Resolve-SwActionTarget 'Softwareverteilung' $sw.LblTarget; if (-not $h) { return }
-        $p = Save-SwForm; if (-not $p) { return }
-        $force = [bool]$sw.ChkForce.IsChecked
-        if (-not (Confirm-SwDeploy -Package $p -Hosts @($h) -Force $force)) { return }
-        Start-SoftwareDeploy -Hosts @($h) -Package $p -Force $force
-    })
+    $w.FindName('btnClient').Add_Click({ Invoke-SwDeployChosen })
     $w.FindName('btnMultiSel').Add_Click({
         $sw = $script:SwUi
         $p = Save-SwForm; if (-not $p) { return }

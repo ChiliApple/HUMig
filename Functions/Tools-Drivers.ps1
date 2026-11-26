@@ -999,6 +999,25 @@ function Save-DrvForm {
     return ($dw.Pkgs | Where-Object { $_.Id -eq $id } | Select-Object -First 1)
 }
 
+# Aktionen fuer den gewaehlten Computer (Ziel nach der Regel der PC-Werkzeuge, umgeschaltet erst nach der Bestaetigung,
+# siehe Invoke-SwOnTarget in Tools-Software.ps1)
+function Invoke-DrvCheckChosen {
+    $dw = $script:DrvUi; if (-not $dw) { return }
+    $i = $dw.Lst.SelectedIndex
+    if ($i -lt 0 -or $i -ge @($dw.Pkgs).Count) { return }
+    $pkg = @($dw.Pkgs)[$i]
+    [void](Invoke-SwOnTarget 'Treiber' $dw.LblTarget $null { param($pc) Start-DriverCheck -Package $pkg -Computer $pc })
+}
+function Invoke-DrvLocksChosen {
+    $dw = $script:DrvUi
+    [void](Invoke-SwOnTarget 'Treiber' $(if ($dw) { $dw.LblTarget } else { $null }) $null { param($pc) Show-DriverLocks -Computer $pc })
+}
+function Invoke-DrvDeployChosen {
+    $dw = $script:DrvUi; if (-not $dw) { return }
+    $p = Save-DrvForm; if (-not $p) { return }
+    $force = [bool]$dw.ChkForce.IsChecked
+    [void](Invoke-SwOnTarget 'Treiber' $dw.LblTarget { param($pc) Confirm-DrvDeploy -Package $p -Hosts @($pc) -Force $force } { param($pc) Start-DriverDeploy -Hosts @($pc) -Package $p -Force $force })
+}
 function Show-DriverWindow {
     if ($script:DrvUi -and $script:DrvUi.Win -and $script:DrvUi.Win.IsVisible) { [void]$script:DrvUi.Win.Activate(); Update-DrvWindowList; return }
     $dir = Get-DrvFolder
@@ -1144,21 +1163,10 @@ function Show-DriverWindow {
     $w.FindName('btnOpen').Add_Click({ $d = Get-DrvFolder; if (Test-Path -LiteralPath $d) { Start-Process explorer.exe -ArgumentList "`"$d`"" } })
     $w.FindName('btnReload').Add_Click({ $script:DrvInfCache = @{}; $script:SwInfoCache = @{}; $dw = $script:DrvUi; $sel = if ($dw.Lst.SelectedIndex -ge 0) { $dw.Pkgs[$dw.Lst.SelectedIndex].Id } else { '' }; Update-DrvWindowList $sel })
     $w.FindName('btnSave').Add_Click({ [void](Save-DrvForm) })
-    $w.FindName('btnCheck').Add_Click({
-        $dw = $script:DrvUi; $i = $dw.Lst.SelectedIndex
-        if ($i -lt 0 -or $i -ge $dw.Pkgs.Count) { return }
-        $h = Resolve-SwActionTarget 'Treiber' $dw.LblTarget; if (-not $h) { return }
-    })
-    $w.FindName('btnLocks').Add_Click({ $h = Resolve-SwActionTarget 'Treiber' $script:DrvUi.LblTarget; if ($h) { Show-DriverLocks -Computer $h } })
+    $w.FindName('btnCheck').Add_Click({ Invoke-DrvCheckChosen })
+    $w.FindName('btnLocks').Add_Click({ Invoke-DrvLocksChosen })
     $w.Add_Activated({ if ($script:DrvUi) { Set-SwTargetLabel $script:DrvUi.LblTarget } })
-    $w.FindName('btnClient').Add_Click({
-        $dw = $script:DrvUi
-        $h = Resolve-SwActionTarget 'Treiber' $dw.LblTarget; if (-not $h) { return }
-        $p = Save-DrvForm; if (-not $p) { return }
-        $force = [bool]$dw.ChkForce.IsChecked
-        if (-not (Confirm-DrvDeploy -Package $p -Hosts @($h) -Force $force)) { return }
-        Start-DriverDeploy -Hosts @($h) -Package $p -Force $force
-    })
+    $w.FindName('btnClient').Add_Click({ Invoke-DrvDeployChosen })
     $w.FindName('btnMultiSel').Add_Click({
         $dw = $script:DrvUi
         $p = Save-DrvForm; if (-not $p) { return }
