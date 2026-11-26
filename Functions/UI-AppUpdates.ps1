@@ -144,7 +144,11 @@ function Update-HMAuState([switch]$Search) {
         # Absturz des Moduls: auf Server 2019 hilft Einrichten nicht, sonst (z.B. Server 2022 ohne App Installer) schon
         $ui.btnAuSetup.Visibility = $(if ($s.Ready -or -not $s.OsOk -or ($s.Crashed -and $s.Experimental)) { 'Collapsed' } else { 'Visible' })
         if ($s.Experimental -and -not $script:AuExpWarned) { $script:AuExpWarned = $true; Out-Console 'App-Updates: Windows Server 2019 - WinGet wird von Microsoft hier nicht unterstuetzt, HUMig versucht es trotzdem (experimentell). Klappt etwas nicht, Ergebnis/Fehler pruefen.' 'Warning' }
-        $ui.lblAuInfo.Text = "$(if ($s.Experimental) { '[Server 2019: experimentell] ' })$(if ($s.Ready) { "Dieser PC: WinGet $($s.WinGet), Modul $($s.Module), App Installer $($s.AppInstaller)" } else { "Dieser PC: $($s.Problem)" })  |  Gelesen wird am Ziel-PC im Konto des angemeldeten Benutzers (oben gewaehlter bevorzugt), ist niemand angemeldet als SYSTEM mit PowerShell 7 (wird bei Bedarf installiert). Aktualisiert: fuer alle Benutzer als SYSTEM, nur fuer einen Benutzer installierte in seinem Konto."
+        # Hinweis zum Modul (Signatur nicht pruefbar, andere Version): im Status, in der Konsole nur bei geaendertem Text
+        $nt = if ($s.PSObject.Properties['Note']) { "$($s.Note)" } else { '' }
+        if ($nt -and $nt -ne "$script:AuNoteShown") { Out-Console "App-Updates: $nt" 'Info' }
+        $script:AuNoteShown = $nt
+        $ui.lblAuInfo.Text = "$(if ($s.Experimental) { '[Server 2019: experimentell] ' })$(if ($s.Ready) { "Dieser PC: WinGet $($s.WinGet), Modul $($s.Module), App Installer $($s.AppInstaller)" } else { "Dieser PC: $($s.Problem)" })$(if ($nt) { " (Hinweis: $nt)" })  |  Gelesen wird am Ziel-PC im Konto des angemeldeten Benutzers (oben gewaehlter bevorzugt), ist niemand angemeldet als SYSTEM mit PowerShell 7 (wird bei Bedarf installiert). Aktualisiert: fuer alle Benutzer als SYSTEM, nur fuer einen Benutzer installierte in seinem Konto."
         $ui.btnAuSourceAdd.IsEnabled = [bool]$s.Ready -and -not $script:JobRunning
         Update-HMAuSourceList
         if ($s.Ready -and $stt.Search -and -not $script:JobRunning) { Start-HMAuSearch }
@@ -609,9 +613,11 @@ function Add-HMAuSourceUi {
     $v = Show-HMAuInputDialog 'WinGet-Quelle hinzufuegen' "Eigene Quelle fuer diesen PC (braucht Administratorrechte). Nur vertrauenswuerdige Quellen verwenden - sie entscheiden, was installiert wird.`nREST-Quelle: https-Adresse (Typ Microsoft.Rest). Vorindizierte Quelle: Adresse oder Netzwerkpfad (Typ Microsoft.PreIndexed.Package)." @('Name:', 'Adresse / Pfad:', 'Typ:') @('', '', 'Microsoft.Rest') @('Microsoft.Rest', 'Microsoft.PreIndexed.Package')
     if (-not $v -or -not $v[0] -or -not $v[1]) { return }
     if ("$($v[0])" -notmatch '^(?=.{1,64}\z)[A-Za-z0-9._](?:[A-Za-z0-9._ -]*[A-Za-z0-9._-])?\z') { Out-Console 'Quelle: Name nur aus Buchstaben, Ziffern, Punkt, Bindestrich, Unterstrich und Leerzeichen (nicht am Anfang/Ende, hoechstens 64 Zeichen).' 'Warning'; return }
-    Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $a, $t) . $eng; Add-HMAuSource $n $a $t; 'OK' } -ArgumentList @($script:AuEngine, $v[0], $v[1], $v[2]) -TimeoutSec 360 -BusyTag 'Au' -BusyText 'Quelle wird hinzugefuegt ...' -State @{ Name = $v[0] } -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $a, $t) . $eng; $nt = Add-HMAuSource $n $a $t; [pscustomobject]@{ Status = 'OK'; Notes = @($nt) } } -ArgumentList @($script:AuEngine, $v[0], $v[1], $v[2]) -TimeoutSec 360 -BusyTag 'Au' -BusyText 'Quelle wird hinzugefuegt ...' -State @{ Name = $v[0] } -OnComplete {
         param($r, $st)
-        if ("$r" -ne 'OK') { Out-Console "Quelle $($st.Name) nicht hinzugefuegt: $r" 'Error'; return }
+        $rr = Read-HMAuSourceResult $r
+        if (-not $rr.Ok) { Out-Console "Quelle $($st.Name) nicht hinzugefuegt: $($rr.Text)" 'Error'; return }
+        foreach ($nt in $rr.Notes) { Out-Console "App-Updates: $nt" 'Info' }
         $c = Get-HMAuConfig
         Save-HMAuConfig (@($c.Sources) + @($st.Name) | Select-Object -Unique) $c.Exclude
         Out-Console "Quelle $($st.Name) hinzugefuegt und fuer Standort $($c.Location) angehakt." 'Success'
@@ -621,9 +627,11 @@ function Add-HMAuSourceUi {
 function Remove-HMAuSourceUi([string]$Name) {
     if (-not $Name) { return }
     if (-not (Confirm-Action "Quelle '$Name' von diesem PC entfernen?$(if ($Name -in @('winget', 'msstore', 'winget-font')) { "`n`nACHTUNG: Standardquelle von WinGet - wiederherstellen mit: winget source reset --force" })" 'App-Updates')) { return }
-    Invoke-AsyncCommand -ScriptBlock { param($eng, $n) . $eng; Remove-HMAuSource $n; 'OK' } -ArgumentList @($script:AuEngine, $Name) -TimeoutSec 360 -BusyTag 'Au' -State @{ Name = $Name } -OnComplete {
+    Invoke-AsyncCommand -ScriptBlock { param($eng, $n) . $eng; $nt = Remove-HMAuSource $n; [pscustomobject]@{ Status = 'OK'; Notes = @($nt) } } -ArgumentList @($script:AuEngine, $Name) -TimeoutSec 360 -BusyTag 'Au' -State @{ Name = $Name } -OnComplete {
         param($r, $st)
-        if ("$r" -ne 'OK') { Out-Console "Quelle $($st.Name) nicht entfernt: $r" 'Error'; return }
+        $rr = Read-HMAuSourceResult $r
+        if (-not $rr.Ok) { Out-Console "Quelle $($st.Name) nicht entfernt: $($rr.Text)" 'Error'; return }
+        foreach ($nt in $rr.Notes) { Out-Console "App-Updates: $nt" 'Info' }
         Out-Console "Quelle $($st.Name) entfernt." 'Info'
         Start-HMAuSearch
     }

@@ -2761,6 +2761,11 @@ function Find-HMUsmt([hashtable]$Ctx) {
     return $null
 }
 
+# Version von USMT (Produktversion von scanstate.exe bzw. loadstate.exe); '' = nicht lesbar
+function Get-HMUsmtVersion([string]$Dir, [string]$Exe = 'scanstate.exe') {
+    try { return "$((Get-Item -LiteralPath (Join-Path $Dir $Exe) -ErrorAction Stop).VersionInfo.ProductVersion)".Trim() } catch { return '' }
+}
+
 function Get-HMUsmtXmlArgs([string]$XmlDir) {
     return @('MigSettingsOnly.xml', 'ExcludeUserFolders.xml', 'ExcludeSystemFolders.xml', 'ExcludeOtherDrives.xml') |
         ForEach-Object { '/i:"' + (Join-Path $XmlDir $_) + '"' }
@@ -2773,7 +2778,8 @@ function Backup-HMUsmt {
     if (-not $Ctx.Account) { return [pscustomobject]@{ Name = 'Usmt'; Status = 'Error'; Msg = 'Kontoname des Benutzers unbekannt (SID nicht aufloesbar)'; Bytes = 0; Source = '' } }
     $xmlDir = Join-Path $Ctx.ToolRoot 'Config\USMT'
     $store = Join-Path (Join-Path $Ctx.BackupPath $Module.Id) 'STORE'
-    $uver = ''; try { $uver = (Get-Item -LiteralPath (Join-Path $usmt 'scanstate.exe')).VersionInfo.ProductVersion } catch { }
+    $uver = Get-HMUsmtVersion $usmt 'scanstate.exe'
+    if ($Ctx.Manifest) { $Ctx.Manifest.UsmtVersion = $uver }
     Write-HMLog $Job "   USMT: $usmt$(if ($uver) { " (Version $uver)" })" 'Debug'
     $remoteDir = $null
     # vorhandenes USMT.MIG eines frueheren Laufs merken (wird nicht geloescht) - als Ergebnis zaehlt nur ein neu geschriebenes
@@ -3245,6 +3251,7 @@ function Start-HMBackup {
         'Betriebssystem' = $m.SourceOS; 'Modell' = $m.SourceModel; 'Seriennummer' = $m.SourceSerial; 'Domaene' = $m.SourceDomain
         'Cloud-Ordner' = $(if (@($m.SyncRoots).Count) { (@($m.SyncRoots | ForEach-Object { "$($_.Path) ($(if ($_.Mode -eq 'Local') { 'lokale Dateien gesichert' } else { 'ausgelassen' }))" }) -join '; ') } else { '' })
         'Pruefung' = $(if ($verify) { "$($verify.Sampled) Dateien per Pruefsumme verglichen, $(@($verify.HashMismatch).Count) Abweichung(en)$(if ($verify.Problem) { " - Pruefung nicht moeglich: $($verify.Problem)" })" } else { '' })
+        'USMT' = $(if ($m.UsmtVersion) { "Version $($m.UsmtVersion)" } else { '' })
         'Pruefsummen-Katalog' = $(if ($m.Catalog) { "$($m.Catalog.Files) Dateien (SHA-256) - spaeter pruefbar: Reiter Restore > Backup pruefen" } else { '' })
         'Erstellt von' = "$($m.CreatedBy) an $($m.CreatedOn)"
     }
@@ -4745,6 +4752,7 @@ function Restore-HMUsmt {
     $store = if ($Ctx.Backup.Legacy) { $Ctx.Backup.Path } else { Join-Path (Join-Path $Ctx.Backup.Path 'Usmt') 'STORE' }
     if (-not (Get-ChildItem -LiteralPath $store -Filter 'USMT.MIG' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) { return (& $mk 'Error' "Kein USMT.MIG im Backup ($store) - Windows-Einstellungen nicht uebernommen") }
     $srcAcct = if ($Ctx.Backup.Account) { $Ctx.Backup.Account } else { $null }
+    $Ctx.UsmtVersion = Get-HMUsmtVersion $usmt 'loadstate.exe'
     $xmlDir = Join-Path $Ctx.ToolRoot 'Config\USMT'
     if ($Ctx.IsRemote) {
         $rl = Join-Path (Invoke-HMTarget $Ctx { $env:windir }) "Temp\HMusmt_$([guid]::NewGuid().ToString('N'))"
@@ -5151,6 +5159,7 @@ function Start-HMRestore {
         'Quell-Betriebssystem' = $(if ($mf) { $mf.SourceOS } else { '' }); 'Durchgefuehrt von' = "$env:USERDOMAIN\$env:USERNAME an $env:COMPUTERNAME"
     }
     if ($Ctx.BrowserCase) { $facts['Browser: erkannter Fall'] = $Ctx.BrowserCase }
+    if ($Ctx.UsmtVersion) { $facts['USMT'] = "Version $($Ctx.UsmtVersion)" }
     # Liste der am Ziel fehlenden Dateien (Kontrolle nach dem Restore)
     $missList = ''
     if ($Ctx.MissingAfter -and $Ctx.MissingAfter.Count) {
