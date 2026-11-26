@@ -370,3 +370,35 @@ Describe 'Quelltext: keine verschmolzenen Zeilen' {
         $hits | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Oberflaeche: Listen in Bildlaufbereichen wachsen nicht mit' {
+    It 'jede Liste oder Tabelle in einem Bildlaufbereich hat eine feste Hoehe oder liegt in einem Raster mit der Hoehe des sichtbaren Bereichs' {
+        $falsch = @()
+        foreach ($doc in @($script:MainXml, $script:SetXml)) {
+            foreach ($sv in @($doc.SelectNodes("//*[local-name()='ScrollViewer']"))) {
+                foreach ($l in @($sv.SelectNodes(".//*[local-name()='DataGrid' or local-name()='ListBox' or local-name()='ListView']"))) {
+                    if ($l.HasAttribute('Height') -or $l.HasAttribute('MaxHeight')) { continue }
+                    $a = $l.ParentNode; $ok = $false
+                    while ($a -and -not [object]::ReferenceEquals($a, $sv)) { if ($a.GetAttribute('Height') -like '*ViewportHeight*') { $ok = $true; break }; $a = $a.ParentNode }
+                    if (-not $ok) { $falsch += (Get-UiName $l) }
+                }
+            }
+        }
+        $falsch | Should -BeNullOrEmpty
+    }
+    It 'Server-Backup: die Haken stehen mit 300 Verlaufszeilen dort, wo sie ohne Verlauf stehen, der Startknopf bleibt sichtbar' -Skip:(-not $script:StaD) {
+        Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+        $w = [System.Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $script:MainXml))
+        $w.Left = -20000; $w.Top = 0; $w.Width = 1200; $w.Height = 800; $w.ShowInTaskbar = $false; $w.ShowActivated = $false
+        try {
+            $w.Show(); $w.FindName('tabMain').SelectedItem = $w.FindName('tabServerBackup')
+            $dg = $w.FindName('dgSbHistory')
+            $mess = { param($n) $dg.ItemsSource = @(1..([Math]::Max(1, $n)) | Select-Object -First $n | ForEach-Object { [pscustomobject]@{ Datum = "$_"; Status = 'OK' } }); $w.UpdateLayout(); [System.Windows.Threading.Dispatcher]::CurrentDispatcher.Invoke([action] {}, 'Background'); $w.UpdateLayout()
+                [pscustomobject]@{ Haken = $w.FindName('chkSbHostConfig').TranslatePoint([System.Windows.Point]::new(0, 0), $w.Content).Y; Start = $w.FindName('btnSbBackup').TranslatePoint([System.Windows.Point]::new(0, 0), $w.Content).Y; Tabelle = $dg.ActualHeight } }
+            $leer = & $mess 0; $voll = & $mess 300
+            $voll.Haken | Should -Be $leer.Haken
+            $voll.Tabelle | Should -Be $leer.Tabelle
+            $voll.Start | Should -BeLessThan $w.Content.ActualHeight
+        } finally { $w.Close() }
+    }
+}

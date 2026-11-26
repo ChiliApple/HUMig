@@ -701,7 +701,8 @@
                             </WrapPanel>
                         </Border>
                         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                            <Grid MinHeight="220">
+                            <!-- so hoch wie der sichtbare Bereich (Listen und Verlauf scrollen in sich), erst unter 220 px scrollt der ganze Bereich -->
+                            <Grid MinHeight="220" Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="*"/>
