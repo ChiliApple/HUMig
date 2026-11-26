@@ -164,7 +164,7 @@ Describe 'Oberflaeche: Set-JobUi schaltet Start und Abbrechen' {
         }
         Set-JobUi $false
         foreach ($p in $script:Pairs) { "$($ui[$p[1]].ToolTip)" | Should -Be $xamlTip[$p[1]] }
-    }
+    }
 }
 
 Describe 'Oberflaeche: Werkzeuge stehen im Abschnitt ihrer Einstufung' {
