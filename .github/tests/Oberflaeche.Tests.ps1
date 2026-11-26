@@ -130,17 +130,24 @@ Describe 'Oberflaeche: Set-JobUi schaltet Start und Abbrechen' {
     }
     It 'im Lauf: Start unsichtbar mit Platz, Abbrechen sichtbar und bedienbar; im Leerlauf umgekehrt' -Skip:(-not $script:StaD) {
         $ui = $script:ui
+        $tipIdle = @{}; foreach ($p in $script:Pairs) { $tipIdle[$p[1]] = "$($ui[$p[1]].ToolTip)" }
+        $script:JobTitle = 'Backup'
         Set-JobUi $true
         foreach ($p in $script:Pairs) {
             "$($ui[$p[0]].Visibility)" | Should -Be 'Hidden'
             "$($ui[$p[1]].Visibility)" | Should -Be 'Visible'
             $ui[$p[1]].IsEnabled | Should -BeTrue
+            # jeder Reiter nennt den laufenden Vorgang (ein Klick bricht ihn ab, wie bisher)
+            "$($ui[$p[1]].Content.Text)" | Should -Be 'Backup abbrechen'
+            "$($ui[$p[1]].ToolTip)" | Should -Match "'Backup'"
         }
         Set-JobUi $false
         foreach ($p in $script:Pairs) {
             "$($ui[$p[0]].Visibility)" | Should -Be 'Visible'
             "$($ui[$p[1]].Visibility)" | Should -Be 'Collapsed'
             $ui[$p[1]].IsEnabled | Should -BeFalse
+            "$($ui[$p[1]].Content)" | Should -Be 'Abbrechen'
+            "$($ui[$p[1]].ToolTip)" | Should -Be $tipIdle[$p[1]]
         }
     }
 }

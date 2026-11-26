@@ -1687,10 +1687,23 @@ function Set-JobUi([bool]$Running) {
     foreach ($b in @($script:SbButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
     foreach ($b in @($script:AuButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
     # Start und Abbrechen teilen sich je Reiter eine Zelle: im Lauf ist der Startknopf unsichtbar (behaelt seinen Platz)
-    # und Abbrechen liegt an seiner Stelle, im Leerlauf ist Abbrechen ausgeblendet
+    # und Abbrechen liegt an seiner Stelle, im Leerlauf ist Abbrechen ausgeblendet. Es laeuft immer nur ein Vorgang, und
+    # jeder Abbrechen-Knopf bricht ihn ab (wie bisher) - deshalb steht Abbrechen in jedem Reiter, mit dem Namen des Vorgangs.
     foreach ($pair in @(@($ui.btnBackup, $ui.btnCancel), @($ui.btnRestore, $ui.btnCancelRestore), @($ui.btnSbBackup, $ui.btnSbCancel), @($ui.btnAuUpdateSel, $ui.btnAuCancel))) {
         $startBtn = $pair[0]; $cancelBtn = $pair[1]
         if (-not $cancelBtn) { continue }
+        if ($null -eq $cancelBtn.Tag) { $cancelBtn.Tag = @{ Text = $cancelBtn.Content; Tip = $cancelBtn.ToolTip } }   # Text und Tooltip aus dem XAML
+        if ($Running) {
+            $jt = "$($script:JobTitle)".Trim()
+            $tb = New-Object System.Windows.Controls.TextBlock
+            $tb.Text = $(if ($jt) { "$jt abbrechen" } else { "$($cancelBtn.Tag.Text)" }); $tb.TextTrimming = 'CharacterEllipsis'
+            $cancelBtn.Content = $tb
+            $cancelBtn.ToolTip = $(if ($jt) { "Laufenden Vorgang '$jt' abbrechen (mit Rueckfrage) - wirkt aus jedem Reiter. Bereits kopierte Daten bleiben erhalten." } else { $cancelBtn.Tag.Tip })
+            # nicht breiter als der Startknopf, dessen Platz es einnimmt (sonst verschiebt sich die Knopfreihe)
+            if ($startBtn -and $startBtn.ActualWidth -gt 0) { $cancelBtn.MaxWidth = $startBtn.ActualWidth } else { $cancelBtn.ClearValue([System.Windows.FrameworkElement]::MaxWidthProperty) }
+        } else {
+            $cancelBtn.Content = $cancelBtn.Tag.Text; $cancelBtn.ToolTip = $cancelBtn.Tag.Tip
+        }
         $cancelBtn.IsEnabled = $Running
         $cancelBtn.Visibility = $(if ($Running) { 'Visible' } else { 'Collapsed' })
         if ($startBtn) { $startBtn.Visibility = $(if ($Running) { 'Hidden' } else { 'Visible' }) }
@@ -1711,10 +1724,10 @@ function Start-EngineJob {
     $job = New-JobState
     $script:CurrentJob = $job
     $script:JobCtx = $Ctx
+    $script:JobTitle = $Title   # vor Set-JobUi: die Abbrechen-Knoepfe nennen den Vorgang
     Set-JobUi $true
     $ui.pbMain.Value = 0
     Set-Status "$Title ..." '#FFF9E2AF'
-    $script:JobTitle = $Title
     $script:JobOnFinished = $OnFinished
     $script:JobReport = $null   # Bericht des Vorgangs (fuer den Verlauf am Handy) - setzt OnFinished bei Bedarf
     try {
