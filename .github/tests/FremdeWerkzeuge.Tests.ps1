@@ -938,3 +938,27 @@ Describe 'USMT-Version: Einstellungen, Manifest, Backup- und Restore-Bericht' {
         $facts.Contains('USMT') | Should -BeFalse
     }
 }
+
+Describe 'Waechter: Liste der fremden Werkzeuge und Aufruf' {
+    BeforeAll {
+        $script:W = Get-Content -LiteralPath (Join-Path $script:Root '.github\waechter.json') -Raw | ConvertFrom-Json
+        $script:T = Get-Content -LiteralPath (Join-Path $script:Root 'Config\tools.json') -Raw | ConvertFrom-Json
+        $script:Y = [IO.File]::ReadAllText((Join-Path $script:Root '.github\workflows\waechter.yml'))
+    }
+    It 'jede Datei aus Config\tools.json hat einen Eintrag im Waechter (Versionen kommen aus tools.json)' {
+        $script:W.werkzeugpaket | Should -Be 'Config/tools.json'
+        foreach ($d in @($script:T.dateien)) { @($script:W.eintraege | Where-Object { $_.id -eq $d.id }).Count | Should -Be 1 -Because $d.id }
+        foreach ($e in @($script:W.eintraege)) { $e.neueste.art | Should -BeIn @('github', 'githubCommit', 'pypi', 'nuget', 'npm', 'endoflife') }
+    }
+    It 'PowerShell 7 wird auf dem Zweig der festen Version beobachtet (LTS)' {
+        $ps = @($script:W.eintraege | Where-Object { $_.id -eq 'powershell7' })[0]
+        $v = @($script:T.dateien | Where-Object { $_.id -eq 'powershell7' })[0].version
+        $ps.neueste.zweig | Should -Be (($v -split '\.')[0..1] -join '.')
+    }
+    It 'Aufruf des Waechters: nur lesen und Issues schreiben, kein Commit, keine Schreibrechte am Repository' {
+        $script:Y | Should -Match '(?m)^\s+contents:\s*read\s*$'
+        $script:Y | Should -Match '(?m)^\s+issues:\s*write\s*$'
+        $script:Y | Should -Not -Match 'contents:\s*write'
+        $script:Y | Should -Match 'uses: ChiliApple/HU-Amt/\.github/workflows/waechter\.yml@main'
+    }
+}
