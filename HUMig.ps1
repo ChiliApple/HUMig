@@ -478,7 +478,7 @@ function Show-HMMsgEarly([object]$Owner, [string]$Text, [string]$Title, [string]
     return "$r"
 }
 function Invoke-HMAppFolderCheck($Owner = $null) {
-    $r = [pscustomobject]@{ Msgs = (New-Object System.Collections.Generic.List[object]); CheckOff = $false }
+    $r = [pscustomobject]@{ Msgs = [System.Collections.Generic.List[object]]::new(); CheckOff = $false }
     if (-not $isAdmin -or $script:UserMode) { return $r }
     $root = $script:AppRoot
     if ($root -like '\\*') { return $r }   # Netzwerkfreigabe: Rechte verwaltet der Server
@@ -3351,7 +3351,7 @@ function Wait-HMJobEnd($Job, [int]$Seconds) {
 function Test-HMAppFolderSecurity {
     $r = Invoke-HMAppFolderCheck $script:Window
     if ($r.CheckOff) { Save-LocalSetting 'AclCheckOff' $true }
-    foreach ($x in @($r.Msgs)) { Out-Console "$($x.Text)" "$($x.Level)" }
+    foreach ($x in $r.Msgs) { Out-Console "$($x.Text)" "$($x.Level)" }
 }
 # Zuletzt gewaehlten Reiter merken (pro Windows-Benutzer, %APPDATA%\HUMig\ui-state.json - nicht im Programmordner)
 $script:UiStateFile = Join-Path $env:APPDATA 'HUMig\ui-state.json'
@@ -3483,7 +3483,7 @@ Update-BackupRootInfo
 Out-Console "HUMig v$($script:Version) - $env:USERDOMAIN\$env:USERNAME auf $env:COMPUTERNAME$(if ($script:UserMode) { ' (Benutzer-Modus)' } elseif ($isAdmin) { ' (Administrator)' } else { ' (OHNE Administratorrechte)' })" 'Header'
 foreach ($e in $script:ConfigErrors) { Out-Console "Konfigurationsfehler: $e" 'Error' }
 # Ergebnis der Ordnerrechte-Pruefung beim Start (lief vor dem Fenster)
-if ($script:AclEarly) { foreach ($x in @($script:AclEarly.Msgs)) { Out-Console "$($x.Text)" "$($x.Level)" } }
+if ($script:AclEarly) { foreach ($x in $script:AclEarly.Msgs) { Out-Console "$($x.Text)" "$($x.Level)" } }
 if ($script:ActiveSchool) { Out-Console "Standort: $($script:ActiveSchool.Name) - Backup-Ordner $(Get-BackupRoot)" 'Info' }
 if ($script:UserMode) { Set-HMUserModeUi }
 Initialize-HMServerBackupTab -IsAdmin $isAdmin

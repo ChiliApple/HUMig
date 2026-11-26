@@ -379,6 +379,18 @@ Describe 'Quelltext: keine verschmolzenen Zeilen' {
     It 'jeder Aufruf einer Projektfunktion (Verb-HM...) ist im Projekt definiert' {
         @($script:Calls | Where-Object { $_.Name -match '^[A-Z][a-z]+-HM' -and -not $script:Defs.ContainsKey($_.Name) } | ForEach-Object { "$($_.Where) $($_.Name)" }) | Should -BeNullOrEmpty
     }
+    It 'Meldungen der Ordnerrechte-Pruefung werden ohne @( ) gelesen und kommen an' {
+        $src = Get-Content -LiteralPath (Join-Path $script:Root 'HUMig.ps1') -Raw -Encoding UTF8
+        $src | Should -Not -Match '@\(\$[\w:]+\.Msgs\)'
+        # eine mit New-Object erzeugte List[object] wirft in @( ) "Die Argumenttypen stimmen nicht ueberein", auch leer
+        $src | Should -Not -MatchExactly '\bMsgs\s*=\s*\(?New-Object'
+        $r = [pscustomobject]@{ Msgs = [System.Collections.Generic.List[object]]::new() }
+        $n = 0; foreach ($x in $r.Msgs) { $n++ }; $n | Should -Be 0
+        $r.Msgs.Add([pscustomobject]@{ Text = 'a'; Level = 'Warning' }); $r.Msgs.Add([pscustomobject]@{ Text = 'b'; Level = 'Info' })
+        $got = @(); foreach ($x in $r.Msgs) { $got += "$($x.Level)|$($x.Text)" }
+        $got -join ',' | Should -Be 'Warning|a,Info|b'
+        $leer = [pscustomobject]@{ Msgs = $null }; $n = 0; foreach ($x in $leer.Msgs) { $n++ }; $n | Should -Be 0
+    }
     It 'keine Funktion beginnt direkt hinter einer schliessenden Klammer' {
         $hits = @()
         foreach ($f in $script:SrcFiles) { $i = 0; foreach ($l in (Get-Content -LiteralPath $f.FullName -Encoding UTF8)) { $i++; if ($l -match '[\}\)]function\s') { $hits += "$($f.Name):$i" } } }
