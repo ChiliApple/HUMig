@@ -13,6 +13,61 @@
 
 $script:HMAuModule = 'Microsoft.WinGet.Client'
 $script:HMAuAppInstaller = 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe'
+# Feste Versionen fremder Werkzeuge (PowerShell 7, WinGet-Modul): nur diese Fassungen werden geladen, neue kommen mit einem Release
+$script:HMAuToolsFile = Join-Path (Split-Path $PSScriptRoot -Parent) 'Config\tools.json'
+
+# ----------------------------------------------------------------------------
+# Feste Versionen (Config\tools.json) lesen und pruefen. Der Ziel-PC hat das Repo nicht: das Ergebnis geht als Payload.Tools
+# mit jedem Auftrag zum Ziel-Skript (nur Hashtables und Texte, uebersteht den Fernzugriff).
+#   Rueckgabe @{ Ok; Errors; Pwsh = @{ Version; Pakete = @{ x64|arm64 = @{ Datei; Url; Sha256 } } } | $null;
+#                WinGet = @{ Version; Name; Herausgeber } | $null }
+#   Ein ungueltiger Eintrag fehlt (= $null), der andere bleibt nutzbar.
+# ----------------------------------------------------------------------------
+function Test-HMAuFixedVersion([string]$Version) { return ("$Version" -match '^\d+\.\d+\.\d+$') }
+function Test-HMAuToolUrl([string]$Url, [string]$Version) {
+    $u = "$Url".Trim()
+    return ($u -match '^https://[^\s]+$' -and $u -notmatch '(?i)latest' -and $Version -and $u.Contains($Version))
+}
+function ConvertTo-HMAuTools($Data) {
+    $r = @{ Ok = $false; Errors = @(); Pwsh = $null; WinGet = $null }
+    $items = @()
+    if ($Data -and $Data.PSObject.Properties['dateien']) { $items = @($Data.dateien | Where-Object { $_ }) }
+    if (-not $items.Count) { $r.Errors += 'keine Eintraege (dateien)'; return $r }
+    # PowerShell 7: Version x.y.z, je Architektur Datei, Adresse mit genau dieser Version (nie "latest"), SHA256 mit 64 Zeichen
+    $ps = @($items | Where-Object { "$($_.id)" -eq 'powershell7' })[0]
+    if (-not $ps) { $r.Errors += 'powershell7: Eintrag fehlt' }
+    else {
+        $v = "$($ps.version)".Trim(); $pk = @{}; $bad = @()
+        if (-not (Test-HMAuFixedVersion $v)) { $bad += "Version '$v' ist keine feste Version (x.y.z)" }
+        foreach ($a in @('x64', 'arm64')) {
+            $p = $null; if ($ps.pakete -and $ps.pakete.PSObject.Properties[$a]) { $p = $ps.pakete.$a }
+            if (-not $p) { $bad += "Paket $a fehlt"; continue }
+            $url = "$($p.url)".Trim(); $sha = "$($p.sha256)".Trim(); $dat = "$($p.datei)".Trim()
+            if (-not (Test-HMAuToolUrl $url $v)) { $bad += "Paket ${a}: Adresse ohne feste Version oder nicht https" }
+            elseif ($sha -notmatch '^[0-9a-fA-F]{64}$') { $bad += "Paket ${a}: SHA256 ungueltig" }
+            elseif (-not $dat -or -not $url.EndsWith("/$dat")) { $bad += "Paket ${a}: Dateiname passt nicht zur Adresse" }
+            else { $pk[$a] = @{ Datei = $dat; Url = $url; Sha256 = $sha.ToUpperInvariant() } }
+        }
+        if ($bad.Count) { $r.Errors += @($bad | ForEach-Object { "powershell7: $_" }) } else { $r.Pwsh = @{ Version = $v; Pakete = $pk } }
+    }
+    # WinGet-Modul: Name, Version x.y.z, Herausgeber (Ende des Zertifikat-Subjects)
+    $wg = @($items | Where-Object { "$($_.id)" -eq 'winget-modul' })[0]
+    if (-not $wg) { $r.Errors += 'winget-modul: Eintrag fehlt' }
+    else {
+        $v = "$($wg.version)".Trim(); $n = "$($wg.name)".Trim(); $h = "$($wg.herausgeber)"
+        if (-not (Test-HMAuFixedVersion $v)) { $r.Errors += "winget-modul: Version '$v' ist keine feste Version (x.y.z)" }
+        elseif ($n -notmatch '^[A-Za-z0-9\.]+$') { $r.Errors += 'winget-modul: Name ungueltig' }
+        elseif ($h -notmatch '^, O=.+') { $r.Errors += 'winget-modul: Herausgeber ungueltig' }
+        else { $r.WinGet = @{ Version = $v; Name = $n; Herausgeber = $h } }
+    }
+    $r.Ok = (-not $r.Errors.Count)
+    return $r
+}
+function Get-HMAuTools([string]$Path = $script:HMAuToolsFile) {
+    try { $d = [System.IO.File]::ReadAllText($Path) | ConvertFrom-Json -ErrorAction Stop }
+    catch { return @{ Ok = $false; Errors = @("Config\tools.json nicht lesbar: $($_.Exception.Message)"); Pwsh = $null; WinGet = $null } }
+    return (ConvertTo-HMAuTools $d)
+}
 
 # ----------------------------------------------------------------------------
 # Reine Hilfsfunktionen (auch fuer die automatischen Tests)
@@ -435,6 +490,9 @@ function Invoke-HMAuTarget([string[]]$Computers, [string]$Op, [hashtable]$Payloa
     $pe = $txt.IndexOf("`n", $pi)
     $txt = $txt.Substring(0, $pe + 1) + $script:HMAuProtectText + "`r`n" + $txt.Substring($pe + 1)
     $sb = [scriptblock]::Create($txt)
+    # feste Versionen fremder Werkzeuge mitgeben (der Ziel-PC hat kein Config\tools.json); Kopie, der Auftrag des Aufrufers bleibt
+    $Payload = $(if ($Payload) { $Payload.Clone() } else { @{} })
+    if (-not $Payload.ContainsKey('Tools')) { $Payload.Tools = Get-HMAuTools }
     $wt = [System.IO.File]::ReadAllText($script:HMAuWorker)
     $at = [System.IO.File]::ReadAllText($script:HMAuAutoFile)
     $out = @{}

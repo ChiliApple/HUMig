@@ -26,6 +26,28 @@ $ModName = 'Microsoft.WinGet.Client'
 $PwshMsi = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
 $PwshDir = Join-Path $env:ProgramFiles 'HUMig\PowerShell7'
 function Get-TPwsh { foreach ($p in @($PwshMsi, (Join-Path $PwshDir 'pwsh.exe'))) { if (Test-Path -LiteralPath $p) { return $p } }; return '' }
+# Feste Fassung aus dem Auftrag (Payload.Tools aus Config\tools.json von HUMig) fuer diese Architektur; $null = keine gueltige Angabe
+function Select-TPwshPackage($Tools, [string]$Arch) {
+    if (-not $Tools -or -not $Tools.Pwsh -or -not $Tools.Pwsh.Pakete) { return $null }
+    $v = "$($Tools.Pwsh.Version)"
+    if ($v -notmatch '^\d+\.\d+\.\d+$') { return $null }
+    $a = if ("$Arch" -eq 'ARM64') { 'arm64' } else { 'x64' }
+    $p = $Tools.Pwsh.Pakete[$a]
+    if (-not $p) { return $null }
+    $url = "$($p.Url)"; $sha = "$($p.Sha256)"
+    if ($url -notmatch '^https://' -or $url -match '(?i)latest' -or -not $url.Contains($v) -or $sha -notmatch '^[0-9a-fA-F]{64}$') { return $null }
+    return @{ Version = $v; Datei = "$($p.Datei)"; Url = $url; Sha256 = $sha.ToUpperInvariant() }
+}
+# vorhandene Version (Text aus humig-pwsh.json oder ProductVersion von pwsh.exe, z. B. "7.4.6 SHA: ...") mit der festen vergleichen:
+# -1 aelter (auch Vorabversion derselben Nummer), 0 gleich, 1 neuer, $null nicht lesbar
+function Compare-TPwshVersion([string]$Have, [string]$Want) {
+    $m = [regex]::Match("$Have", '^\s*v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z\.]+)?')
+    if (-not $m.Success -or "$Want" -notmatch '^\d+\.\d+\.\d+$') { return $null }
+    $h = [version]('{0}.{1}.{2}' -f $m.Groups[1].Value, $m.Groups[2].Value, $m.Groups[3].Value)
+    $c = $h.CompareTo([version]$Want)
+    if ($c -eq 0 -and $m.Groups[4].Success) { return -1 }
+    return [Math]::Sign($c)
+}
 $WinPs = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $AutoTask = 'HUMig App-Updates'
 $script:TErr = @()
