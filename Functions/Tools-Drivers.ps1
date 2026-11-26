@@ -20,6 +20,8 @@
     Quellen: learn.microsoft.com - PnPUtil Command Syntax / PnPUtil Return Values / UpdateDriverForPlugAndPlayDevicesW
 #>
 
+# Hinweis zur Geraete-Sperre (Richtlinie DenyDeviceIDs gilt fuer die Hardware-ID, nicht fuer das einzelne Geraet)
+$script:DrvLockNote = 'gilt auch fuer neu angesteckte Geraete mit derselben ID (anderer USB-Anschluss, Dockingstation)'
 function Get-DrvFolder {
     $f = "$($script:Settings.DriverFolder)".Trim()
     if ($f) { return $f }
@@ -30,6 +32,31 @@ function Get-DrvFolder {
 # Gemeinsamer Code (lokal im UI UND am Ziel-PC): INF lesen, passende Geraete + aktiven Treiber ermitteln
 # ----------------------------------------------------------------------------
 $script:DrvLibText = @'
+# Versionen vergleichbar machen: fuehrendes "v" und Anhaenge weg, auf vier Stellen auffuellen ("1.02.0003" = "1.2.3" = "1.2.3.0");
+# nicht lesbar = $null
+function ConvertTo-HUVer([string]$v) {
+    # Fuehrender Teil aus Zahlen und Punkten, hoechstens vier Stellen, auf vier Stellen aufgefuellt (wie bisher: "8.0.3a" = 8.0.3.0,
+    # "1.2.3.4.5" = 1.2.3.4). Neu: fuehrendes "v" und Leerzeichen am Rand sind erlaubt. Nicht vergleichbar ($null): leer, ohne
+    # fuehrende Zahl, Datumsform mit Schraegstrich ("06/21/2006"), Stellen mit mehr als 9 Ziffern (passen nicht in eine Version).
+    $s = "$v".Trim() -replace '^[vV]\s*', ''
+    if ($s -notmatch '^\d+(\.\d+){0,3}') { return $null }
+    $m = $Matches[0]
+    if ($s.Length -gt $m.Length -and $s[$m.Length] -eq '/') { return $null }
+    $parts = @($m.Split('.'))
+    if (@($parts | Where-Object { $_.Length -gt 9 }).Count) { return $null }
+    $p = @($parts | ForEach-Object { [int]$_ })
+    while ($p.Count -lt 4) { $p += 0 }
+    try { return New-Object System.Version $p[0], $p[1], $p[2], $p[3] } catch { return $null }
+}
+# Ist $Ver eine der Versionen in $List? Vergleich ueber ConvertTo-HUVer, sonst Text. Rueckgabe $true / $false / $null (nicht vergleichbar)
+function Test-HUVerIn([string]$Ver, $List) {
+    if (-not "$Ver".Trim()) { return $null }
+    if (@($List) -contains $Ver) { return $true }
+    $a = ConvertTo-HUVer $Ver
+    $bs = @(@($List) | ForEach-Object { ConvertTo-HUVer "$_" })
+    if ($null -eq $a -or -not $bs.Count -or @($bs | Where-Object { $null -eq $_ }).Count) { return $null }
+    return [bool](@($bs | Where-Object { $_ -eq $a }).Count)
+}
 function Resolve-HUInfStr([string]$s, $str) {
     foreach ($m in [regex]::Matches("$s", '%([^%]+)%')) {
         $k = $m.Groups[1].Value.ToUpperInvariant()
@@ -196,7 +223,7 @@ function Set-HUDrvLock($Rows, [string]$Pkg) {
     $l = Get-HULocks
     foreach ($r in @($Rows | Where-Object { $_.LockId })) { $l[$r.LockId] = "$Pkg|$($r.Version)|$(Get-Date -Format 'yyyy-MM-dd')" }
     Save-HULocks $l
-    return " | vor Treiber-Updates geschuetzt (Geraete-Sperre: $($ids -join ', '))"
+    return " | vor Treiber-Updates geschuetzt (Geraete-Sperre: $($ids -join ', ')) - gilt auch fuer neu angesteckte Geraete mit dieser ID (anderer USB-Anschluss, Dockingstation)"
 }
 '@
 # Lokal verfuegbar machen (UI: Paket-Info)
@@ -305,9 +332,11 @@ function Confirm-DrvDeploy($Package, [string[]]$Hosts, [bool]$Force) {
         else { "pnputil /add-driver *.inf /subdirs /install - $(@($Package.InfFiles).Count) INF-Datei(en), Windows waehlt den besten Treiber" }
     } else { "Setup: `"$($s.Installer)`" $($s.Arguments)" }
     $hw = if ($s.OnlyMatching) { 'nur PCs mit passender Hardware' } else { 'auch ohne passende Hardware (Treiberspeicher)' }
-    $prot = if ($s.ProtectDriver) { "`n  Schutz:   danach vor Treiber-Updates schuetzen (Geraete-Sperre, nur Windows Pro/Education/Enterprise)" } else { '' }
+    $prot = if ($s.ProtectDriver) { "`n  Schutz:   danach vor Treiber-Updates schuetzen (Geraete-Sperre, nur Windows Pro/Education/Enterprise) - $script:DrvLockNote" } else { '' }
     $ziel = if ($Hosts.Count -le 5) { $Hosts -join ', ' } else { "$($Hosts.Count) PCs" }
-    return (Confirm-Action "Treiber '$($s.Name)' installieren auf: $ziel`n`n  Art:      $how`n  Hardware: $hw$prot`n  Version:  $(if ($Force) { 'auch wenn dieselbe Version schon aktiv ist' } else { 'PCs mit derselben aktiven Version werden uebersprungen' })`n  Groesse:  $(Get-DrvCopyText $Package)`n`nGeraete koennen dabei kurz ausfallen (Bildschirm flackert, Netzwerk trennt kurz).`nFortfahren?" 'Treiberverteilung')
+    $rk = ''; try { $rk = Get-SwPackageRiskText $Package (Get-DrvFolder) } catch { }
+    $rkT = if ($rk) { "`n  $rk" } else { '' }
+    return (Confirm-Action "Treiber '$($s.Name)' installieren auf: $ziel`n`n  Art:      $how`n  Hardware: $hw$prot`n  Version:  $(if ($Force) { 'auch wenn dieselbe Version schon aktiv ist' } else { 'PCs mit derselben aktiven Version werden uebersprungen' })`n  Groesse:  $(Get-DrvCopyText $Package)$rkT`n`nGeraete koennen dabei kurz ausfallen (Bildschirm flackert, Netzwerk trennt kurz).`nFortfahren?" 'Treiberverteilung')
 }
 
 # ----------------------------------------------------------------------------
@@ -315,7 +344,13 @@ function Confirm-DrvDeploy($Package, [string[]]$Hosts, [bool]$Force) {
 # ----------------------------------------------------------------------------
 $script:RS_DrvInstallBody = {
     $ErrorActionPreference = 'SilentlyContinue'
-    function ConvertTo-HUVer([string]$v) { if ("$v" -match '^\d+(\.\d+){0,3}') { $t = $Matches[0]; if ($t -notmatch '\.') { $t += '.0' }; try { return [version]$t } catch { } }; return $null }
+    # Nachkontrolle: Urteil nur aus den VERGLEICHBAREN Geraeten. 'NoneNew' = vergleichbare Geraete da, keines mit der Paketversion,
+    # kein Neustart angekuendigt; sonst 'Ok'. Nicht vergleichbare Geraete ueberdecken das nie (nur Zusatz im Text); ist KEIN Geraet
+    # vergleichbar, bleibt es wie bisher 'Ok' mit Hinweis.
+    function Get-HUDrvVerdict([int]$Comparable, [int]$WithNew, [bool]$Reboot) {
+        if ($Comparable -gt 0 -and $WithNew -eq 0 -and -not $Reboot) { return 'NoneNew' }
+        return 'Ok'
+    }
     function Format-HUState($rows) {
         $m = @($rows | Where-Object { $_.Match -and -not $_.Ext })
         if ($m.Count -eq 0) { $m = @($rows | Where-Object { $_.Match }) }
@@ -345,7 +380,7 @@ $script:RS_DrvInstallBody = {
         if ($map.Count -gt 0 -and $matched.Count -eq 0 -and [bool]$p.OnlyMatching) { return "SKIP|keine passende Hardware ($(@($parsed).Count) INF, $($map.Count) Hardware-IDs)" }
         $protect = [bool]$p.ProtectDriver
         if (-not $Force -and $main.Count -gt 0) {
-            $same = @($main | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
+            $same = @($main | Where-Object { $_.Version -and (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true })
             if ($same.Count -eq $main.Count) {
                 $ln = ''
                 if ($protect) {
@@ -458,8 +493,15 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
         if ($map.Count -eq 0) { return "OK|installiert$rbTxt ($dur)$note" }
         $after = @(Get-HUDrvState $map @() $extIds)
         $am = @($after | Where-Object { $_.Match -and -not $_.Ext })
-        $newOk = @($am | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
-        $notNew = @($am | Where-Object { -not ($_.Version -and (@($map[$_.Hw]) -contains $_.Version)) })
+        $newOk = @($am | Where-Object { $_.Version -and (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true })
+        # Paket- oder Geraeteversion nicht lesbar/vergleichbar (leere Version, Geraet ohne Treiber): nur als Zusatz nennen
+        $noCmp = @($am | Where-Object { $null -eq (Test-HUVerIn $_.Version $map[$_.Hw]) })
+        $notNew = @($am | Where-Object { (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $false })
+        $ncTxt = if ($noCmp.Count) { " | $($noCmp.Count) Geraet(e) nicht pruefbar (Version nicht vergleichbar)" } else { '' }
+        # kein passendes Geraet hat die Paketversion und kein Neustart angekuendigt: nicht als "installiert" zaehlen
+        # (vor der Sperren-Buchfuehrung: $lockRestore bleibt gesetzt, finally stellt die vorherigen Sperren wieder her)
+        $nv = Get-HUDrvVerdict ($am.Count - $noCmp.Count) $newOk.Count $reboot
+        if ($nv -eq 'NoneNew') { return "SKIP|nicht wirksam: kein passendes Geraet hat danach die Paketversion aktiv - aktiv: $(Format-HUState $after). Windows hat einen anderen Treiber behalten (oder er greift erst nach einem Neustart); $(if ("$($p.Mode)" -eq 'Inf') { "fuer diese Version 'Treiber erzwingen' einschalten" } else { 'Setup und Geraete-Manager pruefen' }) ($dur)$ncTxt$note | Log: $log" }
         $warn = if ($am.Count -gt 0 -and $notNew.Count -gt 0 -and -not $reboot) { " | ACHTUNG: $($notNew.Count) Geraet(e) noch mit anderer Version - Neustart pruefen" } else { '' }
         # Schutz setzen: nur Geraete, auf denen die Paket-Version jetzt aktiv ist
         if ($protect) {
@@ -475,7 +517,7 @@ public static extern bool UpdateDriverForPlugAndPlayDevicesW(IntPtr hwndParent, 
             $lockNote = ' | bisherige Geraete-Sperre aufgehoben (Paket ohne Schutz)'
         }
         $lockRestore = $false
-        return "OK|installiert$rbTxt ($dur) - aktiv: $(Format-HUState $after)$warn$note$lockNote"
+        return "OK|installiert$rbTxt ($dur) - aktiv: $(Format-HUState $after)$warn$note$lockNote$(if ($noCmp.Count -and $noCmp.Count -eq $am.Count) { " | Version nicht pruefbar (Paket- oder Geraeteversion nicht vergleichbar)" } else { $ncTxt })"
     } catch { return "FEHLER|$($_.Exception.Message -replace '[\r\n|]+', ' ')" }
     finally {
         # Installation fehlgeschlagen/abgebrochen: vorherige Geraete-Sperren wiederherstellen
@@ -510,11 +552,13 @@ $script:RS_DrvCheckBody = {
         $st = 'passt - wuerde installiert'
         if (-not $r.Match) { $st = 'passt nicht' }
         elseif ($r.Ext) { $st = 'Erweiterung - wird mitinstalliert (Version am Geraet nicht pruefbar)' }
-        elseif ($r.Version -and (@($map[$r.Hw]) -contains $r.Version)) { $st = 'gleiche Version aktiv' }
+        elseif ($r.Version -and (Test-HUVerIn $r.Version $map[$r.Hw]) -eq $true) { $st = 'gleiche Version aktiv' }
         else {
-            $cv = $null; try { $cv = [version]$r.Version } catch { }
-            $pv = @(foreach ($v in @($map[$r.Hw])) { try { [version]$v } catch { } })
+            # gleiche Vergleichsfunktion wie bei der Installation (ConvertTo-HUVer), sonst widersprechen sich Anzeige und Ergebnis
+            $cv = ConvertTo-HUVer "$($r.Version)"
+            $pv = @(foreach ($v in @($map[$r.Hw])) { $x = ConvertTo-HUVer "$v"; if ($x) { $x } })
             if ($cv -and $pv.Count -and @($pv | Where-Object { $_ -ge $cv }).Count -eq 0) { $st = 'passt - NEUERER Treiber aktiv (nur mit Erzwingen)' }
+            elseif ($r.Version -and $null -eq (Test-HUVerIn $r.Version $map[$r.Hw])) { $st = 'passt - wuerde installiert (Version nicht vergleichbar)' }
         }
         if ($r.Err) { $st += " (Geraetefehler $($r.Err))" }
         'ROW|' + ((@($r.Name, $st, $r.Version, $r.PkgVer, $lk, $r.Provider, $r.Date, $r.Inf, $(if ($r.Hw) { $r.Hw } else { $r.FirstHw }), $r.Id) | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|')
@@ -619,7 +663,7 @@ $script:RS_DrvPreBody = {
         $main = @($matched | Where-Object { -not $_.Ext })
         if ($map.Count -gt 0 -and $matched.Count -eq 0 -and [bool]$p.OnlyMatching) { return "SKIP|keine passende Hardware (vor der Kopie geprueft)" }
         if (-not $Force -and $main.Count -gt 0) {
-            $same = @($main | Where-Object { $_.Version -and (@($map[$_.Hw]) -contains $_.Version) })
+            $same = @($main | Where-Object { $_.Version -and (Test-HUVerIn $_.Version $map[$_.Hw]) -eq $true })
             if ($same.Count -eq $main.Count) {
                 $ln = ''
                 if ([bool]$p.ProtectDriver) {
@@ -845,7 +889,7 @@ function Update-DrvWindowList([string]$SelectId = '') {
     }
     $dw.Loading = $false
     $dw.LblFolder.Text = "Ordner: $(Get-DrvFolder)   ($($dw.Pkgs.Count) Pakete, * = noch nicht gespeichert)"
-    $dw.LblTarget.Text = "Gewaehlter Computer: $(Get-TargetComputer)"
+    Set-SwTargetLabel $dw.LblTarget
     $idx = 0
     if ($SelectId) { for ($i = 0; $i -lt $dw.Pkgs.Count; $i++) { if ($dw.Pkgs[$i].Id -eq $SelectId) { $idx = $i } } }
     if ($dw.Pkgs.Count -gt 0) { $dw.Lst.SelectedIndex = -1; $dw.Lst.SelectedIndex = $idx } else { Show-DrvPackageDetails $null }
@@ -917,6 +961,7 @@ function Show-DrvPackageDetails($p) {
         $lines.Add("     'Treiber erzwingen' installiert diese Version trotzdem (z.B. aeltere, besser funktionierende Version).")
         $lines.Add("     'Vor Treiber-Updates schuetzen' sperrt danach die Geraete (Windows Pro/Education/Enterprise) -")
         $lines.Add('     Windows Update und andere Treiber-Installationen aendern den Treiber dann nicht mehr.')
+        $lines.Add('     Die Sperre gilt fuer die Hardware-ID, also auch fuer dasselbe Geraet an anderem Anschluss oder Dock.')
         $dw.TxtInfo.Text = ($lines -join "`r`n")
     } finally { $dw.Loading = $false }
 }
@@ -945,7 +990,7 @@ function Save-DrvForm {
         if ("$((Show-HMDialogBox -Owner $dw.Win -Text "Treiber erzwingen: Diese Version wird auf passende Geraete installiert, auch wenn Windows einen neueren oder besser bewerteten Treiber hat.`n`nNur verwenden, wenn genau diese Version gewuenscht ist. Weiter?" -Title 'Treiberverteilung' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return $null }
     }
     if ($set.ProtectDriver -and -not [bool]$p.Settings.ProtectDriver) {
-        if ("$((Show-HMDialogBox -Owner $dw.Win -Text "Vor Treiber-Updates schuetzen:`n`nNach der Installation setzt HUMig am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die betroffenen Geraete. Windows Update (und jede andere Treiber-Installation) aendert den Treiber dieser Geraete dann nicht mehr.`n`n- Nur Windows Pro, Education und Enterprise (bei Home wird nichts gesetzt).`n- Eine GPO/Intune-Richtlinie zur Geraeteinstallation ueberschreibt die lokale Einstellung.`n- Neue Treiber aus HUMig: die Sperre wird dafuer automatisch kurz aufgehoben.`n- Aufheben: 'Sperren am PC ...'.`n`nWeiter?" -Title 'Treiberverteilung' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return $null }
+        if ("$((Show-HMDialogBox -Owner $dw.Win -Text "Vor Treiber-Updates schuetzen:`n`nNach der Installation setzt HUMig am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die betroffenen Geraete. Windows Update (und jede andere Treiber-Installation) aendert den Treiber dieser Geraete dann nicht mehr.`n`n- Nur Windows Pro, Education und Enterprise (bei Home wird nichts gesetzt).`n- Eine GPO/Intune-Richtlinie zur Geraeteinstallation ueberschreibt die lokale Einstellung.`n- Die Sperre gilt fuer die Hardware-ID: dasselbe Geraet an einem anderen USB-Anschluss oder an einer Dockingstation (neue Geraete-Instanz) wird ebenfalls nicht installiert, bis die Sperre aufgehoben ist.`n- Neue Treiber aus HUMig: die Sperre wird dafuer automatisch kurz aufgehoben.`n- Aufheben: 'Sperren am PC ...'.`n`nWeiter?" -Title 'Treiberverteilung' -Mode 'YesNo' -Icon 'Question'))" -ne 'Yes') { return $null }
     }
     if (-not (Save-DrvSettings $p $set)) { return $null }
     Out-Console "Treiberverteilung: Einstellungen fuer '$($set.Name)' gespeichert" 'Success'
@@ -954,6 +999,25 @@ function Save-DrvForm {
     return ($dw.Pkgs | Where-Object { $_.Id -eq $id } | Select-Object -First 1)
 }
 
+# Aktionen fuer den gewaehlten Computer (Ziel nach der Regel der PC-Werkzeuge, umgeschaltet erst nach der Bestaetigung,
+# siehe Invoke-SwOnTarget in Tools-Software.ps1)
+function Invoke-DrvCheckChosen {
+    $dw = $script:DrvUi; if (-not $dw) { return }
+    $i = $dw.Lst.SelectedIndex
+    if ($i -lt 0 -or $i -ge @($dw.Pkgs).Count) { return }
+    $pkg = @($dw.Pkgs)[$i]
+    [void](Invoke-SwOnTarget 'Treiber' $dw.LblTarget $null { param($pc) Start-DriverCheck -Package $pkg -Computer $pc })
+}
+function Invoke-DrvLocksChosen {
+    $dw = $script:DrvUi
+    [void](Invoke-SwOnTarget 'Treiber' $(if ($dw) { $dw.LblTarget } else { $null }) $null { param($pc) Show-DriverLocks -Computer $pc })
+}
+function Invoke-DrvDeployChosen {
+    $dw = $script:DrvUi; if (-not $dw) { return }
+    $p = Save-DrvForm; if (-not $p) { return }
+    $force = [bool]$dw.ChkForce.IsChecked
+    [void](Invoke-SwOnTarget 'Treiber' $dw.LblTarget { param($pc) Confirm-DrvDeploy -Package $p -Hosts @($pc) -Force $force } { param($pc) Start-DriverDeploy -Hosts @($pc) -Package $p -Force $force })
+}
 function Show-DriverWindow {
     if ($script:DrvUi -and $script:DrvUi.Win -and $script:DrvUi.Win.IsVisible) { [void]$script:DrvUi.Win.Activate(); Update-DrvWindowList; return }
     $dir = Get-DrvFolder
@@ -1006,7 +1070,7 @@ function Show-DriverWindow {
           <TextBlock Grid.Row="5" Text="Timeout (Minuten):"/> <TextBox x:Name="txtTimeout" Grid.Row="5" Grid.Column="1" Width="80" HorizontalAlignment="Left"/>
           <TextBlock Grid.Row="6" Text="Hardware:"/>          <CheckBox x:Name="chkMatch" Grid.Row="6" Grid.Column="1" Content="nur installieren, wenn passende Hardware vorhanden ist (sonst: in den Treiberspeicher aufnehmen)"/>
           <TextBlock Grid.Row="7" Text="Erzwingen:"/>         <CheckBox x:Name="chkForceDrv" Grid.Row="7" Grid.Column="1" Content="Treiber erzwingen - auch wenn Windows einen neueren/besser bewerteten Treiber hat (nur INF)"/>
-          <TextBlock Grid.Row="8" Text="Schutz:"/>            <CheckBox x:Name="chkProtect" Grid.Row="8" Grid.Column="1" Content="nach der Installation vor Treiber-Updates schuetzen (Geraete-Sperre - nur Windows Pro/Education/Enterprise)" ToolTip="Setzt am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die Geraete mit diesem Treiber. Windows Update ersetzt den Treiber dann nicht mehr. HUMig hebt die Sperre fuer eigene spaetere Installationen selbst auf."/>
+          <TextBlock Grid.Row="8" Text="Schutz:"/>            <CheckBox x:Name="chkProtect" Grid.Row="8" Grid.Column="1" Content="nach der Installation vor Treiber-Updates schuetzen (Geraete-Sperre - nur Windows Pro/Education/Enterprise)" ToolTip="Setzt am PC die Richtlinie 'Installation von Geraeten verhindern, die diesen Geraete-IDs entsprechen' fuer die Geraete mit diesem Treiber. Windows Update ersetzt den Treiber dann nicht mehr. HUMig hebt die Sperre fuer eigene spaetere Installationen selbst auf. Gilt auch fuer neu angesteckte Geraete mit derselben ID (anderer USB-Anschluss, Dockingstation): sie werden nicht installiert, bis die Sperre aufgehoben ist."/>
           <TextBlock Grid.Row="9" Text="Notiz:"/>             <TextBox x:Name="txtNote" Grid.Row="9" Grid.Column="1"/>
         </Grid>
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,6,0,6">
@@ -1099,21 +1163,10 @@ function Show-DriverWindow {
     $w.FindName('btnOpen').Add_Click({ $d = Get-DrvFolder; if (Test-Path -LiteralPath $d) { Start-Process explorer.exe -ArgumentList "`"$d`"" } })
     $w.FindName('btnReload').Add_Click({ $script:DrvInfCache = @{}; $script:SwInfoCache = @{}; $dw = $script:DrvUi; $sel = if ($dw.Lst.SelectedIndex -ge 0) { $dw.Pkgs[$dw.Lst.SelectedIndex].Id } else { '' }; Update-DrvWindowList $sel })
     $w.FindName('btnSave').Add_Click({ [void](Save-DrvForm) })
-    $w.FindName('btnCheck').Add_Click({
-        $dw = $script:DrvUi; $i = $dw.Lst.SelectedIndex
-        if ($i -lt 0 -or $i -ge $dw.Pkgs.Count) { return }
-        Start-DriverCheck -Package $dw.Pkgs[$i] -Computer (Get-TargetComputer)
-    })
-    $w.FindName('btnLocks').Add_Click({ Show-DriverLocks -Computer (Get-TargetComputer) })
-    $w.Add_Activated({ if ($script:DrvUi) { $script:DrvUi.LblTarget.Text = "Gewaehlter Computer: $(Get-TargetComputer)" } })
-    $w.FindName('btnClient').Add_Click({
-        $dw = $script:DrvUi
-        $h = Get-TargetComputer
-        $p = Save-DrvForm; if (-not $p) { return }
-        $force = [bool]$dw.ChkForce.IsChecked
-        if (-not (Confirm-DrvDeploy -Package $p -Hosts @($h) -Force $force)) { return }
-        Start-DriverDeploy -Hosts @($h) -Package $p -Force $force
-    })
+    $w.FindName('btnCheck').Add_Click({ Invoke-DrvCheckChosen })
+    $w.FindName('btnLocks').Add_Click({ Invoke-DrvLocksChosen })
+    $w.Add_Activated({ if ($script:DrvUi) { Set-SwTargetLabel $script:DrvUi.LblTarget } })
+    $w.FindName('btnClient').Add_Click({ Invoke-DrvDeployChosen })
     $w.FindName('btnMultiSel').Add_Click({
         $dw = $script:DrvUi
         $p = Save-DrvForm; if (-not $p) { return }

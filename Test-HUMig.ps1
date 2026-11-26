@@ -243,7 +243,7 @@ T 'Werkzeug: Inventar lokal (v0.0.5)' { $r = & $script:RS_Inventory $false; if (
 # 4d. Handy-Fernbedienung (v2.0.136) - nur lesend, nichts wird eingerichtet
 . (Join-Path $root 'Functions\Remote-Core.ps1')
 . (Join-Path $root 'Functions\Remote-Web.ps1')
-T 'Fernbedienung: QR-Code und Webseite' { $q = ConvertTo-HMQrMatrix 'https://10.1.1.5:8443/#c=123456'; $f = Get-HMRemoteWebFiles -Version '1' -Pc 'X'; if ($q.Size -ne 29 -or -not $f['/index.html']) { throw 'falsch' }; "QR Version $($q.Version), $($f.Count) Dateien" }
+T 'Fernbedienung: QR-Code und Webseite' { $q = ConvertTo-HMQrMatrix 'https://192.0.2.5:843/#c=123456'; $f = Get-HMRemoteWebFiles -Version '1' -Pc 'X'; if ($q.Size -ne 29 -or -not $f['/index.html']) { throw 'falsch' }; "QR Version $($q.Version), $($f.Count) Dateien" }
 T 'Fernbedienung: Adressen und Port' { $ips = @(Get-HMRemoteIPv4List); $p = @($ips | Where-Object { $_.Private }); "$($ips.Count) IPv4-Adresse(n), $($p.Count) privat$(if ($p.Count) { " (z.B. $($p[0].IP), Netzwerkprofil $(Get-HMRemoteNetCategory $p[0].Index))" }), Port 8443 $(if (Test-HMRemotePortFree 8443) { 'frei' } else { 'belegt' })" }
 T 'Fernbedienung: Zertifikat und Bindung (Bestand)' { $ca = Get-HMRemoteCa; $b = Get-HMRemoteBinding 8443; "CA $(if ($ca) { "vorhanden (bis $($ca.NotAfter.ToString('yyyy-MM-dd')))" } else { 'noch nicht angelegt' }), Bindung 8443: $($b.State)" }
 
@@ -274,12 +274,22 @@ T 'App-Updates: Ausnahmen und WinGet-Status (v2.0.58)' {
     if ($s.Ready) { "WinGet $($s.WinGet), Modul $($s.Module)" } else { "nicht eingerichtet: $($s.Problem)" }
 }
 T 'App-Updates: Ziel-PC-Skript lokal (Zeitplan lesen, v2.0.64)' {
-    . (Join-Path $root 'Functions\AppUpdates-Engine.ps1')
-    $lines = New-Object System.Collections.ArrayList
-    $r = Invoke-HMAuTarget @($env:COMPUTERNAME) 'ScheduleGet' @{} $null { param($pc, $l) [void]$lines.Add($l) }
-    $v = $r["$env:COMPUTERNAME".ToUpper()]
-    if (-not $v -or -not $v.PSObject.Properties['Exists']) { throw "kein Ergebnis: $(@($v.Errors) -join '; ')" }
-    if ($v.Exists) { "Zeitplan vorhanden: $($v.When), naechster Lauf $($v.Next)" } else { 'kein Zeitplan (Ziel-Skript laeuft)' }
+    # Nur pruefen, nichts am PC aendern: das Ziel-Skript arbeitet hier in einem Ersatzordner (statt ProgramData\HUMig\AppUpdates),
+    # ohne Zeitplan-Skript (keine Aktualisierung der installierten auto.ps1) und ohne Absicherung von ProgramData\HUMig
+    $txt = [System.IO.File]::ReadAllText((Join-Path $root 'Functions\AppUpdates-Target.ps1')) -replace '(?m)^#Requires.*$', ''
+    $tmpBase = Join-Path $env:TEMP ("HUMig_Selbsttest_AU_{0}" -f [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $baseLine = "`$Base = Join-Path `$env:ProgramData 'HUMig\AppUpdates'"
+    $protLine = 'if (Get-Command Protect-HMDataDir -ErrorAction SilentlyContinue) {'
+    if (-not $txt.Contains($baseLine) -or -not $txt.Contains($protLine)) { throw 'Ziel-Skript: Zeile fuer den Ablageordner bzw. die Absicherung nicht gefunden - Selbsttest anpassen' }
+    $txt = $txt.Replace($baseLine, "`$Base = '$($tmpBase -replace "'", "''")'").Replace($protLine, 'if ($false) {')
+    try {
+        $out = @(& ([scriptblock]::Create($txt)) 'ScheduleGet' @{} '' '')
+        $rr = @($out | Where-Object { $_ -and $_.PSObject.Properties['HMAu'] -and "$($_.HMAu)" -eq 'R' })[0]
+        if (-not $rr) { throw "kein Ergebnis vom Ziel-Skript: $(@($out | ForEach-Object { "$($_.V)" }) -join '; ')" }
+        $v = "$($rr.J)" | ConvertFrom-Json
+        if (-not $v.PSObject.Properties['Exists']) { throw "kein Ergebnis: $(@($v.Errors) -join '; ')" }
+        if ($v.Exists) { "Zeitplan vorhanden: $($v.When), naechster Lauf $($v.Next) (nur gelesen)" } else { 'kein Zeitplan (Ziel-Skript laeuft, nur gelesen)' }
+    } finally { Remove-Item -LiteralPath $tmpBase -Recurse -Force -ErrorAction SilentlyContinue }
 }
 T 'Zeitplan: Auswerfen lehnt Systemplatte ab (v2.0.57)' {
     $d = Get-HMDriveDisk $env:SystemDrive
@@ -332,6 +342,12 @@ T 'Starter HUMig.exe erzeugen (TEMP)' {
 $out.Add('')
 $out.Add($(if ($fail) { "ERGEBNIS: $fail FEHLER" } else { 'ERGEBNIS: alles OK' }))
 $outFile = Join-Path $root 'Test-HUMig.result.txt'
-$out | Set-Content -LiteralPath $outFile -Encoding UTF8
+# in einem nur fuer Administratoren beschreibbaren Programmordner (Selbsttest ohne Adminrechte): Ausweichort Temp statt Abbruch
+try { $out | Set-Content -LiteralPath $outFile -Encoding UTF8 -ErrorAction Stop }
+catch {
+    $outFile = Join-Path $env:TEMP 'Test-HUMig.result.txt'
+    $out.Add("Hinweis: Ergebnis nicht im Programmordner speicherbar ($($_.Exception.Message)) - abgelegt in $outFile")
+    try { $out | Set-Content -LiteralPath $outFile -Encoding UTF8 -ErrorAction Stop } catch { $out.Add("Hinweis: Ergebnis auch in $outFile nicht speicherbar") }
+}
 $out | ForEach-Object { if ($_ -like 'FAIL*') { Write-Host $_ -ForegroundColor Red } elseif ($_ -like 'OK*') { Write-Host $_ -ForegroundColor Green } else { Write-Host $_ } }
 exit $fail
