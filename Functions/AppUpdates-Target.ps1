@@ -45,6 +45,8 @@ if ($Payload -and $Payload.ByPc) {
 function Out-L([string]$t) { [pscustomobject]@{ HMAu = 'L'; PC = $PC; V = $t } }
 # Ergebnis als JSON (Fernzugriff gibt verschachtelte Objekte sonst nur bis Tiefe 1 zurueck)
 function Out-R($v) { [pscustomobject]@{ HMAu = 'R'; PC = $PC; J = (ConvertTo-Json -InputObject $v -Depth 8 -Compress) } }
+# Zeitlimit je Programm fuer Laeufe als SYSTEM (Minuten); haengt ein Installer laenger, wird die Aufgabe beendet und mit dem Rest weitergemacht
+$SysItemMin = 120; $simTmp = 0; if ([int]::TryParse("$($Payload.ItemTimeoutMin)", [ref]$simTmp) -and $simTmp -gt 0) { $SysItemMin = $simTmp }
 function Get-TLoggedOnSids {
     @(foreach ($p in @(Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue)) {
             try { "$((Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid -ErrorAction Stop).Sid)" } catch { }
@@ -481,8 +483,22 @@ try {
             $usr = @($all | Where-Object { $Op -ne 'Install' -and "$($_.Scope)" -eq 'User' })
             if ($mach.Count) {
                 Out-L "$($mach.Count) Programm(e) fuer alle Benutzer (als SYSTEM) ..."
-                Invoke-TTask 'SYSTEM' @{ Mode = $Op; Cli = $true; Items = @($mach | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) } $false 10800
-                if ($script:TRes) { $res += @($script:TRes.Results) }
+                # je Programm hoechstens $SysItemMin Minuten; haengt ein Installer, Aufgabe beenden und den Rest in einer neuen Aufgabe
+                $todoM = @($mach)
+                while ($todoM.Count) {
+                    Invoke-TTask 'SYSTEM' @{ Mode = $Op; Cli = $true; Items = @($todoM | ForEach-Object { @{ Id = "$($_.Id)"; Source = "$($_.Source)"; Unknown = [bool]$_.Unknown } }) } $false 10800 $SysItemMin
+                    if ($script:TRes) { $res += @($script:TRes.Results); break }
+                    $gotM = @()
+                    foreach ($d in @($script:TDone)) {
+                        $res += [pscustomobject]@{ Id = "$($d[1])"; Status = "$($d[2])"; Code = $(if ($d.Count -gt 3) { $d[3] } else { 0 }); InstallerErrorCode = $(if ($d.Count -gt 4) { $d[4] } else { 0 }); ExtendedErrorCode = $(if ($d.Count -gt 5) { $d[5] } else { 0 }); Reboot = ($d.Count -gt 6 -and $d[6] -eq 'True'); Text = '' }
+                        $gotM += "$($d[1])"
+                    }
+                    if (-not $script:TTimedOut) { break }
+                    $res += [pscustomobject]@{ Id = "$($script:TTimedOut)"; Status = 'Exception'; Code = 0; InstallerErrorCode = 0; ExtendedErrorCode = 0; Reboot = $false; Text = "abgebrochen nach $SysItemMin min (Zeitlimit je Programm) - der Installer hing; am PC pruefen und erneut aktualisieren" }
+                    Out-L "$($script:TTimedOut): nach $SysItemMin min abgebrochen (Zeitlimit je Programm) - weiter mit den uebrigen"
+                    $gotM += "$($script:TTimedOut)"
+                    $todoM = @($todoM | Where-Object { $gotM -notcontains "$($_.Id)" })
+                }
             }
             $usid = "$($My.UserSid)"
             $fromSys = @()   # Pakete, die als SYSTEM nicht gefunden wurden und ins Benutzerkonto wanderten (kein zweiter SYSTEM-Versuch, B60)
@@ -574,7 +590,7 @@ try {
         }
         'ScheduleGet' {
             $t = @(Get-ScheduledTask -TaskName $AutoTask -ErrorAction SilentlyContinue)[0]
-            $o = [ordered]@{ Exists = [bool]$t; When = ''; Next = ''; Last = ''; LastResult = ''; Summary = ''; Running = $false; Progress = ''; Log = @(); History = @(); Errors = @() }
+            $o = [ordered]@{ Exists = [bool]$t; When = ''; Next = ''; Last = ''; LastResult = ''; LastErr = $null; Summary = ''; Running = $false; Progress = ''; Log = @(); History = @(); Errors = @() }
             if ($t) { $o.Running = ("$($t.State)" -eq 'Running') }
             if ($t) {
                 $tr = @($t.Triggers)[0]
@@ -585,7 +601,7 @@ try {
                 try { $i = Get-ScheduledTaskInfo -TaskPath $t.TaskPath -TaskName $t.TaskName; if ($i.NextRunTime) { $o.Next = $i.NextRunTime.ToString('dd.MM.yyyy HH:mm') }; if ($i.LastRunTime -and $i.LastRunTime.Year -gt 2000) { $o.Last = $i.LastRunTime.ToString('dd.MM.yyyy HH:mm') }; $o.LastResult = "$($i.LastTaskResult)" } catch { }
             }
             $lf = Join-Path $Base 'auto\last.json'
-            if (Test-Path -LiteralPath $lf) { try { $l = Get-Content -LiteralPath $lf -Raw -Encoding UTF8 | ConvertFrom-Json; $o.Summary = "$($l.Date): $($l.Ok) aktualisiert, $($l.Err) Fehler, $($l.Excluded) Ausnahme(n)$(if ([int]"0$($l.Skipped)") { ", $($l.Skipped) uebersprungen (lief)" })" } catch { } }
+            if (Test-Path -LiteralPath $lf) { try { $l = Get-Content -LiteralPath $lf -Raw -Encoding UTF8 | ConvertFrom-Json; $o.LastErr = [int]"0$($l.Err)"; $o.Summary = "$($l.Date): $($l.Ok) aktualisiert, $($l.Err) Fehler, $($l.Excluded) Ausnahme(n)$(if ([int]"0$($l.Skipped)") { ", $($l.Skipped) uebersprungen (lief)" })" } catch { } }
             $pf = Join-Path $Base 'auto\progress.json'
             if ($o.Running -and (Test-Path -LiteralPath $pf)) { try { $g = Get-Content -LiteralPath $pf -Raw -Encoding UTF8 | ConvertFrom-Json; $o.Progress = "$($g.Done)/$($g.Total)$(if ($g.Current) { ": $($g.Current)" }) ($($g.Ok) ok, $($g.Err) Fehler)" } catch { } }
             $lg = Join-Path $Base 'auto\log.txt'

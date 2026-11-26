@@ -17,12 +17,127 @@
     Zielmaschine: der/die gewaehlten PCs.
 #>
 
+# ----------------------------------------------------------------------------
+# Ziel der Fenster Softwareverteilung und Treiber (ohne Benutzerbezug). Beim Oeffnen und Aktivieren wird nur angezeigt; steht im
+# Feld Computer ein anderer PC, kommt der Zusatz "im Feld: Y". Erst eine Aktion fuer den gewaehlten Computer schaltet nach der
+# Regel der PC-Werkzeuge um (Use-HMPcTarget in HUMig.ps1: still auf den PC im Feld, waehrend Backup/Restore Rueckfrage).
+# ----------------------------------------------------------------------------
+# Anzeige als reine Funktion: Zustand aus Get-HMTargetState (Kind, Field, Computer) -> Haupttext und Zusatz ('' = keiner)
+function Get-SwTargetDisplay($State, [string]$Fallback) {
+    $c = if ($State -and "$($State.Computer)".Trim()) { "$($State.Computer)".Trim() } else { "$Fallback".Trim() }
+    $hint = if ($State -and "$($State.Kind)" -eq 'Differs') { "im Feld: $($State.Field)" } else { '' }
+    return [pscustomobject]@{ Main = "Gewaehlter Computer: $(if ($c) { $c } else { '(keiner)' })"; Hint = $hint; Computer = $c; Field = $(if ($State) { "$($State.Field)" } else { '' }) }
+}
+# aktueller Zustand (ohne HUMig.ps1, z. B. in Tests: nur das Ziel)
+function Get-SwTargetDisplayNow {
+    $st = $null
+    if (Get-Command Get-HMTargetState -ErrorAction SilentlyContinue) { try { $st = Get-HMTargetState (Get-HMFieldComputer) $script:Target } catch { $st = $null } }
+    return (Get-SwTargetDisplay $st "$(Get-TargetComputer)")
+}
+# Anzeige in den TextBlock "lblTarget" eines Fensters schreiben (Zusatz in Hinweisfarbe) - schaltet nichts um
+function Set-SwTargetLabel($Label) {
+    if (-not $Label) { return }
+    $d = Get-SwTargetDisplayNow
+    $Label.Inlines.Clear()
+    [void]$Label.Inlines.Add((New-Object System.Windows.Documents.Run $d.Main))
+    if ($d.Hint) { $r = New-Object System.Windows.Documents.Run ("   " + $d.Hint); try { $r.Foreground = New-Brush '#FFF9E2AF' } catch { }; [void]$Label.Inlines.Add($r) }
+}
+# Vor einer Aktion fuer den gewaehlten Computer: Regel der PC-Werkzeuge anwenden, danach den Ziel-PC liefern ('' = abgelehnt)
+function Resolve-SwActionTarget([string]$Action, $Label = $null) {
+    if (Get-Command Use-HMPcTarget -ErrorAction SilentlyContinue) { if (-not (Use-HMPcTarget $Action)) { return '' } }
+    if ($Label) { Set-SwTargetLabel $Label }
+    return "$(Get-TargetComputer)".Trim()
+}
+# Entscheidung wie bei den PC-Werkzeugen (Get-HMToolDecision 'Pc' in HUMig.ps1): gleicher PC = 'Run', anderer PC im Feld =
+# 'Switch' (still umschalten), waehrend Backup/Restore = 'Ask' (Rueckfrage)
+function Get-SwTargetDecision($State, [bool]$BackupRestoreRunning) {
+    if (-not $State -or "$($State.Kind)" -ne 'Differs') { return 'Run' }
+    if (-not $BackupRestoreRunning) { return 'Switch' }
+    return 'Ask'
+}
+# Welcher PC waere es? Nur ermitteln, nichts umschalten. Rueckgabe Decision und Computer
+function Get-SwPendingTarget {
+    $cur = "$(Get-TargetComputer)".Trim()
+    if ($script:UserMode -or -not (Get-Command Get-HMTargetState -ErrorAction SilentlyContinue)) { return [pscustomobject]@{ Decision = 'Run'; Computer = $cur } }
+    $st = Get-HMTargetState (Get-HMFieldComputer) $script:Target
+    $busy = $false; if (Get-Command Test-HMBackupRestoreRunning -ErrorAction SilentlyContinue) { $busy = [bool](Test-HMBackupRestoreRunning) }
+    $d = Get-SwTargetDecision $st $busy
+    return [pscustomobject]@{ Decision = $d; Computer = $(if ($d -eq 'Switch') { "$($st.Field)".Trim() } else { $cur }) }
+}
+# Aktion fuer den gewaehlten Computer: Rueckfrage waehrend Backup/Restore zuerst; dann die eigene Bestaetigung ($Confirm, mit dem
+# PC, auf dem es laufen wird); erst nach dem Ja wird auf den PC im Feld umgeschaltet und $Run mit diesem PC ausgefuehrt.
+# Abgelehnt: nichts umgeschaltet, nichts ausgefuehrt. Rueckgabe $true = ausgefuehrt
+function Invoke-SwOnTarget([string]$Action, $Label, [scriptblock]$Confirm, [scriptblock]$Run) {
+    $pend = Get-SwPendingTarget
+    $pc = $pend.Computer
+    if ($pend.Decision -eq 'Ask') { $pc = Resolve-SwActionTarget $Action $Label; if (-not $pc) { return $false } }
+    if (-not $pc) { return $false }
+    if ($Confirm -and -not (& $Confirm $pc)) { return $false }
+    if ($pend.Decision -eq 'Switch') { $pc = Resolve-SwActionTarget $Action $Label; if (-not $pc) { return $false } }
+    & $Run $pc
+    return $true
+}
+
 function Get-SwFolder {
     $f = "$($script:Settings.SoftwareFolder)".Trim()
     if ($f) { return $f }
     return (Join-Path $script:AppRoot 'Softwareverteilung')
 }
 
+# ----------------------------------------------------------------------------
+# Rechte der Paketablage: was dort liegt (Installer, Parameter, Deinstallations-Befehl), laeuft als Administrator auf
+# allen Ziel-PCs. Darf eine breite Gruppe (Jeder, Benutzer, Authentifizierte Benutzer, Domaenen-Benutzer, Gaeste,
+# Interaktiv, Anonym) dort schreiben, wird gewarnt - nichts wird verweigert.
+# ----------------------------------------------------------------------------
+# Breite Gruppen mit Schreibrecht in einer ACL (Allow-Regeln): Rueckgabe Liste der Namen (leer = keine)
+function Get-SwBroadWriters($Acl) {
+    $broad = @{ 'S-1-1-0' = 'Jeder'; 'S-1-5-11' = 'Authentifizierte Benutzer'; 'S-1-5-32-545' = 'Benutzer'; 'S-1-5-4' = 'Interaktiv'; 'S-1-5-32-546' = 'Gaeste'; 'S-1-5-7' = 'Anonym' }
+    # WriteData 0x2, AppendData 0x4, DeleteSubdirectoriesAndFiles 0x40, Delete 0x10000, ChangePermissions 0x40000,
+    # TakeOwnership 0x80000, GENERIC_ALL 0x10000000, GENERIC_WRITE 0x40000000
+    $wr = [int64](0x2 -bor 0x4 -bor 0x40 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000)
+    $hit = @()
+    foreach ($r in @($Acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
+        if ("$($r.AccessControlType)" -ne 'Allow') { continue }
+        if (([int64]$r.FileSystemRights -band $wr) -eq 0) { continue }
+        $sid = "$($r.IdentityReference.Value)"
+        $n = if ($broad.ContainsKey($sid)) { $broad[$sid] } elseif ($sid -match '^S-1-5-21-\d+-\d+-\d+-513$') { 'Domaenen-Benutzer' } else { '' }
+        if ($n -and $hit -notcontains $n) { $hit += $n }
+    }
+    return $hit
+}
+# Pfade der Ablage pruefen: Rueckgabe Hinweiszeilen ('' Liste = in Ordnung). Nicht lesbare Rechte = "nicht pruefbar"
+function Get-SwPathWriteRisk([string[]]$Paths) {
+    $out = @()
+    foreach ($p in @($Paths | Where-Object { "$_".Trim() } | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        try {
+            $w = @(Get-SwBroadWriters (Get-Acl -LiteralPath $p -ErrorAction Stop))
+            if ($w.Count) { $out += "$p - aendern duerfen: $($w -join ', ')" }
+        } catch { $out += "$p - Rechte nicht pruefbar ($($_.Exception.Message))" }
+    }
+    return $out
+}
+# Dateisystem des Pfads (nur Laufwerksbuchstaben; Freigaben und Unbekanntes: '')
+function Get-SwPathFileSystem([string]$Path) {
+    if ("$Path" -notmatch '^([A-Za-z]):') { return '' }
+    try { return "$(([System.IO.DriveInfo]::new($Matches[1])).DriveFormat)" } catch { return '' }
+}
+# Hinweistext fuer ein Paket (Ablage, Paketordner/-datei, Einstellungsdatei); '' = in Ordnung.
+# Rueckgabe beginnt mit "ACHTUNG:" (breite Gruppen duerfen schreiben, Rechte nicht pruefbar) oder "Hinweis:" (FAT/exFAT ohne
+# Rechte - nur einmal je Sitzung, danach ''). Laeuft nur beim Bestaetigen (UI), nicht bei jedem Start.
+function Get-SwPackageRiskText($Package, [string]$Root) {
+    if (-not $Package) { return '' }
+    $paths = @(@($Root, "$($Package.SrcPath)", "$($Package.ConfigPath)") | Where-Object { "$_".Trim() })
+    $fat = @($paths | ForEach-Object { Get-SwPathFileSystem $_ } | Where-Object { $_ -match '^(FAT|FAT32|exFAT)$' } | Select-Object -Unique)
+    if ($fat.Count) {
+        if ($script:SwFatHintShown) { return '' }
+        $script:SwFatHintShown = $true
+        return "Hinweis: Paketablage auf einem Datentraeger ohne Rechte ($($fat -join ', ')) - wer ihn erreicht, kann Pakete aendern; was dort liegt, laeuft als Administrator auf den Ziel-PCs (Hinweis nur einmal je Sitzung)"
+    }
+    $r = @(Get-SwPathWriteRisk $paths)
+    if (-not $r.Count) { return '' }
+    return "ACHTUNG: Paketablage fuer normale Benutzer beschreibbar oder nicht pruefbar - was dort liegt, laeuft als Administrator auf den Ziel-PCs: $($r -join '; ')"
+}
 # Installer analysieren: MSI-Eigenschaften (Windows Installer COM, nur lesend) bzw. EXE-Framework (Signaturen im Stub)
 $script:SwInfoCache = @{}
 function Get-SwInstallerInfo([string]$Path) {
@@ -341,6 +456,8 @@ function Confirm-SwDeploy($Package, [string[]]$Hosts, [bool]$Force) {
     if ($s.NoDesktop) { $extra += "`n  Desktop:   neue Verknuepfungen werden entfernt" }
     $ts = $null; try { $ts = Get-SwTestState $Package } catch { }
     if ($ts -and $ts.State -ne 'OK') { $extra += "`n  Sandbox:   $($ts.Text)" }
+    $rk = ''; try { $rk = Get-SwPackageRiskText $Package (Get-SwFolder) } catch { }
+    if ($rk) { $extra += "`n  $rk" }
     return (Confirm-Action "Paket '$($s.Name)' installieren auf: $ziel`n`n  Befehl:    $cmd`n  Erkennung: $det$(if ($Force) { '  -> trotzdem installieren' } else { '  -> installierte werden uebersprungen' })`n  Erfolg:    ExitCode $($s.SuccessCodes) (3010/1641 = Neustart noetig)`n  Groesse:   $($Package.SizeMB) MB$(if ($Package.IsDir) { ' (ganzer Ordner)' })$extra`n`nFortfahren?" 'Softwareverteilung')
 }
 
@@ -366,10 +483,24 @@ $script:RS_SwInstall = {
     # DetectOnly: nur Erkennung (Status je PC), Ausgabe STATUS|1/0/?|Version|Text
     param([string]$Dir, [string]$PkgJson, [bool]$Force, [bool]$DetectOnly = $false)
     $ErrorActionPreference = 'SilentlyContinue'
-    function ConvertTo-HUVer([string]$v) { if ("$v" -match '^\d+(\.\d+){0,3}') { $t = $Matches[0]; if ($t -notmatch '\.') { $t += '.0' }; try { return [version]$t } catch { } }; return $null }
+    # Versionen vergleichbar machen: fuehrendes "v" und Anhaenge weg, auf vier Stellen auffuellen ("1.2.3" = "1.2.3.0"); nicht lesbar = $null
+    function ConvertTo-HUVer([string]$v) {
+        # Fuehrender Teil aus Zahlen und Punkten, hoechstens vier Stellen, auf vier Stellen aufgefuellt (wie bisher: "8.0.3a" = 8.0.3.0,
+        # "1.2.3.4.5" = 1.2.3.4). Neu: fuehrendes "v" und Leerzeichen am Rand sind erlaubt. Nicht vergleichbar ($null): leer, ohne
+        # fuehrende Zahl, Datumsform mit Schraegstrich ("06/21/2006"), Stellen mit mehr als 9 Ziffern (passen nicht in eine Version).
+        $s = "$v".Trim() -replace '^[vV]\s*', ''
+        if ($s -notmatch '^\d+(\.\d+){0,3}') { return $null }
+        $m = $Matches[0]
+        if ($s.Length -gt $m.Length -and $s[$m.Length] -eq '/') { return $null }
+        $parts = @($m.Split('.'))
+        if (@($parts | Where-Object { $_.Length -gt 9 }).Count) { return $null }
+        $p = @($parts | ForEach-Object { [int]$_ })
+        while ($p.Count -lt 4) { $p += 0 }
+        try { return New-Object System.Version $p[0], $p[1], $p[2], $p[3] } catch { return $null }
+    }
     # ProductCode gesetzt -> NUR danach (exakt). Sonst DisplayName-Muster + optional Mindestversion (aeltere Version = nicht installiert -> Update)
     function Find-HUApp([string]$Name, [string]$Code, [string]$MinVer) {
-        $min = ConvertTo-HUVer $MinVer
+        $min = ConvertTo-HUVer $MinVer; $firstAny = $null
         foreach ($k in 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*') {
             foreach ($i in @(Get-ItemProperty -Path $k -ErrorAction SilentlyContinue)) {
                 if ($Code) { if ($i.PSChildName -eq $Code) { return $i } else { continue } }
@@ -377,10 +508,12 @@ $script:RS_SwInstall = {
                 try { $hit = ($Name -and $i.DisplayName -and "$($i.DisplayName)" -like $Name) } catch { $hit = ("$($i.DisplayName)" -eq $Name) }
                 if (-not $hit) { continue }
                 if ($min) { $iv = ConvertTo-HUVer "$($i.DisplayVersion)"; if (-not $iv -or $iv -lt $min) { continue } }
+                # ohne Mindestversion: einen Eintrag mit vergleichbarer Version bevorzugen (mehrere passende Eintraege)
+                if (-not $min -and -not (ConvertTo-HUVer "$($i.DisplayVersion)")) { if (-not $firstAny) { $firstAny = $i }; continue }
                 return $i
             }
         }
-        return $null
+        return $firstAny
     }
     # Registry-Schluessel vorhanden (optional Version >= MinVer aus DisplayVersion/Version). HKCU -> alle geladenen Benutzerprofile
     function Find-HUKey([string]$Path, [string]$MinVer) {
@@ -436,6 +569,28 @@ $script:RS_SwInstall = {
         $r.Missing = ($miss -join "' + '")
         if (-not $r.Display) { $r.Display = $r.Text }
         return $r
+    }
+    # Ergebnis nach dem Installer: $Chk = Erkennung ohne, $ChkMin = mit Mindestversion. Rueckgabe Ergebniszeile oder '' (= Fehlercode-Zweig)
+    function Get-HUInstallVerdict($Rc, $OkCodes, $Chk, $ChkMin, [string]$MinVer, [string]$Dur, [string]$Ver, [string]$DeskNote, [string]$Log) {
+        $lg = if ($Log) { " | Log: $Log" } else { '' }
+        $reboot = ($Rc -eq 3010 -or $Rc -eq 1641)
+        if (@($OkCodes) -contains $Rc) {
+            if ($Chk -and -not $Chk.Hit) { return "FEHLER|ExitCode $Rc, aber Programm danach nicht gefunden (Erkennung '$($Chk.Missing)' pruefen) ($Dur)$lg" }
+            if ($MinVer -and $ChkMin -and -not $ChkMin.Hit) {
+                # installierte Version nicht lesbar oder nicht vergleichbar: kein Fehler, wie bisher OK mit Hinweis
+                if ($Chk -and $Chk.Hit -and ($null -eq (ConvertTo-HUVer "$($Chk.Version)"))) { return "OK|installiert (ExitCode $Rc, $Dur)$Ver - Version nicht pruefbar (gefunden: '$($Chk.Version)', Mindestversion $MinVer)$DeskNote" }
+                # Neustart-Code als Erfolgscode eingetragen (z. B. "0,3010"): neue Version evtl. erst nach dem Neustart sichtbar - OK bleibt
+                if ($reboot) { return "OK|installiert - NEUSTART erforderlich (ExitCode $Rc, $Dur)$Ver - Version $MinVer erst nach dem Neustart pruefbar (jetzt $($Chk.Version))$DeskNote" }
+                return "FEHLER|ExitCode $Rc, aber danach nur Version $(if ($Chk.Version) { $Chk.Version } else { '?' }) gefunden (Mindestversion $MinVer) - Update nicht wirksam ($Dur)$lg"
+            }
+            return "OK|installiert (ExitCode $Rc, $Dur)$Ver$DeskNote"
+        }
+        if ($reboot) {
+            # Neustart noetig: die neue Version ist evtl. erst danach sichtbar - OK bleibt, aber ehrlich gesagt
+            $vn = if ($MinVer -and $Chk -and $Chk.Hit -and $ChkMin -and -not $ChkMin.Hit) { " - Version $MinVer erst nach dem Neustart pruefbar (jetzt $($Chk.Version))" } else { '' }
+            return "OK|installiert - NEUSTART erforderlich (ExitCode $Rc, $Dur)$Ver$vn$DeskNote"
+        }
+        return ''
     }
     # Neue Desktop-Verknuepfungen (Allgemein, eigener, Default) entfernen - einige Setups legen sie erst nach dem Ende an
     function Remove-HUNewLinks([string[]]$Dirs, [string[]]$Before, [int]$Rounds = 15, [int]$DelaySec = 2) {
@@ -519,14 +674,13 @@ $script:RS_SwInstall = {
         $deskNote = ''
         if ($noDesk) { $nl = Remove-HUNewLinks $deskDirs $deskBefore; if ($nl) { $deskNote = " - $nl Desktop-Verknuepfung(en) entfernt" } }
         $chk = if ($dn -or $dc -or $dk -or $df) { Get-HUDetect $p '' } else { $null }
+        # Nachkontrolle mit Mindestversion: ein gescheitertes Update (alte Version bleibt) gilt nicht als installiert
+        $chkMin = if ($chk -and $mv) { Get-HUDetect $p $mv } else { $chk }
         $after = if ($chk -and $chk.App) { $chk.App } else { $null }
         $ver = if ($after) { " - $($after.DisplayName) $($after.DisplayVersion)" } elseif ($chk -and $chk.Hit -and $chk.Display) { " - $($chk.Display)" } else { '' }
         $dur = "$(if ($sw.Elapsed.TotalSeconds -lt 60) { '{0} s' -f [int]$sw.Elapsed.TotalSeconds } else { '{0} min {1} s' -f [int][Math]::Floor($sw.Elapsed.TotalMinutes), $sw.Elapsed.Seconds })"
-        if ($okCodes -contains $rc) {
-            if ($chk -and -not $chk.Hit) { return "FEHLER|ExitCode $rc, aber Programm danach nicht gefunden (Erkennung '$($chk.Missing)' pruefen) ($dur)$(if ($log) { " | Log: $log" })" }
-            return "OK|installiert (ExitCode $rc, $dur)$ver$deskNote"
-        }
-        if ($rc -eq 3010 -or $rc -eq 1641) { return "OK|installiert - NEUSTART erforderlich (ExitCode $rc, $dur)$ver$deskNote" }
+        $v = Get-HUInstallVerdict $rc $okCodes $chk $chkMin $mv $dur $ver $deskNote $log
+        if ($v) { return $v }
         $hint = switch ($rc) { 1603 { ' = schwerer Fehler (MSI-Log)' } 1618 { ' = andere Installation laeuft gerade' } 1619 { ' = Paket nicht lesbar' } 1620 { ' = Paket ungueltig' } 1633 { ' = falsche Plattform (32/64 Bit)' } 1638 { ' = andere Version bereits installiert' } default { '' } }
         return "FEHLER|ExitCode $rc$hint ($dur)$(if ($log) { " | Log: $log" })"
     } catch { return "FEHLER|$($_.Exception.Message -replace '[\r\n|]+', ' ')" }
@@ -906,7 +1060,7 @@ function Update-SwWindowList([string]$SelectId = '') {
     }
     $sw.Loading = $false
     $sw.LblFolder.Text = "Ordner: $(Get-SwFolder)   ($($sw.Pkgs.Count) Pakete, * = noch nicht geprueft/gespeichert)"
-    $sw.LblTarget.Text = "Gewaehlter Computer: $(Get-TargetComputer)"
+    Set-SwTargetLabel $sw.LblTarget
     $idx = 0
     if ($SelectId) { for ($i = 0; $i -lt $sw.Pkgs.Count; $i++) { if ($sw.Pkgs[$i].Id -eq $SelectId) { $idx = $i } } }
     if ($sw.Pkgs.Count -gt 0) { $sw.Lst.SelectedIndex = $idx } else { Show-SwPackageDetails $null }
@@ -1298,9 +1452,9 @@ function Complete-SwSandboxTest($Watch, $Result) {
 # Deinstallation / Status: Menue "gewaehlter Computer" oder "mehrere PCs"
 function Show-SwTargetMenu($Button, [string]$Kind) {
     $cm = New-Object System.Windows.Controls.ContextMenu
-    $h = "$(Get-TargetComputer)".Trim()
+    $d = Get-SwTargetDisplayNow; $h = $d.Computer
     $m1 = New-Object System.Windows.Controls.MenuItem
-    $m1.Header = $(if ($h) { "Gewaehlter Computer ($h)" } else { 'Gewaehlter Computer (keiner gewaehlt)' }); $m1.IsEnabled = [bool]$h; $m1.Tag = $Kind
+    $m1.Header = $(if ($d.Hint) { "Gewaehlter Computer ($h, im Feld: $($d.Field))" } elseif ($h) { "Gewaehlter Computer ($h)" } else { 'Gewaehlter Computer (keiner gewaehlt)' }); $m1.IsEnabled = [bool]$h; $m1.Tag = $Kind
     $m1.Add_Click({ param($s, $e) Invoke-SwTargetAction "$($s.Tag)" $false })
     $m2 = New-Object System.Windows.Controls.MenuItem
     $m2.Header = 'Mehrere PCs ...'; $m2.Tag = $Kind
@@ -1317,8 +1471,8 @@ function Invoke-SwTargetAction([string]$Kind, [bool]$Multi) {
         return
     }
     if (-not $Multi) {
-        $h = "$(Get-TargetComputer)".Trim(); if (-not $h) { return }
-        Invoke-SwTargetRun $Kind $p @($h)
+        $swConf = if ($Kind -eq 'Uninstall') { { param($pc) Confirm-SwUninstall $p @($pc) } } else { $null }
+        [void](Invoke-SwOnTarget 'Softwareverteilung' $sw.LblTarget $swConf { param($pc) Invoke-SwTargetRun $Kind $p @($pc) -Confirmed })
         return
     }
     $script:SwPickX = @{ Package = $p; Kind = $Kind }
@@ -1330,14 +1484,25 @@ function Invoke-SwTargetAction([string]$Kind, [bool]$Multi) {
         Invoke-SwTargetRun $pp.Kind $pp.Package $hosts
     }
 }
-function Invoke-SwTargetRun([string]$Kind, $Package, [string[]]$Hosts) {
+# -Confirmed: die Rueckfrage zur Deinstallation kam schon (Invoke-SwOnTarget, mit dem PC, auf dem es laufen wird)
+function Invoke-SwTargetRun([string]$Kind, $Package, [string[]]$Hosts, [switch]$Confirmed) {
     if ($Kind -eq 'Status') { Start-SwPackageStatus -Hosts $Hosts -Package $Package; return }
+    if (-not $Confirmed -and -not (Confirm-SwUninstall $Package $Hosts)) { return }
+    Start-SwPackageUninstall -Hosts $Hosts -Package $Package
+}
+function Confirm-SwUninstall($Package, [string[]]$Hosts) {
     $it = Get-SwUninstallItem $Package
-    if (-not $it) { return }
+    if (-not $it) { return $false }
     $ziel = if ($Hosts.Count -le 5) { $Hosts -join ', ' } else { "$($Hosts.Count) PCs" }
     $cmd = "$($it.Cmd) $($it.Args)".Trim()
-    if (-not (Confirm-Action "Paket '$($Package.Settings.Name)' DEINSTALLIEREN auf: $ziel`n`n  Befehl: $cmd`n`nStill, ohne automatischen Neustart. Fortfahren?" 'Deinstallation')) { return }
-    Start-SwPackageUninstall -Hosts $Hosts -Package $Package
+    return [bool](Confirm-Action "Paket '$($Package.Settings.Name)' DEINSTALLIEREN auf: $ziel`n`n  Befehl: $cmd`n`nStill, ohne automatischen Neustart. Fortfahren?" 'Deinstallation')
+}
+# Verteilen auf den gewaehlten Computer (Knopf "Gewaehlten Computer")
+function Invoke-SwDeployChosen {
+    $sw = $script:SwUi; if (-not $sw) { return }
+    $p = Save-SwForm; if (-not $p) { return }
+    $force = [bool]$sw.ChkForce.IsChecked
+    [void](Invoke-SwOnTarget 'Softwareverteilung' $sw.LblTarget { param($pc) Confirm-SwDeploy -Package $p -Hosts @($pc) -Force $force } { param($pc) Start-SoftwareDeploy -Hosts @($pc) -Package $p -Force $force })
 }
 
 # Dateien/Ordner uebernehmen (Knopf und Drag&Drop)
@@ -1705,14 +1870,7 @@ function Show-SoftwareWindow {
     $w.FindName('btnWinget').Add_Click({ Update-SwFromWinget })
     $w.FindName('btnUninst').Add_Click({ param($s, $e) Show-SwTargetMenu $s 'Uninstall' })
     $w.FindName('btnStatus').Add_Click({ param($s, $e) Show-SwTargetMenu $s 'Status' })
-    $w.FindName('btnClient').Add_Click({
-        $sw = $script:SwUi
-        $h = Get-TargetComputer
-        $p = Save-SwForm; if (-not $p) { return }
-        $force = [bool]$sw.ChkForce.IsChecked
-        if (-not (Confirm-SwDeploy -Package $p -Hosts @($h) -Force $force)) { return }
-        Start-SoftwareDeploy -Hosts @($h) -Package $p -Force $force
-    })
+    $w.FindName('btnClient').Add_Click({ Invoke-SwDeployChosen })
     $w.FindName('btnMultiSel').Add_Click({
         $sw = $script:SwUi
         $p = Save-SwForm; if (-not $p) { return }
@@ -1727,7 +1885,7 @@ function Show-SoftwareWindow {
             Start-SoftwareDeploy -Hosts $hosts -Package $pp.Package -Force $pp.Force -Label 'Mehrere PCs'
         }
     })
-    $w.Add_Activated({ if ($script:SwUi) { $script:SwUi.LblTarget.Text = "Gewaehlter Computer: $(Get-TargetComputer)"; Update-SwSandboxButton } })
+    $w.Add_Activated({ if ($script:SwUi) { Set-SwTargetLabel $script:SwUi.LblTarget; Update-SwSandboxButton } })
     $w.Add_Closed({ $script:SwUi = $null })
     $w.Owner = $script:Window; Set-HMWindowScale $w
     $w.Show()

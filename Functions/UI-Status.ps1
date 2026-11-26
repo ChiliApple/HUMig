@@ -39,9 +39,12 @@ function Get-HMAuOpenFailures([object[]]$Entries, $Search = $null) {
 # App-Update-Verlauf, Plattenzustand je Bezeichnung = Get-HMSbHealthSummary); $Now und $StaleDays fuer Tests.
 # Rueckgabe: Warnings (Text, Level), Schedules, Backups, Server, Apps
 function Get-HMStatusData {
-    param($BsRows = @(), $Backups = @(), $SbProfiles = @(), $SbHistory = @(), $AuHistory = @(), [datetime]$Now = (Get-Date), [int]$StaleDays = 8, $SbHealth = @{}, $AuSearch = $null)
+    param($BsRows = @(), $Backups = @(), $SbProfiles = @(), $SbHistory = @(), $AuHistory = @(), [datetime]$Now = (Get-Date), [int]$StaleDays = 8, $SbHealth = @{}, $AuSearch = $null, [string[]]$Unreadable = @())
     if ($null -eq $SbHealth) { $SbHealth = @{} }
     $warn = New-Object System.Collections.Generic.List[object]
+    $notes = New-Object System.Collections.Generic.List[object]   # Hinweise ohne Warnstufe (zaehlen nicht gegen "Alles in Ordnung")
+    # Quellen, die nicht gelesen werden konnten: eigener Hinweis - sonst stuende "Alles in Ordnung" ueber fehlenden Angaben
+    foreach ($u in @($Unreadable | Where-Object { "$_".Trim() } | Select-Object -Unique)) { $warn.Add([pscustomobject]@{ Level = 'Warning'; Area = 'Status'; Text = "Status: $u nicht lesbar - die Angaben dazu fehlen hier" }) }
     $parse = {
         param($s)
         $d = [datetime]::MinValue
@@ -126,9 +129,11 @@ function Get-HMStatusData {
             if ($arcDue -and $mine.Count) { $warn.Add([pscustomobject]@{ Level = 'Warning'; Area = 'Server-Backup'; Text = "Server-Backup '$($p.Name)': Archiv-Sicherung faellig$(if ($null -ne $arcAge) { " (letzte vor $arcAge Tagen)" })" }) }
         }
         $level = 'OK'
-        if (-not $lastOk) { $level = $(if ($mine.Count) { 'Error' } else { 'Warning' }) }
+        if (-not $lastOk) { $level = $(if ($mine.Count) { 'Error' } else { 'Info' }) }   # ohne jeden Lauf: Hinweis, keine Warnung
         elseif ($okAge -gt $wd) { $level = 'Error' }
         elseif ($lastAny -and "$($lastAny.Status)" -eq 'Error') { $level = 'Error' }
+        # noch kein Lauf (z. B. am Tag der Anlage): nur Hinweis, zaehlt nicht gegen "Alles in Ordnung"
+        if (-not $mine.Count) { $notes.Add([pscustomobject]@{ Level = 'Info'; Area = 'Server-Backup'; Text = "Server-Backup '$($p.Name)': noch kein Lauf gefunden (oder Platten nicht angesteckt)" }) }
         if ($level -eq 'Error' -and $mine.Count) {
             $t = if (-not $lastOk) { 'noch keine erfolgreiche Sicherung' } elseif ($okAge -gt $wd) { "letzte erfolgreiche Sicherung vor $okAge Tagen" } else { 'letzter Lauf fehlgeschlagen' }
             $warn.Add([pscustomobject]@{ Level = 'Error'; Area = 'Server-Backup'; Text = "Server-Backup '$($p.Name)': $t" })
@@ -148,7 +153,7 @@ function Get-HMStatusData {
         $bad = @(Get-HMAuOpenFailures $g.Group $AuSearch)
         $au += [pscustomobject]@{ Computer = "$($g.Group[0].Computer)"; Ok = $ok; Failed = $bad.Count; FailedNames = @($bad | ForEach-Object { "$($_.Name)" } | Select-Object -Unique -First 4); Level = $(if ($bad.Count) { 'Warning' } else { 'OK' }) }
     }
-    return [pscustomobject]@{ Warnings = $warn.ToArray(); Schedules = $sched; Backups = $bk; Server = $sb; Apps = $au; Time = $Now }
+    return [pscustomobject]@{ Warnings = $warn.ToArray(); Notes = $notes.ToArray(); Schedules = $sched; Backups = $bk; Server = $sb; Apps = $au; Time = $Now }
 }
 
 # ----------------------------------------------------------------------------
@@ -192,21 +197,29 @@ function New-HMStatusHeader([string]$Text, $Tab) {
 }
 function Get-HMStatusTab([string]$Header) { return @($ui.tabMain.Items | Where-Object { $_ -is [System.Windows.Controls.TabItem] -and "$($_.Header)" -eq $Header })[0] }
 
+# JSON-Datei lesbar? Fehlt sie (oder kein Pfad), gilt sie als lesbar (noch nichts gespeichert); leer oder beschaedigt = nicht lesbar
+function Test-HMStatusJsonFile([string]$Path) {
+    if (-not "$Path".Trim() -or -not [System.IO.File]::Exists($Path)) { return $true }
+    try { $t = [System.IO.File]::ReadAllText($Path); if (-not $t.Trim()) { return $false }; $null = $t | ConvertFrom-Json -ErrorAction Stop; return $true } catch { return $false }
+}
 # Daten sammeln (am PC, auf dem HUMig laeuft) und Startseite zeichnen; -StartUp: Hinweise zusaetzlich in die Ausgabe
 function Update-HMStatusPage([switch]$StartUp) {
     $sd = 8
     try { if ($null -ne $script:Settings.StatusStaleDays -and [int]$script:Settings.StatusStaleDays -gt 0) { $sd = [int]$script:Settings.StatusStaleDays } } catch { }
-    $bs = @(); $sbp = @(); $sbh = @(); $au = @(); $sbHealth = @{}
+    $bs = @(); $sbp = @(); $sbh = @(); $au = @(); $sbHealth = @{}; $unread = @()
     # erst zuweisen: Get-HMBsRows gibt die Liste als EIN Objekt zurueck (return ,$rows)
-    try { $tmpBs = Get-HMBsRows; $bs = @($tmpBs) } catch { }
+    try { $tmpBs = Get-HMBsRows; $bs = @($tmpBs) } catch { $unread += 'Backup-Zeitplaene' }
     if (-not $script:UserMode) {
-        try { $sbp = @((Get-HMSbConfig).Profiles) } catch { }
+        # Get-HMSbConfig liefert bei beschaedigter Datei still eine leere Liste - die Datei deshalb selbst pruefen
+        if (-not (Test-HMStatusJsonFile $script:SbCfgFile)) { $unread += 'Server-Backup-Profile' }
+        try { $sbp = @((Get-HMSbConfig).Profiles) } catch { $unread += 'Server-Backup-Profile' }
         # erst zuweisen: Get-HMSbAllHistory gibt die Liste als EIN Objekt zurueck (return ,@()) - @(Aufruf) haette sonst nur 1 Element
-        try { if ($sbp.Count) { $tmpH = Get-HMSbAllHistory -ScanDrives; $sbh = @($tmpH) } } catch { }
-        try { if ($sbp.Count) { $sbHealth = Get-HMSbHealthSummary (Read-HMSbHealthStore $script:SbHealthFile) } } catch { }
-        try { if (Test-Path -LiteralPath $script:AuHistFile) { $aj = Get-Content -LiteralPath $script:AuHistFile -Raw -Encoding UTF8 | ConvertFrom-Json; $au = @($aj) } } catch { }
+        try { if ($sbp.Count) { $tmpH = Get-HMSbAllHistory -ScanDrives; $sbh = @($tmpH) } } catch { $unread += 'Server-Backup-Verlauf' }
+        if ($sbp.Count -and -not (Test-HMStatusJsonFile $script:SbHealthFile)) { $unread += 'Plattenzustand (Server-Backup)' }
+        try { if ($sbp.Count) { $sbHealth = Get-HMSbHealthSummary (Read-HMSbHealthStore $script:SbHealthFile) } } catch { $unread += 'Plattenzustand (Server-Backup)' }
+        try { if (Test-Path -LiteralPath $script:AuHistFile) { $aj = Get-Content -LiteralPath $script:AuHistFile -Raw -Encoding UTF8 | ConvertFrom-Json; $au = @($aj) } } catch { $unread += 'App-Updates-Verlauf' }
     }
-    $data = Get-HMStatusData -BsRows $bs -Backups @($script:BackupInfos) -SbProfiles $sbp -SbHistory $sbh -AuHistory $au -StaleDays $sd -SbHealth $sbHealth -AuSearch $script:AuLastSearch
+    $data = Get-HMStatusData -BsRows $bs -Backups @($script:BackupInfos) -SbProfiles $sbp -SbHistory $sbh -AuHistory $au -StaleDays $sd -SbHealth $sbHealth -AuSearch $script:AuLastSearch -Unreadable $unread
     $script:StatusData = $data
     $nw = @($data.Warnings).Count
     if ($ui.tabStatus) { $ui.tabStatus.Header = $(if ($nw) { "Status ($nw)" } else { 'Status' }) }
@@ -221,7 +234,8 @@ function Update-HMStatusPage([switch]$StartUp) {
     # Wichtig
     [void]$p.Children.Add((New-HMStatusHeader 'WICHTIG' $null))
     if ($nw) { foreach ($w in @($data.Warnings)) { [void]$p.Children.Add((New-HMStatusLine $w.Level $w.Text)) } }
-    else { [void]$p.Children.Add((New-HMStatusLine 'OK' 'Alles in Ordnung - keine offenen Hinweise.')) }
+    else { [void]$p.Children.Add((New-HMStatusLine 'OK' 'Alles in Ordnung - keine offenen Warnungen.')) }
+    foreach ($n in @($data.Notes)) { if ($n) { [void]$p.Children.Add((New-HMStatusLine 'Info' $n.Text)) } }
     # Zeitplaene
     [void]$p.Children.Add((New-HMStatusHeader 'BACKUP-ZEITPLAENE' (Get-HMStatusTab 'Backup')))
     if (@($data.Schedules).Count) {
