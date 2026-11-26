@@ -16,12 +16,17 @@ BeforeAll {
 
 Describe 'Signieren: Zeile je Release in der Bestaetigung' {
     It 'gleich, abweichend, andere Version, Fehler' {
-        Get-HMSignCheckLine 'v2.1.24' (New-Chk 'v2.1.24' 'gleich' 'gleich wie der lokale Stand (C:\Tools\HUMig, 60 Dateien)') | Should -Be 'v2.1.24: gleich wie der lokale Stand'
+        Get-HMSignCheckLine 'v2.1.24' (New-Chk 'v2.1.24' 'gleich' "gleich wie der lokale Stand ($(Join-Path $TestDrive 'HUMig'), 60 Dateien)") | Should -Be 'v2.1.24: gleich wie der lokale Stand'
         Get-HMSignCheckLine 'v2.1.24' (New-Chk 'v2.1.24' 'abweichend' 'weicht ab' @('HUMig.ps1: Inhalt anders', 'Pull.ps1: fehlt lokal')) | Should -Be 'v2.1.24: WEICHT vom lokalen Stand ab (2 Datei(en))'
         Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'nicht abgleichbar' 'nicht mit lokalem Stand abgeglichen, lokal ist Version 2.1.24 (C:\Tools\HUMig)') | Should -Be 'v2.1.25: nicht abgeglichen, lokal ist Version 2.1.24'
         Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'nicht abgleichbar' 'nicht abgleichbar: Zugriff verweigert') | Should -Be 'v2.1.25: nicht abgeglichen: Zugriff verweigert'
         Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'Fehler' 'Der Remoteserver hat einen Fehler zurueckgegeben') | Should -Be 'v2.1.25: nicht abgeglichen: Der Remoteserver hat einen Fehler zurueckgegeben'
         Get-HMSignCheckLine 'v2.1.25' $null | Should -Be 'v2.1.25: nicht abgeglichen'
+        # Klammern im Programmordner (z.B. Program Files (x86)) und Netzpfad: Ordner wird ganz weggelassen
+        Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'nicht abgleichbar' 'nicht mit lokalem Stand abgeglichen, lokal ist Version 2.1.24 (C:\Program Files (x86)\HUMig)') | Should -Be 'v2.1.25: nicht abgeglichen, lokal ist Version 2.1.24'
+        Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'nicht abgleichbar' 'nicht mit lokalem Stand abgeglichen, kein lokaler Stand (\\server\freigabe (alt)\HUMig)') | Should -Be 'v2.1.25: nicht abgeglichen, kein lokaler Stand'
+        # Klammer ohne Pfad bleibt
+        Get-HMSignCheckLine 'v1' (New-Chk 'v1' 'Fehler' 'Timeout (abgebrochen)') | Should -Be 'v1: nicht abgeglichen: Timeout (abgebrochen)'
     }
     It 'Text aus dem echten Abgleich (Core-Update): installierte Version aelter als das Release' {
         . (Join-Path $script:Root 'Functions\Core-Update.ps1')
@@ -58,6 +63,7 @@ Describe 'Signieren: Plan und Entscheidung' {
         $d = Get-HMSignDecision $p ''
         $d.OnMismatch | Should -Be 'Sign'
         @($d.Skipped).Count | Should -Be 0
+        @($d.SignTags) | Should -Be @('v2.1.24', 'v2.1.25')
     }
     It 'Abweichung: zweite Rueckfrage mit hoechstens acht Dateien je Release, als Satz gelesen' {
         $diff = @(1..10 | ForEach-Object { "Functions/Datei$_.ps1: Inhalt anders" })
@@ -72,6 +78,10 @@ Describe 'Signieren: Plan und Entscheidung' {
         $no = Get-HMSignDecision $p 'No'
         $no.OnMismatch | Should -Be 'Skip'
         @($no.Skipped) | Should -Be @('v2.1.24')
+        @($no.SignTags) | Should -Be @('v2.1.23')
+        # alle abweichend und Nein: nichts zu signieren
+        $all = Get-HMSignPlan @('v1') @((New-Chk 'v1' 'abweichend' 'x' @('a: Inhalt anders')))
+        @((Get-HMSignDecision $all 'No').SignTags).Count | Should -Be 0
         (Get-HMSignDecision $p '').OnMismatch | Should -Be 'Skip'   # Schliessen = sicher
     }
 }
@@ -79,6 +89,7 @@ Describe 'Signieren: Plan und Entscheidung' {
 Describe 'Signieren: Ablauf in der Oberflaeche (Attrappen statt GitHub und Zertifikat)' {
     BeforeAll {
         . ([scriptblock]::Create((Get-SignFn 'Start-HMReleaseSigning')))
+        . ([scriptblock]::Create((Get-SignFn 'Stop-HMSigning')))
         function Get-HMUpdateConfig { [pscustomobject]@{ Owner = 'o'; Repo = 'r'; SignerThumbprint = 'AB' } }
         function Get-HMSigningCert { $true }
         function Get-HMSignTokenOrPrompt { 'tok' }
@@ -88,13 +99,15 @@ Describe 'Signieren: Ablauf in der Oberflaeche (Attrappen statt GitHub und Zerti
         function Confirm-Action { param($m, $t) $script:Confirms.Add("$m"); return $script:ConfirmAnswer }
         function Show-HMDialogBox { param($Owner, $Text, $Title, $Mode, $Icon, $Default) $script:Dialogs.Add(@{ Text = $Text; Default = $Default }); return $script:MisAnswer }
         # Hintergrundlaeufe der Reihe nach mit vorbereiteten Antworten, keine echten Laeufe
-        function Invoke-AsyncCommand { param($ScriptBlock, $ArgumentList, $TimeoutSec, $OnComplete) $script:Runs.Add(@{ Args = $ArgumentList; Timeout = $TimeoutSec }); $res = $script:Answers.Dequeue(); & $OnComplete $res }
+        # mit $script:Defer werden die Laeufe nur vorgemerkt und spaeter einzeln beendet (Klick waehrend der Pruefung)
+        function Invoke-AsyncCommand { param($ScriptBlock, $ArgumentList, $TimeoutSec, $State, $OnComplete) $run = @{ Args = $ArgumentList; Timeout = $TimeoutSec; State = $State; OnComplete = $OnComplete }; $script:Runs.Add($run); if ($script:Defer) { $script:Pending.Enqueue($run); return }; $res = $script:Answers.Dequeue(); & $OnComplete $res $State }
+        function Complete-Next($Res) { $run = $script:Pending.Dequeue(); & $run.OnComplete $Res $run.State }
     }
     BeforeEach {
         $script:Lines = New-Object System.Collections.Generic.List[string]; $script:Confirms = New-Object System.Collections.Generic.List[string]
         $script:Dialogs = New-Object System.Collections.Generic.List[object]; $script:Runs = New-Object System.Collections.Generic.List[object]
         $script:Answers = New-Object System.Collections.Queue; $script:ConfirmAnswer = $true; $script:MisAnswer = 'No'
-        $script:JobRunning = $false; $script:ConfigDir = $TestDrive; $script:AppRoot = $script:Root
+        $script:JobRunning = $false; $script:ConfigDir = $TestDrive; $script:AppRoot = $script:Root; $script:SignBusy = $false; $script:Defer = $false; $script:Pending = New-Object System.Collections.Queue
         $script:Rels = @([pscustomobject]@{ Tag = 'v2.1.24'; Version = '2.1.24' }, [pscustomobject]@{ Tag = 'v2.1.25'; Version = '2.1.25' })
     }
     It 'Normalfall: ein Klick wie bisher, Abgleich steht in der Bestaetigung, signiert mit OnMismatch Sign' {
@@ -118,7 +131,8 @@ Describe 'Signieren: Ablauf in der Oberflaeche (Attrappen statt GitHub und Zerti
         $script:Dialogs.Count | Should -Be 1
         $script:Dialogs[0].Default | Should -Be 'No'
         @($script:Runs[2].Args)[-1] | Should -Be 'Skip'
-        ($script:Lines -join "`n") | Should -Match 'Ausgelassen \(weicht vom lokalen Stand ab\): v2\.1\.24'
+        @(@($script:Runs[2].Args)[5]) | Should -Be @('v2.1.25')   # ausgelassene gehen nicht an den Signier-Lauf
+        ($script:Lines -join "`n") | Should -Match 'Info\|Ausgelassen \(weicht vom lokalen Stand ab\): v2\.1\.24'
         ($script:Lines -join "`n") | Should -Match 'Signiere v2\.1\.25 \.\.\.'
     }
     It 'Abweichung und Ja: trotzdem signieren (OnMismatch Sign)' {
@@ -139,11 +153,55 @@ Describe 'Signieren: Ablauf in der Oberflaeche (Attrappen statt GitHub und Zerti
         $script:Runs.Count | Should -Be 3
         @($script:Runs[2].Args)[-1] | Should -Be 'Sign'
     }
+    It 'alle abweichend und Nein: kein Signier-Lauf, ruhige Zeile statt Fehlern' {
+        $script:Answers.Enqueue([pscustomobject]@{ Tags = @('v2.1.24'); Releases = @($script:Rels[0]); Err = '' })
+        $script:Answers.Enqueue([pscustomobject]@{ Checks = @((New-Chk 'v2.1.24' 'abweichend' 'x' @('HUMig.ps1: Inhalt anders'))); Err = '' })
+        Start-HMReleaseSigning
+        $script:Runs.Count | Should -Be 2
+        ($script:Lines -join "`n") | Should -Match 'Info\|Nichts signiert: v2\.1\.24 ausgelassen \(weicht vom lokalen Stand ab\)\.'
+        ($script:Lines -join "`n") | Should -Not -Match 'Error\|'
+        ($script:Lines -join "`n") | Should -Not -Match 'Signiere'
+        $script:SignBusy | Should -BeFalse
+    }
+    It 'zwei Starts kurz nacheinander: der zweite startet keinen Ablauf, der erste signiert genau seine Releases' {
+        $script:Defer = $true
+        Start-HMReleaseSigning
+        Start-HMReleaseSigning
+        $script:Runs.Count | Should -Be 1
+        ($script:Lines -join "`n") | Should -Match 'Warning\|Signieren laeuft bereits'
+        Complete-Next ([pscustomobject]@{ Tags = @('v2.1.24'); Releases = @($script:Rels[0]); Err = '' })
+        Start-HMReleaseSigning                                   # waehrend der Pruefung noch einmal
+        $script:Runs.Count | Should -Be 2
+        Complete-Next ([pscustomobject]@{ Checks = @((New-Chk 'v2.1.24' 'gleich')); Err = '' })
+        $script:Confirms[0] | Should -Match 'v2\.1\.24: gleich wie der lokale Stand'
+        @(@($script:Runs[2].Args)[5]) | Should -Be @('v2.1.24')
+        $script:SignBusy | Should -BeTrue
+        Complete-Next ([pscustomobject]@{ Items = @(); Err = '' })
+        $script:SignBusy | Should -BeFalse
+    }
+    It 'Fehler im ersten Lauf bzw. Zeitgrenze beim Signieren: Merkmal zurueck, neuer Start moeglich' {
+        $script:Answers.Enqueue('FEHLER: Timeout - keine Antwort nach 40 Sekunden (abgebrochen)')
+        Start-HMReleaseSigning
+        $script:SignBusy | Should -BeFalse
+        $script:Answers.Enqueue([pscustomobject]@{ Tags = @('v2.1.24'); Releases = @($script:Rels[0]); Err = '' })
+        $script:Answers.Enqueue([pscustomobject]@{ Checks = @((New-Chk 'v2.1.24' 'gleich')); Err = '' })
+        $script:Answers.Enqueue('FEHLER: Timeout - keine Antwort nach 180 Sekunden (abgebrochen)')
+        Start-HMReleaseSigning
+        $script:Runs.Count | Should -Be 4
+        $script:SignBusy | Should -BeFalse
+        ($script:Lines -join "`n") | Should -Match 'Signieren fehlgeschlagen: FEHLER: Timeout'
+    }
     It 'Bestaetigung abgelehnt: nichts wird signiert' {
         $script:ConfirmAnswer = $false
         $script:Answers.Enqueue([pscustomobject]@{ Tags = @('v2.1.24'); Releases = @($script:Rels[0]); Err = '' })
         $script:Answers.Enqueue([pscustomobject]@{ Checks = @((New-Chk 'v2.1.24' 'gleich')); Err = '' })
         Start-HMReleaseSigning
         $script:Runs.Count | Should -Be 2
+        $script:SignBusy | Should -BeFalse
+        # danach ist ein neuer Start wieder moeglich
+        $script:Answers.Enqueue([pscustomobject]@{ Tags = @(); Releases = @(); Err = '' })
+        Start-HMReleaseSigning
+        $script:Runs.Count | Should -Be 3
+        ($script:Lines -join "`n") | Should -Match 'Alle Releases mit Pruefsumme sind bereits signiert'
     }
 }
