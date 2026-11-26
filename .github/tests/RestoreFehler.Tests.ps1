@@ -179,25 +179,45 @@ Describe 'Restore mit Fehler-Modulen: Backup aus Start-HMBackup (Robocopy ersetz
         $null = & cmd.exe /c mklink /J (Join-Path $p 'a\link') $z
         if (Test-Path -LiteralPath (Join-Path $p 'a\link\x.txt')) { Test-HMDirHasFile $p 60000 | Should -BeFalse }
     }
-    It 'Ordnerpruefung: Fehler beim Aufzaehlen (auch mitten im Ordner) und sonst keine Datei = mit Daten, aber unsicher; eine gefundene Datei bleibt sicher' {
+    It 'Ordnerpruefung: Fehler beim Aufzaehlen (beim Oeffnen und mitten im Ordner) und sonst keine Datei = mit Daten, aber unsicher; eine gefundene Datei ist sicher' {
+        # Aufzaehlung, die einen Eintrag liefert und dann scheitert (wie ein Ordner, dessen Rest nicht lesbar ist)
+        if (-not ('HMTWirftNach' -as [type])) {
+            Add-Type -TypeDefinition @"
+public class HMTWirftNach : System.Collections.IEnumerable {
+    private object[] a; public HMTWirftNach(object[] x) { a = x; }
+    public System.Collections.IEnumerator GetEnumerator() { return new E(a); }
+    private class E : System.Collections.IEnumerator {
+        private object[] a; private int i = -1; public E(object[] x) { a = x; }
+        public bool MoveNext() { i++; if (i >= a.Length) { throw new System.UnauthorizedAccessException("Zugriff verweigert (Ersatz)"); } return true; }
+        public object Current { get { return a[i]; } }
+        public void Reset() { i = -1; }
+    }
+}
+"@
+        }
         $p = New-TDir 'fehl'
-        foreach ($n in @('a', 'b')) { [void][System.IO.Directory]::CreateDirectory((Join-Path $p $n)) }
+        foreach ($n in @('a', 'b\c')) { [void][System.IO.Directory]::CreateDirectory((Join-Path $p $n)) }
         $script:Real = ${function:Get-HMDirEntries}
-        $script:Bad = Join-Path $p 'b'
+        $script:Bad = Join-Path $p 'b'; $script:Open = Join-Path $p 'a'
+        $script:Seen = @()
         try {
-            # Ordner b: Aufzaehlung bricht nach dem ersten Eintrag ab (wie ein Ordner, dessen Rest nicht lesbar ist)
             function Get-HMDirEntries([string]$Dir) {
-                if ($Dir -eq $script:Bad) { return , (& { [System.IO.DirectoryInfo]::new($script:Bad) | ForEach-Object { $_ }; throw 'Zugriff verweigert (Ersatz)' } 2>$null) }
+                $script:Seen += $Dir
+                if ($Dir -eq $script:Open) { throw 'Zugriff verweigert beim Oeffnen (Ersatz)' }
+                if ($Dir -eq $script:Bad) { return , ([HMTWirftNach]::new(@([System.IO.DirectoryInfo]::new((Join-Path $script:Bad 'c'))))) }
                 return , ([System.IO.DirectoryInfo]::new($Dir).EnumerateFileSystemInfos())
             }
             $s = Get-HMDirFileState $p 60000
             $s.HasFile | Should -BeTrue
             $s.Certain | Should -BeFalse
+            # der vor dem Fehler gelieferte Unterordner wurde trotzdem durchsucht
+            $script:Seen | Should -Contain (Join-Path $p 'b\c')
             Test-HMDirHasFile $p 60000 | Should -BeTrue
-            # findet sich trotzdem eine Datei, ist das Ergebnis sicher
-            [System.IO.File]::WriteAllText((Join-Path $p 'a\x.txt'), 'x')
+            # liegt im noch gelieferten Unterordner eine Datei, ist das Ergebnis sicher
+            [System.IO.File]::WriteAllText((Join-Path $p 'b\c\x.txt'), 'x')
             $s = Get-HMDirFileState $p 60000
             $s.HasFile | Should -BeTrue
+            $s.Certain | Should -BeTrue
         } finally { Set-Item -Path Function:\Get-HMDirEntries -Value $script:Real }
         # ohne Fehler und ohne Datei: sicher leer
         $q = New-TDir 'leer2'; [void][System.IO.Directory]::CreateDirectory((Join-Path $q 'a'))

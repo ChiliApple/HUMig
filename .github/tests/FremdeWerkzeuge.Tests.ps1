@@ -920,6 +920,8 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
                 $el.Path | Should -Be $ld.Path
                 $el.Blocked | Should -BeFalse
                 [bool]$el.Note | Should -Be $c.Note
+                # Status-Hinweis der Engine mit demselben Satz wie am Ziel-PC
+                if ($c.Note) { $el.Note | Should -Be 'WinGet-Modul 1.29.380: Signatur gueltig, aber von einem anderen Herausgeber als erwartet (Microsoft.WinGet.Client.psd1: CN=Fremd) - wird wie bisher geladen' }
             } finally {
                 function global:Get-TModuleSigFiles([string]$Dir) {
                     $global:T_SigCalls++
@@ -1750,6 +1752,7 @@ Describe 'WinGet-Modul: Signaturpruefung mit der echten Dateiliste von 1.29.380 
         $script:ToSigs = { param([string[]]$Rows, [hashtable]$Change = @{}) @(foreach ($r in $Rows) { $f = $r -split '\|'; $st = 'Valid'; $k = $f[1]; if ($Change.ContainsKey($f[0])) { $st = $Change[$f[0]].Status; $k = $Change[$f[0]].Key }; @{ Path = "C:\M\1.29.380\$($f[0])"; Status = $st; Subject = $script:Subj[$k] } }) }
         $script:Pub = (Get-HMAuTools (Join-Path $script:Root 'Config\tools.json')).WinGet.Herausgeber
     }
+    AfterAll { foreach ($n in @('Test-TModuleSignature', 'Test-TModuleOwnFile', 'Get-TModuleSigNote')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue } }
     It 'Herausgeber in Config\tools.json passt genau zum Signierer der Modulbeschreibung (Tippfehler faellt auf)' {
         $psd = @($script:Fresh | Where-Object { $_ -like 'Microsoft.WinGet.Client.psd1|*' })[0]
         $sub = $script:Subj[($psd -split '\|')[1]]
