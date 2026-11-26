@@ -150,6 +150,21 @@ Describe 'Oberflaeche: Set-JobUi schaltet Start und Abbrechen' {
             "$($ui[$p[1]].ToolTip)" | Should -Be $tipIdle[$p[1]]
         }
     }
+    It 'Tooltip im Lauf: eigener Reiter mit Hinweis aus dem XAML, andere Reiter nur der Vorgang (<Job>)' -Skip:(-not $script:StaD) -ForEach @(
+        @{ Job = 'Backup'; Own = 'btnCancel' }, @{ Job = 'Restore'; Own = 'btnCancelRestore' }, @{ Job = 'Server-Backup'; Own = 'btnSbCancel' }, @{ Job = 'App-Updates'; Own = 'btnAuCancel' }) {
+        $ui = $script:ui
+        $xamlTip = @{}; foreach ($p in $script:Pairs) { $n = @($script:MainXml.SelectNodes('//*') | Where-Object { (Get-UiName $_) -eq $p[1] })[0]; $xamlTip[$p[1]] = $n.GetAttribute('ToolTip') }
+        $script:JobTitle = $Job
+        Set-JobUi $true
+        foreach ($p in $script:Pairs) {
+            $c = $p[1]
+            "$($ui[$c].Content.Text)" | Should -Be "Abbrechen: $Job"
+            if ($c -eq $Own) { "$($ui[$c].ToolTip)" | Should -Be ("Laufenden Vorgang '$Job' abbrechen, wirkt aus jedem Reiter.`n" + $xamlTip[$c]) }
+            else { "$($ui[$c].ToolTip)" | Should -Be "Laufenden Vorgang '$Job' abbrechen (mit Rueckfrage), wirkt aus jedem Reiter." }
+        }
+        Set-JobUi $false
+        foreach ($p in $script:Pairs) { "$($ui[$p[1]].ToolTip)" | Should -Be $xamlTip[$p[1]] }
+    }
 }
 
 Describe 'Oberflaeche: Werkzeuge stehen im Abschnitt ihrer Einstufung' {

@@ -1723,7 +1723,9 @@ function Set-JobUi([bool]$Running) {
             $tb.Text = $(if ($jt) { "Abbrechen: $jt" } else { "$($cancelBtn.Tag.Text)" }); $tb.TextTrimming = 'CharacterEllipsis'
             $cancelBtn.Content = $tb
             # Tooltip: der laufende Vorgang; gehoert er zu diesem Reiter, dazu der Hinweis aus dem XAML (z.B. "nach dem laufenden Programm")
-            $own = switch ($cancelBtn) { $ui.btnCancel { '^Backup$' } $ui.btnCancelRestore { '^Restore$' } $ui.btnSbCancel { '^(Server-Backup|VM-Export)$' } $ui.btnAuCancel { '^App-Updates' } default { '^$' } }
+            # Vergleich ueber die Objekt-Identitaet (switch wuerde die Knoepfe als Text vergleichen, dann traefen mehrere Zweige zu)
+            $own = '^$'
+            if ([object]::ReferenceEquals($cancelBtn, $ui.btnCancel)) { $own = '^Backup$' } elseif ([object]::ReferenceEquals($cancelBtn, $ui.btnCancelRestore)) { $own = '^Restore$' } elseif ([object]::ReferenceEquals($cancelBtn, $ui.btnSbCancel)) { $own = '^(Server-Backup|VM-Export)$' } elseif ([object]::ReferenceEquals($cancelBtn, $ui.btnAuCancel)) { $own = '^App-Updates' }
             $cancelBtn.ToolTip = $(if (-not $jt) { $cancelBtn.Tag.Tip } elseif ($jt -match $own) { "Laufenden Vorgang '$jt' abbrechen, wirkt aus jedem Reiter.`n$($cancelBtn.Tag.Tip)" } else { "Laufenden Vorgang '$jt' abbrechen (mit Rueckfrage), wirkt aus jedem Reiter." })
             # die Breite begrenzt das XAML (MaxWidth = Breite des Startknopfs), langer Text wird mit ... gekuerzt
         } else {
