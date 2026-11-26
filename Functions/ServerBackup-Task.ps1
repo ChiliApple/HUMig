@@ -54,8 +54,16 @@ function Add-HMSbTaskError([string]$Note, [string]$Disk = '') {
             HostVersionId = ''; Note = "Geplante Aufgabe: $Note"; Tool = "HUMig $version"
         })
     } catch { }
-    $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME FEHLGESCHLAGEN" -Lines @($Note, "Protokoll: $($script:TaskLog)") -Level 'Error' -Category 'SbError' -SbProfile $(if ($prof) { $ProfileName } else { '' })
-    if ($n) { Write-HMSbLog $n 'Info' }
+    try {
+        $n = Send-HMNotify -Title "Server-Backup '$ProfileName' auf $env:COMPUTERNAME FEHLGESCHLAGEN" -Lines @($Note, "Protokoll: $($script:TaskLog)") -Level 'Error' -Category 'SbError' -SbProfile $(if ($prof) { $ProfileName } else { '' })
+        if ($n) { Write-HMSbLog $n 'Info' }
+    } catch { Write-HMSbLog "Benachrichtigung: $($_.Exception.Message)" 'Warning' }
+}
+# Sicherheitsnetz: ein unerwarteter Fehler ausserhalb der einzelnen Pruefungen endet nie ohne Verlauf, Ereignis und Meldung
+trap {
+    $tm = "Unerwarteter Fehler: $($_.Exception.Message)"
+    try { Add-HMSbTaskError $tm } catch { try { Write-HMSbLog $tm 'Error' } catch { } }
+    exit 2
 }
 
 Write-HMSbLog "Geplantes Server-Backup - Profil '$ProfileName' - Host $env:COMPUTERNAME - Konto $env:USERDOMAIN\$env:USERNAME - HUMig $version" 'Header'
@@ -69,8 +77,11 @@ try { foreach ($x in @(Remove-HMSbStaleOnceTasks)) { Write-HMSbLog "Erledigte Hi
 
 # --- Profil (auch nach Umbenennung)
 $prof = $null
+$cfgState = $null
 try {
-    $cfg = Get-Content -LiteralPath (Join-Path $cfgDir 'serverbackup.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    # nur lesen (nie beiseitelegen - das macht die Oberflaeche beim Speichern), aber den Grund nennen
+    $cfgState = Read-HMSbJsonState (Join-Path $cfgDir 'serverbackup.json')
+    $cfg = $cfgState.Data
     $name = $ProfileName
     for ($i = 0; $i -lt 20; $i++) {
         $r = @(@($cfg.Renames) | Where-Object { $_ -and "$($_.Old)" -eq $name })[0]
@@ -80,7 +91,12 @@ try {
     $prof = @(@($cfg.Profiles) | Where-Object { $_ -and "$($_.Name)" -eq $name })[0]
     if ($prof) { $ProfileName = $name }
 } catch { }
-if (-not $prof) { Add-HMSbTaskError "Profil '$ProfileName' nicht gefunden (Config\serverbackup.json)"; exit 2 }
+if (-not $prof) {
+    $why = if ($cfgState -and $cfgState.State -eq 'Corrupt') { "Config\serverbackup.json ist beschaedigt ($($cfgState.Error)) - in HUMig > Server-Backup pruefen" }
+    elseif ($cfgState -and $cfgState.State -eq 'Unreadable') { "Config\serverbackup.json ist nicht lesbar ($($cfgState.Error))" }
+    else { "Profil '$ProfileName' nicht gefunden (Config\serverbackup.json)" }
+    Add-HMSbTaskError $why; exit 2
+}
 # laeuft dieses Profil schon (Oberflaeche, Hintergrund, anderer Zeitplan)? Dann nicht doppelt
 try {
     $live = @(Get-HMSbAliveRuns (Split-Path $localHist -Parent) $ProfileName)
@@ -97,16 +113,19 @@ $prefix = "$($prof.DiskPrefix)".Trim()
 if (-not $prefix) { $prefix = 'HUMIG-' + (ConvertTo-HMSbSafeName $ProfileName).ToUpper() }
 
 # --- Platte des Profils suchen
-$dl = Get-HMSbDriveList
+$dl = $null
+try { $dl = Get-HMSbDriveList } catch { Add-HMSbTaskError "Platten nicht lesbar: $($_.Exception.Message)"; exit 2 }
 foreach ($m in @($dl.Messages)) { if ($m) { Write-HMSbLog $m 'Warning' } }
+# Pass-Through-Meldungen gehoeren in den Fehlertext (Verlauf, Teams), falls keine Platte gefunden wird
+$ptWhy = Get-HMSbPassThroughNote @($dl.Messages)
 $drives = @(@($dl.Drives) | Where-Object { $_ -and (Test-HMSbLabelMatch "$($_.Label)" $prefix) })
 if ($DiskLabel) {
     # bestimmte Platte (in der Oberflaeche gewaehlt): nur diese - nie eine andere Platte des Profils
     if (-not (Test-HMSbDiskLabel $DiskLabel)) { Add-HMSbTaskError "Ungueltige Platten-Bezeichnung '$DiskLabel'"; exit 2 }
     $drives = @($drives | Where-Object { "$($_.Label)" -ieq $DiskLabel })
-    if (-not $drives.Count) { Add-HMSbTaskError "Platte $DiskLabel ist nicht (mehr) angesteckt oder gehoert nicht zum Profil ($prefix-...)"; exit 2 }
+    if (-not $drives.Count) { Add-HMSbTaskError "Platte $DiskLabel ist nicht (mehr) angesteckt oder gehoert nicht zum Profil ($prefix-...)$ptWhy"; exit 2 }
 }
-if (-not $drives.Count) { Add-HMSbTaskError "Keine Platte des Profils angesteckt ($prefix-...)"; exit 2 }
+if (-not $drives.Count) { Add-HMSbTaskError "Keine Platte des Profils angesteckt ($prefix-...)$ptWhy"; exit 2 }
 # Rotations-Platten vor Archiv-Platten (<Prefix>-A<n>)
 $drives = @(@($drives | Where-Object { -not (Test-HMSbArchiveLabel "$($_.Label)" $prefix) }) + @($drives | Where-Object { Test-HMSbArchiveLabel "$($_.Label)" $prefix }))
 if ($drives.Count -gt 1) { Write-HMSbLog "Mehrere Platten des Profils angesteckt - verwendet wird $($drives[0].Letter): $($drives[0].Label)" 'Warning' }

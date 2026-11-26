@@ -218,7 +218,10 @@ function Show-HMMultiDialogCore {
         if (-not $rv) { return }
         $ui.cmbComputer.Text = "$($rv.Row.Name)"
         $s.W.Close()
-        Connect-Target
+        # waehrend Backup/Restore nicht neu verbinden - der Name steht im Feld,
+        # die Anzeige unter dem Feld zeigt den Unterschied, Enter verbindet nach dem Vorgang
+        if (Test-HMBackupRestoreRunning) { Out-Console "$($rv.Row.Name) ins Feld Computer uebernommen - verbunden wird nach dem laufenden Vorgang (Enter oder Verbinden)." 'Warning'; return }
+        Connect-Target -FromField
     }
     $script:MultiDlgTake = $take
     $w.FindName('btnTake').Add_Click({ & $script:MultiDlgTake })

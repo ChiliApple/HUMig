@@ -4,8 +4,9 @@
 #   Vorab-Release v<Version> (Kanal Test) automatisch anlegen, Text aus CHANGELOG.md, HUMig-files.sha256 anhaengen,
 #   nur die letzten 10 Releases behalten (die freigegebene Version bleibt immer)
 # - von Hand veroeffentlichtes Release: HUMig-files.sha256 anhaengen
-# - Release ohne HUMig-files.sha256 (z.B. abgebrochener Lauf): Datei wird beim naechsten Push auf main nachgereicht -
-#   immer aus dem Stand des Tags, eine vorhandene Datei wird nie ueberschrieben (sie kann schon signiert sein)
+# - Release der aktuellen Version (Config/version.json) ohne HUMig-files.sha256 (z.B. abgebrochener Lauf): Datei wird beim
+#   naechsten Push auf main nachgereicht (aeltere Releases nicht) - immer aus dem Stand des Tags, eine vorhandene Datei wird
+#   nie ueberschrieben (sie kann schon signiert sein)
 # - HUMig-files.sha256 beginnt mit "# HUMig-Release <Tag>" (Pull.ps1 prueft, dass die signierte Datei zum Release passt)
 # - danach jeweils den Update-Weg testen (Pull.ps1 laedt genau dieses Release und prueft alle Pruefsummen; zweiter Lauf = Update mit Journal/Aufraeumen)
 # - Signatur + Freigabe macht der Herausgeber in HUMig (Rechtsklick auf Update > Release signieren / Release freigeben),
@@ -35,7 +36,7 @@ jobs:
     name: Autor-Pruefung (nur ChiliApple)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (auf Commit festgelegt)
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -70,7 +71,7 @@ jobs:
     name: Pruefungen (Windows PowerShell 5.1)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (auf Commit festgelegt)
         with:
           ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
           persist-credentials: false
@@ -96,7 +97,7 @@ jobs:
     outputs:
       tag: ${{ steps.rel.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (auf Commit festgelegt)
         with:
           ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
       - name: Release bestimmen bzw. als Vorab-Release anlegen
@@ -175,7 +176,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (auf Commit festgelegt)
         with:
           ref: ${{ needs.release.outputs.tag }}
           persist-credentials: false
