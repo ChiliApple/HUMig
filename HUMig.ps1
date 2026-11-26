@@ -732,7 +732,7 @@ foreach ($n in @('btnWizard', 'btnRemote', 'brdMonBackup', 'brdMonRestore', 'brd
     'btnRestore', 'btnCancelRestore', 'btnExtraTargets', 'lblExtraTargets', 'btnToolCredWiz', 'btnToolCredList', 'btnToolUserAppData', 'btnToolUserStartup', 'btnToolProfileFolder', 'pnlSysTools',
     'pnlLinks', 'rtbConsole', 'pbMain', 'lblStatus', 'lblElapsed', 'rowConsole', 'btnToolSoftDeploy', 'btnToolDrvDeploy', 'btnToolSoftList', 'lblSizeTotal', 'lstExclude',
     'btnExclAdd', 'btnExclDel', 'btnBigFiles', 'chkIncremental', 'lblIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport',
-    'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag',
+    'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag', 'pnlToolsMulti', 'pnlToolsNoTarget', 'pnlToolsSoft', 'lblToolsPc', 'lblToolsMulti', 'lblToolsUser', 'lblToolsDiag', 'lblToolsSoft', 'lblToolsNoTarget',
     'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnBackupSearch', 'btnFileSearch', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnFeedback', 'btnFeedbackR', 'btnReinstall', 'btnADDevices',
     'tabServerBackup', 'btnSbHealth', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
     'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'cmbSbAfter', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
@@ -1450,6 +1450,7 @@ function Update-HMTargetLabel {
     $ui.lblConnected.Text = $l.Text
     $ui.lblConnected.Foreground = Get-ConsoleBrush $l.Color
     $ui.lblConnected.ToolTip = $l.Tip
+    if (Get-Command Update-HMToolHeads -ErrorAction SilentlyContinue) { Update-HMToolHeads }
 }
 # Vor jedem Vorgang: steht im Feld ein anderer PC als das Ziel, nachfragen statt still zu mischen. $true = Vorgang starten
 # $script:HMTargetDeclined: $true, wenn der Anwender die Rueckfrage abgelehnt hat (fuer den Umzugs-Assistenten)
@@ -1545,6 +1546,7 @@ function Get-SelectedProfile {
 }
 function Update-SidLabel {
     $p = Get-SelectedProfile
+    if (Get-Command Update-HMToolHeads -ErrorAction SilentlyContinue) { Update-HMToolHeads }   # Ueberschriften im Reiter Werkzeuge
     if (-not $p) { $ui.lblSid.Text = ''; return }
     if ($p.NoProfile) { $ui.lblSid.Text = 'kein Profil an diesem PC (nur Restore mit USMT)'; $ui.lblSid.Foreground = Get-ConsoleBrush '#FFF9E2AF' }
     else {
@@ -2460,51 +2462,69 @@ function Test-HMToolStart($Tag) {
     if ("$($Tag.Kind)" -eq 'User') { Save-HMUserMemory }   # mit diesem Benutzer wird gearbeitet
     return $true
 }
+# Abschnitte folgen der Einstufung jedes Werkzeugs (Schalter von Add-ToolButton): ohne Schalter = gewaehlter PC ($tc, Diagnose $td),
+# -User = gewaehlter Benutzer ($tp), -NoTarget = mehrere PCs ($tm) oder ohne Ziel-PC ($tn). Ein Test prueft, dass beides zusammenpasst.
 $tc = $ui.pnlToolsComputer
-Add-ToolButton $tc 'Fernwartung aktivieren' 'BtnGreen' 'Am gewaehlten PC WinRM, Remotedesktop, SMB/C$, Remoteregistrierung und Firewall-Regeln aktivieren - Start ueber WMI (Port 135), auch wenn WinRM noch aus ist' { Start-HMEnableRemote }
-Add-ToolButton $tc 'Umbenennen' 'BtnPeach' 'Computernamen aendern (Domaenen-PC: Domaenen-Anmeldedaten), optional Neustart' { Start-HMRenameComputer } -Busy
-Add-ToolButton $tc 'IP-Adresse / DHCP' 'BtnPeach' 'Statische IP oder DHCP - wird als SYSTEM-Aufgabe am Ziel ausgefuehrt (Verbindungsabbruch egal)' { Start-HMNetworkConfig } -Busy
-Add-ToolButton $tc 'Lokale Gruppen' 'BtnBlue' 'Administratoren, Netzwerkkonfigurations-Operatoren, Remotedesktopbenutzer, Benutzer: anzeigen, hinzufuegen, entfernen' { Show-HMLocalGroups }
-Add-ToolButton $tc 'Autologon' 'BtnDefault' 'Automatische Anmeldung setzen/aufheben/anzeigen (Kennwort als LSA-Geheimnis)' { Start-HMAutologon }
-Add-ToolButton $tc 'Sperrbildschirm / Energie' 'BtnDefault' 'Links: Sperrbildschirm, automatisches Sperren, Bildschirm aus, Energiesparen, Schnellstart setzen | Rechts: aktuelle Werte' { Start-HMPowerSettings } { Show-HMPowerSettings }
-Add-ToolButton $tc 'Firewall / Netzwerkprofil' 'BtnDefault' 'Firewall-Profile und Netzwerkkategorie (Privat/Oeffentlich) anzeigen und aendern' { Show-HMFirewall }
-Add-ToolButton $tc 'Angemeldete Benutzer' 'BtnTeal' 'Wer ist angemeldet? Sitzungen abmelden (z.B. vor einem Backup)' { Show-HMSessions }
-Add-ToolButton $tc 'Nachricht senden' 'BtnTeal' 'Nachricht an alle angemeldeten Benutzer' { Start-HMMessage }
-Add-ToolButton $tc 'Neustart / Herunterfahren' 'BtnRed' 'Mit Wartezeit und Nachricht - oder geplanten Neustart abbrechen' { Start-HMShutdown } -Busy
+Add-ToolButton $tc 'Fernwartung aktivieren' 'BtnChange' 'Am gewaehlten PC WinRM, Remotedesktop, SMB/C$, Remoteregistrierung und Firewall-Regeln aktivieren - Start ueber WMI (Port 135), auch wenn WinRM noch aus ist' { Start-HMEnableRemote }
+Add-ToolButton $tc 'Umbenennen' 'BtnChange' 'Computernamen aendern (Domaenen-PC: Domaenen-Anmeldedaten), optional Neustart' { Start-HMRenameComputer } -Busy
+Add-ToolButton $tc 'IP-Adresse / DHCP' 'BtnChange' 'Statische IP oder DHCP - wird als SYSTEM-Aufgabe am Ziel ausgefuehrt (Verbindungsabbruch egal)' { Start-HMNetworkConfig } -Busy
+Add-ToolButton $tc 'Lokale Gruppen' 'BtnDefault' 'Administratoren, Netzwerkkonfigurations-Operatoren, Remotedesktopbenutzer, Benutzer: anzeigen, hinzufuegen, entfernen' { Show-HMLocalGroups }
+Add-ToolButton $tc 'Autologon' 'BtnChange' 'Automatische Anmeldung setzen/aufheben/anzeigen (Kennwort als LSA-Geheimnis)' { Start-HMAutologon }
+Add-ToolButton $tc 'Sperrbildschirm / Energie' 'BtnChange' 'Links: Sperrbildschirm, automatisches Sperren, Bildschirm aus, Energiesparen, Schnellstart setzen | Rechts: aktuelle Werte' { Start-HMPowerSettings } { Show-HMPowerSettings }
+Add-ToolButton $tc 'Firewall / Netzwerkprofil' 'BtnChange' 'Firewall-Profile und Netzwerkkategorie (Privat/Oeffentlich) anzeigen und aendern' { Show-HMFirewall }
+Add-ToolButton $tc 'Angemeldete Benutzer' 'BtnDefault' 'Wer ist angemeldet? Sitzungen abmelden (z.B. vor einem Backup)' { Show-HMSessions }
+Add-ToolButton $tc 'Nachricht senden' 'BtnDefault' 'Nachricht an alle angemeldeten Benutzer' { Start-HMMessage }
+Add-ToolButton $tc 'Neustart / Herunterfahren' 'BtnDanger' 'Mit Wartezeit und Nachricht - oder geplanten Neustart abbrechen' { Start-HMShutdown } -Busy
 Add-ToolButton $tc 'Netzwerktest' 'BtnDefault' 'Von diesem PC zum Ziel: DNS (vor/rueckwaerts), Ping, Ports 445/5985/135/3389, WinRM' { Start-HMNetTest }
-Add-ToolButton $tc 'Geraete (AD) / Mehrfach' 'BtnGreen' 'PCs aus dem Active Directory (Filter, OU) anhaken und Aktionen parallel ausfuehren: Online-Check, Fernwartung, Inventar, Autopilot, Uebermittlungsoptimierung, Aufraeumen, Software, GPUpdate, Intune, Nachricht, Neustart' { Show-HMMultiDialog } -NoTarget
-Add-ToolButton $tc 'Remote-PowerShell' 'BtnTeal' 'Links: PowerShell-Sitzung am gewaehlten PC (Enter-PSSession) | Rechts: CMD (winrs)' { Start-HMRemoteShell $false } { Start-HMRemoteShell $true }
+Add-ToolButton $tc 'Remote-PowerShell' 'BtnDefault' 'Links: PowerShell-Sitzung am gewaehlten PC (Enter-PSSession) | Rechts: CMD (winrs)' { Start-HMRemoteShell $false } { Start-HMRemoteShell $true }
 Add-ToolButton $tc 'Uebermittlungsoptimierung' 'BtnDefault' 'Delivery Optimization: Updates zwischen PCs im Netz teilen (LAN/Gruppe) - lokale Richtlinie setzen und Status anzeigen' { Start-HMDeliveryOpt }
-Add-ToolButton $tc 'Ordnerfreigaben' 'BtnBlue' 'Freigaben mit Freigabe- und NTFS-Rechten anzeigen, Freigaben aus einem Backup uebernehmen' { Show-HMShares }
-Add-ToolButton $tc 'USMT einrichten (ADK)' 'BtnDefault' 'User State Migration Tool aus dem Windows ADK nach BIN\USMT kopieren - ohne ADK: nur USMT still installieren' { Start-HMUsmtSetup } -NoTarget
-Add-ToolButton $tc 'Inventar (mehrere PCs)' 'BtnMauve' 'Links: Hardware, Windows, BitLocker, TPM, IP/MAC mehrerer PCs parallel (WinRM) - Tabelle + CSV im Backup-Ordner\Inventar | Rechts: zusaetzlich installierte Software' { Start-HMInventory $false } { Start-HMInventory $true } -NoTarget
-Add-ToolButton $tc 'BitLocker-Schluessel' 'BtnBlue' 'Status und Schluesselschutz aller Laufwerke, Wiederherstellungskennwort in AD oder Entra ID sichern' { Show-HMBitLockerKeys }
+Add-ToolButton $tc 'Ordnerfreigaben' 'BtnDefault' 'Freigaben mit Freigabe- und NTFS-Rechten anzeigen, Freigaben aus einem Backup uebernehmen' { Show-HMShares }
+Add-ToolButton $tc 'BitLocker-Schluessel' 'BtnDefault' 'Status und Schluesselschutz aller Laufwerke, Wiederherstellungskennwort in AD oder Entra ID sichern' { Show-HMBitLockerKeys }
 Add-ToolButton $tc 'Autopilot-Hash' 'BtnDefault' 'Hardware-Hash fuer Intune/Autopilot als CSV (Backup-Ordner\Autopilot) - ist HUPilot eingetragen, auf Wunsch auch an HUPilot uebergeben' { Start-HMAutopilotHash }
-Add-ToolButton $tc 'HUPilot ...' 'BtnDefault' 'Links: HUPilot-Setup an diesem PC oeffnen (Autopilot per USB-Stick - eigenes Werkzeug; noch nicht eingetragen: suchen oder Anleitung) | Rechts: HUPilot-Ordner neu waehlen' { Start-HMHUPilot } { Start-HMHUPilot -Choose } -NoTarget
 Add-ToolButton $tc 'Wake-on-LAN' 'BtnDefault' 'PC aufwecken (MAC aus Inventar/Backup) - optional ueber einen PC im Zielnetz senden' { Start-HMWakeOnLan }
-Add-ToolButton $tc 'Laufwerke (C$)' 'BtnBlue' 'Links: Laufwerk C: des gewaehlten PCs im Explorer oeffnen (remote \\PC\C$) | Rechts: Laufwerk oder Freigabe waehlen - auch USB-Sticks am Remote-PC. Der angemeldete Windows-Benutzer braucht Adminrechte am Ziel-PC.' { Open-HMAdminShare } { Show-HMDriveMenu }
+Add-ToolButton $tc 'Laufwerke (C$)' 'BtnDefault' 'Links: Laufwerk C: des gewaehlten PCs im Explorer oeffnen (remote \\PC\C$) | Rechts: Laufwerk oder Freigabe waehlen - auch USB-Sticks am Remote-PC. Der angemeldete Windows-Benutzer braucht Adminrechte am Ziel-PC.' { Open-HMAdminShare } { Show-HMDriveMenu }
+Add-ToolButton $tc 'Profil zurueckholen' 'BtnChange' 'Erneuerte Profile anzeigen und das alte Profil wiederherstellen (Test-Profil wird beiseitegelegt)' { Show-HMProfileRestore } -Busy
+Add-ToolButton $tc 'Aufgaben aus Backup importieren' 'BtnChange' 'Geplante Aufgaben aus dem im Reiter Restore markierten Backup einzeln importieren' { Show-HMTaskImport }
+Add-ToolButton $tc 'Alte Profile loeschen' 'BtnDanger' 'Alle Profile mit letzter Anmeldung anzeigen, markierte sauber loeschen (Ordner + Registry)' { Show-HMOldProfiles } -Busy
+Add-ToolButton $tc 'Wichtige Dateien suchen' 'BtnDefault' 'PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche finden und als Zusaetzliche Ordner aufnehmen' { Start-HMFileSearch }
+$tm = $ui.pnlToolsMulti
+Add-ToolButton $tm 'Geraete (AD) / Mehrfach' 'BtnDefault' 'PCs aus dem Active Directory (Filter, OU) anhaken und Aktionen parallel ausfuehren: Online-Check, Fernwartung, Inventar, Autopilot, Uebermittlungsoptimierung, Aufraeumen, Software, GPUpdate, Intune, Nachricht, Neustart' { Show-HMMultiDialog } -NoTarget
+Add-ToolButton $tm 'Inventar (mehrere PCs)' 'BtnDefault' 'Links: Hardware, Windows, BitLocker, TPM, IP/MAC mehrerer PCs parallel (WinRM) - Tabelle + CSV im Backup-Ordner\Inventar | Rechts: zusaetzlich installierte Software' { Start-HMInventory $false } { Start-HMInventory $true } -NoTarget
 $tp = $ui.pnlToolsProfile
-Add-ToolButton $tp 'Profil erneuern (Test)' 'BtnPeach' 'Profilordner umbenennen + Registry-Eintrag sichern/entfernen: Benutzer bekommt beim Anmelden ein frisches Profil (z.B. bei defektem Profil). Rueckgaengig: Profil zurueckholen' { Start-HMProfileRenew } -Busy -User
-Add-ToolButton $tp 'Profil zurueckholen' 'BtnGreen' 'Erneuerte Profile anzeigen und das alte Profil wiederherstellen (Test-Profil wird beiseitegelegt)' { Show-HMProfileRestore } -Busy
-Add-ToolButton $tp 'Profilordner umbenennen' 'BtnDefault' 'Ordnernamen des Profils aendern (z.B. nach Namensaenderung) und ProfileList anpassen' { Start-HMProfileRename } -Busy -User
-Add-ToolButton $tp 'Profil anderem Konto zuweisen' 'BtnMauve' 'Profil bleibt am Ort und gehoert danach einem anderen Konto (z.B. Domaene -> lokal): Rechte, Registry, ProfileList' { Start-HMProfileAssign } -Busy -User
-Add-ToolButton $tp 'Windows-Apps neu registrieren' 'BtnDefault' 'Store-Apps, Startmenue, Einstellungen reparieren - im Kontext des Benutzers (sofort oder bei Anmeldung)' { Start-HMAppxReregister } -User
+Add-ToolButton $tp 'Profil erneuern (Test)' 'BtnChange' 'Profilordner umbenennen + Registry-Eintrag sichern/entfernen: Benutzer bekommt beim Anmelden ein frisches Profil (z.B. bei defektem Profil). Rueckgaengig: Profil zurueckholen' { Start-HMProfileRenew } -Busy -User
+Add-ToolButton $tp 'Profilordner umbenennen' 'BtnChange' 'Ordnernamen des Profils aendern (z.B. nach Namensaenderung) und ProfileList anpassen' { Start-HMProfileRename } -Busy -User
+Add-ToolButton $tp 'Profil anderem Konto zuweisen' 'BtnChange' 'Profil bleibt am Ort und gehoert danach einem anderen Konto (z.B. Domaene -> lokal): Rechte, Registry, ProfileList' { Start-HMProfileAssign } -Busy -User
+Add-ToolButton $tp 'Windows-Apps neu registrieren' 'BtnChange' 'Store-Apps, Startmenue, Einstellungen reparieren - im Kontext des Benutzers (sofort oder bei Anmeldung)' { Start-HMAppxReregister } -User
 Add-ToolButton $tp 'Gruppenrichtlinien-Ergebnis' 'BtnDefault' 'gpresult als HTML fuer PC + gewaehlten Benutzer' { Start-HMGpResult } -User
-Add-ToolButton $tp 'Aufgaben aus Backup importieren' 'BtnDefault' 'Geplante Aufgaben aus dem im Reiter Restore markierten Backup einzeln importieren' { Show-HMTaskImport }
-Add-ToolButton $tp 'Alte Profile loeschen' 'BtnRed' 'Alle Profile mit letzter Anmeldung anzeigen, markierte sauber loeschen (Ordner + Registry)' { Show-HMOldProfiles } -Busy
-Add-ToolButton $tp 'Wichtige Dateien suchen' 'BtnPeach' 'PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche finden und als Zusaetzliche Ordner aufnehmen' { Start-HMFileSearch }
-Add-ToolButton $tp 'Datenbanken suchen' 'BtnPeach' 'Lokale Datenbanken (SQLite, Access, KeePass, SQL Server, Firebird ...) und Datenbank-Dienste am PC finden - als Zusaetzliche Ordner oder als Katalog-Eintrag uebernehmen (Programm wird dann vor dem Backup geschlossen)' { Start-HMDbSearch } -User
-Add-ToolButton $tp 'Im Backup suchen' 'BtnTeal' 'Dateien im markierten Backup suchen und einzeln herauskopieren' { Start-HMBackupSearch } -NoTarget
+Add-ToolButton $tp 'Datenbanken suchen' 'BtnDefault' 'Lokale Datenbanken (SQLite, Access, KeePass, SQL Server, Firebird ...) und Datenbank-Dienste am PC finden - als Zusaetzliche Ordner oder als Katalog-Eintrag uebernehmen (Programm wird dann vor dem Backup geschlossen)' { Start-HMDbSearch } -User
 $td = $ui.pnlToolsDiag
-Add-ToolButton $td 'Ereignisse (Fehler)' 'BtnBlue' 'Links: Fehler der letzten 3 Tage | Rechts: 14 Tage inkl. Warnungen' { Show-HMEventLog 3 $false } { Show-HMEventLog 14 $true }
+Add-ToolButton $td 'Ereignisse (Fehler)' 'BtnDefault' 'Links: Fehler der letzten 3 Tage | Rechts: 14 Tage inkl. Warnungen' { Show-HMEventLog 3 $false } { Show-HMEventLog 14 $true }
 Add-ToolButton $td 'Akku-Bericht' 'BtnDefault' 'Ladestand, Akku-Zustand in %, Ladezyklen + ausfuehrlicher Windows-Akku-Bericht (HTML)' { Start-HMBatteryReport }
 Add-ToolButton $td 'Aktivierung' 'BtnDefault' 'Windows- und Office-Lizenzstatus (KMS, Abo)' { Show-HMActivation }
 Add-ToolButton $td 'Entra ID / Intune' 'BtnDefault' 'Links: Status (dsregcmd, MDM-Registrierung) | Rechts: Intune-Synchronisierung anstossen' { Start-HMIntune $false } { Start-HMIntune $true }
 Add-ToolButton $td 'Domaene / Zeit / Kerberos' 'BtnDefault' 'Vertrauensstellung pruefen/reparieren, Zeit synchronisieren, Kerberos-Tickets des Computers leeren' { Start-HMDomainRepair }
-Add-ToolButton $td 'Druckwarteschlange leeren' 'BtnDefault' 'Druckspooler stoppen, haengende Auftraege loeschen, neu starten' { Start-HMSpoolerReset }
-Add-ToolButton $td 'Speicher aufraeumen' 'BtnPeach' 'Temp, Windows-Update-Cache, Fehlerberichte, Papierkorb, Komponentenspeicher - mit Anzeige des freigegebenen Platzes' { Start-HMCleanup }
-Add-ToolButton $td 'Systemdateien reparieren' 'BtnPeach' 'Links: DISM /RestoreHealth + SFC /scannow im Hintergrund starten | Rechts: Status/Ergebnis' { Start-HMSystemRepair $false } { Start-HMSystemRepair $true }
-$sysTools = @(
+Add-ToolButton $td 'Druckwarteschlange leeren' 'BtnChange' 'Druckspooler stoppen, haengende Auftraege loeschen, neu starten' { Start-HMSpoolerReset }
+Add-ToolButton $td 'Speicher aufraeumen' 'BtnChange' 'Temp, Windows-Update-Cache, Fehlerberichte, Papierkorb, Komponentenspeicher - mit Anzeige des freigegebenen Platzes' { Start-HMCleanup }
+Add-ToolButton $td 'Systemdateien reparieren' 'BtnChange' 'Links: DISM /RestoreHealth + SFC /scannow im Hintergrund starten | Rechts: Status/Ergebnis' { Start-HMSystemRepair $false } { Start-HMSystemRepair $true }
+$tn = $ui.pnlToolsNoTarget
+Add-ToolButton $tn 'USMT einrichten (ADK)' 'BtnChange' 'User State Migration Tool aus dem Windows ADK nach BIN\USMT kopieren - ohne ADK: nur USMT still installieren' { Start-HMUsmtSetup } -NoTarget
+Add-ToolButton $tn 'HUPilot ...' 'BtnDefault' 'Links: HUPilot-Setup an diesem PC oeffnen (Autopilot per USB-Stick - eigenes Werkzeug; noch nicht eingetragen: suchen oder Anleitung) | Rechts: HUPilot-Ordner neu waehlen' { Start-HMHUPilot } { Start-HMHUPilot -Choose } -NoTarget
+Add-ToolButton $tn 'Im Backup suchen' 'BtnDefault' 'Dateien im markierten Backup suchen und einzeln herauskopieren' { Start-HMBackupSearch } -NoTarget
+# die drei Ordner-Knoepfe aus dem XAML (Benutzerbezug) stehen am Ende des Benutzer-Abschnitts
+foreach ($b in @($ui.btnToolUserAppData, $ui.btnToolUserStartup, $ui.btnToolProfileFolder)) { if ($b) { [void]$tp.Children.Remove($b); [void]$tp.Children.Add($b) } }
+# Ueberschriften der Werkzeug-Abschnitte nennen PC und Benutzer, auf die die Knoepfe wirken (nach Verbinden, Umschalten, Benutzerwahl)
+function Update-HMToolHeads {
+    if (-not $ui.lblToolsPc) { return }
+    $pc = $(if ($script:UserMode) { $env:COMPUTERNAME } else { Get-HMTargetCaption })
+    $acc = ''
+    try { $sp = Get-SelectedProfile; if ($sp -and "$($sp.Account)") { $acc = "$($sp.Account)" } } catch { }
+    if (-not $acc) { $acc = "$($ui.cmbUser.Text)".Trim() }
+    $ui.lblToolsPc.Text = "GEWAEHLTER PC: $pc"
+    $ui.lblToolsDiag.Text = "DIAGNOSE UND WARTUNG: $pc"
+    $ui.lblToolsSoft.Text = "SOFTWARE UND TREIBER: $pc"
+    $ui.lblToolsUser.Text = $(if ($acc) { "GEWAEHLTER BENUTZER: $acc auf $pc" } else { "GEWAEHLTER BENUTZER: keiner gewaehlt (auf $pc)" })
+}
+Update-HMToolHeads$sysTools = @(
     @('Taskmanager', 'taskmgr.exe', ''), @('Autostart-Apps', 'ms-settings:startupapps', ''), @('Netzwerkadapter', 'ncpa.cpl', ''),
     @('Systemsteuerung', 'control.exe', ''), @('Verwaltung', 'control.exe', 'admintools'), @('Firewall', 'firewall.cpl', ''),
     @('Ereignisanzeige', 'eventvwr.msc', ''), @('Maus', 'main.cpl', ''), @('Geraete-Manager', 'devmgmt.msc', ''), @('Dienste', 'services.msc', ''),
@@ -2536,12 +2556,12 @@ foreach ($t in $sysTools) {
     [void]$ui.pnlSysTools.Children.Add($b)
 }
 $bx = New-Object System.Windows.Controls.Button
-$bx.Content = '.exe als Admin starten'; $bx.Style = $script:Window.FindResource('BtnMauve')
+$bx.Content = '.exe als Admin starten'; $bx.Style = $script:Window.FindResource('BtnDefault')
 $bx.ToolTip = 'Programm, Installer oder Skript (.exe, .msi, .cmd, .bat) waehlen und an diesem PC als Administrator starten'
 $bx.Add_Click({ $d = New-Object Microsoft.Win32.OpenFileDialog; $d.Filter = 'Programme (*.exe;*.msi;*.cmd;*.bat)|*.exe;*.msi;*.cmd;*.bat'; if ($d.ShowDialog() -eq $true) { Start-Process -FilePath $d.FileName -Verb RunAs } })
 [void]$ui.pnlSysTools.Children.Add($bx)
 $bc = New-Object System.Windows.Controls.Button
-$bc.Content = 'Alle offenen Programme schliessen'; $bc.Style = $script:Window.FindResource('BtnRed')
+$bc.Content = 'Alle offenen Programme schliessen'; $bc.Style = $script:Window.FindResource('BtnDanger')
 $bc.ToolTip = 'Schliesst alle Programme mit Fenster ohne Rueckfrage (ausser PowerShell/HUMig) - z.B. vor einem lokalen Backup'
 $bc.Add_Click({
     if (-not (Confirm-Action 'Alle Programme mit Fenster OHNE Rueckfrage schliessen (nicht gespeicherte Daten gehen verloren)?')) { return }
@@ -2599,7 +2619,7 @@ $ui.pnlLinks.Children.Clear()
 foreach ($l in @($script:Settings.Links)) {
     if (-not $l.Name -or -not $l.Url) { continue }
     $b = New-Object System.Windows.Controls.Button
-    $b.Content = $l.Name; $b.Style = $script:Window.FindResource('BtnTeal')
+    $b.Content = $l.Name; $b.Style = $script:Window.FindResource('BtnDefault')
     $b.ToolTip = "$($l.Url)"
     $b.Tag = @("$($l.Url)", [bool]$l.CopySerial)
     $b.Add_Click({
@@ -3149,15 +3169,20 @@ function Set-HMUserModeUi {
     # Backup / Restore: Funktionen mit Systemzugriff ausblenden
     foreach ($c in @($ui.btnEditExceptions, $ui.chkMinSystemExc, $ui.chkNoSystemFileExc, $ui.btnCleanupBackups, $ui.btnReinstall,
                      $ui.chkGpUpdate, $ui.chkWUDrivers, $ui.chkNumLock, $ui.chkFastBoot, $ui.txtPostScript, $ui.btnPostScript)) { & $hide $c }
-    # Werkzeuge: nur Suche und Ordner/Anmeldedaten des eigenen Profils
+    # Werkzeuge: nur Suche und Ordner/Anmeldedaten des eigenen Profils (gleiche Auswahl wie bisher, in welchem Abschnitt sie auch stehen)
     $keep = @('Im Backup suchen', 'Wichtige Dateien suchen', 'Datenbanken suchen')
-    foreach ($b in @($ui.pnlToolsProfile.Children)) { if ($keep -notcontains "$($b.Content)") { $b.Visibility = 'Collapsed' } }
-    foreach ($p in @($ui.pnlToolsComputer, $ui.pnlToolsDiag, $ui.pnlSysTools, $ui.btnToolSoftDeploy)) {
-        # ganze Abschnitte (Border) ausblenden
-        $e = $p
-        while ($e -and -not ($e -is [System.Windows.Controls.Border])) { $e = $e.Parent }
-        & $hide $(if ($e) { $e } else { $p })
+    $keepUi = @($ui.btnToolCredWiz, $ui.btnToolCredList, $ui.btnToolUserAppData, $ui.btnToolUserStartup, $ui.btnToolProfileFolder)
+    foreach ($p in @($ui.pnlToolsComputer, $ui.pnlToolsMulti, $ui.pnlToolsProfile, $ui.pnlToolsDiag, $ui.pnlToolsSoft, $ui.pnlToolsNoTarget, $ui.pnlSysTools)) {
+        if (-not $p) { continue }
+        foreach ($b in @($p.Children)) { if ($p -eq $ui.pnlSysTools -or ($keep -notcontains "$($b.Content)" -and -not ($keepUi | Where-Object { [object]::ReferenceEquals($_, $b) }))) { $b.Visibility = 'Collapsed' } }
+        # Abschnitt ohne sichtbaren Knopf ganz ausblenden (Border um die Leiste)
+        if (-not @($p.Children | Where-Object { $_.Visibility -eq 'Visible' }).Count) {
+            $e = $p
+            while ($e -and -not ($e -is [System.Windows.Controls.Border])) { $e = $e.Parent }
+            & $hide $(if ($e) { $e } else { $p })
+        }
     }
+    if (Get-Command Update-HMToolHeads -ErrorAction SilentlyContinue) { Update-HMToolHeads }
     Out-Console 'BENUTZER-MODUS: eigenes Profil sichern/wiederherstellen, Dateien im Backup suchen. Alle anderen Funktionen brauchen Administratorrechte.' 'Warning'
 }
 

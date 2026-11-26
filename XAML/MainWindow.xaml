@@ -474,28 +474,20 @@
                         <StackPanel x:Name="pnlTools">
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="COMPUTER (GEWAEHLTER PC - LOKAL ODER REMOTE)" Style="{StaticResource ToolSectionLabel}"/>
+                                    <TextBlock x:Name="lblToolsPc" Text="GEWAEHLTER PC" Style="{StaticResource ToolSectionLabel}" TextWrapping="Wrap"/>
                                     <WrapPanel x:Name="pnlToolsComputer"/>
                                 </StackPanel>
                             </Border>
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="BENUTZERPROFIL (GEWAEHLTER BENUTZER)" Style="{StaticResource ToolSectionLabel}"/>
-                                    <WrapPanel x:Name="pnlToolsProfile"/>
+                                    <TextBlock x:Name="lblToolsMulti" Text="MEHRERE PCS (AUSWAHL IM FENSTER)" Style="{StaticResource ToolSectionLabel}" TextWrapping="Wrap"/>
+                                    <WrapPanel x:Name="pnlToolsMulti"/>
                                 </StackPanel>
                             </Border>
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="DIAGNOSE / WARTUNG (GEWAEHLTER PC)" Style="{StaticResource ToolSectionLabel}"/>
-                                    <WrapPanel x:Name="pnlToolsDiag"/>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
-                                <StackPanel>
-                                    <TextBlock Text="ANMELDEDATEN / ORDNER" Style="{StaticResource ToolSectionLabel}"/>
-                                    <WrapPanel>
-                                        <Button x:Name="btnToolCredWiz" Content="Anmeldedaten sichern/wiederherstellen" Style="{StaticResource BtnDefault}" ToolTip="Windows-Assistent (credwiz) fuer die Anmeldeinformationsverwaltung des ANGEMELDETEN Benutzers. Datei am besten in den Backup-Ordner speichern."/>
-                                        <Button x:Name="btnToolCredList" Content="Gespeicherte Anmeldedaten (anzeigen/loeschen)" Style="{StaticResource BtnDefault}" ToolTip="Anmeldeinformationsverwaltung DIESES Kontos (das HUMig ausfuehrt): Liste ohne Kennwoerter, markierte loeschen"/>
+                                    <TextBlock x:Name="lblToolsUser" Text="GEWAEHLTER BENUTZER" Style="{StaticResource ToolSectionLabel}" TextWrapping="Wrap"/>
+                                    <WrapPanel x:Name="pnlToolsProfile">
                                         <Button x:Name="btnToolUserAppData" Content="AppData des Benutzers" Style="{StaticResource BtnDefault}" ToolTip="AppData-Ordner des gewaehlten Benutzers im Explorer oeffnen"/>
                                         <Button x:Name="btnToolUserStartup" Content="Autostart des Benutzers" Style="{StaticResource BtnDefault}" ToolTip="Autostart-Ordner des gewaehlten Benutzers im Explorer oeffnen"/>
                                         <Button x:Name="btnToolProfileFolder" Content="Profilordner" Style="{StaticResource BtnDefault}" ToolTip="Profilordner des gewaehlten Benutzers im Explorer oeffnen"/>
@@ -504,8 +496,14 @@
                             </Border>
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
-                                    <TextBlock Text="SOFTWARE + TREIBER (GEWAEHLTER COMPUTER)" Style="{StaticResource ToolSectionLabel}"/>
-                                    <WrapPanel>
+                                    <TextBlock x:Name="lblToolsDiag" Text="DIAGNOSE UND WARTUNG" Style="{StaticResource ToolSectionLabel}" TextWrapping="Wrap"/>
+                                    <WrapPanel x:Name="pnlToolsDiag"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
+                                <StackPanel>
+                                    <TextBlock x:Name="lblToolsSoft" Text="SOFTWARE UND TREIBER" Style="{StaticResource ToolSectionLabel}" TextWrapping="Wrap"/>
+                                    <WrapPanel x:Name="pnlToolsSoft">
                                         <Button x:Name="btnToolSoftDeploy" Content="Software installieren (Softwareverteilung)" Style="{StaticResource BtnChange}" ToolTip="Pakete (MSI/EXE/MSP oder Ordner) silent installieren - auf dem gewaehlten Computer oder mehreren PCs. Parameter werden aus dem Installer gelesen und vorgeschlagen, bereits installierte Software wird erkannt."/>
                                         <Button x:Name="btnToolDrvDeploy" Content="Treiber installieren (Treiberverteilung)" Style="{StaticResource BtnChange}" ToolTip="Treiber aus einem eigenen Ordner (INF-Ordner per pnputil oder Hersteller-Setup) auf den gewaehlten Computer oder mehrere PCs - mit Hardware-Pruefung und Versionsvergleich, auf Wunsch erzwungen (auch aeltere Version)."/>
                                         <Button x:Name="btnToolSoftList" Content="Installierte Software anzeigen" Style="{StaticResource BtnDefault}" ToolTip="Programme des gewaehlten Computers als Tabelle (Filter, CSV, Drucken)"/>
@@ -514,17 +512,26 @@
                             </Border>
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
+                                    <TextBlock x:Name="lblToolsNoTarget" Text="OHNE ZIEL-PC (BACKUP-ORDNER UND DIESER PC)" Style="{StaticResource ToolSectionLabel}" TextWrapping="Wrap"/>
+                                    <WrapPanel x:Name="pnlToolsNoTarget">
+                                        <Button x:Name="btnToolCredWiz" Content="Anmeldedaten sichern/wiederherstellen" Style="{StaticResource BtnDefault}" ToolTip="Windows-Assistent (credwiz) fuer die Anmeldeinformationsverwaltung des ANGEMELDETEN Benutzers. Datei am besten in den Backup-Ordner speichern."/>
+                                        <Button x:Name="btnToolCredList" Content="Gespeicherte Anmeldedaten (anzeigen/loeschen)" Style="{StaticResource BtnDefault}" ToolTip="Anmeldeinformationsverwaltung DIESES Kontos (das HUMig ausfuehrt): Liste ohne Kennwoerter, markierte loeschen"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+                                                        <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
+                                <StackPanel>
                                     <TextBlock Text="SYSTEM (DIESER PC)" Style="{StaticResource ToolSectionLabel}"/>
                                     <WrapPanel x:Name="pnlSysTools"/>
                                 </StackPanel>
                             </Border>
-                            <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
+                                                        <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
                                     <TextBlock Text="LINKS" Style="{StaticResource ToolSectionLabel}"/>
                                     <WrapPanel x:Name="pnlLinks"/>
                                 </StackPanel>
                             </Border>
-                            <TextBlock Text="Werkzeuge wirken auf den oben gewaehlten Computer (lokal direkt, remote ueber PowerShell-Remoting) bzw. den gewaehlten Benutzer. Rechtsklick = Zweitfunktion (siehe Tooltip)." Foreground="{StaticResource CatOverlay0}" Margin="4,8" TextWrapping="Wrap"/>
+                            <TextBlock Text="Jeder Knopf wirkt auf den PC bzw. Benutzer in der Ueberschrift seines Abschnitts (lokal direkt, remote ueber PowerShell-Remoting). Rechtsklick = Zweitfunktion (siehe Tooltip)." Foreground="{StaticResource CatOverlay0}" Margin="4,8" TextWrapping="Wrap"/>
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>

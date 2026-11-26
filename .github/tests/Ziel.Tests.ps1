@@ -560,13 +560,13 @@ Describe 'Ziel: Werkzeuge (Busy, nur PC, Benutzer)' {
         $f = Get-ZielFn 'Add-ToolButton'
         ([regex]::Matches($f, 'Test-HMToolStart \$src\.Tag')).Count | Should -Be 2
         foreach ($n in @('Umbenennen', 'IP-Adresse / DHCP', 'Neustart / Herunterfahren', 'Profil erneuern \(Test\)', 'Profil zurueckholen', 'Profilordner umbenennen', 'Profil anderem Konto zuweisen', 'Alte Profile loeschen')) {
-            $script:MainSrc | Should -Match "(?m)^Add-ToolButton \`$t[cp] '$n' .* -Busy"
+            $script:MainSrc | Should -Match "(?m)^Add-ToolButton \`$t[cpdmn] '$n' .* -Busy"
         }
         foreach ($n in @('Profil erneuern \(Test\)', 'Profilordner umbenennen', 'Profil anderem Konto zuweisen', 'Windows-Apps neu registrieren', 'Gruppenrichtlinien-Ergebnis', 'Datenbanken suchen')) {
             $script:MainSrc | Should -Match "(?m)^Add-ToolButton \`$tp '$n' .* -User\r?$"
         }
         foreach ($n in @('Geraete \(AD\) / Mehrfach', 'USMT einrichten \(ADK\)', 'Inventar \(mehrere PCs\)', 'HUPilot \.\.\.', 'Im Backup suchen')) {
-            $script:MainSrc | Should -Match "(?m)^Add-ToolButton \`$t[cp] '$n' .* -NoTarget\r?$"
+            $script:MainSrc | Should -Match "(?m)^Add-ToolButton \`$t[mn] '$n' .* -NoTarget\r?$"
         }
         $script:MainSrc | Should -Not -Match 'FieldOk'
     }

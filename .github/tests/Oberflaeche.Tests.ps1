@@ -144,3 +144,60 @@ Describe 'Oberflaeche: Set-JobUi schaltet Start und Abbrechen' {
         }
     }
 }
+
+Describe 'Oberflaeche: Werkzeuge stehen im Abschnitt ihrer Einstufung' {
+    BeforeAll {
+        $script:MainSrc = Get-Content -LiteralPath (Join-Path $script:Root 'HUMig.ps1') -Raw -Encoding UTF8
+        $script:PanelOf = @{ tc = 'pnlToolsComputer'; td = 'pnlToolsDiag'; tp = 'pnlToolsProfile'; tm = 'pnlToolsMulti'; tn = 'pnlToolsNoTarget' }
+        function Get-XamlParentPanel([string]$Name) {
+            $n = @($script:MainXml.SelectNodes('//*') | Where-Object { (Get-UiName $_) -eq $Name })[0]
+            if (-not $n) { return '' }
+            return (Get-UiName $n.ParentNode)
+        }
+    }
+    It 'die Abschnittsvariablen zeigen auf die richtigen Leisten' {
+        foreach ($k in $script:PanelOf.Keys) { $script:MainSrc | Should -Match ('(?m)^\$' + $k + ' = \$ui\.' + $script:PanelOf[$k] + '\s*$') }
+    }
+    It 'Add-ToolButton: ohne Schalter im PC- oder Diagnose-Abschnitt, -User im Benutzer-Abschnitt, -NoTarget bei mehreren PCs oder ohne Ziel-PC' {
+        $lines = @([regex]::Matches($script:MainSrc, '(?m)^Add-ToolButton \$(t\w+) ''([^'']*)''.*$') | ForEach-Object { $_ })
+        $lines.Count | Should -BeGreaterThan 30
+        $falsch = @()
+        foreach ($m in $lines) {
+            $v = $m.Groups[1].Value; $l = $m.Value
+            $soll = $(if ($l -match ' -NoTarget\b') { @('tm', 'tn') } elseif ($l -match ' -User\b') { @('tp') } else { @('tc', 'td') })
+            if ($soll -notcontains $v) { $falsch += "$($m.Groups[2].Value) steht in `$$v" }
+        }
+        $falsch | Should -BeNullOrEmpty
+    }
+    It 'Knoepfe aus dem XAML stehen im Abschnitt, den ihr Klick verlangt' {
+        foreach ($n in 'btnToolSoftDeploy', 'btnToolDrvDeploy', 'btnToolSoftList') {
+            Get-XamlParentPanel $n | Should -Be 'pnlToolsSoft'
+            $script:MainSrc | Should -Match ('\$ui\.' + $n + '\.Add_Click\(\{ if \(Use-HMPcTarget ')
+        }
+        foreach ($n in 'btnToolUserAppData', 'btnToolUserStartup', 'btnToolProfileFolder') {
+            Get-XamlParentPanel $n | Should -Be 'pnlToolsProfile'
+            $script:MainSrc | Should -Match ('\$ui\.' + $n + '\.Add_Click\(\{ \$x = Get-SelectedProfilePath ')
+        }
+        foreach ($n in 'btnToolCredWiz', 'btnToolCredList') {
+            Get-XamlParentPanel $n | Should -Be 'pnlToolsNoTarget'
+            $script:MainSrc | Should -Not -Match ('\$ui\.' + $n + '\.Add_Click\(\{[^\r\n]*(Use-HMPcTarget|Get-SelectedProfilePath|Confirm-HMTarget)')
+        }
+    }
+    It 'Ueberschriften nennen PC und Benutzer' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'HUMig.ps1'), [ref]$null, [ref]$null)
+        $fn = @($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq 'Update-HMToolHeads' }, $true))[0]
+        $fn | Should -Not -BeNullOrEmpty
+        . ([scriptblock]::Create($fn.Extent.Text))
+        function Get-HMTargetCaption { 'PC-TEST-01' }
+        function Get-SelectedProfile { [pscustomobject]@{ Account = 'DOM\max.muster' } }
+        $ui = @{}
+        foreach ($n in 'lblToolsPc', 'lblToolsDiag', 'lblToolsSoft', 'lblToolsUser') { $ui[$n] = [pscustomobject]@{ Text = '' } }
+        $ui['cmbUser'] = [pscustomobject]@{ Text = '' }
+        $script:UserMode = $false
+        Update-HMToolHeads
+        $ui.lblToolsPc.Text | Should -Be 'GEWAEHLTER PC: PC-TEST-01'
+        $ui.lblToolsDiag.Text | Should -Match 'PC-TEST-01$'
+        $ui.lblToolsSoft.Text | Should -Match 'PC-TEST-01$'
+        $ui.lblToolsUser.Text | Should -Be 'GEWAEHLTER BENUTZER: DOM\max.muster auf PC-TEST-01'
+    }
+}
