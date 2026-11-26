@@ -297,14 +297,28 @@ Describe 'PowerShell 7 am Ziel-PC: feste Fassung, Tausch der eigenen Kopie, jede
         $script:Content = { [IO.File]::ReadAllText((Join-Path $global:PwshDir 'pwsh.exe')) }
         $script:Errs = { @(@($script:TErr) + @($global:TErr) | Where-Object { $_ }) }
         $script:NoRest = { (Test-Path -LiteralPath $global:PwshNeu) -or (Test-Path -LiteralPath $global:PwshAlt) }
-        $script:State = { if ($global:TPwshState) { $global:TPwshState } else { $script:TPwshState } }
+        # Ergebnis aus den Wirkungen ablesen: Fehler, Protokollzeilen, Downloads
+        $script:State = {
+            $log = ($global:T_Log -join "`n")
+            if (@(& $script:Errs | Where-Object { $_ -like 'PowerShell 7*' }).Count) { 'Fehlt' }
+            elseif ($log -match 'laeuft gerade') { 'Laeuft' }
+            elseif ($log -match 'ist neuer als die feste') { 'Neuer' }
+            elseif ($log -match 'Version der eigenen Kopie nicht lesbar') { 'Unlesbar' }
+            elseif ($log -match '(?m)^Warnung:') { 'Behalten' }
+            elseif ($log -match 'wird durch die feste Fassung' -and $log -match 'bereit \(') { 'Ersetzt' }
+            elseif ($log -match 'bereit \(') { 'Neu' }
+            elseif (Test-Path -LiteralPath $global:PwshMsi) { 'Msi' }
+            elseif (-not $global:My.InstallPwsh) { 'Vorhanden' }
+            elseif (-not @($global:T_Calls | Where-Object { $_ -like 'ZIP:*' }).Count) { 'Aktuell' }
+            else { 'unbekannt' }
+        }
     }
     AfterAll {
         foreach ($n in @('Out-L', 'Get-TPwsh', 'Select-TPwshPackage', 'Compare-TPwshVersion', 'Get-TPwshZip', 'Get-TFileSha256', 'Expand-TPwshZip', 'Move-TDir', 'Remove-TDir', 'Get-TProcessPaths', 'Get-TFileProductVersion', 'Test-TPathsInDirs', 'Test-TPwshInUse', 'Get-TPwshOwnVersion', 'Clear-TPwshLeftover', 'Install-TPwshPackage', 'Install-TPwsh')) {
             Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue
         }
     }
-    BeforeEach { $global:TPwshState = ''; $script:TPwshState = '' }
+
     It 'nichts vorhanden, Netz da: feste Fassung wird eingerichtet, mit Versionsdatei, ohne Reste' {
         & $script:Setup
         Install-TPwsh
@@ -332,12 +346,19 @@ Describe 'PowerShell 7 am Ziel-PC: feste Fassung, Tausch der eigenen Kopie, jede
         & $script:State | Should -Be 'Ersetzt'
         & $script:Content | Should -Be 'NEU 7.6.10'
     }
-    It 'eigene Kopie mit unlesbarer Version: wird durch die feste ersetzt' {
+    It 'eigene Kopie mit unlesbarer Version (keine Versionsdatei, Produktversion leer oder unbekannt): nie zurueckstufen, in diesem Lauf nicht ersetzt' {
         & $script:Setup '7.5.4' $false
         $global:T_ProdVer = ''
         Install-TPwsh
-        & $script:State | Should -Be 'Ersetzt'
-        ($global:T_Log -join "`n") | Should -Match 'unbekannter Version'
+        & $script:State | Should -Be 'Unlesbar'
+        & $script:Content | Should -Be 'ALT 7.5.4'
+        @($global:T_Calls | Where-Object { $_ -like 'ZIP:*' }).Count | Should -Be 0
+        & $script:Errs | Should -BeNullOrEmpty
+        & $script:Setup '7.5.4' $false
+        $global:T_ProdVer = 'Version unbekannt'
+        Install-TPwsh
+        & $script:State | Should -Be 'Unlesbar'
+        & $script:Content | Should -Be 'ALT 7.5.4'
     }
     It 'gleiche Version schon da: nichts geladen, nichts geaendert' {
         & $script:Setup '7.6.10'
@@ -506,7 +527,7 @@ function global:Invoke-WebRequest { [Console]::Out.WriteLine('C|Invoke-WebReques
 function global:Invoke-RestMethod { [Console]::Out.WriteLine('C|Invoke-RestMethod ' + ($args -join ' ')); throw 'kein Netz (Ersatz)' }
 function global:Expand-Archive { [Console]::Out.WriteLine('C|Expand-Archive'); throw 'nicht erwartet' }
 function global:Register-ScheduledTask { param($TaskName, $TaskPath, $Action, $Trigger, $Principal, $Settings, $Description, [switch]$Force, $ErrorAction) $global:T_Act = $Action; [Console]::Out.WriteLine('C|Register|' + $TaskName + '|' + $Action.Execute) }
-function global:Get-AuthenticodeSignature { param($LiteralPath) [pscustomobject]@{ Status = $(if ($env:T_BADSIG) { 'HashMismatch' } else { 'Valid' }); SignerCertificate = [pscustomobject]@{ Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' } } }
+function global:Get-AuthenticodeSignature { param($LiteralPath) [pscustomobject]@{ Status = $(if ($env:T_BADSIG) { 'HashMismatch' } elseif ($env:T_UNKSIG) { 'UnknownError' } else { 'Valid' }); SignerCertificate = [pscustomobject]@{ Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' } } }
 function global:Start-ScheduledTask { param($TaskPath, $TaskName) $m = [regex]::Match("$($global:T_Act.Arguments)", '-Dir "([^"]+)"'); if ($m.Success) { [Console]::Out.WriteLine('C|Request|' + ([IO.File]::ReadAllText((Join-Path $m.Groups[1].Value 'request.json')) -replace '\s+', ' ')); [IO.File]::WriteAllText((Join-Path $m.Groups[1].Value 'result.json'), '{"Items":[{"Id":"Test.App","Name":"Test App","Scope":"User"}],"Errors":[],"Notes":["Hinweis aus dem Worker (Test)"]}') } }
 function global:Stop-ScheduledTask { }
 function global:Unregister-ScheduledTask { }
@@ -615,6 +636,14 @@ foreach ($n in @('Get-AuthenticodeSignature', 'Register-ScheduledTask', 'Start-S
         @($r.Out | Where-Object { $_ -like 'C|Register|*' }).Count | Should -Be 0
         @($r.Out | Where-Object { $_ -like 'L|Warnung: WinGet-Modul 1.29.380 wird nicht geladen, Signatur ungueltig*' }).Count | Should -Be 1
     }
+    It 'Signatur nicht pruefbar: Lesen laeuft wie bisher mit der festen Version, Warnung im Protokoll' {
+        $env:T_UNKSIG = '1'
+        try { $r = & $script:RunTarget 'Search' $script:SearchPayload } finally { $env:T_UNKSIG = '' }
+        $r.R.ReadAs | Should -Be 'SYSTEM (PowerShell 7)'
+        (@($r.Out | Where-Object { $_ -like 'C|Request|*' })[0].Substring(10) | ConvertFrom-Json).ModulePath | Should -Be $r.Psd
+        @($r.Out | Where-Object { $_ -like 'L|Warnung: WinGet-Modul 1.29.380: Signatur nicht pruefbar*' }).Count | Should -Be 1
+        @($r.Out | Where-Object { $_ -like 'C|Install-Module*' }).Count | Should -Be 0
+    }
     It 'feste Modulversion mit ungueltiger Signatur, keine andere: Zeitplan wird nicht angelegt (Ok = falsch)' {
         $env:T_BADSIG = '1'
         try { $r = & $script:RunTarget 'ScheduleSet' $script:SchedPayload } finally { $env:T_BADSIG = '' }
@@ -626,7 +655,9 @@ foreach ($n in @('Get-AuthenticodeSignature', 'Register-ScheduledTask', 'Start-S
 
 Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur geprueft, Rueckfall auf eine vorhandene Version' {
     BeforeAll {
-        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad')
+        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad',
+            'Get-TModOtherDir', 'Test-TModRetryDue', 'Set-TModRetryMarker', 'Clear-TModRetryMarker', 'Get-TModSigState', 'Get-TModBlockedText')
+        function global:Get-TNow { $global:T_Now }
         . (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1')
         $script:Pub = ', O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
         function global:Out-L([string]$t) { $global:T_Log += $t }
@@ -637,16 +668,22 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
             $global:T_Calls += "Install-Module $Name $RequiredVersion"
             if (-not $global:T_Net) { throw 'kein Netz (Ersatz)' }
             $d = Join-Path $global:ModRoot $RequiredVersion; New-Item -ItemType Directory -Path $d -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $d "$Name.psd1"), '@{}')
+            if ($global:T_RepairFixes) { $global:T_BadSig = @($global:T_BadSig | Where-Object { $_ -ne $RequiredVersion }) }
         }
         function global:Find-Module { $global:T_Calls += 'Find-Module' }
         # Signaturen als Ersatz: je Version gueltig oder nicht
         function global:Get-TModuleSigFiles([string]$Dir) {
+            $global:T_SigCalls++
+            if ($global:T_SigThrow) { throw 'Zertifikatspruefung nicht moeglich (Ersatz)' }
             $v = Split-Path $Dir -Leaf
-            $st = if ($global:T_BadSig -contains $v) { 'HashMismatch' } else { 'Valid' }
+            $st = if ($global:T_BadSig -contains $v) { 'HashMismatch' } elseif ($global:T_UnkSig -contains $v) { 'NotTrusted' } else { 'Valid' }
             return @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = $st; Subject = "CN=Microsoft Corporation$script:Pub" }, @{ Path = (Join-Path $Dir 'a.dll'); Status = 'Valid'; Subject = "CN=Microsoft Corporation$script:Pub" })
         }
         $script:Setup = {
-            param([string[]]$Have = @(), [bool]$Net = $true, $Fixed = 'gueltig', [string[]]$BadSig = @())
+            param([string[]]$Have = @(), [bool]$Net = $true, $Fixed = 'gueltig', [string[]]$BadSig = @(), [string[]]$UnkSig = @(), [bool]$RepairFixes = $false)
+            $global:Base = Join-Path $TestDrive ('base_' + [guid]::NewGuid().ToString('N').Substring(0, 8)); $global:TModMarker = Join-Path $global:Base 'winget-modul-versuch.json'
+            $global:T_UnkSig = $UnkSig; $global:T_RepairFixes = $RepairFixes; $global:T_SigCalls = 0; $global:T_SigThrow = $false; $global:T_Now = [datetime]'2026-11-26T03:00:00'
+            $global:TModSig = $null; $script:TModSig = $null
             $pf = Join-Path $TestDrive ('mod_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
             $global:ModName = 'Microsoft.WinGet.Client'; $global:ModRoot = Join-Path $pf 'WindowsPowerShell\Modules\Microsoft.WinGet.Client'
             $env:ProgramFiles = $pf
@@ -659,7 +696,7 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
     }
     AfterAll {
         $env:ProgramFiles = $script:PF0
-        foreach ($n in @('Out-L', 'Get-PackageProvider', 'Install-PackageProvider', 'Install-Module', 'Find-Module', 'Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
+        foreach ($n in @('Out-L', 'Get-TNow', 'Get-PackageProvider', 'Install-PackageProvider', 'Install-Module', 'Find-Module', 'Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Get-TModOtherDir', 'Test-TModRetryDue', 'Set-TModRetryMarker', 'Clear-TModRetryMarker', 'Get-TModSigState', 'Get-TModBlockedText')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
     }
     AfterEach { $env:ProgramFiles = $script:PF0 }
     It 'feste Version fehlt, keine andere da: Install-Module nur mit -RequiredVersion 1.29.380, nie Find-Module' {
@@ -730,20 +767,114 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
         @($global:T_Log | Where-Object { $_ -like '*1.9.2411 wird verwendet*' }).Count | Should -Be 1
     }
     $sigCases = @(
-        @{ Fall = 'alle gueltig, Microsoft'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\a.dll'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Ok = $true }
-        @{ Fall = 'eine Datei veraendert'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\a.dll'; Status = 'HashMismatch'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Ok = $false }
-        @{ Fall = 'nicht signiert'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'NotSigned'; Subject = '' }); Ok = $false }
-        @{ Fall = 'anderer Herausgeber'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Fremd, O=Fremd GmbH, L=Wien, C=AT' }); Ok = $false }
-        @{ Fall = 'Herausgeber nur als Teil im Namen'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US, OU=Fremd' }); Ok = $false }
-        @{ Fall = 'ohne .psd1'; Sigs = @(@{ Path = 'x\a.dll'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Ok = $false }
-        @{ Fall = 'leer'; Sigs = @(); Ok = $false }
+        @{ Fall = 'alle gueltig, Microsoft'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\a.dll'; Status = 'Valid'; Subject = 'CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Erg = 'Ok' }
+        @{ Fall = 'eine Datei veraendert (HashMismatch)'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\a.dll'; Status = 'HashMismatch'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Erg = 'Ungueltig' }
+        @{ Fall = 'nicht signiert (NotSigned)'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'NotSigned'; Subject = '' }); Erg = 'Ungueltig' }
+        @{ Fall = 'anderer Herausgeber'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Fremd, O=Fremd GmbH, L=Wien, C=AT' }); Erg = 'Ungueltig' }
+        @{ Fall = 'Herausgeber nur als Teil im Namen'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US, OU=Fremd' }); Erg = 'Ungueltig' }
+        @{ Fall = 'ohne .psd1'; Sigs = @(@{ Path = 'x\a.dll'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Erg = 'Ungueltig' }
+        @{ Fall = 'leer'; Sigs = @(); Erg = 'Ungueltig' }
+        @{ Fall = 'Stammzertifikat fehlt (NotTrusted)'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'NotTrusted'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }); Erg = 'NichtPruefbar' }
+        @{ Fall = 'UnknownError'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Valid'; Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }, @{ Path = 'x\a.dll'; Status = 'UnknownError'; Subject = '' }); Erg = 'NichtPruefbar' }
+        @{ Fall = 'Incompatible'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'Incompatible'; Subject = '' }); Erg = 'NichtPruefbar' }
+        @{ Fall = 'NotSupportedFileFormat'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'NotSupportedFileFormat'; Subject = '' }); Erg = 'NichtPruefbar' }
+        @{ Fall = 'eindeutiger Befund geht vor (NotTrusted und HashMismatch)'; Sigs = @(@{ Path = 'x\m.psd1'; Status = 'NotTrusted'; Subject = '' }, @{ Path = 'x\a.dll'; Status = 'HashMismatch'; Subject = '' }); Erg = 'Ungueltig' }
     )
-    It 'Signaturpruefung (rein), Ziel-PC und HUMig-PC gleich: <Fall>' -TestCases $sigCases {
-        param($Fall, $Sigs, $Ok)
+    It 'Signaturpruefung (rein), Ziel-PC und HUMig-PC gleich: <Fall> ergibt <Erg>' -TestCases $sigCases {
+        param($Fall, $Sigs, $Erg)
         $t = Test-TModuleSignature $Sigs $script:Pub
         $e = Test-HMAuModuleSignature $Sigs $script:Pub
-        ($t -eq '') | Should -Be $Ok
-        $e | Should -Be $t
+        $t.State | Should -Be $Erg
+        $e.State | Should -Be $t.State
+        $e.Reason | Should -Be $t.Reason
+        if ($Erg -ne 'Ok') { $t.Reason | Should -Not -BeNullOrEmpty }
+    }
+    It 'Signatur nicht pruefbar (z. B. Stammzertifikate fehlen): feste Version wird wie bisher geladen, Warnung, kein Install-Module' {
+        & $script:Setup @('1.29.380') -UnkSig @('1.29.380')
+        Install-TModule
+        @($global:T_Calls).Count | Should -Be 0
+        $ld = Get-TModuleLoad
+        $ld.Path | Should -Be (Join-Path $global:ModRoot '1.29.380\Microsoft.WinGet.Client.psd1')
+        $ld.Blocked | Should -BeFalse
+        $ld.Note | Should -Match '^Warnung: WinGet-Modul 1\.29\.380: Signatur nicht pruefbar \(Microsoft\.WinGet\.Client\.psd1: NotTrusted\) - wird wie bisher geladen'
+    }
+    It 'Pruefung wirft eine Ausnahme: nicht pruefbar, Modul wird wie bisher geladen' {
+        & $script:Setup @('1.29.380')
+        $global:T_SigThrow = $true
+        Install-TModule
+        @($global:T_Calls).Count | Should -Be 0
+        $ld = Get-TModuleLoad
+        $ld.Path | Should -Match '1\.29\.380'
+        $ld.Note | Should -Match 'Signatur nicht pruefbar \(Zertifikatspruefung nicht moeglich'
+    }
+    It 'Signatur je Lauf nur einmal geprueft (Install-TModule, Ladepfad, Hinweis)' {
+        & $script:Setup @('1.29.380')
+        Install-TModule; Resolve-TModuleLoad; [void](Get-TModuleLoad)
+        $global:T_SigCalls | Should -Be 1
+    }
+    It 'Selbstreparatur: feste Version eindeutig ungueltig, keine andere - einmal neu installiert, danach gueltig und geladen' {
+        & $script:Setup @('1.29.380') -BadSig @('1.29.380') -RepairFixes $true
+        Install-TModule
+        @($global:T_Calls | Where-Object { $_ -like 'Install-Module*' }) | Should -Be @('Install-Module Microsoft.WinGet.Client 1.29.380')
+        ($global:T_Log -join "`n") | Should -Match 'Signatur ungueltig .* wird neu installiert'
+        $ld = Get-TModuleLoad
+        $ld.Path | Should -Be (Join-Path $global:ModRoot '1.29.380\Microsoft.WinGet.Client.psd1')
+        $ld.Blocked | Should -BeFalse
+        & $script:Errs | Should -BeNullOrEmpty
+    }
+    It 'Selbstreparatur ohne Erfolg, keine andere Version: gesperrt, Meldung mit Ordner und Abhilfe, nichts geloescht, bei jedem Lauf neuer Versuch' {
+        & $script:Setup @('1.29.380') -BadSig @('1.29.380')
+        Install-TModule
+        $ld = Get-TModuleLoad
+        $ld.Blocked | Should -BeTrue
+        $txt = Get-TModBlockedText
+        $txt | Should -Match ([regex]::Escape((Join-Path $global:ModRoot '1.29.380')))
+        $txt | Should -Match 'Abhilfe: den Ordner .* als Administrator loeschen'
+        Test-Path -LiteralPath (Join-Path $global:ModRoot '1.29.380\Microsoft.WinGet.Client.psd1') | Should -BeTrue
+        Test-Path -LiteralPath $global:TModMarker | Should -BeFalse
+        $global:TModSig = $null; $script:TModSig = $null; $global:T_Calls = @()
+        Install-TModule
+        @($global:T_Calls | Where-Object { $_ -like 'Install-Module*' }).Count | Should -Be 1
+    }
+    It 'Selbstreparatur ohne Erfolg, andere Version da: andere wird verwendet, Merker gesetzt' {
+        & $script:Setup @('1.29.380', '1.9.2411') -BadSig @('1.29.380')
+        Install-TModule
+        ($global:T_Log -join "`n") | Should -Match '(?m)^Warnung: WinGet-Modul 1\.29\.380 nicht installierbar \(Signatur weiter ungueltig'
+        Test-Path -LiteralPath $global:TModMarker | Should -BeTrue
+        (Get-TModuleLoad).Path | Should -Match '1\.9\.2411'
+    }
+    It 'Merker: andere Version da, kein Netz - naechster Versuch erst nach 24 Stunden, dann wieder; Erfolg entfernt den Merker' {
+        & $script:Setup @('1.9.2411') -Net $false
+        Install-TModule
+        @($global:T_Calls | Where-Object { $_ -like 'Install-Module*' }).Count | Should -Be 1
+        $m = Get-Content -LiteralPath $global:TModMarker -Raw | ConvertFrom-Json
+        $m.version | Should -Be '1.29.380'
+        Test-Path -LiteralPath "$global:TModMarker.tmp" | Should -BeFalse
+        $global:T_Calls = @(); $global:T_Log = @(); $global:T_Now = $global:T_Now.AddHours(23)
+        Install-TModule
+        @($global:T_Calls).Count | Should -Be 0
+        ($global:T_Log -join "`n") | Should -Match 'fruehestens 24 Stunden'
+        $global:T_Calls = @(); $global:T_Now = $global:T_Now.AddHours(2); $global:T_Net = $true
+        Install-TModule
+        @($global:T_Calls | Where-Object { $_ -like 'Install-Module*' }).Count | Should -Be 1
+        Test-Path -LiteralPath $global:TModMarker | Should -BeFalse
+    }
+    It 'Merker gilt nicht: andere feste Version, Zeit in der Zukunft, unlesbar' {
+        & $script:Setup @('1.9.2411')
+        New-Item -ItemType Directory -Path $global:Base -Force | Out-Null
+        $now = $global:T_Now.ToUniversalTime().Ticks
+        [IO.File]::WriteAllText($global:TModMarker, "{`"version`":`"1.28.0`",`"zeit`":$now}"); Test-TModRetryDue '1.29.380' | Should -BeTrue
+        [IO.File]::WriteAllText($global:TModMarker, "{`"version`":`"1.29.380`",`"zeit`":$($now + [TimeSpan]::FromHours(5).Ticks)}"); Test-TModRetryDue '1.29.380' | Should -BeTrue
+        [IO.File]::WriteAllText($global:TModMarker, '{ kaputt'); Test-TModRetryDue '1.29.380' | Should -BeTrue
+        [IO.File]::WriteAllText($global:TModMarker, "{`"version`":`"1.29.380`",`"zeit`":$now}"); Test-TModRetryDue '1.29.380' | Should -BeFalse
+    }
+    It 'Merker gilt nicht ohne jede Version: dann wie bisher bei jedem Lauf versuchen' {
+        & $script:Setup @() -Net $false
+        New-Item -ItemType Directory -Path $global:Base -Force | Out-Null
+        [IO.File]::WriteAllText($global:TModMarker, "{`"version`":`"1.29.380`",`"zeit`":$($global:T_Now.ToUniversalTime().Ticks)}")
+        Install-TModule
+        @($global:T_Calls | Where-Object { $_ -like 'Install-Module*' }).Count | Should -Be 1
+        @(& $script:Errs) | Should -Be @('WinGet-Modul nicht installierbar (Internet/Proxy?): kein Netz (Ersatz)')
     }
     It 'Signaturen lesen: nur signierbare Dateitypen (Hilfe-XML und Texte zaehlen nicht)' {
         $d = Join-Path $TestDrive 'sigdir'; New-Item -ItemType Directory -Path $d -Force | Out-Null
@@ -1036,7 +1167,7 @@ Describe 'WinGet-Modul gesperrt (ungueltige Signatur, keine andere Version): nie
 
 Describe 'WinGet einrichten am Ziel-PC (Install-TWinGet): feste Modulversion vor der Reparatur, gesperrt keine Reparatur' {
     BeforeAll {
-        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet')
+        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText')
         function global:Out-L([string]$t) { $global:T_Log += $t }
         function global:Get-TModuleSigFiles([string]$Dir) { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = $(if ($global:T_Bad) { 'HashMismatch' } else { 'Valid' }); Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }) }
         # Ersatz fuer den eigenen Prozess: merkt den Befehl, startet nichts
@@ -1048,13 +1179,13 @@ Describe 'WinGet einrichten am Ziel-PC (Install-TWinGet): feste Modulversion vor
             $global:ModName = 'Microsoft.WinGet.Client'; $global:ModRoot = Join-Path $pf 'WindowsPowerShell\Modules\Microsoft.WinGet.Client'
             $d = Join-Path $global:ModRoot '1.29.380'; New-Item -ItemType Directory -Path $d -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $d 'Microsoft.WinGet.Client.psd1'), '@{}')
             $global:T_Bad = $Bad; $global:T_Cmd = $null; $global:T_Log = @(); $script:TErr = @(); $global:TErr = @(); $script:TModLoad = $null; $global:TModLoad = $null
-            $global:TModBlockedText = 'WinGet-Modul nicht nutzbar: Test'
+            $global:TModSig = $null; $script:TModSig = $null
             $global:Payload = @{ Tools = @{ WinGet = @{ Version = '1.29.380'; Name = 'Microsoft.WinGet.Client'; Herausgeber = ', O=Microsoft Corporation, L=Redmond, S=Washington, C=US' } } }
         }
     }
     AfterAll {
         $env:ProgramFiles = $script:PF0
-        foreach ($n in @('Out-L', 'Get-TModuleSigFiles', 'Invoke-TPsEncoded', 'Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
+        foreach ($n in @('Out-L', 'Get-TModuleSigFiles', 'Invoke-TPsEncoded', 'Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
     }
     AfterEach { $env:ProgramFiles = $script:PF0 }
     It 'WinGet fehlt: der eigene Prozess laedt die feste Modulversion ueber ihren Pfad und repariert' -Skip:([Environment]::OSVersion.Version.Build -lt 17763) {
@@ -1067,6 +1198,81 @@ Describe 'WinGet einrichten am Ziel-PC (Install-TWinGet): feste Modulversion vor
         & $script:Setup $true
         Install-TWinGet
         $global:T_Cmd | Should -BeNullOrEmpty
-        @(@($script:TErr) + @($global:TErr) | Where-Object { $_ }) | Should -Contain 'WinGet-Modul nicht nutzbar: Test'
+        (@(@($script:TErr) + @($global:TErr) | Where-Object { $_ }) -join ' ') | Should -Match 'WinGet-Modul nicht nutzbar: die feste Version 1\.29\.380 in .*Abhilfe'
+    }
+}
+
+Describe 'Nachbesserung: Engine pruefbar/nicht pruefbar, einmal je Lauf, Hinweise weitergeben, Form von tools.json' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\AppUpdates-Engine.ps1')
+        $script:PF0 = $env:ProgramFiles
+        $script:Pub = ', O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
+    }
+    AfterEach { $env:ProgramFiles = $script:PF0 }
+    BeforeEach {
+        $pf = Join-Path $TestDrive ('n_' + [guid]::NewGuid().ToString('N').Substring(0, 6)); $env:ProgramFiles = $pf
+        $script:Fix = Join-Path $pf 'WindowsPowerShell\Modules\Microsoft.WinGet.Client\1.29.380'
+        New-Item -ItemType Directory -Path $script:Fix -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $script:Fix 'Microsoft.WinGet.Client.psd1'), '@{}')
+        $script:Job = [pscustomobject]@{ Log = New-Object System.Collections.Concurrent.ConcurrentQueue[object]; Result = $null; Cancel = $false }
+        $script:Scr = @()
+        Mock Get-AppxPackage { @([pscustomobject]@{ Version = '1.0' }) }
+        Mock Get-Module { @([pscustomobject]@{ Version = [version]'1.29.380'; ModuleBase = $script:Fix }) }
+        Mock Install-Module { }
+        Mock Find-Module { throw 'darf nicht aufgerufen werden' }
+        Mock Get-HMAuTools { @{ Ok = $true; Errors = @(); Pwsh = $null; WinGet = @{ Version = '1.29.380'; Name = 'Microsoft.WinGet.Client'; Herausgeber = $script:Pub } } }
+        Mock Invoke-HMAuIsolated { $script:Scr += $Script; [pscustomobject]@{ Ok = $true; Result = '1.0'; Crashed = $false; Cancelled = $false; TimedOut = $false; Error = '' } }
+    }
+    It 'Engine, Signatur nicht pruefbar (NotTrusted): WinGet einrichten laeuft mit der festen Version, Warnung, keine Neuinstallation' {
+        Mock Get-HMAuModuleSigFiles { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = 'NotTrusted'; Subject = '' }) }
+        Install-HMAuWinGet $script:Job | Should -BeTrue
+        Should -Invoke Install-Module -Times 0
+        $script:Scr[0] | Should -Match ([regex]::Escape("Import-Module '$(Join-Path $script:Fix 'Microsoft.WinGet.Client.psd1')' -Force"))
+        @($script:Job.Log.ToArray() | ForEach-Object { "$($_.Lvl)|$($_.Msg)" }) -join "`n" | Should -Match 'Warning\|WinGet-Modul 1\.29\.380: Signatur nicht pruefbar'
+    }
+    It 'Engine, Signatur je Lauf nur einmal geprueft (WinGet einrichten)' {
+        Mock Get-HMAuModuleSigFiles { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = 'Valid'; Subject = "CN=Microsoft Corporation$script:Pub" }) }
+        Install-HMAuWinGet $script:Job | Should -BeTrue
+        Should -Invoke Get-HMAuModuleSigFiles -Times 1 -Exactly
+        Install-HMAuWinGet $script:Job | Should -BeTrue
+        Should -Invoke Get-HMAuModuleSigFiles -Times 2 -Exactly   # neuer Lauf, neue Pruefung
+    }
+    It 'Engine, Selbstreparatur: eindeutig ungueltig, Neuinstallation macht sie gueltig, dann geladen' {
+        $script:Bad = $true
+        Mock Get-HMAuModuleSigFiles { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = $(if ($script:Bad) { 'HashMismatch' } else { 'Valid' }); Subject = "CN=Microsoft Corporation$script:Pub" }) }
+        Mock Install-Module { $script:Bad = $false }
+        Install-HMAuWinGet $script:Job | Should -BeTrue
+        Should -Invoke Install-Module -Times 1 -Exactly -ParameterFilter { $RequiredVersion -eq '1.29.380' }
+        $script:Scr[0] | Should -Match ([regex]::Escape("Import-Module '$(Join-Path $script:Fix 'Microsoft.WinGet.Client.psd1')' -Force"))
+    }
+    It 'Engine, Selbstreparatur ohne Erfolg und keine andere Version: Fehler mit Ordner und Abhilfe, nichts geloescht' {
+        Mock Get-HMAuModuleSigFiles { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = 'HashMismatch'; Subject = '' }) }
+        Install-HMAuWinGet $script:Job | Should -BeFalse
+        $log = @($script:Job.Log.ToArray() | ForEach-Object { "$($_.Lvl)|$($_.Msg)" }) -join "`n"
+        $log | Should -Match 'Error\|WinGet-Modul nicht nutzbar: auch nach einer Neuinstallation ungueltig'
+        $log | Should -Match ([regex]::Escape("Abhilfe: den Ordner $script:Fix als Administrator loeschen"))
+        Test-Path -LiteralPath (Join-Path $script:Fix 'Microsoft.WinGet.Client.psd1') | Should -BeTrue
+    }
+    It 'Hilfsaufgabe: Hinweis zur Modulwahl und Hinweise des Workers kommen im Ergebnis an (Notes)' {
+        $d = Join-Path $TestDrive ('h_' + [guid]::NewGuid().ToString('N').Substring(0, 6)); New-Item -ItemType Directory -Path $d -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $d 'result.json'), '{"Items":[],"Errors":[],"Notes":["Hinweis des Workers"]}')
+        Mock Unregister-ScheduledTask { }
+        $r = Wait-HMAuTask ([pscustomobject]@{ Dir = $d; TaskName = 'x'; Account = 'SYSTEM'; Note = 'Hinweis zur Modulwahl' }) 10
+        @($r.Notes) | Should -Be @('Hinweis zur Modulwahl', 'Hinweis des Workers')
+        $d2 = Join-Path $TestDrive ('h2_' + [guid]::NewGuid().ToString('N').Substring(0, 6)); New-Item -ItemType Directory -Path $d2 -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $d2 'result.json'), '{"Items":[],"Errors":[]}')
+        $r2 = Wait-HMAuTask ([pscustomobject]@{ Dir = $d2; TaskName = 'x'; Account = 'SYSTEM'; Note = '' }) 10
+        @($r2.Notes).Count | Should -Be 0
+    }
+    It 'Form der festen Angaben in Config\tools.json: SHA256 mit 64 Hex-Zeichen je Architektur, Adresse mit der Versionsnummer, nie latest' {
+        $raw = [IO.File]::ReadAllText((Join-Path $script:Root 'Config\tools.json'))
+        $raw | Should -Not -Match '(?i)latest'
+        $j = $raw | ConvertFrom-Json
+        $ps = @($j.dateien | Where-Object { $_.id -eq 'powershell7' })[0]
+        foreach ($a in @('x64', 'arm64')) {
+            $ps.pakete.$a.sha256 | Should -Match '^[0-9a-fA-F]{64}$' -Because $a
+            $ps.pakete.$a.url | Should -Match ([regex]::Escape("/v$($ps.version)/")) -Because $a
+            $ps.pakete.$a.url | Should -Match ([regex]::Escape("PowerShell-$($ps.version)-win-$a.zip") + '$') -Because $a
+        }
+        @($j.dateien | Where-Object { $_.id -eq 'winget-modul' })[0].version | Should -Match '^\d+\.\d+\.\d+$'
     }
 }
