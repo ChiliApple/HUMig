@@ -379,16 +379,11 @@ Describe 'Quelltext: keine verschmolzenen Zeilen' {
     It 'jeder Aufruf einer Projektfunktion (Verb-HM...) ist im Projekt definiert' {
         @($script:Calls | Where-Object { $_.Name -match '^[A-Z][a-z]+-HM' -and -not $script:Defs.ContainsKey($_.Name) } | ForEach-Object { "$($_.Where) $($_.Name)" }) | Should -BeNullOrEmpty
     }
-    It 'keine mit New-Object erzeugte List[object] (wirft in @( ) "Die Argumenttypen stimmen nicht ueberein", auch leer)' {
-        # Eine solche Liste ist in ein PSObject verpackt, @($liste) bzw. @($obj.Eigenschaft) scheitert dann unter 5.1 und 7.
-        # Erlaubt: [System.Collections.Generic.List[object]]::new() oder eine Liste mit anderem Typ.
-        $hits = @()
-        foreach ($f in $script:SrcFiles) { $i = 0; foreach ($l in (Get-Content -LiteralPath $f.FullName -Encoding UTF8)) { $i++; if ($l -match 'Msgs\s*=\s*\(?New-Object\s+System\.Collections\.Generic\.List\[object\]') { $hits += "$($f.Name):$i" } } }
-        $hits | Should -BeNullOrEmpty
-    }
     It 'Meldungen der Ordnerrechte-Pruefung werden ohne @( ) gelesen und kommen an' {
         $src = Get-Content -LiteralPath (Join-Path $script:Root 'HUMig.ps1') -Raw -Encoding UTF8
         $src | Should -Not -Match '@\(\$[\w:]+\.Msgs\)'
+        # eine mit New-Object erzeugte List[object] wirft in @( ) "Die Argumenttypen stimmen nicht ueberein", auch leer
+        $src | Should -Not -Match 'Msgs\s*=\s*\(?New-Object'
         $r = [pscustomobject]@{ Msgs = [System.Collections.Generic.List[object]]::new() }
         $n = 0; foreach ($x in $r.Msgs) { $n++ }; $n | Should -Be 0
         $r.Msgs.Add([pscustomobject]@{ Text = 'a'; Level = 'Warning' }); $r.Msgs.Add([pscustomobject]@{ Text = 'b'; Level = 'Info' })
