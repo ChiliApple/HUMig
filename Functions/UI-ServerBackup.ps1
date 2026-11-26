@@ -286,8 +286,8 @@ function Edit-HMSbProfile {
         if ($null -eq $i) { return }
         if (-not [int]::TryParse("$i".Trim(), [ref]$ai) -or $ai -lt 1 -or $ai -gt 365) { Out-Console "Ungueltige Tage '$i' (1-365)" 'Error'; return }
     }
-    $rbq = "Geplante Sicherung, wenn am Server ein Neustart aussteht (z. B. nach Windows Update)?`n`nJa = NICHT sichern, nur melden (Teams/Verlauf) - sinnvoll, wenn Windows den Server sonst mitten in der Sicherung neu startet`nNein = trotzdem sichern und warnen (Standard)`n`nAktuell: $(if ($p.RebootPendingSkip) { 'nicht sichern' } else { 'trotzdem sichern' })"
-    $rba = "$((Show-HMDialogBox -Owner $script:Window -Text $rbq -Title 'Profil bearbeiten' -Mode 'YesNoCancel' -Icon 'Question' -Default ($(if ($p.RebootPendingSkip) { 'Yes' } else { 'No' }))))"
+    $rbq = "Was soll die geplante Sicherung tun, wenn am Server ein Neustart aussteht (z. B. nach Windows Update)?`n`nNicht sichern: nur melden (Teams/Verlauf) - sinnvoll, wenn Windows den Server sonst mitten in der Sicherung neu startet`nSichern: trotzdem sichern und warnen (Standard)`n`nAktuell: $(if ($p.RebootPendingSkip) { 'nicht sichern' } else { 'trotzdem sichern' })"
+    $rba = "$((Show-HMDialogBox -Owner $script:Window -Text $rbq -Title 'Profil bearbeiten' -Mode 'YesNoCancel' -Icon 'Question' -Default ($(if ($p.RebootPendingSkip) { 'Yes' } else { 'No' })) -Labels @{ Yes = 'Nicht sichern'; No = 'Sichern'; Cancel = 'Abbrechen' }))"
     if ($rba -eq 'Cancel') { return }
     $rbs = ($rba -eq 'Yes')
     # Sperrzeit: Zeitraum, in dem eine andere Sicherung laeuft (z.B. iPACK am Wochenende) - HUMig warnt, wenn ein Lauf hineinragt
@@ -955,14 +955,14 @@ function Start-HMSbBackup {
     $bgNote = @(Get-HMSbBackgroundNotes $exp $d)
     $bg = $false
     if (-not $bgWhy) {
-        $m2 = $msg + "`n`nWo soll die Sicherung laufen?`nJa = im Hintergrund als SYSTEM - du kannst dich danach abmelden (Fortschritt: Verlauf, Teams, Logs\ServerBackup\Aufgabe_*.log)`nNein = hier in HUMig (Fenster offen und angemeldet lassen)`nAbbrechen = nicht starten"
+        $m2 = $msg + "`n`nWo soll die Sicherung laufen?`nIm Hintergrund: als SYSTEM - du kannst dich danach abmelden (Fortschritt: Verlauf, Teams, Logs\ServerBackup\Aufgabe_*.log)`nHier in HUMig: Fenster offen und angemeldet lassen"
         if ($bgNote.Count) { $m2 += "`n`n" + ($bgNote -join "`n") }
-        $a = "$((Show-HMDialogBox -Owner $script:Window -Text $m2 -Title 'Server-Backup' -Mode 'YesNoCancel' -Icon 'Question' -Default 'No'))"
+        $a = "$((Show-HMDialogBox -Owner $script:Window -Text $m2 -Title 'Server-Backup' -Mode 'YesNoCancel' -Icon 'Question' -Default 'No' -Labels @{ Yes = 'Im Hintergrund starten'; No = 'Hier in HUMig starten'; Cancel = 'Nicht starten' }))"
         if ($a -eq 'Cancel') { return }
         $bg = ($a -eq 'Yes')
     } else {
         if ($p) { $msg += "`n`nIm Hintergrund (mit Abmelden) nicht moeglich: $bgWhy" }
-        if (-not (Confirm-Action $msg 'Server-Backup')) { return }
+        if (-not (Confirm-Action $msg 'Server-Backup' -Labels @{ Yes = 'Starten'; No = 'Nicht starten' })) { return }
     }
     if ($bg) {
         if ($p) { Save-HMSbLastProfile $p.Name }
@@ -1878,8 +1878,8 @@ function New-HMSbSchedule {
         $cf = Get-HMSbConflicts $r $own $avg
         $hit = @(@($cf) | Where-Object { "$($_.Ueberschneidung)" -like 'JA*' })
         if ($hit.Count) {
-            $m = "Diese Aufgaben laufen zur selben Zeit wie der geplante Lauf (angenommene Dauer $(Format-HMDuration $avg)) - die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig:`n`n" + (@($hit | Select-Object -First 10 | ForEach-Object { "  $($_.Aufgabe)  [$($_.Ausloeser)]  -> $($_.Ueberschneidung)" }) -join "`n") + $(if ($hit.Count -gt 10) { "`n  ..." }) + "`n`nHUMig wartet zwar, bis der andere Vorgang fertig ist (hoechstens 8 h), besser ist aber eine andere Uhrzeit.`n`nJa = trotzdem planen`nNein = nicht planen (Uhrzeit aendern)`nAbbrechen = Liste aller gefundenen Aufgaben anzeigen"
-            $ans = "$((Show-HMDialogBox -Owner $script:Window -Text $m -Title 'Server-Backup planen' -Mode 'YesNoCancel' -Icon 'Warning'))"
+            $m = "Diese Aufgaben laufen zur selben Zeit wie der geplante Lauf (angenommene Dauer $(Format-HMDuration $avg)) - die Windows Server-Sicherung kann nur einen Vorgang gleichzeitig:`n`n" + (@($hit | Select-Object -First 10 | ForEach-Object { "  $($_.Aufgabe)  [$($_.Ausloeser)]  -> $($_.Ueberschneidung)" }) -join "`n") + $(if ($hit.Count -gt 10) { "`n  ..." }) + "`n`nHUMig wartet zwar, bis der andere Vorgang fertig ist (hoechstens 8 h), besser ist aber eine andere Uhrzeit."
+            $ans = "$((Show-HMDialogBox -Owner $script:Window -Text $m -Title 'Server-Backup planen' -Mode 'YesNoCancel' -Icon 'Warning' -Labels @{ Yes = 'Trotzdem planen'; No = 'Nicht planen'; Cancel = 'Liste anzeigen' }))"
             if ($ans -eq 'Cancel') { Show-HMSbConflicts $r $own $avg; return }
             if ($ans -ne 'Yes') { return }
         }

@@ -765,8 +765,8 @@ function Set-ConnectStatus([string]$Text, [string]$Color = '#FFA6E3A1') {
     # laeuft inzwischen ein neuer Vorgang, kein altes Ergebnis voranstellen; ein Verbindungsfehler bleibt rot
     if ($k -and -not $script:JobRunning) { Set-Status "$($k.Text) - $Text" $(if ($Color -eq '#FFF38BA8') { $Color } else { $k.Color }) } else { Set-Status $Text $Color }
 }
-function Confirm-Action([string]$Message, [string]$Title = 'HUMig') {
-    return ((Show-HMDialogBox -Owner $script:Window -Text $Message -Title $Title -Mode 'YesNo' -Icon 'Warning') -eq 'Yes')
+function Confirm-Action([string]$Message, [string]$Title = 'HUMig', [hashtable]$Labels = $null) {
+    return ((Show-HMDialogBox -Owner $script:Window -Text $Message -Title $Title -Mode 'YesNo' -Icon 'Warning' -Labels $Labels) -eq 'Yes')
 }
 $ui.rtbConsole.Add_MouseRightButtonUp({ Clear-ConsoleOutput -Window $script:Window; $_.Handled = $true })
 
@@ -2203,7 +2203,9 @@ $ui.btnDeleteBackup.Add_Click({
     if (-not (Confirm-HMBackupNotInUse @("$($b.Path)") "$($b.Name)")) { return }
     # unvollstaendig bzw. "laeuft": z.B. ein geplantes Backup in einem anderen Prozess schreibt gerade hinein
     $runTxt = $(if ("$($b.Status)" -eq 'Running') { "`n`nACHTUNG: Dieses Backup ist unvollstaendig oder wird gerade geschrieben (z.B. von einem geplanten Backup)." } else { '' })
-    if (-not (Confirm-Action "Backup '$($b.Name)' endgueltig loeschen?$runTxt")) { return }
+    $det = @(); if ($b.Created) { $det += "Datum: $($b.Created)" }; if ($b.Computer) { $det += "PC: $($b.Computer)" }; if ($b.User) { $det += "Benutzer: $($b.User)" }
+    if ([long]"0$($b.SizeBytes)" -gt 0) { $det += "Groesse: $(Format-HMSize ([long]$b.SizeBytes))" }; if ($b.Status) { $det += "Status: $($b.Status)" }
+    if (-not (Confirm-Action "Backup '$($b.Name)' endgueltig loeschen?$(if ($det.Count) { "`n`n" + ($det -join "`n") })$runTxt" -Labels @{ Yes = 'Endgueltig loeschen'; No = 'Nicht loeschen' })) { return }
     Out-Console "Loesche $($b.Path) ..." 'Warning'
     Add-HMDeleting @("$($b.Path)")
     Invoke-AsyncCommand -ScriptBlock { param($eng, $p) . $eng; Remove-HMBackupFolder $p } -ArgumentList @($script:Engine, $b.Path) -TimeoutSec 3600 -State "$($b.Path)" -OnComplete {
@@ -2365,7 +2367,7 @@ $ui.btnRestore.Add_Click({
     if (-not $p) { Out-Console 'Bitte Zielbenutzer waehlen (oder DOMAENE\Benutzer eintragen).' 'Warning'; return }
     if ($p.NoProfile -and -not @($mods | Where-Object { $_.Id -eq 'Usmt' }).Count -and @($mods | Where-Object { $_.Scope -eq 'User' }).Count) {
         Out-Console "$($p.Account) hat an $comp noch kein Profil: Benutzer einmal anmelden lassen oder 'Windows-Einstellungen (USMT)' mitwaehlen." 'Warning'
-        if (-not (Confirm-Action "Ohne Profil werden nur die Computer-Module wiederhergestellt. Fortfahren?")) { return }
+        if (-not (Confirm-Action "$($p.Account) hat an $comp noch kein Profil. Ohne Profil werden nur die Computer-Module wiederhergestellt." -Labels @{ Yes = 'Nur Computer-Module'; No = 'Nicht starten' })) { return }
     }
     $msg = "Restore von`n  $($b.Name)`nnach`n  $comp \ $($p.Folder)`n`nModule: $(($mods | ForEach-Object { $_.Name }) -join ', ')"
     if ($b.User -and $b.User -ne $p.Folder) { $msg += "`n`nACHTUNG: anderer Benutzer als im Backup ($($b.User))!" }
@@ -2389,8 +2391,8 @@ $ui.btnRestore.Add_Click({
         $ut = @(Get-HMUntrustedBackupItems $b.Path $ctx.Modules)
         if ($ut.Count) {
             $own = @($ut | ForEach-Object { "$($_.Owner)" } | Select-Object -Unique) -join ', '
-            $um = "Dieses Backup wurde nicht von einem Administrator angelegt (Besitzer: $own).`n`nFolgende Teile laufen mit Adminrechten:`n$(@($ut | ForEach-Object { "  $($_.Name)" }) -join "`n")`n`nNur uebernehmen, wenn du dem Backup vertraust. Uebernehmen?`n`nNein = diese Teile auslassen, Rest wiederherstellen"
-            if ("$((Show-HMDialogBox -Owner $script:Window -Text $um -Title 'Restore - Backup pruefen' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') {
+            $um = "Dieses Backup wurde nicht von einem Administrator angelegt (Besitzer: $own).`n`nFolgende Teile laufen mit Adminrechten:`n$(@($ut | ForEach-Object { "  $($_.Name)" }) -join "`n")`n`nNur uebernehmen, wenn du dem Backup vertraust. Ausgelassen wird nur dieser Teil, der Rest wird wiederhergestellt."
+            if ("$((Show-HMDialogBox -Owner $script:Window -Text $um -Title 'Restore - Backup pruefen' -Mode 'YesNo' -Icon 'Warning' -Default 'No' -Labels @{ Yes = 'Admin-Teile uebernehmen'; No = 'Admin-Teile auslassen' }))" -ne 'Yes') {
                 $ctx.SkipUntrustedMachine = @($ut | ForEach-Object { "$($_.Id)" })
                 Out-Console "Ausgelassen (Backup nicht von einem Administrator angelegt, Besitzer: $own): $(@($ut | ForEach-Object { $_.Name }) -join ', ')" 'Warning'
             } else { Out-Console "Backup-Besitzer $own - Uebernahme der Admin-Teile bestaetigt." 'Warning' }
@@ -3169,7 +3171,7 @@ $miS = New-Object System.Windows.Controls.MenuItem; $miS.Header = 'Update-Einste
 $miT = New-Object System.Windows.Controls.MenuItem; $miT.Header = 'GitHub-Token (nur privates Repo) ...'
 $miT.Add_Click({
     $f = Get-GitHubTokenFile
-    $a = (Show-HMDialogBox -Owner $script:Window -Text ("Update-Quelle: $($script:UpdateOwner)/$($script:UpdateRepo)`nGespeicherter Token: $(if (Test-Path -LiteralPath $f) { 'vorhanden' } else { 'keiner' })`n`nNur fuer PRIVATE Repos noetig (Fine-grained PAT, nur 'Contents: Read').`n`nJa = Token eingeben`nNein = Token loeschen") -Title 'GitHub-Token' -Mode 'YesNoCancel' -Icon 'Question')
+    $a = (Show-HMDialogBox -Owner $script:Window -Text ("Update-Quelle: $($script:UpdateOwner)/$($script:UpdateRepo)`nGespeicherter Token: $(if (Test-Path -LiteralPath $f) { 'vorhanden' } else { 'keiner' })`n`nNur fuer PRIVATE Repos noetig (Fine-grained PAT, nur 'Contents: Read').") -Title 'GitHub-Token' -Mode 'YesNoCancel' -Icon 'Question' -Labels @{ Yes = 'Token eingeben'; No = 'Token loeschen'; Cancel = 'Abbrechen' })
     if ($a -eq 'Yes') {
         $c = Get-Credential -UserName 'github' -Message 'GitHub-Token als Kennwort eingeben (wird verschluesselt gespeichert)'
         if ($c) { $c | Export-Clixml -Path $f -Force; Out-Console 'GitHub-Token gespeichert (DPAPI)' 'Success'; Invoke-UpdateCheck -Force }
@@ -3285,7 +3287,7 @@ $script:Window.Add_Closing({
             try { Clear-HMSbRunMarker @{ LocalHistory = $script:SbHistFile; Profile = "$($script:SbRunProfile)" } } catch { }
         }
     } elseif ($script:JobRunning) {
-        if (-not (Confirm-Action 'Ein Backup/Restore laeuft noch. Wirklich beenden (Vorgang wird abgebrochen)?')) { $e.Cancel = $true; return }
+        if (-not (Confirm-Action "'$(if ("$($script:JobTitle)") { $script:JobTitle } else { 'Backup/Restore' })' laeuft noch. Beim Beenden wird der Vorgang abgebrochen." -Labels @{ Yes = 'Abbrechen und beenden'; No = 'Weiterlaufen lassen' })) { $e.Cancel = $true; return }
         if ($script:CurrentJob) { $script:CurrentJob.Cancel = $true; Stop-HMJobProcess $script:CurrentJob }
         # Aufraeumen abwarten (u.a. Benutzer-Registry entladen - bliebe sonst bis zum Neustart geladen)
         Wait-HMJobEnd $script:CurrentJob 30

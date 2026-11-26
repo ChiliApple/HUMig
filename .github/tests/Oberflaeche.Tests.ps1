@@ -234,3 +234,57 @@ Describe 'Oberflaeche: ausgeblendet statt gesperrt' {
         $b.HasAttribute('IsEnabled') | Should -BeFalse
     }
 }
+
+Describe 'Oberflaeche: Rueckfragen mit eigenen Knopftexten' {
+    BeforeAll {
+        if ($script:Sta) {
+            Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\UI-Common.ps1'), [ref]$null, [ref]$null)
+            $fn = @($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq 'Show-HMDialogBox' }, $true))[0]
+            . ([scriptblock]::Create($fn.Extent.Text))
+            function Set-HMWindowScale { param($w) }
+            function Out-Console { param($a, $b) }
+            # Besitzerfenster ausserhalb des Bildschirms (die Rueckfrage braucht ein geladenes Fenster)
+            $script:OwnerWin = New-Object System.Windows.Window
+            $script:OwnerWin.Left = -20000; $script:OwnerWin.Top = 0; $script:OwnerWin.Width = 200; $script:OwnerWin.Height = 100; $script:OwnerWin.ShowInTaskbar = $false; $script:OwnerWin.ShowActivated = $false
+            $script:OwnerWin.Show()
+            # jede neue Rueckfrage: Knopftexte merken und je nach $script:Press Enter, Esc oder Schliessen ausloesen
+            $script:Seen = New-Object System.Collections.ArrayList
+            $script:Press = 'Enter'
+            [System.Windows.EventManager]::RegisterClassHandler([System.Windows.Window], [System.Windows.FrameworkElement]::LoadedEvent, [System.Windows.RoutedEventHandler] {
+                param($sd, $e)
+                if ([object]::ReferenceEquals($sd, $script:OwnerWin)) { return }
+                $btns = New-Object System.Collections.ArrayList
+                $walk = { param($v) if ($v -is [System.Windows.Controls.Button]) { [void]$btns.Add($v) }; for ($i = 0; $i -lt [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($v); $i++) { & $walk ([System.Windows.Media.VisualTreeHelper]::GetChild($v, $i)) } }
+                & $walk $sd
+                [void]$script:Seen.Clear(); foreach ($b in $btns) { [void]$script:Seen.Add("$($b.Content)") }
+                $target = $(switch ($script:Press) { 'Enter' { @($btns | Where-Object { $_.IsDefault })[0] } 'Esc' { @($btns | Where-Object { $_.IsCancel })[0] } default { $null } })
+                $sd.Dispatcher.BeginInvoke([action] {
+                    if ($target) { $target.RaiseEvent((New-Object System.Windows.RoutedEventArgs ([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent))) } else { $sd.Close() }
+                }.GetNewClosure(), [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null
+            })
+        }
+    }
+    AfterAll { if ($script:OwnerWin) { $script:OwnerWin.Close() } }
+    It 'gleiche Rueckgabe mit und ohne eigene Texte (<Mode>, <Icon>, Standard <Def>, Taste <Key>)' -Skip:(-not $script:StaD) -ForEach @(
+        @{ Mode = 'YesNo'; Icon = 'Warning'; Def = ''; Key = 'Enter' }, @{ Mode = 'YesNo'; Icon = 'Warning'; Def = ''; Key = 'Esc' }, @{ Mode = 'YesNo'; Icon = 'Warning'; Def = ''; Key = 'Close' },
+        @{ Mode = 'YesNo'; Icon = 'Warning'; Def = 'No'; Key = 'Enter' }, @{ Mode = 'YesNo'; Icon = 'Question'; Def = 'Yes'; Key = 'Enter' },
+        @{ Mode = 'YesNoCancel'; Icon = 'Question'; Def = 'No'; Key = 'Enter' }, @{ Mode = 'YesNoCancel'; Icon = 'Question'; Def = 'No'; Key = 'Esc' }, @{ Mode = 'YesNoCancel'; Icon = 'Question'; Def = 'No'; Key = 'Close' },
+        @{ Mode = 'YesNoCancel'; Icon = 'Warning'; Def = ''; Key = 'Enter' }, @{ Mode = 'OKCancel'; Icon = 'Warning'; Def = ''; Key = 'Esc' }) {
+        $script:Press = $Key
+        $a = Show-HMDialogBox -Owner $script:OwnerWin -Text 'Test' -Title 'Test' -Mode $Mode -Icon $Icon -Default $Def
+        $plain = @($script:Seen)
+        $lab = @{ Yes = 'Machen'; No = 'Lassen'; Cancel = 'Zurueck'; OK = 'Weiter' }
+        $b = Show-HMDialogBox -Owner $script:OwnerWin -Text 'Test' -Title 'Test' -Mode $Mode -Icon $Icon -Default $Def -Labels $lab
+        $b | Should -Be $a
+        $plain.Count | Should -BeGreaterThan 1
+        @($script:Seen).Count | Should -Be $plain.Count
+        @($script:Seen) | Should -Not -Contain 'Ja'
+        @($script:Seen) | Should -Not -Contain 'Nein'
+    }
+    It 'ohne Parameter bleiben die festen Texte' -Skip:(-not $script:StaD) {
+        $script:Press = 'Esc'
+        [void](Show-HMDialogBox -Owner $script:OwnerWin -Text 'Test' -Mode 'YesNoCancel' -Icon 'Question')
+        @($script:Seen) | Should -Be @('Ja', 'Nein', 'Abbrechen')
+    }
+}
