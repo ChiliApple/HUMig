@@ -583,6 +583,19 @@ function Get-HMRetentionCandidates {
     }
     return $out.ToArray()
 }
+# Text der Rueckfrage "Restore aus unvollstaendigem Backup" (rein, testbar). Leer = keine Rueckfrage.
+# Backup mit Fehlern oder abgebrochen: wie bisher, mit den gewaehlten Modulen mit Fehlern. Sonst nur, wenn gewaehlte Module
+# mit Fehlern gesichert sind (z. B. aus einem frueheren Lauf eines fortlaufenden Backups mitgefuehrt).
+function Get-HMRestoreIncompleteText([string]$BackupStatus, [string[]]$BadModules) {
+    $bad = @(@($BadModules) | Where-Object { $_ })
+    $lost = 'Was dort nicht gesichert wurde, fehlt auch nach dem Restore.'
+    if ($BackupStatus -in @('Error', 'Cancelled')) {
+        return ("ACHTUNG: Dieses Backup ist $(if ($BackupStatus -eq 'Error') { 'mit FEHLERN' } else { 'ABGEBROCHEN' }) beendet worden - es ist nicht vollstaendig.`n" +
+            "$(if ($bad.Count) { "Gewaehlte Module mit Fehlern: $($bad -join ', ')`n$lost`n" })Details: Bericht_Backup.html im Backup-Ordner.`n`nTrotzdem wiederherstellen?")
+    }
+    if (-not $bad.Count) { return '' }
+    return "ACHTUNG: Gewaehlte Module sind mit FEHLERN gesichert - nicht alles liegt im Backup.`nGewaehlte Module mit Fehlern: $($bad -join ', ')`n$lost`nDetails: Bericht_Backup.html im Backup-Ordner.`n`nTrotzdem wiederherstellen?"
+}
 # Brauchbares Backup: abgeschlossen mit OK oder Warnung (oder alte Ordnerstruktur ohne Manifest)
 function Test-HMBackupUsable($b) { return ([bool]$b.Legacy -or "$($b.Status)" -in @('OK', 'Warning')) }
 function Format-HMBackupStatus($b) {

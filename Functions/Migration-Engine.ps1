@@ -1586,6 +1586,52 @@ function Save-HMManifest([hashtable]$Manifest, [string]$BackupPath) {
     $Manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $BackupPath 'manifest.json') -Encoding UTF8 -Force
 }
 
+# Restore: Liegt von einem Modul etwas im Backup? (rein, testbar)
+# OK/Warning: ja (wie bisher). Error: nur, wenn dieser Lauf etwas gesichert hat - Bytes > 0 (z. B. Ordner mit einzelnen
+# gesperrten Dateien) oder ein Eintrag mit OK (Hinweise zaehlen nicht). Keine Daten sind: nicht lesbare Ordner (Warning, 0 Bytes)
+# und "Quelle nicht erreichbar" (Error, 0 Bytes), auch wenn bei einem fortlaufenden Backup noch ein aelterer Stand im Ordner liegt.
+# USMT mit Fehler bleibt immer aus: kein oder ein unbrauchbares USMT.MIG (ein brauchbarer alter Stand ist Warning).
+# Module ohne Statusangabe bleiben wie bisher aus.
+function Test-HMBackupModuleHasData($Module) {
+    if (-not $Module) { return $false }
+    $st = "$($Module.Status)"
+    if ($st -in @('OK', 'Warning')) { return $true }
+    if ($st -ne 'Error' -or "$($Module.Id)" -eq 'Usmt') { return $false }
+    $by = [long]0
+    if ([long]::TryParse("$($Module.Bytes)", [ref]$by) -and $by -gt 0) { return $true }
+    return (@(@($Module.Items) | Where-Object { $_ -and "$($_.Name)" -ne 'Hinweis' -and "$($_.Status)" -eq 'OK' }).Count -gt 0)
+}
+# Module eines Manifests fuer den Restore: Modules = waehlbar, ErrorModules = davon mit Fehlern gesichert (Markierung, Rueckfrage)
+function Get-HMBackupModuleSets($Manifest) {
+    $ids = @(); $err = @()
+    foreach ($m in @($Manifest.Modules)) {
+        if (-not $m -or -not "$($m.Id)" -or -not (Test-HMBackupModuleHasData $m)) { continue }
+        $ids += "$($m.Id)"
+        if ("$($m.Status)" -eq 'Error') { $err += "$($m.Id)" }
+    }
+    return [pscustomobject]@{ Modules = $ids; ErrorModules = $err }
+}
+# Hinweistext zu einem mit Fehlern gesicherten Modul (Manifest-Eintrag): betroffene Eintraege mit Grund, gekuerzt (rein, testbar)
+function Get-HMModuleErrorHint($Module) {
+    if (-not $Module) { return '' }
+    $bad = @(@($Module.Items) | Where-Object { $_ -and "$($_.Status)" -in @('Error', 'Cancel') })
+    $lines = @('Mit Fehlern gesichert: nicht alles liegt im Backup. Was dort fehlt, fehlt auch nach dem Restore.')
+    if ("$($Module.FromPrevious)") { $lines += "Stand aus einem frueheren Lauf dieses Backups ($($Module.FromPrevious))." }
+    foreach ($i in @($bad | Select-Object -First 3)) {
+        $t = ("$($i.Msg)" -replace '\s*\r?\n\s*', ' ').Trim()
+        if ($t.Length -gt 180) { $t = $t.Substring(0, 177) + '...' }
+        $lines += "$($i.Name): $t"
+    }
+    if ($bad.Count -gt 3) { $lines += "... und $($bad.Count - 3) weitere" }
+    $lines += 'Details: Bericht_Backup.html im Backup-Ordner'
+    return ($lines -join "`n")
+}
+# Namen der gewaehlten Module, die im Backup mit Fehlern gesichert sind (Rueckfrage vor dem Restore, Protokoll)
+function Get-HMRestoreErrorModuleNames($Manifest, [object[]]$Modules) {
+    $ids = @(@($Modules) | Where-Object { $_ } | ForEach-Object { "$($_.Id)" })
+    return @(@($Manifest.Modules) | Where-Object { $_ -and "$($_.Status)" -eq 'Error' -and $ids -contains "$($_.Id)" } | ForEach-Object { "$($_.Name)" })
+}
+
 # Liest ein Backup (neu: manifest.json, alt: Ordnerstruktur der Vorgaengerversion)
 function Read-HMBackupInfo {
     param([string]$Path, [object[]]$Modules)
@@ -1593,10 +1639,11 @@ function Read-HMBackupInfo {
     if (Test-Path -LiteralPath $mf) {
         try {
             $m = Get-Content -LiteralPath $mf -Raw -Encoding UTF8 | ConvertFrom-Json
-            $mods = @($m.Modules | Where-Object { $_.Status -in @('OK', 'Warning') } | ForEach-Object { $_.Id })
+            # waehlbar: Module mit OK/Warning und mit Fehlern gesicherte, von denen Daten im Backup liegen (Get-HMBackupModuleSets)
+            $set = Get-HMBackupModuleSets $m
             return [pscustomobject]@{ Path = $Path; Name = (Split-Path $Path -Leaf); Legacy = $false; Created = $m.Created
                 Computer = $m.SourceComputer; User = $m.UserName; Account = $m.Account; Sid = $m.UserSid; ProfilePath = $m.ProfilePath
-                Modules = $mods; SizeBytes = [long]$m.SizeBytes; Status = $m.Status; Manifest = $m; Archived = (Test-HMBackupArchived $Path) }
+                Modules = @($set.Modules); ErrorModules = @($set.ErrorModules); SizeBytes = [long]$m.SizeBytes; Status = $m.Status; Manifest = $m; Archived = (Test-HMBackupArchived $Path) }
         } catch { }
     }
     # Legacy-Erkennung
@@ -1621,7 +1668,7 @@ function Read-HMBackupInfo {
     }
     if ((Test-Path -LiteralPath (Join-Path $Path 'FOLDER1')) -or (Test-Path -LiteralPath (Join-Path $Path 'FOLDER2'))) { $found = @($found) + 'ExtraFolders' }
     return [pscustomobject]@{ Path = $Path; Name = $leaf; Legacy = $true; Created = $created; Computer = $comp; User = $user; Account = $null
-        Sid = $sid; ProfilePath = "C:\Users\$user"; Modules = @($found | Select-Object -Unique); SizeBytes = [long]0; Status = 'Legacy'; Manifest = $null; Archived = (Test-HMBackupArchived $Path) }
+        Sid = $sid; ProfilePath = "C:\Users\$user"; Modules = @($found | Select-Object -Unique); ErrorModules = @(); SizeBytes = [long]0; Status = 'Legacy'; Manifest = $null; Archived = (Test-HMBackupArchived $Path) }
 }
 
 function Get-HMBackupList {
@@ -5001,6 +5048,8 @@ function Start-HMRestore {
     if ($Ctx.Backup.Legacy) { Write-HMLog $Job 'Backup der Vorgaengerversion erkannt (ohne manifest.json)' 'Info' }
     $skipApps = @(@($Ctx.SkippedApps) | Where-Object { $_ } | ForEach-Object { "$($_.Name)" })
     if ($skipApps.Count) { Write-HMLog $Job "Programm-Einstellungen ausgelassen (Programm am Ziel nicht installiert): $($skipApps -join ', ') - nach der Installation Restore nur mit diesen Modulen wiederholen" 'Warning' }
+    $errMods = @(); try { if ($Ctx.Backup.Manifest) { $errMods = @(Get-HMRestoreErrorModuleNames $Ctx.Backup.Manifest $Ctx.Modules) } } catch { }
+    if ($errMods.Count) { Write-HMLog $Job "Im Backup mit Fehlern gesichert: $($errMods -join ', ') - was beim Backup nicht gesichert wurde, fehlt auch nach dem Restore (Details: Bericht_Backup.html im Backup-Ordner)" 'Warning' }
     if ($Ctx.Options.VerifyAfter) { Write-HMLog $Job 'Nach jedem Ordner wird kontrolliert, ob alle Dateien aus dem Backup am Ziel liegen' 'Debug' }
 
     $shareRoot = $null
