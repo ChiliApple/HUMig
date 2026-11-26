@@ -1,6 +1,6 @@
 ﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="HUMig - Einstellungen" Width="880" Height="680" MinWidth="700" MinHeight="500"
+        Title="HUMig - Einstellungen" Width="880" Height="680" MinWidth="700" MinHeight="500" ResizeMode="CanResizeWithGrip"
         WindowStartupLocation="CenterOwner" Background="#FF1E1E2E" Foreground="#FFCDD6F4" FontFamily="Segoe UI" FontSize="12">
     <DockPanel LastChildFill="True">
         <Border DockPanel.Dock="Top" Background="#FF181825" Padding="10,6">

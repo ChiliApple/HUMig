@@ -8,7 +8,7 @@
         Foreground="#FFCDD6F4"
         FontFamily="Segoe UI"
         FontSize="12"
-        ResizeMode="CanResize">
+        ResizeMode="CanResizeWithGrip">
 
     <Window.Resources>
         <SolidColorBrush x:Key="CatBase"     Color="#FF1E1E2E"/>
