@@ -191,8 +191,7 @@ Describe 'Kein fremdes Werkzeug ohne feste Version in Functions\*.ps1' {
             @{ File = 'AppUpdates-Target.ps1'; Rule = 'Install-PackageProvider'; Count = 1; Why = 'NuGet-Anbieter am Ziel-PC, wie oben' }
             @{ File = 'AppUpdates-Engine.ps1'; Rule = 'Repair-WinGetPackageManager -Latest'; Count = 4; Why = 'App Installer (WinGet) ist ein Windows-Bestandteil, nur Microsoft liefert passende Fassungen; repariert wird nur, wenn WinGet nicht laeuft' }
             @{ File = 'AppUpdates-Target.ps1'; Rule = 'Repair-WinGetPackageManager -Latest'; Count = 3; Why = 'App Installer am Ziel-PC, wie oben (ein Aufruf, zwei Hinweistexte fuer den Administrator)' }
-            # bis Schritt 2 (PowerShell 7 fest) bzw. 3 (WinGet-Modul fest)
-            @{ File = 'AppUpdates-Target.ps1'; Rule = 'releases/latest'; Count = 1; Why = 'voruebergehend' }
+            # bis Schritt 3 (WinGet-Modul fest)
             @{ File = 'AppUpdates-Engine.ps1'; Rule = 'Find-Module'; Count = 1; Why = 'voruebergehend' }
             @{ File = 'AppUpdates-Engine.ps1'; Rule = 'Install-Module ohne RequiredVersion'; Count = 2; Why = 'voruebergehend' }
             @{ File = 'AppUpdates-Target.ps1'; Rule = 'Install-Module ohne RequiredVersion'; Count = 1; Why = 'voruebergehend' }
@@ -244,5 +243,359 @@ $u = 'https://api.github.com/repos/a/b/releases/latest'
         [regex]::Matches($code, $script:Rules['Install-Module ohne RequiredVersion'], 'IgnoreCase').Count | Should -Be 2
         [regex]::Matches($code, $script:Rules['Find-Module'], 'IgnoreCase').Count | Should -Be 1
         [regex]::Matches($code, $script:Rules['releases/latest'], 'IgnoreCase').Count | Should -Be 1
+    }
+}
+
+Describe 'PowerShell 7 am Ziel-PC: feste Fassung, Tausch der eigenen Kopie, jeder Fall der Abwaertsvertraeglichkeit' {
+    BeforeAll {
+        Import-TargetFunction @('Get-TPwsh', 'Select-TPwshPackage', 'Compare-TPwshVersion', 'Get-TPwshZip', 'Get-TFileSha256', 'Expand-TPwshZip', 'Move-TDir', 'Remove-TDir',
+            'Get-TProcessPaths', 'Get-TFileProductVersion', 'Test-TPathsInDirs', 'Test-TPwshInUse', 'Get-TPwshOwnVersion', 'Clear-TPwshLeftover', 'Install-TPwshPackage', 'Install-TPwsh')
+        # echtes ZIP mit einem Ersatz-pwsh.exe (Text) im TestDrive, Pruefsumme dazu
+        $src = Join-Path $TestDrive 'zipsrc'; New-Item -ItemType Directory -Path $src -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $src 'pwsh.exe'), 'NEU 7.6.10')
+        $script:Zip = Join-Path $TestDrive 'PowerShell-7.6.10-win-x64.zip'
+        Compress-Archive -Path (Join-Path $src '*') -DestinationPath $script:Zip -Force
+        $src2 = Join-Path $TestDrive 'zipleer'; New-Item -ItemType Directory -Path $src2 -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $src2 'liesmich.txt'), 'kein pwsh')
+        $script:ZipOhne = Join-Path $TestDrive 'ohne.zip'
+        Compress-Archive -Path (Join-Path $src2 '*') -DestinationPath $script:ZipOhne -Force
+        $script:Sha = (Get-FileHash -LiteralPath $script:Zip -Algorithm SHA256).Hash
+        $script:ShaOhne = (Get-FileHash -LiteralPath $script:ZipOhne -Algorithm SHA256).Hash
+        function global:Out-L([string]$t) { $global:T_Log += $t }
+        # Ersatz fuer Download und Prozessliste (kein Netz, keine echten Prozesse)
+        function global:Get-TPwshZip([string]$Url, [string]$OutFile) {
+            $global:T_Calls += "ZIP:$Url"
+            if (-not $global:T_Net) { throw 'Netz nicht erreichbar' }
+            Copy-Item -LiteralPath $global:T_ZipFile -Destination $OutFile
+        }
+        function global:Get-TProcessPaths { if ($global:T_ProcFail) { throw 'Zugriff verweigert' }; return @($global:T_Procs) }
+        function global:Get-TFileProductVersion([string]$Path) { if (-not (Test-Path -LiteralPath $Path)) { throw 'fehlt' }; return $global:T_ProdVer }
+        # Umbenennen mit gezieltem Fehlschlag (T_FailFrom = Ordner, dessen Umbenennen scheitert)
+        function global:Move-TDir([string]$From, [string]$To) {
+            $global:T_Calls += "MOVE:$(Split-Path $From -Leaf)>$(Split-Path $To -Leaf)"
+            if ($global:T_FailFrom -and $From -eq $global:T_FailFrom) { throw 'Zugriff verweigert (Ersatz)' }
+            Move-Item -LiteralPath $From -Destination $To -ErrorAction Stop
+        }
+        # Fall vorbereiten: Ordner im TestDrive, eigene Kopie mit Version (Versionsdatei oder nur Produktversion), MSI ja/nein
+        $script:Setup = {
+            param([string]$Own = '', [bool]$Json = $true, [bool]$Msi = $false, [bool]$Net = $true, [string]$Sha = $script:Sha, [string]$ZipFile = $script:Zip, [bool]$Install = $true, $Tools = 'gueltig')
+            $pf = Join-Path $TestDrive ('pf_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+            $global:PwshDir = Join-Path $pf 'HUMig\PowerShell7'; $global:PwshNeu = "$global:PwshDir.neu"; $global:PwshAlt = "$global:PwshDir.alt"; $global:PwshInfo = 'humig-pwsh.json'
+            $global:PwshMsi = Join-Path $pf 'PowerShell\7\pwsh.exe'; $global:Base = Join-Path $pf 'Data\HUMig\AppUpdates'
+            if ($Own) {
+                New-Item -ItemType Directory -Path $global:PwshDir -Force | Out-Null
+                [IO.File]::WriteAllText((Join-Path $global:PwshDir 'pwsh.exe'), "ALT $Own")
+                if ($Json) { [IO.File]::WriteAllText((Join-Path $global:PwshDir 'humig-pwsh.json'), "{`"version`":`"$Own`"}") }
+            }
+            if ($Msi) { New-Item -ItemType Directory -Path (Split-Path $global:PwshMsi) -Force | Out-Null; [IO.File]::WriteAllText($global:PwshMsi, 'MSI') }
+            $global:T_ProdVer = "$Own SHA: 0123abcd"
+            $global:T_Net = $Net; $global:T_ZipFile = $ZipFile; $global:T_Procs = @(); $global:T_ProcFail = $false; $global:T_FailFrom = ''
+            $global:T_Log = @(); $global:T_Calls = @(); $script:TErr = @(); $global:TErr = @()
+            $global:My = @{ InstallPwsh = $Install }
+            $url = 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.10/PowerShell-7.6.10-win-x64.zip'
+            $pk = @{ Datei = 'PowerShell-7.6.10-win-x64.zip'; Url = $url; Sha256 = $Sha }
+            $global:Payload = @{ Tools = $(if ("$Tools" -eq 'gueltig') { @{ Pwsh = @{ Version = '7.6.10'; Pakete = @{ x64 = $pk; arm64 = $pk } } } } else { $Tools }) }
+        }
+        $script:OwnExe = { Join-Path $global:PwshDir 'pwsh.exe' }
+        $script:Content = { [IO.File]::ReadAllText((Join-Path $global:PwshDir 'pwsh.exe')) }
+        $script:Errs = { @(@($script:TErr) + @($global:TErr) | Where-Object { $_ }) }
+        $script:NoRest = { (Test-Path -LiteralPath $global:PwshNeu) -or (Test-Path -LiteralPath $global:PwshAlt) }
+        $script:State = { if ($global:TPwshState) { $global:TPwshState } else { $script:TPwshState } }
+    }
+    AfterAll {
+        foreach ($n in @('Out-L', 'Get-TPwsh', 'Select-TPwshPackage', 'Compare-TPwshVersion', 'Get-TPwshZip', 'Get-TFileSha256', 'Expand-TPwshZip', 'Move-TDir', 'Remove-TDir', 'Get-TProcessPaths', 'Get-TFileProductVersion', 'Test-TPathsInDirs', 'Test-TPwshInUse', 'Get-TPwshOwnVersion', 'Clear-TPwshLeftover', 'Install-TPwshPackage', 'Install-TPwsh')) {
+            Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue
+        }
+    }
+    BeforeEach { $global:TPwshState = ''; $script:TPwshState = '' }
+    It 'nichts vorhanden, Netz da: feste Fassung wird eingerichtet, mit Versionsdatei, ohne Reste' {
+        & $script:Setup
+        Install-TPwsh
+        & $script:State | Should -Be 'Neu'
+        & $script:Content | Should -Be 'NEU 7.6.10'
+        (Get-Content (Join-Path $global:PwshDir 'humig-pwsh.json') -Raw | ConvertFrom-Json).version | Should -Be '7.6.10'
+        Get-TPwsh | Should -Be (& $script:OwnExe)
+        & $script:NoRest | Should -BeFalse
+        & $script:Errs | Should -BeNullOrEmpty
+        @($global:T_Calls | Where-Object { $_ -like 'ZIP:*' }) | Should -Be @('ZIP:https://github.com/PowerShell/PowerShell/releases/download/v7.6.10/PowerShell-7.6.10-win-x64.zip')
+        @(Get-ChildItem -LiteralPath $global:Base -Filter 'pwsh_*.zip').Count | Should -Be 0
+    }
+    It 'eigene aeltere Kopie (Versionsdatei): wird ohne Rueckfrage ersetzt, Protokollzeile, ohne Reste' {
+        & $script:Setup '7.4.6'
+        Install-TPwsh
+        & $script:State | Should -Be 'Ersetzt'
+        & $script:Content | Should -Be 'NEU 7.6.10'
+        ($global:T_Log -join "`n") | Should -Match 'PowerShell 7 7\.4\.6 wird durch die feste Fassung 7\.6\.10 ersetzt'
+        & $script:NoRest | Should -BeFalse
+        & $script:Errs | Should -BeNullOrEmpty
+    }
+    It 'eigene aeltere Kopie von frueher (ohne Versionsdatei, Version aus pwsh.exe): wird ersetzt' {
+        & $script:Setup '7.5.4' $false
+        Install-TPwsh
+        & $script:State | Should -Be 'Ersetzt'
+        & $script:Content | Should -Be 'NEU 7.6.10'
+    }
+    It 'eigene Kopie mit unlesbarer Version: wird durch die feste ersetzt' {
+        & $script:Setup '7.5.4' $false
+        $global:T_ProdVer = ''
+        Install-TPwsh
+        & $script:State | Should -Be 'Ersetzt'
+        ($global:T_Log -join "`n") | Should -Match 'unbekannter Version'
+    }
+    It 'gleiche Version schon da: nichts geladen, nichts geaendert' {
+        & $script:Setup '7.6.10'
+        Install-TPwsh
+        & $script:State | Should -Be 'Aktuell'
+        & $script:Content | Should -Be 'ALT 7.6.10'
+        @($global:T_Calls).Count | Should -Be 0
+        @($global:T_Log).Count | Should -Be 0
+    }
+    It 'eigene Kopie neuer als die feste (frueher von "latest" geladen): bleibt, Protokollzeile' {
+        & $script:Setup '7.7.1'
+        Install-TPwsh
+        & $script:State | Should -Be 'Neuer'
+        & $script:Content | Should -Be 'ALT 7.7.1'
+        @($global:T_Calls).Count | Should -Be 0
+    }
+    It 'eigene aeltere Kopie, kein Netz: bleibt, Warnung, kein Fehler, der Lauf nimmt sie (Get-TPwsh)' {
+        & $script:Setup '7.4.6' -Net $false
+        Install-TPwsh
+        & $script:State | Should -Be 'Behalten'
+        & $script:Content | Should -Be 'ALT 7.4.6'
+        Get-TPwsh | Should -Be (& $script:OwnExe)
+        ($global:T_Log -join "`n") | Should -Match '(?m)^Warnung: PowerShell 7 7\.6\.10 nicht eingerichtet \(Netz nicht erreichbar\) - die vorhandene Fassung 7\.4\.6 wird weiter verwendet'
+        & $script:Errs | Should -BeNullOrEmpty
+        & $script:NoRest | Should -BeFalse
+    }
+    It 'eigene aeltere Kopie, Pruefsumme falsch: nicht eingerichtet, alte bleibt, Warnung, nichts entpackt' {
+        & $script:Setup '7.4.6' -Sha ('0' * 64)
+        Install-TPwsh
+        & $script:State | Should -Be 'Behalten'
+        & $script:Content | Should -Be 'ALT 7.4.6'
+        ($global:T_Log -join "`n") | Should -Match 'Pruefsumme passt nicht'
+        @($global:T_Calls | Where-Object { $_ -like 'MOVE:*' }).Count | Should -Be 0
+        & $script:NoRest | Should -BeFalse
+        & $script:Errs | Should -BeNullOrEmpty
+    }
+    It 'eigene aeltere Kopie, ZIP ohne pwsh.exe: alte bleibt, nichts getauscht' {
+        & $script:Setup '7.4.6' -Sha $script:ShaOhne -ZipFile $script:ZipOhne
+        Install-TPwsh
+        & $script:State | Should -Be 'Behalten'
+        & $script:Content | Should -Be 'ALT 7.4.6'
+        ($global:T_Log -join "`n") | Should -Match 'pwsh.exe nach dem Entpacken nicht gefunden'
+        & $script:NoRest | Should -BeFalse
+    }
+    It 'eigene Kopie laeuft gerade (Zeitplan): in diesem Lauf nicht getauscht, Protokollzeile, nichts geladen' {
+        & $script:Setup '7.4.6'
+        $global:T_Procs = @('C:\Windows\explorer.exe', (Join-Path $global:PwshDir 'pwsh.exe'))
+        Install-TPwsh
+        & $script:State | Should -Be 'Laeuft'
+        & $script:Content | Should -Be 'ALT 7.4.6'
+        ($global:T_Log -join "`n") | Should -Match 'laeuft gerade'
+        @($global:T_Calls).Count | Should -Be 0
+        Get-TPwsh | Should -Be (& $script:OwnExe)
+    }
+    It 'Prozessliste nicht lesbar: gilt als laufend, nicht getauscht' {
+        & $script:Setup '7.4.6'
+        $global:T_ProcFail = $true
+        Install-TPwsh
+        & $script:State | Should -Be 'Laeuft'
+        & $script:Content | Should -Be 'ALT 7.4.6'
+    }
+    It 'Umbenennen der neuen Fassung scheitert: alte wird zurueckbenannt, keine Reste, Warnung' {
+        & $script:Setup '7.4.6'
+        $global:T_FailFrom = $global:PwshNeu
+        Install-TPwsh
+        & $script:State | Should -Be 'Behalten'
+        & $script:Content | Should -Be 'ALT 7.4.6'
+        @($global:T_Calls | Where-Object { $_ -like 'MOVE:*' }) | Should -Be @('MOVE:PowerShell7>PowerShell7.alt', 'MOVE:PowerShell7.neu>PowerShell7', 'MOVE:PowerShell7.alt>PowerShell7')
+        ($global:T_Log -join "`n") | Should -Match 'Tausch fehlgeschlagen'
+        & $script:NoRest | Should -BeFalse
+        & $script:Errs | Should -BeNullOrEmpty
+    }
+    It 'Umbenennen der alten Fassung scheitert: alte bleibt unberuehrt, keine Reste' {
+        & $script:Setup '7.4.6'
+        $global:T_FailFrom = $global:PwshDir
+        Install-TPwsh
+        & $script:State | Should -Be 'Behalten'
+        & $script:Content | Should -Be 'ALT 7.4.6'
+        & $script:NoRest | Should -BeFalse
+    }
+    It 'gar keine PowerShell 7 und kein Netz: derselbe Fehler wie bisher ("PowerShell 7 nicht installierbar")' {
+        & $script:Setup '' -Net $false
+        Install-TPwsh
+        & $script:State | Should -Be 'Fehlt'
+        @(& $script:Errs) | Should -Be @('PowerShell 7 nicht installierbar: Netz nicht erreichbar')
+        Get-TPwsh | Should -Be ''
+        & $script:NoRest | Should -BeFalse
+        Test-Path -LiteralPath $global:PwshDir | Should -BeFalse
+    }
+    It 'MSI-PowerShell vorhanden: wird verwendet, nichts geladen, eigene Kopie und MSI unberuehrt' {
+        & $script:Setup '7.4.6' -Msi $true
+        Install-TPwsh
+        & $script:State | Should -Be 'Msi'
+        Get-TPwsh | Should -Be $global:PwshMsi
+        [IO.File]::ReadAllText($global:PwshMsi) | Should -Be 'MSI'
+        & $script:Content | Should -Be 'ALT 7.4.6'
+        @($global:T_Calls).Count | Should -Be 0
+        @($global:T_Log).Count | Should -Be 0
+    }
+    It 'Auftrag ohne InstallPwsh: vorhandene Kopie wird nur verwendet (kein Download), ohne Kopie die bisherige Meldung' {
+        & $script:Setup '7.4.6' -Install $false
+        Install-TPwsh
+        & $script:State | Should -Be 'Vorhanden'
+        @($global:T_Calls).Count | Should -Be 0
+        & $script:Setup '' -Install $false
+        Install-TPwsh
+        @(& $script:Errs) | Should -Be @('PowerShell 7 fehlt (fuer das Lesen ohne angemeldeten Benutzer und den Zeitplan noetig)')
+    }
+    It 'keine gueltige feste Version im Auftrag: vorhandene Kopie bleibt (Warnung), ohne Kopie Fehler, nie ein Download' {
+        & $script:Setup '7.4.6' -Tools $null
+        Install-TPwsh
+        & $script:State | Should -Be 'Behalten'
+        ($global:T_Log -join "`n") | Should -Match '(?m)^Warnung: keine gueltige feste Version'
+        & $script:Setup '' -Tools @{ Pwsh = @{ Version = 'latest' } }
+        Install-TPwsh
+        & $script:State | Should -Be 'Fehlt'
+        @(& $script:Errs)[0] | Should -Match '^PowerShell 7 nicht installierbar: keine gueltige feste Version'
+        @($global:T_Calls).Count | Should -Be 0
+    }
+    It 'Reste eines abgebrochenen Tauschs: PowerShell7.alt ohne PowerShell7 wird zurueckbenannt (nie geloescht), PowerShell7.neu entfernt' {
+        & $script:Setup '7.6.10'
+        Move-Item -LiteralPath $global:PwshDir -Destination $global:PwshAlt
+        New-Item -ItemType Directory -Path $global:PwshNeu -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $global:PwshNeu 'pwsh.exe'), 'HALB')
+        Install-TPwsh
+        & $script:Content | Should -Be 'ALT 7.6.10'
+        & $script:State | Should -Be 'Aktuell'
+        & $script:NoRest | Should -BeFalse
+        ($global:T_Log -join "`n") | Should -Match 'vorige Fassung wiederhergestellt'
+    }
+    It 'Reste: ueberzaehliges PowerShell7.alt neben PowerShell7 wird entfernt, aber nicht, solange daraus etwas laeuft' {
+        & $script:Setup '7.6.10'
+        New-Item -ItemType Directory -Path $global:PwshAlt -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $global:PwshAlt 'pwsh.exe'), 'ALT')
+        $global:T_Procs = @((Join-Path $global:PwshAlt 'pwsh.exe'))
+        Install-TPwsh
+        Test-Path -LiteralPath $global:PwshAlt | Should -BeTrue
+        $global:T_Procs = @()
+        Install-TPwsh
+        Test-Path -LiteralPath $global:PwshAlt | Should -BeFalse
+    }
+    It 'Pruefung "laeuft ein Programm daraus" (rein): nur Pfade im Ordner selbst, ohne Gross-/Kleinschreibung, kein Namensanfang' {
+        Test-TPathsInDirs @('C:\Programme\HUMig\PowerShell7\pwsh.exe') @('C:\Programme\HUMig\PowerShell7') | Should -BeTrue
+        Test-TPathsInDirs @('c:\programme\humig\powershell7\x\y.exe') @('C:\Programme\HUMig\PowerShell7\') | Should -BeTrue
+        Test-TPathsInDirs @('C:\Programme\HUMig\PowerShell7.alt\pwsh.exe') @('C:\Programme\HUMig\PowerShell7') | Should -BeFalse
+        Test-TPathsInDirs @('C:\Programme\HUMig\PowerShell7.alt\pwsh.exe') @('C:\Programme\HUMig\PowerShell7', 'C:\Programme\HUMig\PowerShell7.alt') | Should -BeTrue
+        Test-TPathsInDirs @() @('C:\X') | Should -BeFalse
+        Test-TPathsInDirs @('', $null) @('C:\X') | Should -BeFalse
+    }
+}
+
+Describe 'PowerShell 7 am Ziel-PC: Aufrufstellen im ganzen Ziel-Skript (Zeitplan anlegen, Lesen als SYSTEM)' -Skip:([Environment]::OSVersion.Platform -ne 'Win32NT') {
+    BeforeAll {
+        $script:WinPs = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        # Ersatz fuer alles, was am PC etwas aendert oder ins Netz geht; Programme und ProgramData zeigen in den TestDrive
+        $script:Stubs = @'
+$ErrorActionPreference = 'Stop'
+# Module mit den echten Befehlen vorher laden: sonst laedt das Ziel-Skript sie unterwegs nach und sie verdecken den Ersatz
+Import-Module ScheduledTasks, CimCmdlets -ErrorAction SilentlyContinue
+function global:Get-CimInstance { param($ClassName, $Filter, $ErrorAction) if ($ClassName -eq 'Win32_OperatingSystem') { return [pscustomobject]@{ ProductType = 1 } }; return @($global:T_ProcObj) }
+function global:Invoke-CimMethod { }
+function global:Get-PackageProvider { @([pscustomobject]@{ Version = [version]'2.8.5.201' }) }
+function global:Install-PackageProvider { [Console]::Out.WriteLine('C|Install-PackageProvider') }
+function global:Install-Module { [Console]::Out.WriteLine('C|Install-Module ' + ($args -join ' ')); throw 'kein Netz (Ersatz)' }
+function global:Invoke-WebRequest { [Console]::Out.WriteLine('C|Invoke-WebRequest ' + ($args -join ' ')); throw 'kein Netz (Ersatz)' }
+function global:Invoke-RestMethod { [Console]::Out.WriteLine('C|Invoke-RestMethod ' + ($args -join ' ')); throw 'kein Netz (Ersatz)' }
+function global:Expand-Archive { [Console]::Out.WriteLine('C|Expand-Archive'); throw 'nicht erwartet' }
+function global:Register-ScheduledTask { param($TaskName, $TaskPath, $Action, $Trigger, $Principal, $Settings, $Description, [switch]$Force, $ErrorAction) $global:T_Act = $Action; [Console]::Out.WriteLine('C|Register|' + $TaskName + '|' + $Action.Execute) }
+function global:Start-ScheduledTask { param($TaskPath, $TaskName) $m = [regex]::Match("$($global:T_Act.Arguments)", '-Dir "([^"]+)"'); if ($m.Success) { [IO.File]::WriteAllText((Join-Path $m.Groups[1].Value 'result.json'), '{"Items":[{"Id":"Test.App","Name":"Test App","Scope":"User"}],"Errors":[]}') } }
+function global:Stop-ScheduledTask { }
+function global:Unregister-ScheduledTask { }
+function global:Get-ScheduledTask { [pscustomobject]@{ State = 'Running' } }
+function global:Get-ScheduledTaskInfo { [pscustomobject]@{ NextRunTime = (Get-Date); LastTaskResult = 0 } }
+function global:Get-Service { }
+function global:Start-Service { }
+function global:Stop-Service { }
+function global:Stop-Process { }
+function global:Get-Process { @() }
+function global:icacls.exe { }
+function global:Set-ExecutionPolicy { }
+function global:Add-Type { }
+function global:Start-Sleep { }
+# Sperre: jeder Ersatz muss als eigene Funktion greifen, sonst abbrechen (nie ein echter Befehl)
+foreach ($n in @('Register-ScheduledTask', 'Start-ScheduledTask', 'Stop-ScheduledTask', 'Unregister-ScheduledTask', 'Install-Module', 'Install-PackageProvider', 'Invoke-WebRequest', 'Invoke-RestMethod', 'Expand-Archive', 'Get-CimInstance', 'Stop-Process', 'Stop-Service', 'Start-Service', 'Set-ExecutionPolicy')) { $c = Get-Command $n -ErrorAction SilentlyContinue; if (-not $c -or $c.CommandType -ne 'Function' -or $c.Module) { [Console]::Out.WriteLine("SPERRE|$n"); exit 9 } }
+'@
+        $script:Safe = @('ConvertFrom-Json', 'ConvertTo-Json', 'ForEach-Object', 'Get-ChildItem', 'Get-Command', 'Get-Content', 'Get-Date', 'Get-FileHash', 'Get-Item', 'Get-ItemProperty',
+            'Join-Path', 'Move-Item', 'New-Item', 'New-Object', 'New-ScheduledTaskAction', 'New-ScheduledTaskPrincipal', 'New-ScheduledTaskSettingsSet', 'New-ScheduledTaskTrigger', 'New-TimeSpan',
+            'Out-Null', 'Remove-Item', 'Select-Object', 'Set-Content', 'Split-Path', 'Test-Path', 'Where-Object', 'Protect-HMDataDir')
+        # Ziel-Skript mit Ersatz in eigenem Prozess; $Prep legt Ordner im TestDrive an. Rueckgabe: Zeilen R|..., L|..., C|...
+        $script:RunTarget = {
+            param([string]$Op, [string]$PayloadText, [string]$Own = '7.4.6', [bool]$Msi = $false)
+            $pf = Join-Path $TestDrive ('PF_' + [guid]::NewGuid().ToString('N').Substring(0, 6)); $pd = Join-Path $TestDrive ('PD_' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+            New-Item -ItemType Directory -Path (Join-Path $pf 'WindowsPowerShell\Modules\Microsoft.WinGet.Client\1.29.380') -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $pf 'WindowsPowerShell\Modules\Microsoft.WinGet.Client\1.29.380\Microsoft.WinGet.Client.psd1'), '@{}')
+            New-Item -ItemType Directory -Path (Join-Path $pf 'WindowsApps\Microsoft.DesktopAppInstaller_1.0.0.0_x64__8wekyb3d8bbwe') -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $pf 'WindowsApps\Microsoft.DesktopAppInstaller_1.0.0.0_x64__8wekyb3d8bbwe\winget.exe'), 'x')
+            if ($Own) {
+                New-Item -ItemType Directory -Path (Join-Path $pf 'HUMig\PowerShell7') -Force | Out-Null
+                [IO.File]::WriteAllText((Join-Path $pf 'HUMig\PowerShell7\pwsh.exe'), 'ALT')
+                [IO.File]::WriteAllText((Join-Path $pf 'HUMig\PowerShell7\humig-pwsh.json'), "{`"version`":`"$Own`"}")
+            }
+            if ($Msi) { New-Item -ItemType Directory -Path (Join-Path $pf 'PowerShell\7') -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $pf 'PowerShell\7\pwsh.exe'), 'MSI') }
+            $q = { param($s) "'" + ("$s" -replace "'", "''") + "'" }
+            $pre = $script:Stubs + "`r`n`$env:ProgramFiles = $(& $q $pf)`r`n`$env:ProgramData = $(& $q $pd)`r`n" +
+            "`$tools = @{ Pwsh = @{ Version = '7.6.10'; Pakete = @{ x64 = @{ Datei = 'PowerShell-7.6.10-win-x64.zip'; Url = 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.10/PowerShell-7.6.10-win-x64.zip'; Sha256 = '$('A' * 64)' }; arm64 = @{ Datei = 'PowerShell-7.6.10-win-arm64.zip'; Url = 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.10/PowerShell-7.6.10-win-arm64.zip'; Sha256 = '$('B' * 64)' } } }; WinGet = @{ Version = '1.29.380'; Name = 'Microsoft.WinGet.Client'; Herausgeber = ', O=Microsoft Corporation, L=Redmond, S=Washington, C=US' } }`r`n" +
+            "`$p = $PayloadText`r`n" +
+            "foreach (`$o in @(& $(& $q $script:TargetFile) -Op '$Op' -Payload `$p -WorkerText 'w' -AutoText 'a')) { if (`"`$(`$o.HMAu)`" -eq 'R') { [Console]::Out.WriteLine('R|' + `$o.J) } elseif (`"`$(`$o.HMAu)`" -eq 'L') { [Console]::Out.WriteLine('L|' + `$o.V) } }"
+            $f = Join-Path $TestDrive ("run_{0}.ps1" -f [guid]::NewGuid().ToString('N'))
+            [IO.File]::WriteAllText($f, $pre, (New-Object System.Text.UTF8Encoding($true)))
+            $out = @(& $script:WinPs -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $f 2>&1 | ForEach-Object { "$_" })
+            return [pscustomobject]@{ Out = $out; Pf = $pf; Own = (Join-Path $pf 'HUMig\PowerShell7\pwsh.exe'); Msi = (Join-Path $pf 'PowerShell\7\pwsh.exe')
+                R = $(try { (@($out | Where-Object { $_ -like 'R|*' })[0]).Substring(2) | ConvertFrom-Json } catch { $null }) }
+        }
+        $script:SchedPayload = "@{ Mode = 'Daily'; Time = '03:00'; Days = @(); Sources = @('winget'); Exclude = @(); Location = ''; By = 'Test'; Wake = `$false; InstallPwsh = `$true; Tools = `$tools }"
+        $script:SearchPayload = "@{ ByPc = @{ `"`$(`"`$env:COMPUTERNAME`".ToUpper())`" = @{ Sources = @('winget'); IncludeUnknown = `$false; UserSid = ''; InstallPwsh = `$true } }; Tools = `$tools }"
+    }
+    It 'Vorbedingung: jeder Befehl des Ziel-Skripts ist im Skript definiert, ersetzt oder harmlos (am PC wird nichts geaendert)' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:TargetFile, [ref]$null, [ref]$null)
+        $defs = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name })
+        $sa = [System.Management.Automation.Language.Parser]::ParseInput($script:Stubs, [ref]$null, [ref]$null)
+        $stub = @($sa.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name -replace '^global:', '' })
+        $cmds = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() } | Where-Object { $_ } | Sort-Object -Unique)
+        @($cmds | Where-Object { $defs -notcontains $_ -and $stub -notcontains $_ -and $script:Safe -notcontains $_ }) | Should -BeNullOrEmpty
+        # die Sperre im Vorspann bricht ab, wenn ein Ersatz nicht greift
+        $script:Stubs | Should -Match 'exit 9'
+    }
+    It 'Zeitplan anlegen, eigene aeltere Kopie, kein Netz: Zeitplan wird mit der vorhandenen PowerShell 7 angelegt, Warnung, kein Fehler' {
+        $r = & $script:RunTarget 'ScheduleSet' $script:SchedPayload
+        $r.R.Ok | Should -BeTrue -Because ($r.Out -join "`n")
+        @($r.R.Errors).Count | Should -Be 0
+        @($r.Out | Where-Object { $_ -like 'C|Register|*' }) | Should -Be @("C|Register|HUMig App-Updates|$($r.Own)")
+        @($r.Out | Where-Object { $_ -like 'L|Warnung: PowerShell 7 7.6.10 nicht eingerichtet*' }).Count | Should -Be 1
+        @($r.Out | Where-Object { $_ -like 'C|Invoke-WebRequest*' }) | Should -Match 'v7\.6\.10/PowerShell-7\.6\.10-win-x64\.zip'
+        @($r.Out | Where-Object { $_ -like 'C|Invoke-RestMethod*' }).Count | Should -Be 0
+        [IO.File]::ReadAllText($r.Own) | Should -Be 'ALT'
+    }
+    It 'Zeitplan anlegen, gar keine PowerShell 7 und kein Netz: wie bisher abgebrochen mit "PowerShell 7 nicht installierbar"' {
+        $r = & $script:RunTarget 'ScheduleSet' $script:SchedPayload ''
+        $r.R.Ok | Should -BeFalse
+        @($r.R.Errors) -join ' ' | Should -Match 'PowerShell 7 nicht installierbar'
+        @($r.Out | Where-Object { $_ -like 'C|Register|*' }).Count | Should -Be 0
+    }
+    It 'Zeitplan anlegen mit MSI-PowerShell: Zeitplan nimmt sie, nichts geladen, eigene Kopie unberuehrt' {
+        $r = & $script:RunTarget 'ScheduleSet' $script:SchedPayload '7.4.6' $true
+        $r.R.Ok | Should -BeTrue
+        @($r.Out | Where-Object { $_ -like 'C|Register|*' }) | Should -Be @("C|Register|HUMig App-Updates|$($r.Msi)")
+        @($r.Out | Where-Object { $_ -like 'C|Invoke-WebRequest*' }).Count | Should -Be 0
+        [IO.File]::ReadAllText($r.Own) | Should -Be 'ALT'
+    }
+    It 'Lesen ohne angemeldeten Benutzer, eigene aeltere Kopie, kein Netz: liest als SYSTEM mit der vorhandenen PowerShell 7' {
+        $r = & $script:RunTarget 'Search' $script:SearchPayload
+        $r.R.ReadAs | Should -Be 'SYSTEM (PowerShell 7)' -Because ($r.Out -join "`n")
+        @($r.R.Items).Count | Should -Be 1
+        @($r.Out | Where-Object { $_ -like 'C|Register|*' }) | Should -Match ([regex]::Escape("|$($r.Own)"))
+        @($r.Out | Where-Object { $_ -like 'L|Warnung: PowerShell 7*' }).Count | Should -Be 1
+        @($r.R.Errors | Where-Object { $_ -match 'PowerShell 7' }).Count | Should -Be 0
     }
 }

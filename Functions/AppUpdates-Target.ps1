@@ -213,44 +213,121 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec, 
     if ($script:TRes) { $script:TErr += @($script:TRes.Errors | Where-Object { $_ }) }
 }
 
-# PowerShell 7 (fuer das Lesen als SYSTEM und den Zeitplan): offizielles ZIP-Paket von GitHub (Microsoft),
-# SHA256 aus den Release-Angaben geprueft, entpackt nach Programme\HUMig\PowerShell7 (nur Administratoren duerfen schreiben)
-function Install-TPwsh {
-    if (Get-TPwsh) { return }
-    if (-not $My.InstallPwsh) { $script:TErr += 'PowerShell 7 fehlt (fuer das Lesen ohne angemeldeten Benutzer und den Zeitplan noetig)'; return }
-    Out-L 'PowerShell 7 laden (ZIP von Microsoft/GitHub, nur fuer HUMig) ...'
+# PowerShell 7 (fuer das Lesen als SYSTEM und den Zeitplan): eigene Kopie von HUMig in Programme\HUMig\PowerShell7 (nur
+# Administratoren duerfen schreiben), offizielles ZIP-Paket von GitHub (Microsoft) in genau der festen Fassung aus dem Auftrag
+# (Payload.Tools, Config\tools.json von HUMig), SHA256 geprueft. Nie eine neuere Fassung von irgendwoher.
+# Das per MSI installierte PowerShell 7 (Programme\PowerShell\7) wird verwendet und nie angefasst.
+# Eine aeltere eigene Kopie wird ohne Rueckfrage ersetzt: in PowerShell7.neu entpacken, pruefen, umbenennen (alte ueber
+# PowerShell7.alt), bei Fehlschlag zurueckbenennen. Scheitert etwas, bleibt die vorhandene Kopie und der Lauf geht mit ihr weiter.
+# Zustand danach in $script:TPwshState: Msi | Vorhanden | Aktuell | Neuer | Laeuft | Neu | Ersetzt | Behalten | Fehlt
+$PwshNeu = "$PwshDir.neu"
+$PwshAlt = "$PwshDir.alt"
+$PwshInfo = 'humig-pwsh.json'
+# einzelne Schritte (ersetzbar in den Tests)
+function Get-TPwshZip([string]$Url, [string]$OutFile) { Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -ErrorAction Stop }
+function Get-TFileSha256([string]$Path) { return "$((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash)".ToUpperInvariant() }
+function Expand-TPwshZip([string]$Zip, [string]$Dest) { Expand-Archive -LiteralPath $Zip -DestinationPath $Dest -Force }
+function Move-TDir([string]$From, [string]$To) { Move-Item -LiteralPath $From -Destination $To -ErrorAction Stop }
+function Remove-TDir([string]$Path) { if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop } }
+function Get-TProcessPaths { return @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | ForEach-Object { "$($_.ExecutablePath)" } | Where-Object { $_ }) }
+function Get-TFileProductVersion([string]$Path) {
+    $vi = (Get-Item -LiteralPath $Path -ErrorAction Stop).VersionInfo
+    if ("$($vi.ProductVersion)".Trim()) { return "$($vi.ProductVersion)" }
+    return "$($vi.FileVersion)"
+}
+# laeuft ein Programm aus einem dieser Ordner (oder darunter)? (rein)
+function Test-TPathsInDirs([string[]]$Paths, [string[]]$Dirs) {
+    foreach ($d in @($Dirs | Where-Object { $_ })) {
+        $pre = "$d".TrimEnd('\') + '\'
+        foreach ($p in @($Paths | Where-Object { $_ })) { if ("$p".StartsWith($pre, [StringComparison]::OrdinalIgnoreCase)) { return $true } }
+    }
+    return $false
+}
+# Prozessliste nicht lesbar: als "laeuft" werten (dann lieber nicht tauschen)
+function Test-TPwshInUse([string[]]$Dirs) {
+    try { $p = Get-TProcessPaths } catch { return $true }
+    return (Test-TPathsInDirs $p $Dirs)
+}
+# Version der eigenen Kopie: humig-pwsh.json (schreibt HUMig beim Einrichten), sonst Produktversion von pwsh.exe; '' = nicht lesbar
+function Get-TPwshOwnVersion([string]$Dir = $PwshDir) {
+    try { $j = [System.IO.File]::ReadAllText((Join-Path $Dir $PwshInfo)) | ConvertFrom-Json; if ("$($j.version)" -match '^\d+\.\d+\.\d+$') { return "$($j.version)" } } catch { }
+    try { return "$(Get-TFileProductVersion (Join-Path $Dir 'pwsh.exe'))".Trim() } catch { return '' }
+}
+# Reste eines abgebrochenen Tauschs: fehlt der Ordner ganz und hat PowerShell7.alt ein pwsh.exe, zurueckbenennen (nie loeschen);
+# PowerShell7.neu und ein ueberzaehliges PowerShell7.alt entfernen, wenn nichts daraus laeuft
+function Clear-TPwshLeftover {
+    if (-not (Test-Path -LiteralPath $PwshDir) -and (Test-Path -LiteralPath (Join-Path $PwshAlt 'pwsh.exe'))) {
+        try { Move-TDir $PwshAlt $PwshDir; Out-L 'PowerShell 7: abgebrochenen Tausch zurueckgenommen, vorige Fassung wiederhergestellt' }
+        catch { Out-L "Warnung: PowerShell 7: vorige Fassung nicht wiederherstellbar ($($_.Exception.Message))" }
+    }
+    foreach ($d in @($PwshNeu, $PwshAlt)) {
+        if (-not (Test-Path -LiteralPath $d)) { continue }
+        if ($d -eq $PwshAlt -and -not (Test-Path -LiteralPath $PwshDir)) { continue }
+        if (Test-TPwshInUse @($d)) { continue }
+        try { Remove-TDir $d; Out-L "PowerShell 7: Rest eines abgebrochenen Tauschs entfernt ($(Split-Path $d -Leaf))" } catch { }
+    }
+}
+# feste Fassung laden, pruefen und an die Stelle von PowerShell7 setzen. Rueckgabe '' = fertig, sonst Fehlertext (nichts ausgeben:
+# das Ergebnis ist der Rueckgabewert). Die bisherige Kopie bleibt bei jedem Fehler erhalten.
+function Install-TPwshPackage($Pk) {
     $tmp = Join-Path $Base "pwsh_$([guid]::NewGuid().ToString('N')).zip"
+    $ok = $false
     try {
         try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
         New-Item -ItemType Directory -Path $Base -Force | Out-Null
-        $arch = if ("$env:PROCESSOR_ARCHITECTURE" -eq 'ARM64') { 'arm64' } else { 'x64' }
-        $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/PowerShell/PowerShell/releases/latest' -Headers @{ 'User-Agent' = 'HUMig' } -UseBasicParsing -ErrorAction Stop
-        $as = @($rel.assets | Where-Object { "$($_.name)" -match "^PowerShell-[\d\.]+-win-$arch\.zip$" })[0]
-        if (-not $as) { throw "kein ZIP-Paket fuer $arch in $($rel.tag_name)" }
-        $want = ''
-        if ("$($as.digest)" -match '^sha256:([0-9a-fA-F]{64})$') { $want = $Matches[1] }
-        if (-not $want) {
-            $ha = @($rel.assets | Where-Object { "$($_.name)" -eq 'hashes.sha256' })[0]
-            if ($ha) {
-                $b = (Invoke-WebRequest -Uri $ha.browser_download_url -UseBasicParsing -ErrorAction Stop).RawContentStream.ToArray()
-                $txt = if ($b.Length -ge 2 -and $b[0] -eq 0xFF -and $b[1] -eq 0xFE) { [Text.Encoding]::Unicode.GetString($b) } else { [Text.Encoding]::UTF8.GetString($b) }
-                $m = [regex]::Match($txt, '([0-9a-fA-F]{64})\s+\*?' + [regex]::Escape("$($as.name)"))
-                if ($m.Success) { $want = $m.Groups[1].Value }
-            }
-        }
-        if (-not $want) { throw 'keine Pruefsumme zum Paket gefunden - nicht installiert' }
-        Invoke-WebRequest -Uri $as.browser_download_url -OutFile $tmp -UseBasicParsing -ErrorAction Stop
-        $got = (Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash
-        if ($got -ne $want.ToUpper()) { throw "Pruefsumme passt nicht ($($as.name)) - nicht installiert" }
-        if (Test-Path -LiteralPath $PwshDir) { Remove-Item -LiteralPath $PwshDir -Recurse -Force }
-        New-Item -ItemType Directory -Path $PwshDir -Force | Out-Null
-        Expand-Archive -LiteralPath $tmp -DestinationPath $PwshDir -Force
-        if (-not (Test-Path -LiteralPath (Join-Path $PwshDir 'pwsh.exe'))) { throw 'pwsh.exe nach dem Entpacken nicht gefunden' }
-        Out-L "PowerShell $("$($rel.tag_name)".TrimStart('v')) bereit ($PwshDir)"
-    } catch { $script:TErr += "PowerShell 7 nicht installierbar: $($_.Exception.Message)" }
-    finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        Remove-TDir $PwshNeu
+        Get-TPwshZip "$($Pk.Url)" $tmp
+        if ((Get-TFileSha256 $tmp) -ne "$($Pk.Sha256)".ToUpperInvariant()) { throw "Pruefsumme passt nicht ($($Pk.Datei))" }
+        New-Item -ItemType Directory -Path $PwshNeu -Force | Out-Null
+        Expand-TPwshZip $tmp $PwshNeu
+        if (-not (Test-Path -LiteralPath (Join-Path $PwshNeu 'pwsh.exe'))) { throw 'pwsh.exe nach dem Entpacken nicht gefunden' }
+        $info = ConvertTo-Json -Compress -InputObject ([ordered]@{ version = "$($Pk.Version)"; sha256 = "$($Pk.Sha256)"; datei = "$($Pk.Datei)" })
+        [System.IO.File]::WriteAllText((Join-Path $PwshNeu $PwshInfo), $info, (New-Object System.Text.UTF8Encoding($false)))
+        if (Test-Path -LiteralPath $PwshDir) {
+            Remove-TDir $PwshAlt
+            Move-TDir $PwshDir $PwshAlt
+            try { Move-TDir $PwshNeu $PwshDir }
+            catch { $e = $_.Exception.Message; try { Move-TDir $PwshAlt $PwshDir } catch { }; throw "Tausch fehlgeschlagen ($e)" }
+            try { Remove-TDir $PwshAlt } catch { }   # bleibt etwas liegen, raeumt es der naechste Lauf auf
+        } else { Move-TDir $PwshNeu $PwshDir }
+        $ok = $true
+        return ''
+    } catch { return "$($_.Exception.Message)" }
+    finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        if (-not $ok) { try { Remove-TDir $PwshNeu } catch { } }
+    }
 }
-
+function Install-TPwsh {
+    $script:TPwshState = ''
+    if (Test-Path -LiteralPath $PwshMsi) { $script:TPwshState = 'Msi'; return }
+    $own = Join-Path $PwshDir 'pwsh.exe'
+    if (-not $My.InstallPwsh) {
+        if (Test-Path -LiteralPath $own) { $script:TPwshState = 'Vorhanden'; return }
+        $script:TErr += 'PowerShell 7 fehlt (fuer das Lesen ohne angemeldeten Benutzer und den Zeitplan noetig)'; $script:TPwshState = 'Fehlt'; return
+    }
+    Clear-TPwshLeftover
+    $have = Test-Path -LiteralPath $own
+    $pk = Select-TPwshPackage $Payload.Tools "$env:PROCESSOR_ARCHITECTURE"
+    if (-not $pk) {
+        if ($have) { Out-L 'Warnung: keine gueltige feste Version fuer PowerShell 7 (Config\tools.json) - die vorhandene Fassung wird verwendet'; $script:TPwshState = 'Behalten'; return }
+        $script:TErr += 'PowerShell 7 nicht installierbar: keine gueltige feste Version (Config\tools.json von HUMig)'; $script:TPwshState = 'Fehlt'; return
+    }
+    $cur = ''
+    if ($have) {
+        $cur = Get-TPwshOwnVersion
+        $c = Compare-TPwshVersion $cur $pk.Version
+        if ($c -eq 0) { $script:TPwshState = 'Aktuell'; return }
+        if ($c -eq 1) { Out-L "PowerShell 7: eigene Fassung $cur ist neuer als die feste $($pk.Version) - bleibt"; $script:TPwshState = 'Neuer'; return }
+        if (-not $cur) { $cur = 'unbekannter Version' }
+        if (Test-TPwshInUse @($PwshDir)) { Out-L "PowerShell 7 $cur laeuft gerade (z. B. Zeitplan) - wird bei einem spaeteren Lauf durch $($pk.Version) ersetzt"; $script:TPwshState = 'Laeuft'; return }
+        Out-L "PowerShell 7 $cur wird durch die feste Fassung $($pk.Version) ersetzt (ZIP von Microsoft/GitHub, nur fuer HUMig) ..."
+    } else { Out-L "PowerShell 7 $($pk.Version) laden (ZIP von Microsoft/GitHub, nur fuer HUMig) ..." }
+    $err = Install-TPwshPackage $pk
+    if (-not $err) { Out-L "PowerShell $($pk.Version) bereit ($PwshDir)"; $script:TPwshState = $(if ($have) { 'Ersetzt' } else { 'Neu' }); return }
+    if ($have -and (Test-Path -LiteralPath $own)) { Out-L "Warnung: PowerShell 7 $($pk.Version) nicht eingerichtet ($err) - die vorhandene Fassung $cur wird weiter verwendet"; $script:TPwshState = 'Behalten'; return }
+    $script:TErr += "PowerShell 7 nicht installierbar: $err"; $script:TPwshState = 'Fehlt'
+}
 # Taugt ein Ordner als Programmordner fuer die Suche nach laufenden Prozessen? Nie der Windows-Ordner (samt Unterordnern -
 # DisplayIcon zeigt manchmal auf System32\msiexec.exe), nie Sammelordner (Programme, Common Files, ProgramData, Laufwerk,
 # Benutzer-, Profil- und AppData-Wurzeln) - sonst gaelten svchost, ctfmon usw. als "laeuft" (B50)
