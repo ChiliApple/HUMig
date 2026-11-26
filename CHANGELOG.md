@@ -1,5 +1,14 @@
 ﻿# Changelog
 
+## v2.1.30 - 2026-11-26
+### 📖 Hilfe
+- **Neue Bilder:** Die Bilder in Anleitung, Funktionsübersicht und README zeigen die aktuelle Oberfläche mit allen sechs Reitern und die aktuelle Handy-Ansicht, mit Beispieldaten.
+- **Werkzeuge nach Ziel:** Die Anleitung gliedert die Werkzeuge wie die App nach gewähltem PC, mehreren PCs, gewähltem Benutzer, Diagnose, Software und Treiber und ohne Ziel-PC.
+- **Begriffe wie in der App:** "Neu laden", "Bericht", "Fortlaufendes Backup", "Abbrechen: <Vorgang>" und die Knöpfe der Rückfragen heißen in der Hilfe wie in der Oberfläche.
+- **Neue Abläufe beschrieben:** Anzeige "verbunden mit", Rückfrage bei anderem PC im Feld, Ergebnis in der Statuszeile, Prüfungen beim Update, Signieren mit Abgleich und Zugriffsprotokoll der Fernbedienung.
+- **Nur, was die App tut:** Texte zu Vorschau, Vorab-Prüfung, Umzugs-Assistent, Backup mit Fehlern und Erstinstallation sind auf das gekürzt, was die App wirklich macht.
+- **Verweise repariert:** Doppelte Sprungmarken in der Anleitung zeigen jetzt auf die richtige Stelle.
+
 ## v2.1.29 - 2026-11-26
 ### 🔐 Rechte
 - **Meldungen der Ordnerrechte-Prüfung erscheinen wieder:** Was die Prüfung des Programmordners beim Start feststellt, steht jetzt in der Konsole, zum Beispiel dass HUMig in einem Benutzerprofil liegt oder dass die Prüfung abgeschaltet ist.
