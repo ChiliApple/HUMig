@@ -94,25 +94,38 @@ function Get-TModOtherDir($Fixed) {
             $_.Name -match '^\d+(\.\d+){1,3}$' -and (-not $Fixed -or $_.Name -ne $Fixed.Version) -and (Test-Path -LiteralPath (Join-Path $_.FullName "$ModName.psd1")) } |
         Sort-Object { [version]$_.Name } -Descending)[0]
 }
-# neuer Installationsversuch faellig? Kein oder unlesbarer Merker, andere Version, Zeit in der Zukunft oder 24 Stunden vorbei: ja
-function Test-TModRetryDue([string]$Version) {
-    try { $m = [System.IO.File]::ReadAllText($TModMarker) | ConvertFrom-Json } catch { return $true }
+# andere Version fuer alle Benutzer, wie sie geladen wird: hoechster Versionsordner, sonst eine Modulbeschreibung direkt im
+# Modulordner (aeltere Ablage ohne Versionsordner). Rueckgabe @{ Path; Name } oder $null. Eine Definition fuer alle Stellen.
+function Get-TModOther($Fixed) {
+    $d = Get-TModOtherDir $Fixed
+    if ($d) { return @{ Path = (Join-Path $d.FullName "$ModName.psd1"); Name = "$($d.Name)" } }
+    $r = Join-Path $ModRoot "$ModName.psd1"
+    if (Test-Path -LiteralPath $r) { return @{ Path = $r; Name = '(ohne Versionsordner)' } }
+    return $null
+}
+# neuer Versuch faellig? Kein oder unlesbarer Merker, andere Version, Zeit in der Zukunft oder 24 Stunden vorbei: ja
+function Test-TRetryDue([string]$File, [string]$Version) {
+    try { $m = [System.IO.File]::ReadAllText($File) | ConvertFrom-Json } catch { return $true }
     $ticks = 0L
     if ("$($m.version)" -ne $Version -or -not [long]::TryParse("$($m.zeit)", [ref]$ticks)) { return $true }
     $now = (Get-TNow).ToUniversalTime().Ticks
     if ($ticks -gt $now) { return $true }
     return ((New-Object TimeSpan ($now - $ticks)).TotalHours -ge 24)
 }
-# Merker schreiben (erst in eine Nachbardatei, dann ersetzen) bzw. entfernen
-function Set-TModRetryMarker([string]$Version) {
+# Merker schreiben (erst in eine Nachbardatei, dann ersetzen) bzw. entfernen. Geschrieben wird VOR dem Versuch: bricht der Lauf
+# am Zeitlimit ab, gilt der Versuch trotzdem als gemacht.
+function Set-TRetryMarker([string]$File, [string]$Version) {
     try {
-        New-Item -ItemType Directory -Path $Base -Force | Out-Null
-        $tmp = "$TModMarker.tmp"
+        New-Item -ItemType Directory -Path (Split-Path $File -Parent) -Force | Out-Null
+        $tmp = "$File.tmp"
         [System.IO.File]::WriteAllText($tmp, (ConvertTo-Json -Compress -InputObject ([ordered]@{ version = $Version; zeit = (Get-TNow).ToUniversalTime().Ticks })), (New-Object System.Text.UTF8Encoding($false)))
-        Move-Item -LiteralPath $tmp -Destination $TModMarker -Force -ErrorAction Stop
+        Move-Item -LiteralPath $tmp -Destination $File -Force -ErrorAction Stop
     } catch { }
 }
-function Clear-TModRetryMarker { Remove-Item -LiteralPath $TModMarker -Force -ErrorAction SilentlyContinue }
+function Clear-TRetryMarker([string]$File) { Remove-Item -LiteralPath $File -Force -ErrorAction SilentlyContinue }
+function Test-TModRetryDue([string]$Version) { return (Test-TRetryDue $TModMarker $Version) }
+function Set-TModRetryMarker([string]$Version) { Set-TRetryMarker $TModMarker $Version }
+function Clear-TModRetryMarker { Clear-TRetryMarker $TModMarker }
 # Signaturen der Moduldateien (nur signierbare Dateitypen; Hilfe-XML und Texte haben keine Signatur)
 function Get-TModuleSigFiles([string]$Dir) {
     return @(Get-ChildItem -LiteralPath $Dir -Recurse -File -ErrorAction Stop | Where-Object { @('.psd1', '.psm1', '.ps1', '.ps1xml', '.dll', '.winmd', '.cat') -contains $_.Extension.ToLowerInvariant() } |
@@ -162,11 +175,45 @@ function Get-TModBlockedText {
     $d = Join-Path $ModRoot "$($fx.Version)"
     return "WinGet-Modul nicht nutzbar: die feste Version $($fx.Version) in $d hat eine ungueltige Signatur ($((Get-TModSigState).Reason)), auch nach einer Neuinstallation, und eine andere Version ist nicht vorhanden. Abhilfe: den Ordner $d als Administrator loeschen und 'Updates suchen' erneut starten - HUMig installiert die feste Version dann neu"
 }
+# Reparatur der festen Version: Nachbarordner ausserhalb der Modulsuche (nicht in PSModulePath), auf demselben Laufwerk wie
+# der Modulordner, weil getauscht wird, indem Ordner umbenannt werden
+$TModRepRoot = Join-Path $env:ProgramFiles 'WindowsPowerShell\HUMig-Modulreparatur'
+$script:TModAltDir = ''
+# feste Version in einen Ordner laden, ohne zu installieren (ersetzbar in den Tests)
+function Save-TModuleTo([string]$Version, [string]$Path) { Save-Module -Name $ModName -RequiredVersion $Version -Repository PSGallery -Path $Path -Force -ErrorAction Stop }
+# eindeutig ungueltige feste Version ersetzen wie bei PowerShell7.neu/.alt: in einen Nachbarordner laden, dort die Signatur
+# pruefen, dann den Versionsordner per Umbenennen tauschen. Die bisherige Fassung wird nicht geloescht, sondern bleibt unter
+# HUMig-Modulreparatur\alt\<Version>_<Zeit> liegen ($script:TModAltDir); bei jedem Fehler bleibt der alte Zustand.
+# Nie aus einem alten Lauf zurueckholen (sonst kaeme eine absichtlich geloeschte Fassung wieder). Rueckgabe '' = fertig,
+# sonst Fehlertext (nichts ausgeben: das Ergebnis ist der Rueckgabewert).
+function Repair-TModuleFixed($Fx) {
+    $dst = Join-Path $ModRoot "$($Fx.Version)"
+    $neu = Join-Path $TModRepRoot 'neu'
+    $alt = Join-Path $TModRepRoot ("alt\$($Fx.Version)_" + (Get-TNow).ToString('yyyyMMdd-HHmmss'))
+    $script:TModAltDir = ''
+    try {
+        Remove-TDir $neu
+        New-Item -ItemType Directory -Path $neu -Force | Out-Null
+        Save-TModuleTo $Fx.Version $neu
+        $src = Join-Path $neu "$ModName\$($Fx.Version)"
+        if (-not (Test-Path -LiteralPath (Join-Path $src "$ModName.psd1"))) { throw "Modulbeschreibung nach dem Laden nicht gefunden ($src)" }
+        $sg = Test-TModuleSignature (Get-TModuleSigFiles $src) $Fx.Herausgeber
+        if ($sg.State -eq 'Ungueltig') { throw "auch die geladene Fassung ist ungueltig ($($sg.Reason))" }
+        if (Test-Path -LiteralPath $alt) { throw "Ablage $alt gibt es schon" }
+        New-Item -ItemType Directory -Path (Split-Path $alt -Parent) -Force | Out-Null
+        Move-TDir $dst $alt
+        try { Move-TDir $src $dst }
+        catch { $e = $_.Exception.Message; try { Move-TDir $alt $dst } catch { }; throw "Tausch fehlgeschlagen ($e)" }
+        $script:TModAltDir = $alt
+        return ''
+    } catch { return "$($_.Exception.Message)" }
+    finally { try { Remove-TDir $neu } catch { } }
+}
 # Modul fuer alle Benutzer (SYSTEM und andere Benutzer finden es nur dort), nur in der festen Version: neben einer vorhandenen
 # anderen Version installiert (Install-Module -RequiredVersion), nie eine neuere aus der Galerie. Ist die feste da und gueltig
-# oder nicht pruefbar, kein Install-Module. Ist sie eindeutig ungueltig, einmal je Lauf neu installieren und erneut pruefen.
-# Scheitert das Holen und ist eine andere Version da: Merker, naechster Versuch fruehestens nach 24 Stunden. Ohne jede
-# Version wird bei jedem Lauf versucht. Geloescht wird nichts.
+# oder nicht pruefbar, kein Install-Module. Ist sie eindeutig ungueltig, einmal je Lauf ersetzen (Repair-TModuleFixed) und
+# erneut pruefen. Ist eine andere Version da, wird vor dem Versuch ein Merker geschrieben: naechster Versuch fruehestens nach
+# 24 Stunden, bei Erfolg entfernt. Ohne jede Version wird bei jedem Lauf versucht. Geloescht wird nichts.
 function Install-TModule {
     $fx = Get-TModFixed
     $had = Test-TModule
@@ -179,26 +226,32 @@ function Install-TModule {
         if ((Get-TModSigState).State -ne 'Ungueltig') { return }
         $repair = $true
     }
-    $other = ($null -ne (Get-TModOtherDir $fx)) -or (Test-Path -LiteralPath (Join-Path $ModRoot "$ModName.psd1"))
+    $other = ($null -ne (Get-TModOther $fx))
     if ($other -and -not (Test-TModRetryDue $fx.Version)) {
         Out-L "WinGet-Modul $($fx.Version): der letzte Installationsversuch ist gescheitert, der naechste folgt fruehestens 24 Stunden danach - die vorhandene Version wird verwendet"
         return
     }
-    if ($repair) { Out-L "WinGet-Modul $($fx.Version): Signatur ungueltig ($((Get-TModSigState).Reason)) - wird neu installiert (PowerShell Gallery, feste Version) ..." }
+    if ($repair) { Out-L "WinGet-Modul $($fx.Version): Signatur ungueltig ($((Get-TModSigState).Reason)) - wird ersetzt (PowerShell Gallery, feste Version, in einen Nachbarordner laden, pruefen, tauschen) ..." }
     else { Out-L "WinGet-Modul $($fx.Version) fuer alle Benutzer installieren (PowerShell Gallery, feste Version) ..." }
+    if ($other) { Set-TModRetryMarker $fx.Version }
     $err = ''
     try {
         try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
         if (-not @(Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' }).Count) {
             Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers -ErrorAction Stop | Out-Null
         }
-        Install-Module -Name $ModName -RequiredVersion $fx.Version -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop
+        if ($repair) { $re = Repair-TModuleFixed $fx; if ($re) { throw $re } }
+        else { Install-Module -Name $ModName -RequiredVersion $fx.Version -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop }
     } catch { $err = "$($_.Exception.Message)" }
     $script:TModSig = $null; $script:TModLoad = $null
     if (-not $err -and (Get-TModSigState).State -eq 'Ungueltig') { $err = "Signatur weiter ungueltig ($((Get-TModSigState).Reason))" }
-    if (-not $err) { Clear-TModRetryMarker; Out-L "WinGet-Modul $($fx.Version) installiert"; return }
-    if ($other) { Set-TModRetryMarker $fx.Version; Out-L "Warnung: WinGet-Modul $($fx.Version) nicht installierbar ($err) - die vorhandene Version wird verwendet"; return }
-    if ($repair) { Out-L "Warnung: WinGet-Modul $($fx.Version): Neuinstallation ohne Erfolg ($err)"; return }
+    if (-not $err) {
+        Clear-TModRetryMarker
+        if ($repair) { Out-L "WinGet-Modul $($fx.Version) ersetzt, die bisherige Fassung liegt unveraendert in $($script:TModAltDir)" } else { Out-L "WinGet-Modul $($fx.Version) installiert" }
+        return
+    }
+    if ($other) { Out-L "Warnung: WinGet-Modul $($fx.Version) nicht installierbar ($err) - die vorhandene Version wird verwendet"; return }
+    if ($repair) { Out-L "Warnung: WinGet-Modul $($fx.Version): Ersetzen ohne Erfolg ($err)"; return }
     $script:TErr += "WinGet-Modul nicht installierbar (Internet/Proxy?): $err"
 }
 # welches Modul laden? Rueckgabe @{ Path; Note; Blocked } - gibt selbst nichts aus, nichts wird geloescht.
@@ -219,10 +272,10 @@ function Get-TModuleLoad {
             $note = "Warnung: WinGet-Modul $($fx.Version) wird nicht geladen, Signatur ungueltig ($($sg.Reason))"
         }
     }
-    $oth = Get-TModOtherDir $fx
+    $oth = Get-TModOther $fx
     if ($oth) {
         $why = if ($note) { $note } elseif ($fx) { "WinGet-Modul: feste Version $($fx.Version) fehlt" } else { 'WinGet-Modul: keine gueltige feste Version' }
-        return @{ Path = (Join-Path $oth.FullName "$ModName.psd1"); Note = "$why - die vorhandene Version $($oth.Name) wird verwendet"; Blocked = $false }
+        return @{ Path = $oth.Path; Note = "$why - die vorhandene Version $($oth.Name) wird verwendet"; Blocked = $false }
     }
     return @{ Path = ''; Note = $note; Blocked = $invalid }
 }
@@ -407,11 +460,19 @@ function Test-TPwshInUse([string[]]$Dirs) {
     try { $p = Get-TProcessPaths } catch { return $true }
     return (Test-TPathsInDirs $p $Dirs)
 }
-# Version der eigenen Kopie: humig-pwsh.json (schreibt HUMig beim Einrichten), sonst Produktversion von pwsh.exe; '' = nicht lesbar
+# Version der eigenen Kopie: die hoehere der beiden lesbaren Angaben aus humig-pwsh.json (schreibt HUMig beim Einrichten) und
+# der Produktversion von pwsh.exe, damit nie zurueckgestuft wird; '' = nicht lesbar
 function Get-TPwshOwnVersion([string]$Dir = $PwshDir) {
-    try { $j = [System.IO.File]::ReadAllText((Join-Path $Dir $PwshInfo)) | ConvertFrom-Json; if ("$($j.version)" -match '^\d+\.\d+\.\d+$') { return "$($j.version)" } } catch { }
-    try { return "$(Get-TFileProductVersion (Join-Path $Dir 'pwsh.exe'))".Trim() } catch { return '' }
+    $j = ''; $p = ''
+    try { $x = [System.IO.File]::ReadAllText((Join-Path $Dir $PwshInfo)) | ConvertFrom-Json; if ("$($x.version)" -match '^\d+\.\d+\.\d+$') { $j = "$($x.version)" } } catch { }
+    try { $p = "$(Get-TFileProductVersion (Join-Path $Dir 'pwsh.exe'))".Trim() } catch { }
+    if (-not $j) { return $p }
+    if (-not $p) { return $j }
+    if ((Compare-TPwshVersion $p $j) -eq 1) { return $p }
+    return $j
 }
+# Merker fuer einen gescheiterten Tausch der eigenen Kopie (nur wenn eine nutzbare Kopie da ist)
+$TPwshMarker = Join-Path $Base 'pwsh-versuch.json'
 # Reste eines abgebrochenen Tauschs: fehlt der Ordner ganz und hat PowerShell7.alt ein pwsh.exe, zurueckbenennen (nie loeschen);
 # PowerShell7.neu und ein ueberzaehliges PowerShell7.alt entfernen, wenn nichts daraus laeuft
 function Clear-TPwshLeftover {
@@ -480,10 +541,13 @@ function Install-TPwsh {
         # nie zurueckstufen: ist die Version der eigenen Kopie nicht lesbar, in diesem Lauf nicht tauschen
         if ($null -eq $c) { Out-L "PowerShell 7: Version der eigenen Kopie nicht lesbar$(if ($cur) { " ($cur)" }) - wird nicht ersetzt, die vorhandene Fassung wird verwendet"; return }
         if (Test-TPwshInUse @($PwshDir)) { Out-L "PowerShell 7 $cur laeuft gerade (z. B. Zeitplan) - wird bei einem spaeteren Lauf durch $($pk.Version) ersetzt"; return }
+        # nutzbare Kopie da: nach einem gescheiterten Versuch fruehestens nach 24 Stunden wieder laden (Merker vor dem Versuch)
+        if (-not (Test-TRetryDue $TPwshMarker $pk.Version)) { Out-L "PowerShell 7 $cur`: der letzte Versuch mit $($pk.Version) ist gescheitert, der naechste folgt fruehestens 24 Stunden danach - die vorhandene Fassung wird verwendet"; return }
+        Set-TRetryMarker $TPwshMarker $pk.Version
         Out-L "PowerShell 7 $cur wird durch die feste Fassung $($pk.Version) ersetzt (ZIP von Microsoft/GitHub, nur fuer HUMig) ..."
     } else { Out-L "PowerShell 7 $($pk.Version) laden (ZIP von Microsoft/GitHub, nur fuer HUMig) ..." }
     $err = Install-TPwshPackage $pk
-    if (-not $err) { Out-L "PowerShell $($pk.Version) bereit ($PwshDir)"; return }
+    if (-not $err) { Clear-TRetryMarker $TPwshMarker; Out-L "PowerShell $($pk.Version) bereit ($PwshDir)"; return }
     if ($have -and (Test-Path -LiteralPath $own)) { Out-L "Warnung: PowerShell 7 $($pk.Version) nicht eingerichtet ($err) - die vorhandene Fassung $cur wird weiter verwendet"; return }
     $script:TErr += "PowerShell 7 nicht installierbar: $err"
 }
