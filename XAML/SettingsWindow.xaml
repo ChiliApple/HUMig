@@ -14,10 +14,10 @@
         </Border>
         <Border DockPanel.Dock="Bottom" Background="#FF11111B" Padding="10,6">
             <DockPanel>
-                <Button x:Name="btnOpenConfig" DockPanel.Dock="Left" Content="Config-Ordner oeffnen" Style="{DynamicResource BtnDefault}" Margin="0"/>
+                <Button x:Name="btnOpenConfig" DockPanel.Dock="Left" Content="Config-Ordner oeffnen" Style="{DynamicResource BtnDefault}" Margin="0" ToolTip="Ordner mit settings.json und den anderen Konfigurationsdateien im Explorer oeffnen"/>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="btnSave" Content="Speichern" Style="{DynamicResource BtnMain}" Width="110" Margin="0,0,6,0" FontWeight="Bold"/>
-                    <Button x:Name="btnCancel" Content="Abbrechen" Style="{DynamicResource BtnDefault}" Width="100" Margin="0"/>
+                    <Button x:Name="btnSave" Content="Speichern" Style="{DynamicResource BtnMain}" Width="110" Margin="0,0,6,0" FontWeight="Bold" ToolTip="Haken und Felder aller Reiter speichern und das Fenster schliessen"/>
+                    <Button x:Name="btnCancel" Content="Abbrechen" Style="{DynamicResource BtnDefault}" Width="100" Margin="0" ToolTip="Fenster schliessen, ungespeicherte Haken und Felder verwerfen"/>
                 </StackPanel>
                 <TextBlock x:Name="lblSaveScope" Text="Speichern gilt fuer Haken und Felder. Knoepfe in den Reitern wirken sofort." Foreground="#FFA6ADC8" FontSize="11" VerticalAlignment="Center" Margin="12,0,12,0" TextWrapping="Wrap"/>
             </DockPanel>
@@ -36,11 +36,11 @@
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Text="Backup-Ordner:" Style="{DynamicResource Lbl}"/>
                         <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,8">
-                            <Button x:Name="btnRoot" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0"/>
+                            <Button x:Name="btnRoot" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0" ToolTip="Ordner fuer die Backups waehlen"/>
                             <TextBox x:Name="txtRoot" Style="{DynamicResource DarkTextBox}" ToolTip="Leer = Unterordner BACKUPS im Tool-Ordner (z.B. am USB-Laufwerk)"/>
                         </DockPanel>
                         <TextBlock Grid.Row="1" Text="Robocopy-Threads (Standard):" Style="{DynamicResource Lbl}"/>
-                        <ComboBox x:Name="cmbThreads" Grid.Row="1" Grid.Column="1" Width="90" HorizontalAlignment="Left" Margin="0,0,0,8"/>
+                        <ComboBox x:Name="cmbThreads" Grid.Row="1" Grid.Column="1" Width="90" HorizontalAlignment="Left" Margin="0,0,0,8" ToolTip="Vorgabe fuer die Auswahl im Hauptfenster: so viele Dateien kopiert Robocopy gleichzeitig (/MT)"/>
                         <TextBlock Grid.Row="2" Text="Backups aufbewahren (Tage):" Style="{DynamicResource Lbl}" VerticalAlignment="Top" Margin="0,4,6,0"/>
                         <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,0,8">
                             <WrapPanel>
@@ -61,43 +61,43 @@
                         <TextBlock Grid.Row="3" Text="USMT-Ordner (scanstate.exe):" Style="{DynamicResource Lbl}"/>
                         <DockPanel Grid.Row="3" Grid.Column="1" Margin="0,0,0,2">
                             <Button x:Name="btnUsmtAdk" DockPanel.Dock="Right" Content="Aus ADK einrichten" Style="{DynamicResource BtnChange}" Margin="4,0,0,0" ToolTip="USMT aus dem Windows ADK nach BIN\USMT kopieren (ohne ADK: nur USMT still installieren)"/>
-                            <Button x:Name="btnUsmt" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0"/>
+                            <Button x:Name="btnUsmt" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0" ToolTip="Ordner mit scanstate.exe waehlen"/>
                             <TextBox x:Name="txtUsmt" Style="{DynamicResource DarkTextBox}" ToolTip="Leer = automatisch suchen (BIN\USMT\amd64, Windows ADK)"/>
                         </DockPanel>
                         <TextBlock x:Name="lblUsmt" Grid.Row="4" Grid.Column="1" FontSize="11" Foreground="#FFA6ADC8" Margin="0,0,0,8" TextWrapping="Wrap"/>
                         <TextBlock Grid.Row="5" Text="WLAN-Export:" Style="{DynamicResource Lbl}"/>
-                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkWlanClear" Grid.Row="5" Grid.Column="1" Content="WLAN-Schluessel im Klartext exportieren (Backup-Laufwerk dann sicher verwahren!)" Margin="0,0,0,8"/>
+                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkWlanClear" Grid.Row="5" Grid.Column="1" Content="WLAN-Schluessel im Klartext exportieren (Backup-Laufwerk dann sicher verwahren!)" Margin="0,0,0,8" ToolTip="Ohne Haken enthaelt das Backup die WLAN-Profile ohne lesbaren Schluessel"/>
                         <TextBlock Grid.Row="6" Text="Subnetzmaske (Standard):" Style="{DynamicResource Lbl}"/>
-                        <TextBox x:Name="txtSubnet" Grid.Row="6" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Width="160" HorizontalAlignment="Left" Margin="0,0,0,8"/>
+                        <TextBox x:Name="txtSubnet" Grid.Row="6" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Width="160" HorizontalAlignment="Left" Margin="0,0,0,8" ToolTip="Vorgabe der Subnetzmaske im Werkzeug 'IP-Adresse / DHCP', leer = 255.255.255.0"/>
                         <TextBlock Grid.Row="7" Text="DNS-Server (je Zeile):" Style="{DynamicResource Lbl}" VerticalAlignment="Top" Margin="0,4,6,0"/>
-                        <TextBox x:Name="txtDns" Grid.Row="7" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Width="220" Height="60" HorizontalAlignment="Left" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Margin="0,0,0,8"/>
+                        <TextBox x:Name="txtDns" Grid.Row="7" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Width="220" Height="60" HorizontalAlignment="Left" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Margin="0,0,0,8" ToolTip="DNS-Server, die das Werkzeug 'IP-Adresse / DHCP' vorschlaegt, wenn der Adapter keine hat"/>
                         <TextBlock Grid.Row="9" Text="Softwareverteilung-Ordner:" Style="{DynamicResource Lbl}"/>
                         <DockPanel Grid.Row="9" Grid.Column="1" Margin="0,8,0,0">
-                            <Button x:Name="btnSwDir" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0"/>
+                            <Button x:Name="btnSwDir" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0" ToolTip="Ordner der Softwareverteilung waehlen"/>
                             <TextBox x:Name="txtSwDir" Style="{DynamicResource DarkTextBox}" ToolTip="Leer = Unterordner Softwareverteilung im Tool-Ordner. Auch Netzwerkfreigabe moeglich."/>
                         </DockPanel>
                         <TextBlock Grid.Row="10" Text="Treiberverteilung-Ordner:" Style="{DynamicResource Lbl}"/>
                         <DockPanel Grid.Row="10" Grid.Column="1" Margin="0,8,0,0">
-                            <Button x:Name="btnDrvDir" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0"/>
+                            <Button x:Name="btnDrvDir" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0" ToolTip="Ordner der Treiberverteilung waehlen"/>
                             <TextBox x:Name="txtDrvDir" Style="{DynamicResource DarkTextBox}" ToolTip="Leer = Unterordner Treiberverteilung im Tool-Ordner. Auch Netzwerkfreigabe moeglich."/>
                         </DockPanel>
                         <TextBlock Grid.Row="12" Text="Anzeige-Groesse:" Style="{DynamicResource Lbl}"/>
                         <StackPanel Grid.Row="12" Grid.Column="1" Margin="0,10,0,0">
                             <WrapPanel>
-                                <ComboBox x:Name="cmbUiScale" Width="140"/>
+                                <ComboBox x:Name="cmbUiScale" Width="140" ToolTip="Groesse von Schrift und Bedienelementen in HUMig"/>
                                 <TextBlock Text="Text + Oberflaeche skalieren. Automatisch = verkleinert auf kleinen Bildschirmen. Im Hauptfenster: Strg + Mausrad, Strg + 0 = automatisch" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap" MaxWidth="440"/>
                             </WrapPanel>
-                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkSplashAnim" Content="Startanimation: Saugroboter raeumt den Startbildschirm weg (Klick darauf ueberspringt)" Margin="0,6,0,0"/>
+                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkSplashAnim" Content="Startanimation: Saugroboter raeumt den Startbildschirm weg (Klick darauf ueberspringt)" Margin="0,6,0,0" ToolTip="Ohne Haken verschwindet der Startbildschirm ohne Animation"/>
                         </StackPanel>
                         <TextBlock Grid.Row="11" Text="Backup-Uebersicht:" Style="{DynamicResource Lbl}"/>
                         <StackPanel Grid.Row="11" Grid.Column="1" Margin="0,10,0,0">
-                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkOverviewAuto" Content="Backups.html im Backup-Ordner nach jedem Backup/Restore aktualisieren"/>
-                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkStatusPage" Content="Reiter 'Status' als Startseite anzeigen (Zeitplaene, letzte Backups, Server-Backup, App-Updates auf einen Blick)" Margin="0,6,0,0"/>
+                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkOverviewAuto" Content="Backups.html im Backup-Ordner nach jedem Backup/Restore aktualisieren" ToolTip="Haelt die HTML-Uebersicht aller Backups (Knopf 'Uebersicht (HTML)') automatisch aktuell"/>
+                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkStatusPage" Content="Reiter 'Status' als Startseite anzeigen (Zeitplaene, letzte Backups, Server-Backup, App-Updates auf einen Blick)" Margin="0,6,0,0" ToolTip="Ohne Haken blendet HUMig den Reiter Status aus"/>
                         </StackPanel>
                         <TextBlock Grid.Row="8" Text="Starter:" Style="{DynamicResource Lbl}"/>
                         <WrapPanel Grid.Row="8" Grid.Column="1">
                             <Button x:Name="btnLauncher" Content="HUMig.exe neu erstellen" Style="{DynamicResource BtnDefault}" ToolTip="Starter mit Logo (startet HUMig ohne Konsolenfenster, kann an die Taskleiste angeheftet werden)"/>
-                            <Button x:Name="btnShortcut" Content="Desktop-Verknuepfung" Style="{DynamicResource BtnDefault}"/>
+                            <Button x:Name="btnShortcut" Content="Desktop-Verknuepfung" Style="{DynamicResource BtnDefault}" ToolTip="Verknuepfung zu HUMig auf dem Desktop anlegen"/>
                         </WrapPanel>
                         <TextBlock Grid.Row="13" Text="Rueckmeldung per E-Mail an:" Style="{DynamicResource Lbl}"/>
                         <StackPanel Grid.Row="13" Grid.Column="1" Margin="0,10,0,0">
@@ -135,22 +135,22 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="4">
                         <TextBlock Text="Vorauswahl der Nacharbeiten im Reiter Restore:" Style="{DynamicResource Lbl}" Margin="0,0,0,6" TextWrapping="Wrap"/>
-                        <CheckBox x:Name="chkRGp" Content="gpupdate /force"/>
-                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRWu" Content="Treiber ueber Windows Update deaktivieren"/>
-                        <CheckBox x:Name="chkRNum" Content="NumLock beim Start an"/>
-                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRFav" Content="Explorer: alte 'Favoriten' einblenden"/>
-                        <CheckBox x:Name="chkRFast" Content="Schnellstart (Fast Boot) aus"/>
+                        <CheckBox x:Name="chkRGp" Content="gpupdate /force" ToolTip="Vorauswahl fuer den Haken 'gpupdate /force' im Reiter Restore"/>
+                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRWu" Content="Treiber ueber Windows Update deaktivieren" ToolTip="Vorauswahl fuer den Haken 'Treiber ueber Windows Update aus' im Reiter Restore"/>
+                        <CheckBox x:Name="chkRNum" Content="NumLock beim Start an" ToolTip="Vorauswahl fuer den Haken 'NumLock beim Start an' im Reiter Restore"/>
+                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRFav" Content="Explorer: alte 'Favoriten' einblenden" ToolTip="Vorauswahl fuer den Haken 'Favoriten einblenden' im Reiter Restore"/>
+                        <CheckBox x:Name="chkRFast" Content="Schnellstart (Fast Boot) aus" ToolTip="Vorauswahl fuer den Haken 'Schnellstart aus' im Reiter Restore"/>
                         <TextBlock Text="Vor und nach dem Restore:" Style="{DynamicResource Lbl}" Margin="0,10,0,4"/>
-                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkROfferApps" Content="Fehlende Programme vor dem Restore anbieten (zuerst installieren, dann zurueckspielen - Empfehlung von Microsoft)"/>
-                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRVerify" Content="Nach dem Restore Backup und Ziel vergleichen (fehlende Dateien im Protokoll)"/>
+                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkROfferApps" Content="Fehlende Programme vor dem Restore anbieten (zuerst installieren, dann zurueckspielen - Empfehlung von Microsoft)" ToolTip="Gilt fuer jedes Restore, die Programme kommen aus der Softwareverteilung"/>
+                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRVerify" Content="Nach dem Restore Backup und Ziel vergleichen (fehlende Dateien im Protokoll)" ToolTip="Der Vergleich laeuft automatisch nach jedem Restore, das Ergebnis steht im Restore-Protokoll"/>
                         <TextBlock Text="Nach-Skript (.ps1, wird am Ziel-PC als Administrator ausgefuehrt):" Style="{DynamicResource Lbl}" Margin="0,10,0,4" TextWrapping="Wrap"/>
                         <DockPanel>
-                            <Button x:Name="btnRScript" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0"/>
-                            <TextBox x:Name="txtRScript" Style="{DynamicResource DarkTextBox}"/>
+                            <Button x:Name="btnRScript" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0" ToolTip="Vorgabe-Nach-Skript (.ps1) waehlen"/>
+                            <TextBox x:Name="txtRScript" Style="{DynamicResource DarkTextBox}" ToolTip="Vorgabe fuer das Feld Nach-Skript im Reiter Restore, leer = kein Skript"/>
                         </DockPanel>
                         <TextBlock Text="Checkliste nach dem Restore (ein Punkt je Zeile, wird im Restore-Protokoll abgehakt):" Style="{DynamicResource Lbl}" Margin="0,14,0,4" TextWrapping="Wrap"/>
-                        <TextBox x:Name="txtChecklist" Style="{DynamicResource DarkTextBox}" Height="170" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
-                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkChecklistAuto" Content="Checkliste nach jedem Restore automatisch anzeigen (Programm-Nacharbeiten aus dem Programm-Katalog kommen dazu)" Margin="0,6,0,0"/>
+                        <TextBox x:Name="txtChecklist" Style="{DynamicResource DarkTextBox}" Height="170" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" ToolTip="Punkte der Checkliste, die nach dem Restore zum Abhaken erscheinen"/>
+                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkChecklistAuto" Content="Checkliste nach jedem Restore automatisch anzeigen (Programm-Nacharbeiten aus dem Programm-Katalog kommen dazu)" Margin="0,6,0,0" ToolTip="Ohne Haken oeffnet sich die Checkliste nur ueber den Knopf 'Checkliste' im Reiter Restore"/>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -159,12 +159,12 @@
                 <DockPanel Margin="4">
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                         <WrapPanel DockPanel.Dock="Right">
-                            <Button x:Name="btnSchoolAdd" Content="+ Standort" Style="{DynamicResource BtnDefault}"/>
-                            <Button x:Name="btnSchoolDel" Content="- Entfernen" Style="{DynamicResource BtnDefault}" Margin="0"/>
+                            <Button x:Name="btnSchoolAdd" Content="+ Standort" Style="{DynamicResource BtnDefault}" ToolTip="Neue Zeile fuer einen Standort anlegen (erst mit Speichern wirksam)"/>
+                            <Button x:Name="btnSchoolDel" Content="- Entfernen" Style="{DynamicResource BtnDefault}" Margin="0" ToolTip="Markierten Standort aus der Liste nehmen (erst mit Speichern wirksam)"/>
                         </WrapPanel>
                         <TextBlock Text="Profile fuer mehrere Standorte (Schulen, Filialen, Abteilungen ...) - Namen frei waehlbar. Umschalten oben im Hauptfenster (Standort). Leere Felder = Wert aus 'Allgemein'. DNS: mehrere mit Komma trennen." Foreground="#FFA6ADC8" TextWrapping="Wrap" VerticalAlignment="Center"/>
                     </DockPanel>
-                    <DataGrid x:Name="dgSchools" Style="{DynamicResource DarkGrid}" IsReadOnly="False" SelectionMode="Single" CanUserAddRows="False">
+                    <DataGrid x:Name="dgSchools" Style="{DynamicResource DarkGrid}" IsReadOnly="False" SelectionMode="Single" CanUserAddRows="False" ToolTip="Je Standort eigene Ordner, Domaene, Subnetz und DNS-Server, Zelle anklicken zum Bearbeiten">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
                             <DataGridTextColumn Header="Backup-Ordner" Binding="{Binding BackupRoot, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
@@ -183,16 +183,16 @@
             <TabItem Header="Ausnahmen" x:Name="tabExceptions">
                 <DockPanel Margin="4">
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
-                        <Button x:Name="btnExcDefault" DockPanel.Dock="Right" Content="Standard wiederherstellen" Style="{DynamicResource BtnChange}" Margin="0"/>
+                        <Button x:Name="btnExcDefault" DockPanel.Dock="Right" Content="Standard wiederherstellen" Style="{DynamicResource BtnChange}" Margin="0" ToolTip="Alle Ausnahmelisten auf den Auslieferungsstand zuruecksetzen (mit Rueckfrage, erst mit Speichern wirksam)"/>
                         <TextBlock Text="Ein Eintrag pro Zeile, * und ? erlaubt. Ordner ohne * gelten nur direkt im Quellordner, mit * in jeder Ebene." Foreground="#FFA6ADC8" TextWrapping="Wrap" VerticalAlignment="Center"/>
                     </DockPanel>
                     <UniformGrid Columns="3" Rows="2">
-                        <DockPanel Margin="0,0,6,6"><TextBlock DockPanel.Dock="Top" Text="PROFIL - ORDNER" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExPF" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/></DockPanel>
-                        <DockPanel Margin="0,0,6,6"><TextBlock DockPanel.Dock="Top" Text="PROFIL - DATEITYPEN" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExPFi" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/></DockPanel>
-                        <DockPanel Margin="0,0,0,6"><TextBlock DockPanel.Dock="Top" Text="PROFIL - MINIMAL (Ordner)" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExPMin" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/></DockPanel>
-                        <DockPanel Margin="0,0,6,0"><TextBlock DockPanel.Dock="Top" Text="C:\ - ORDNER" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExSF" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/></DockPanel>
-                        <DockPanel Margin="0,0,6,0"><TextBlock DockPanel.Dock="Top" Text="C:\ - DATEITYPEN" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExSFi" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/></DockPanel>
-                        <DockPanel><TextBlock DockPanel.Dock="Top" Text="C:\ - MINIMAL (Ordner)" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExSMin" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/></DockPanel>
+                        <DockPanel Margin="0,0,6,6"><TextBlock DockPanel.Dock="Top" Text="PROFIL - ORDNER" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExPF" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" ToolTip="Ordner im Profil, die nicht gesichert werden"/></DockPanel>
+                        <DockPanel Margin="0,0,6,6"><TextBlock DockPanel.Dock="Top" Text="PROFIL - DATEITYPEN" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExPFi" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" ToolTip="Dateitypen im Profil, die nicht gesichert werden (z.B. *.tmp)"/></DockPanel>
+                        <DockPanel Margin="0,0,0,6"><TextBlock DockPanel.Dock="Top" Text="PROFIL - MINIMAL (Ordner)" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExPMin" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" ToolTip="Ordner im Profil, die mit dem Haken 'Profil: nur AppData ausnehmen' ausgenommen werden"/></DockPanel>
+                        <DockPanel Margin="0,0,6,0"><TextBlock DockPanel.Dock="Top" Text="C:\ - ORDNER" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExSF" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" ToolTip="Ordner auf C:\, die nicht gesichert werden"/></DockPanel>
+                        <DockPanel Margin="0,0,6,0"><TextBlock DockPanel.Dock="Top" Text="C:\ - DATEITYPEN" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExSFi" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" ToolTip="Dateitypen auf C:\, die nicht gesichert werden"/></DockPanel>
+                        <DockPanel><TextBlock DockPanel.Dock="Top" Text="C:\ - MINIMAL (Ordner)" Style="{DynamicResource SectionLabel}"/><TextBox x:Name="txtExSMin" Style="{DynamicResource DarkTextBox}" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" ToolTip="Ordner auf C:\, die mit dem Haken 'C:\ nur Systemordner ausnehmen' ausgenommen werden"/></DockPanel>
                     </UniformGrid>
                 </DockPanel>
             </TabItem>
@@ -206,28 +206,28 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <TextBlock Text="Name:" Style="{DynamicResource Lbl}"/>
-                                <TextBox x:Name="txtNmName" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Margin="0,0,8,4"/>
+                                <TextBox x:Name="txtNmName" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Margin="0,0,8,4" ToolTip="Anzeigename des eigenen Moduls in der Modulliste"/>
                                 <TextBlock Grid.Column="2" Text="Gruppe:" Style="{DynamicResource Lbl}"/>
-                                <ComboBox x:Name="cmbNmGroup" Grid.Column="3" IsEditable="True" Margin="0,0,0,4"/>
+                                <ComboBox x:Name="cmbNmGroup" Grid.Column="3" IsEditable="True" Margin="0,0,0,4" ToolTip="Abschnitt der Modulliste, in dem das Modul erscheint (leer = Programme)"/>
                                 <TextBlock Grid.Row="1" Text="Art:" Style="{DynamicResource Lbl}"/>
-                                <ComboBox x:Name="cmbNmType" Grid.Row="1" Grid.Column="1" Width="220" HorizontalAlignment="Left" Margin="0,0,8,4"/>
+                                <ComboBox x:Name="cmbNmType" Grid.Row="1" Grid.Column="1" Width="220" HorizontalAlignment="Left" Margin="0,0,8,4" ToolTip="Ganzen Ordner, Dateien nach Filter oder einen Registry-Schluessel sichern"/>
                                 <TextBlock Grid.Row="1" Grid.Column="2" Text="Dateifilter:" Style="{DynamicResource Lbl}"/>
                                 <TextBox x:Name="txtNmFilter" Grid.Row="1" Grid.Column="3" Style="{DynamicResource DarkTextBox}" Margin="0,0,0,4" ToolTip="Nur bei 'Dateien': z.B. *.xml;*.ini"/>
                                 <TextBlock Grid.Row="2" Text="Pfad / Schluessel:" Style="{DynamicResource Lbl}"/>
                                 <TextBox x:Name="txtNmPath" Grid.Row="2" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Margin="0,0,8,0" ToolTip="Ordner mit Platzhaltern {APPDATA}, {LOCALAPPDATA}, {PROFILE}, {PROGRAMFILES}, {PROGRAMFILESX86}, {PROGRAMDATA}, {SYSTEMDRIVE} - oder Registry: HKCU\Software\... / HKLM\Software\..."/>
-                                <Button x:Name="btnNmAdd" Grid.Row="2" Grid.Column="3" Content="Hinzufuegen" Style="{DynamicResource BtnDefault}" Margin="0"/>
+                                <Button x:Name="btnNmAdd" Grid.Row="2" Grid.Column="3" Content="Hinzufuegen" Style="{DynamicResource BtnDefault}" Margin="0" ToolTip="Eigenes Modul mit diesen Angaben in die Liste aufnehmen"/>
                             </Grid>
                         </StackPanel>
                     </Border>
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                         <WrapPanel DockPanel.Dock="Right">
                             <Button x:Name="btnAppEditor" Content="Programm-Katalog bearbeiten ..." Style="{DynamicResource BtnDefault}" ToolTip="Programme, deren Einstellungen, Plug-ins, Lizenzdateien und Datenbanken mitgesichert werden (Config\apps.json)"/>
-                            <Button x:Name="btnModDel" Content="Eigenes Modul loeschen" Style="{DynamicResource BtnDanger}"/>
-                            <Button x:Name="btnModJson" Content="modules.json (Experten)" Style="{DynamicResource BtnDefault}" Margin="0"/>
+                            <Button x:Name="btnModDel" Content="Eigenes Modul loeschen" Style="{DynamicResource BtnDanger}" ToolTip="Markiertes eigenes Modul loeschen, Standard-Module lassen sich nur ausblenden"/>
+                            <Button x:Name="btnModJson" Content="modules.json (Experten)" Style="{DynamicResource BtnDefault}" Margin="0" ToolTip="Eigene Module und Vorlagen direkt in modules.json im Editor bearbeiten"/>
                         </WrapPanel>
                         <TextBlock Text="Anzeigen = Checkbox im Tool sichtbar, Standard = beim Start angehakt." Foreground="#FFA6ADC8" VerticalAlignment="Center" TextWrapping="Wrap"/>
                     </DockPanel>
-                    <DataGrid x:Name="dgModules" Style="{DynamicResource DarkGrid}" IsReadOnly="False" SelectionMode="Single" CanUserAddRows="False" CanUserDeleteRows="False">
+                    <DataGrid x:Name="dgModules" Style="{DynamicResource DarkGrid}" IsReadOnly="False" SelectionMode="Single" CanUserAddRows="False" CanUserDeleteRows="False" ToolTip="Alle Module, die Spalte Herkunft zeigt Standard oder Eigenes">
                         <DataGrid.Columns>
                             <DataGridCheckBoxColumn Header="Anzeigen" Binding="{Binding Anzeigen, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
                             <DataGridCheckBoxColumn Header="Standard" Binding="{Binding Standard, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
@@ -243,12 +243,12 @@
                 <DockPanel Margin="4">
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                         <WrapPanel DockPanel.Dock="Right">
-                            <Button x:Name="btnLinkAdd" Content="+ Link" Style="{DynamicResource BtnDefault}"/>
-                            <Button x:Name="btnLinkDel" Content="- Entfernen" Style="{DynamicResource BtnDefault}" Margin="0"/>
+                            <Button x:Name="btnLinkAdd" Content="+ Link" Style="{DynamicResource BtnDefault}" ToolTip="Neuen Link fuer den Reiter Werkzeuge anlegen (erst mit Speichern wirksam)"/>
+                            <Button x:Name="btnLinkDel" Content="- Entfernen" Style="{DynamicResource BtnDefault}" Margin="0" ToolTip="Markierten Link aus der Liste nehmen (erst mit Speichern wirksam)"/>
                         </WrapPanel>
                         <TextBlock Text="Platzhalter in der URL: {SERIAL} = Seriennummer, {COMPUTER} = PC-Name" Foreground="#FFA6ADC8" VerticalAlignment="Center" TextWrapping="Wrap"/>
                     </DockPanel>
-                    <DataGrid x:Name="dgLinks" Style="{DynamicResource DarkGrid}" IsReadOnly="False" SelectionMode="Single" CanUserAddRows="False">
+                    <DataGrid x:Name="dgLinks" Style="{DynamicResource DarkGrid}" IsReadOnly="False" SelectionMode="Single" CanUserAddRows="False" ToolTip="Links im Reiter Werkzeuge, 'SN kopieren' legt vorher die Seriennummer des PCs in die Zwischenablage">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="70"/>
                             <DataGridTextColumn Header="URL" Binding="{Binding Url, UpdateSourceTrigger=PropertyChanged}" Width="Auto" MinWidth="250"/>
@@ -265,27 +265,27 @@
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                         <TextBlock Grid.ColumnSpan="2" Text="Mit dem Handy im selben Netz den Status (Hinweise, Zeitplaene, letzte Sicherungen, App-Updates) und laufende Vorgaenge ansehen und abbrechen. Verschluesselt (HTTPS, eigenes Zertifikat dieses PCs), Kopplung per QR-Code und Code. Ein/Aus und QR-Code: Knopf 'Handy' unten rechts im Hauptfenster." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,0,0,10"/>
                         <TextBlock Grid.Row="1" Text="Beim Start:" Style="{DynamicResource Lbl}"/>
-                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRemoteAuto" Grid.Row="1" Grid.Column="1" Content="Fernbedienung beim Start von HUMig automatisch einschalten" Margin="0,0,0,8"/>
+                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRemoteAuto" Grid.Row="1" Grid.Column="1" Content="Fernbedienung beim Start von HUMig automatisch einschalten" Margin="0,0,0,8" ToolTip="Ohne Haken schaltet der Knopf 'Handy' im Hauptfenster die Fernbedienung ein"/>
                         <TextBlock Grid.Row="2" Text="Port (TCP):" Style="{DynamicResource Lbl}"/>
                         <WrapPanel Grid.Row="2" Grid.Column="1" Margin="0,0,0,8">
-                            <TextBox x:Name="txtRemotePort" Style="{DynamicResource DarkTextBox}" Width="80"/>
+                            <TextBox x:Name="txtRemotePort" Style="{DynamicResource DarkTextBox}" Width="80" ToolTip="TCP-Port der Fernbedienung (1025 bis 65535)"/>
                             <TextBlock Text="Standard 8443. Ist der Port belegt, schlaegt HUMig beim Einschalten einen freien vor." Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
                         </WrapPanel>
                         <TextBlock Grid.Row="3" Text="Laufzeit:" Style="{DynamicResource Lbl}"/>
                         <WrapPanel Grid.Row="3" Grid.Column="1" Margin="0,0,0,8">
-                            <ComboBox x:Name="cmbRemoteTime" Width="180"/>
+                            <ComboBox x:Name="cmbRemoteTime" Width="180" ToolTip="So lange bleibt die Fernbedienung nach dem Einschalten aktiv"/>
                             <TextBlock Text="danach schaltet sich die Fernbedienung selbst aus" Foreground="#FFA6ADC8" VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
                         </WrapPanel>
                         <TextBlock Grid.Row="4" Text="Weitere erlaubte Netze:" Style="{DynamicResource Lbl}" VerticalAlignment="Top" Margin="0,4,6,0"/>
                         <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,0,0,8">
-                            <TextBox x:Name="txtRemoteNets" Style="{DynamicResource DarkTextBox}" Width="220" Height="56" HorizontalAlignment="Left" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"/>
+                            <TextBox x:Name="txtRemoteNets" Style="{DynamicResource DarkTextBox}" Width="220" Height="56" HorizontalAlignment="Left" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" ToolTip="Weitere Netze, aus denen das Handy zugreifen darf"/>
                             <TextBlock Text="Je Zeile ein Netz (z.B. 10.20.0.0/16), leer = nur das lokale Subnetz dieses PCs. Die Firewall-Regel gilt nur in Domaenen- und privaten Netzen." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
                         </StackPanel>
                         <TextBlock Grid.Row="5" Text="Zeitplaene vom Handy:" Style="{DynamicResource Lbl}" VerticalAlignment="Top" Margin="0,2,6,0"/>
                         <StackPanel Grid.Row="5" Grid.Column="1" Margin="0,0,0,8">
-                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkSchedBackup" Content="Profil-Backups (eigene Zeitplaene, ohne Adminrechte angelegt) sofort starten" Margin="0,0,0,4"/>
-                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkSchedServer" Content="Server-Backups sofort starten (laeuft als SYSTEM, sichert die VMs)" Margin="0,0,0,4"/>
-                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkSchedAu" Content="App-Updates dieses PCs sofort starten (laeuft als SYSTEM)" Margin="0,0,0,4"/>
+                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkSchedBackup" Content="Profil-Backups (eigene Zeitplaene, ohne Adminrechte angelegt) sofort starten" Margin="0,0,0,4" ToolTip="Gekoppelte Handys duerfen geplante Profil-Backups sofort starten"/>
+                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkSchedServer" Content="Server-Backups sofort starten (laeuft als SYSTEM, sichert die VMs)" Margin="0,0,0,4" ToolTip="Gekoppelte Handys duerfen geplante Server-Backups sofort starten"/>
+                            <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkSchedAu" Content="App-Updates dieses PCs sofort starten (laeuft als SYSTEM)" Margin="0,0,0,4" ToolTip="Gekoppelte Handys duerfen geplante App-Updates sofort starten"/>
                             <TextBlock Text="Standard aus. Gekoppelte Handys sehen dann die Zeitplaene im Reiter Vorgang und koennen sie mit Bestaetigung starten (hoechstens einmal pro Minute, 5 Starts in 10 Minuten; im Zugriffsprotokoll). Gestartet wird nur eine unveraenderte HUMig-Aufgabe; SYSTEM-Aufgaben nur, wenn normale Benutzer den Programmordner nicht aendern koennen." Foreground="#FFA6ADC8" TextWrapping="Wrap"/>
                         </StackPanel>
                         <TextBlock Grid.Row="6" Grid.ColumnSpan="2" Text="BENUTZER-MODUS (OHNE ADMINRECHTE)" Style="{DynamicResource SectionLabel}" Margin="0,10,0,4"/>
@@ -293,8 +293,8 @@
                         <TextBlock Grid.Row="8" Text="Benutzerkonto:" Style="{DynamicResource Lbl}"/>
                         <WrapPanel Grid.Row="8" Grid.Column="1" Margin="0,0,0,6">
                             <TextBox x:Name="txtRemoteUser" Style="{DynamicResource DarkTextBox}" Width="220" ToolTip="Konto, das HUMig ohne Adminrechte startet (z.B. SCHULE\max)"/>
-                            <Button x:Name="btnRemoteSetup" Content="Fuer Benutzer-Modus einrichten" Style="{DynamicResource BtnChange}" Margin="6,0,0,0"/>
-                            <Button x:Name="btnRemoteUnsetup" Content="Entfernen" Style="{DynamicResource BtnDanger}" Margin="4,0,0,0"/>
+                            <Button x:Name="btnRemoteSetup" Content="Fuer Benutzer-Modus einrichten" Style="{DynamicResource BtnChange}" Margin="6,0,0,0" ToolTip="Firewall-Regel, HTTPS-Bindung und Port-Freigabe fuer das eingetragene Konto dauerhaft anlegen (mit Rueckfrage)"/>
+                            <Button x:Name="btnRemoteUnsetup" Content="Entfernen" Style="{DynamicResource BtnDanger}" Margin="4,0,0,0" ToolTip="Firewall-Regel, HTTPS-Bindung und Port-Freigabe des Benutzer-Modus entfernen (mit Rueckfrage)"/>
                         </WrapPanel>
                         <TextBlock x:Name="lblRemoteSetup" Grid.Row="9" Grid.Column="1" Foreground="#FFA6ADC8" TextWrapping="Wrap"/>
                     </Grid>
@@ -307,7 +307,7 @@
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                     <TextBlock Text="Kanal:" Style="{DynamicResource Lbl}"/>
                     <StackPanel Grid.Column="1" Margin="0,0,0,4">
-                        <ComboBox x:Name="cmbChannel" Width="300" HorizontalAlignment="Left"/>
+                        <ComboBox x:Name="cmbChannel" Width="300" HorizontalAlignment="Left" ToolTip="Update-Kanal fuer den Knopf 'Update' im Hauptfenster"/>
                         <TextBlock Text="Stabil: nur freigegebene Versionen (fuer Server und Schul-PCs). Test: neue Versionen sofort, vor der Freigabe (zum Ausprobieren)." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
                     </StackPanel>
                     <TextBlock Grid.Row="1" Text="Version:" Style="{DynamicResource Lbl}"/>
@@ -316,27 +316,27 @@
                         <Button x:Name="btnVersions" Content="Andere Version / Vorversion ..." Style="{DynamicResource BtnChange}" ToolTip="Alle Versionen anzeigen und eine bestimmte (auch aeltere) installieren"/>
                     </WrapPanel>
                     <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="SIGNATUR" Style="{DynamicResource SectionLabel}" Margin="0,8,0,4"/>
-                    <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRequireSig" Grid.Row="3" Grid.Column="1" Content="Nur signierte Updates annehmen (empfohlen)" Margin="0,0,0,6"/>
+                    <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRequireSig" Grid.Row="3" Grid.Column="1" Content="Nur signierte Updates annehmen (empfohlen)" Margin="0,0,0,6" ToolTip="Updates ohne gueltige Signatur des eingetragenen Zertifikats werden abgelehnt"/>
                     <TextBlock Grid.Row="4" Text="Zertifikat (Fingerabdruck):" Style="{DynamicResource Lbl}"/>
                     <TextBox x:Name="txtSignerThumb" Grid.Row="4" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Width="420" HorizontalAlignment="Left" Margin="0,0,0,6" ToolTip="Fingerabdruck (Thumbprint, 40 Zeichen) des Zertifikats, mit dem die Releases signiert werden. Offizielle Quelle: ist eingebaut."/>
                     <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Text="Jedes Release wird mit einer Pruefsumme (SHA256) aller Dateien geprueft und vom Herausgeber signiert. HUMig installiert nur Releases mit gueltiger Signatur dieses Zertifikats - eine Version, die jemand anderer auf GitHub ablegt, wird abgelehnt. Fuer die offizielle Quelle ist der Fingerabdruck eingebaut, hier ist nichts zu tun. Nur bei einer eigenen Quelle (eigenes Repo) den Fingerabdruck des eigenen Zertifikats eintragen." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,0,0,8"/>
                     <TextBlock Grid.Row="6" Grid.ColumnSpan="2" Text="QUELLE" Style="{DynamicResource SectionLabel}" Margin="0,4,0,4"/>
                     <TextBlock Grid.Row="7" Text="GitHub-Besitzer / Repo:" Style="{DynamicResource Lbl}"/>
                     <WrapPanel Grid.Row="7" Grid.Column="1" Margin="0,0,0,6">
-                        <TextBox x:Name="txtOwner" Style="{DynamicResource DarkTextBox}" Width="200"/>
+                        <TextBox x:Name="txtOwner" Style="{DynamicResource DarkTextBox}" Width="200" ToolTip="GitHub-Konto des Repos, aus dem die Updates kommen"/>
                         <TextBlock Text=" / " VerticalAlignment="Center"/>
-                        <TextBox x:Name="txtRepo" Style="{DynamicResource DarkTextBox}" Width="200"/>
+                        <TextBox x:Name="txtRepo" Style="{DynamicResource DarkTextBox}" Width="200" ToolTip="Name des GitHub-Repos fuer die Updates"/>
                     </WrapPanel>
                     <TextBlock Grid.Row="8" Text="Branch (Entwicklung):" Style="{DynamicResource Lbl}"/>
                     <WrapPanel Grid.Row="8" Grid.Column="1" Margin="0,0,0,6">
-                        <TextBox x:Name="txtBranch" Style="{DynamicResource DarkTextBox}" Width="160"/>
-                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkUseBranch" Content="Branch statt Releases laden (nur Entwicklung, ohne Pruefsumme und Signatur)" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                        <TextBox x:Name="txtBranch" Style="{DynamicResource DarkTextBox}" Width="160" ToolTip="Branch, der mit dem Haken 'Branch statt Releases laden' geladen wird"/>
+                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkUseBranch" Content="Branch statt Releases laden (nur Entwicklung, ohne Pruefsumme und Signatur)" VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="Nur fuer die Entwicklung, im Normalbetrieb ohne Haken lassen"/>
                     </WrapPanel>
                     <TextBlock Grid.Row="9" Text="Token (privates Repo):" Style="{DynamicResource Lbl}"/>
                     <WrapPanel Grid.Row="9" Grid.Column="1" Margin="0,0,0,6">
                         <TextBlock x:Name="lblToken" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                        <Button x:Name="btnTokenSet" Content="Token eingeben" Style="{DynamicResource BtnDefault}"/>
-                        <Button x:Name="btnTokenDel" Content="Token loeschen" Style="{DynamicResource BtnDanger}"/>
+                        <Button x:Name="btnTokenSet" Content="Token eingeben" Style="{DynamicResource BtnDefault}" ToolTip="GitHub-Token (nur Lesen) eingeben, wird verschluesselt fuer dieses Konto gespeichert"/>
+                        <Button x:Name="btnTokenDel" Content="Token loeschen" Style="{DynamicResource BtnDanger}" ToolTip="Gespeichertes GitHub-Token sofort loeschen"/>
                     </WrapPanel>
                     <TextBlock Grid.Row="10" Grid.ColumnSpan="2" Text="Nur-Lese-Token genuegt (Fine-grained PAT, Repository-Zugriff nur auf dieses Repo, 'Contents: Read'). Er wird verschluesselt (DPAPI) nur fuer deinen Windows-Benutzer gespeichert." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,8,0,0"/>
                 </Grid>
