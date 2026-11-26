@@ -30,7 +30,7 @@
 - Geprüft werden nur Dateitypen, die eine Signatur tragen können (Moduldateien, DLLs, Kataloge), keine Hilfe- und Textdateien.
 - Ist das WinGet-Modul gesperrt (veränderte feste Version, keine andere), endet "Aktualisieren" für Programme, die nur für einen Benutzer installiert sind, mit der allgemeinen Meldung des Workers, ohne den Ordner und die Abhilfe.
 ### ✅ Qualität
-- **Tests:** PLATZHALTER
+- **Tests:** 801 bestanden.
 
 ## v2.1.30 - 2026-11-26
 ### 📖 Hilfe
