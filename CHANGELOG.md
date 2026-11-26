@@ -1,5 +1,12 @@
 ﻿# Changelog
 
+## v2.1.27 - 2026-11-26
+### 📱 Fernbedienung
+- **Zugriffsprotokoll abgesichert:** Das Zugriffsprotokoll wird vor jedem Eintrag geprüft und enthält keine eingeschleusten Zeilen oder Steuerzeichen mehr.
+  - Kann ein Eintrag nicht sicher geschrieben werden, meldet HUMig das einmal in der Konsole, die Fernbedienung läuft weiter.
+### ✅ Qualität
+- **Tests:** 601 bestanden.
+
 ## v2.1.26 - 2026-11-26
 ### 🔐 Herausgeber
 - **Release signieren zeigt den Abgleich:** Die Bestätigung nennt je Release, ob die Prüfsummen-Datei gleich wie der lokale Stand ist, nicht abgeglichen werden konnte (z. B. andere Version installiert) oder abweicht.
