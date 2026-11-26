@@ -303,7 +303,7 @@
                             <Button x:Name="btnStatusRefresh" Content="Aktualisieren" Style="{StaticResource BtnDefault}"/>
                             <TextBlock x:Name="lblStatusTime" Text="" Foreground="{StaticResource CatSubtext}" VerticalAlignment="Center" Margin="10,0,0,4"/>
                         </WrapPanel>
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                             <StackPanel x:Name="pnlStatus" Margin="0,0,8,8"/>
                         </ScrollViewer>
                     </DockPanel>
@@ -323,11 +323,11 @@
                                 <TextBlock x:Name="lblSizeTotal" Text="" Foreground="{StaticResource CatSubtext}" VerticalAlignment="Center" Margin="10,0,0,4" ToolTip="Summe der gemessenen, angehakten Module (Groesse ermitteln)"/>
                             </WrapPanel>
                             <Border x:Name="brdMonBackup" DockPanel.Dock="Bottom" Visibility="Collapsed" Background="{StaticResource CatMantle}" CornerRadius="4" Padding="10,6" Margin="0,6,0,0" ToolTip="Live-Anzeige waehrend Backup/Restore - CPU und Arbeitsspeicher des PCs, auf dem HUMig laeuft"/>
-                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                                 <StackPanel x:Name="pnlBackupModules"/>
                             </ScrollViewer>
                         </DockPanel>
-                        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Margin="8,0,0,0">
+                        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="8,0,0,0">
                             <StackPanel>
                                 <TextBlock Text="ZUSAETZLICHE ORDNER" Style="{StaticResource SectionLabel}"/>
                                 <ListBox x:Name="lstExtra" Height="70" ToolTip="Werden im Modul 'Zusaetzliche Ordner' gesichert - Pfad bleibt erhalten"/>
@@ -350,12 +350,12 @@
                                 <CheckBox x:Name="chkNoSystemFileExc" Content="C:\ keine Datei-Ausnahmen"/>
                                 <Button x:Name="btnEditExceptions" Content="Ausnahmelisten bearbeiten" Style="{StaticResource BtnDefault}" HorizontalAlignment="Left" Margin="0,4,0,8"/>
                                 <TextBlock Text="OPTIONEN" Style="{StaticResource SectionLabel}"/>
-                                <CheckBox x:Name="chkIncremental" Content="Vorhandenes Backup aktualisieren" ToolTip="Gibt es fuer diesen PC und Benutzer schon ein Backup im Backup-Ordner, wird es weitergefuehrt: nur neue/geaenderte Dateien werden kopiert (viel schneller). Geloeschte Dateien bleiben im Backup."/>
+                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkIncremental" Content="Vorhandenes Backup aktualisieren" ToolTip="Gibt es fuer diesen PC und Benutzer schon ein Backup im Backup-Ordner, wird es weitergefuehrt: nur neue/geaenderte Dateien werden kopiert (viel schneller). Geloeschte Dateien bleiben im Backup."/>
                                 <TextBlock x:Name="lblIncremental" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="20,0,0,4"/>
                                 <CheckBox x:Name="chkSpaceCheck" Content="Platz vor dem Start pruefen" ToolTip="Simuliert das Backup vor dem Start (zaehlt nur, was wirklich kopiert wird) und bricht ab, wenn das Ziel zu wenig Platz hat."/>
                                 <CheckBox x:Name="chkVerify" Content="Backup danach pruefen" ToolTip="Vergleicht Quelle und Backup (fehlende Dateien) und prueft eine Stichprobe per Pruefsumme (SHA-256)."/>
                                 <CheckBox x:Name="chkCatalog" Content="Pruefsummen-Katalog erstellen" ToolTip="SHA-256 jeder Datei im Backup (Pruefsummen.tsv). Damit laesst sich spaeter jederzeit pruefen, ob das Backup (z.B. am USB-Laufwerk) unbeschaedigt ist: Reiter Restore > Backup pruefen. Bei Aktualisierung werden nur neue/geaenderte Dateien berechnet."/>
-                                <CheckBox x:Name="chkOneDriveLocal" Content="OneDrive/SharePoint: lokale Dateien mitsichern" ToolTip="Aus: Cloud-Ordner werden ausgelassen (Inhalt liegt in der Cloud). Ein: nur Dateien, die am PC vorhanden sind, werden gesichert - Nur-Cloud-Dateien werden NIE heruntergeladen."/>
+                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkOneDriveLocal" Content="OneDrive/SharePoint: lokale Dateien mitsichern" ToolTip="Aus: Cloud-Ordner werden ausgelassen (Inhalt liegt in der Cloud). Ein: nur Dateien, die am PC vorhanden sind, werden gesichert - Nur-Cloud-Dateien werden NIE heruntergeladen."/>
                                 <TextBlock Text="KOPIEREN" Style="{StaticResource SectionLabel}" Margin="0,8,0,4"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                     <TextBlock Text="Threads (Robocopy /MT):" Style="{StaticResource Lbl}"/>
@@ -414,22 +414,22 @@
                         <TextBlock x:Name="lblRestoreInfo" Grid.Row="1" Grid.Column="0" Text="Backup auswaehlen - vorhandene Module werden angehakt." Foreground="{StaticResource CatSubtext}" Margin="0,6,0,4" TextWrapping="Wrap"/>
                         <DockPanel Grid.Row="2" Grid.Column="0">
                             <Border x:Name="brdMonRestore" DockPanel.Dock="Bottom" Visibility="Collapsed" Background="{StaticResource CatMantle}" CornerRadius="4" Padding="10,6" Margin="0,6,0,0" ToolTip="Live-Anzeige waehrend Backup/Restore - CPU und Arbeitsspeicher des PCs, auf dem HUMig laeuft"/>
-                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                                 <StackPanel x:Name="pnlRestoreModules"/>
                             </ScrollViewer>
                         </DockPanel>
-                        <ScrollViewer Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" VerticalScrollBarVisibility="Auto" Margin="8,0,0,0">
+                        <ScrollViewer Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="8,0,0,0">
                             <StackPanel>
                                 <TextBlock Text="ZIEL" Style="{StaticResource SectionLabel}"/>
                                 <TextBlock x:Name="lblRestoreTarget" Text="" Foreground="{StaticResource CatText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
                                 <TextBlock Text="OPTIONEN" Style="{StaticResource SectionLabel}"/>
-                                <CheckBox x:Name="chkKeepNewer" Content="Neuere Dateien am Ziel nicht ueberschreiben" ToolTip="Robocopy /XO: ist eine Datei am Ziel-PC neuer als im Backup, bleibt sie erhalten"/>
-                                <CheckBox x:Name="chkRestoreOneDrive" Content="OneDrive-Dateien in eigenen Ordner" Margin="0,0,0,8" ToolTip="Mitgesicherte OneDrive/SharePoint-Dateien nach Profil\OneDrive-Wiederherstellung kopieren (nie direkt in den Sync-Ordner - dort koennten neuere Cloud-Versionen ueberschrieben werden)."/>
+                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkKeepNewer" Content="Neuere Dateien am Ziel nicht ueberschreiben" ToolTip="Robocopy /XO: ist eine Datei am Ziel-PC neuer als im Backup, bleibt sie erhalten"/>
+                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkRestoreOneDrive" Content="OneDrive-Dateien in eigenen Ordner" Margin="0,0,0,8" ToolTip="Mitgesicherte OneDrive/SharePoint-Dateien nach Profil\OneDrive-Wiederherstellung kopieren (nie direkt in den Sync-Ordner - dort koennten neuere Cloud-Versionen ueberschrieben werden)."/>
                                 <TextBlock Text="NACHARBEITEN" Style="{StaticResource SectionLabel}"/>
                                 <CheckBox x:Name="chkGpUpdate" Content="gpupdate /force"/>
-                                <CheckBox x:Name="chkWUDrivers" Content="Treiber ueber Windows Update aus"/>
+                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkWUDrivers" Content="Treiber ueber Windows Update aus"/>
                                 <CheckBox x:Name="chkNumLock" Content="NumLock beim Start an"/>
-                                <CheckBox x:Name="chkFavorites" Content="Explorer: alte 'Favoriten' einblenden"/>
+                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkFavorites" Content="Explorer: alte 'Favoriten' einblenden"/>
                                 <CheckBox x:Name="chkFastBoot" Content="Schnellstart (Fast Boot) aus"/>
                                 <TextBlock Text="Nach-Skript (optional, .ps1):" Style="{StaticResource Lbl}" Margin="0,6,0,2"/>
                                 <DockPanel Margin="0,0,0,10">
@@ -451,7 +451,7 @@
 
                 <!-- WERKZEUGE -->
                 <TabItem Header="Werkzeuge">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel x:Name="pnlTools">
                             <Border Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
                                 <StackPanel>
@@ -526,7 +526,7 @@
                                     <Button x:Name="btnAuUpdateSel" Content="Angehakte aktualisieren" Style="{StaticResource BtnGreen}" FontWeight="SemiBold" Padding="14,6" ToolTip="Angehakte Programme still aktualisieren - Ausnahmen werden nie aktualisiert"/>
                                     <Button x:Name="btnAuUpdateAll" Content="Alle aktualisieren" Style="{StaticResource BtnTeal}" Padding="12,6" ToolTip="Alle gefundenen Updates ausser den Ausnahmen"/>
                                     <Button x:Name="btnAuCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False" Padding="12,6" ToolTip="Nach dem laufenden Programm abbrechen"/>
-                                    <CheckBox x:Name="chkAuUnknown" Content="Programme ohne bekannte Version zeigen" VerticalAlignment="Center" Margin="10,0,0,4" ToolTip="WinGet kennt die installierte Version nicht - die Zuordnung zum Paket ist dann unsicher (Variante, Sprache, x86/x64). Nur gezielt verwenden."/>
+                                    <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkAuUnknown" Content="Programme ohne bekannte Version zeigen" VerticalAlignment="Center" Margin="10,0,0,4" ToolTip="WinGet kennt die installierte Version nicht - die Zuordnung zum Paket ist dann unsicher (Variante, Sprache, x86/x64). Nur gezielt verwenden."/>
                                     <Button x:Name="btnAuSetup" Content="WinGet einrichten" Style="{StaticResource BtnYellow}" Padding="12,6" Margin="10,0,4,4" Visibility="Collapsed" ToolTip="Modul Microsoft.WinGet.Client aus der PowerShell Gallery installieren (alle Benutzer) und WinGet fuer dieses Konto registrieren/reparieren - Internet noetig"/>
                                     <Ellipse x:Name="dotAuBusy" Width="11" Height="11" Fill="{StaticResource CatGreen}" Margin="10,0,6,4" VerticalAlignment="Center" Visibility="Collapsed"/>
                                     <TextBlock x:Name="lblAuBusy" Text="" Foreground="{StaticResource CatGreen}" FontSize="11" VerticalAlignment="Center" Margin="0,0,0,4" Visibility="Collapsed"/>
@@ -646,12 +646,12 @@
                                     <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
                                         <TextBlock x:Name="lblSbSize" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" Margin="0,0,0,4"/>
                                         <CheckBox x:Name="chkSbHostConfig" Content="Host-Konfiguration sichern (Switches, VLANs, Netzwerk, VM-Einstellungen + Wiederherstellungs-Skript)" IsChecked="True"/>
-                                        <CheckBox x:Name="chkSbVerify" Content="Sicherung pruefen (Version und enthaltene VMs)" IsChecked="True"/>
+                                        <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkSbVerify" Content="Sicherung pruefen (Version und enthaltene VMs)" IsChecked="True"/>
                                         <CheckBox x:Name="chkSbHostSystem" Content="Host-System mitsichern (nur der Host: C:, Boot/EFI - fuer Bare-Metal-Wiederherstellung)" ToolTip="wbadmin -allCritical: sichert nur den Host selbst - Systemlaufwerk C: (Windows, Hyper-V-Rolle, Switches, Einstellungen) und EFI-/Boot-/Wiederherstellungspartition. Datenlaufwerke mit den VMs (z.B. D:) sind NICHT enthalten - dafuer die VM-Sicherung. Komplette Wiederherstellung nach Totalausfall: Host-System UND VMs sichern. Liegen VMs auf C:, werden sie hier zusaetzlich mitgesichert."/>
                                         <TextBlock x:Name="lblSbHostSystem" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="11" Margin="20,0,0,0"/>
                                         <Border x:Name="brdMonServer" Visibility="Collapsed" Background="{StaticResource CatBase}" CornerRadius="4" Padding="10,6" Margin="0,8,0,0" ToolTip="Live-Anzeige waehrend der Sicherung: Durchsatz der Windows Server-Sicherung, CPU und Arbeitsspeicher dieses Servers"/>
                                     </StackPanel>
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                                         <StackPanel x:Name="pnlSbVms"/>
                                     </ScrollViewer>
                                 </DockPanel>
