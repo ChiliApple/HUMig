@@ -6,7 +6,7 @@
   - Bisher gingen diese Meldungen bei jedem Start verloren.
   - An der Prüfung selbst und an ihren Rückfragen ändert sich nichts.
 ### ✅ Qualität
-- **Tests:** PLATZHALTER
+- **Tests:** 650 bestanden.
 
 ## v2.1.28 - 2026-11-26
 ### 🎨 Oberfläche
