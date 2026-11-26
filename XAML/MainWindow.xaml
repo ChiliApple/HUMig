@@ -39,6 +39,7 @@
             <Setter Property="Padding" Value="10,4"/>
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="ToolTipService.ShowOnDisabled" Value="True"/>
             <Setter Property="Margin" Value="0,0,4,4"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
@@ -65,6 +66,13 @@
         <Style x:Key="BtnMauve" TargetType="Button" BasedOn="{StaticResource BtnBase}"><Setter Property="Background" Value="{StaticResource CatMauve}"/><Setter Property="Foreground" Value="#FF1E1E2E"/></Style>
         <Style x:Key="BtnPeach" TargetType="Button" BasedOn="{StaticResource BtnBase}"><Setter Property="Background" Value="{StaticResource CatPeach}"/><Setter Property="Foreground" Value="#FF1E1E2E"/></Style>
         <Style x:Key="BtnTeal" TargetType="Button" BasedOn="{StaticResource BtnBase}"><Setter Property="Background" Value="{StaticResource CatTeal}"/><Setter Property="Foreground" Value="#FF1E1E2E"/></Style>
+        <!-- Farbregel: Hauptvorgang gruen, veraendernd orange, loeschend/Abbruch rot, sonst BtnDefault (grau) -->
+        <Style x:Key="BtnMain" TargetType="Button" BasedOn="{StaticResource BtnBase}"><Setter Property="Background" Value="{StaticResource CatGreen}"/><Setter Property="Foreground" Value="#FF1E1E2E"/></Style>
+        <Style x:Key="BtnChange" TargetType="Button" BasedOn="{StaticResource BtnBase}"><Setter Property="Background" Value="{StaticResource CatPeach}"/><Setter Property="Foreground" Value="#FF1E1E2E"/></Style>
+        <Style x:Key="BtnDanger" TargetType="Button" BasedOn="{StaticResource BtnBase}"><Setter Property="Background" Value="{StaticResource CatRed}"/><Setter Property="Foreground" Value="#FF1E1E2E"/></Style>
+        <!-- Knopfgruppen: senkrechter Trenner und kurze Beschriftung vor der Gruppe -->
+        <Style x:Key="GroupSep" TargetType="Border"><Setter Property="Width" Value="1"/><Setter Property="Height" Value="22"/><Setter Property="Background" Value="{StaticResource CatSurface2}"/><Setter Property="Margin" Value="4,0,8,4"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+        <Style x:Key="GroupCaption" TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource CatSubtext}"/><Setter Property="FontSize" Value="10"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="Margin" Value="0,0,6,4"/></Style>
 
         <Style x:Key="DarkTextBox" TargetType="TextBox">
             <Setter Property="Background" Value="{StaticResource CatSurface0}"/>
@@ -100,6 +108,8 @@
             <Setter Property="Margin" Value="0,2,12,2"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
+        <!-- lange Haken-Texte brechen um (eine Stelle fuer Haupt- und Einstellungsfenster) -->
+        <Style x:Key="WrapCheck" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}"><Setter Property="ContentTemplate"><Setter.Value><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap"/></DataTemplate></Setter.Value></Setter></Style>
         <Style TargetType="ToolTip">
             <Setter Property="Background" Value="{StaticResource CatMantle}"/>
             <Setter Property="Foreground" Value="{StaticResource CatText}"/>
