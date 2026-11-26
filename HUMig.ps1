@@ -3059,14 +3059,23 @@ function Get-HMSignPlan([string[]]$Tags, $Checks) {
     return [pscustomobject]@{ Tags = $tags; Lines = $lines; ConfirmText = $confirm; Mismatch = @($bad | ForEach-Object { "$($_.Tag)" }); MismatchText = $mis }
 }
 # Antwort auf die zweite Rueckfrage -> Parameter fuer Invoke-HMReleaseSigning, ausgelassene und zu signierende Releases.
+# OnMismatch 'Sign' NUR nach ausdruecklichem Ja in der zweiten Rueckfrage, sonst 'Skip': findet erst der Signier-Lauf eine echte
+# Abweichung (Abgleich vorher gescheitert, Datei inzwischen ersetzt), wird dieses Release nicht ohne Rueckfrage signiert.
+# 'Skip' laesst dort nur wirklich abweichende aus (gleiche Version, anderer Inhalt), nicht abgleichbare werden signiert.
 # SignTags ist nie leer, wenn signiert wird: leer heisst "nichts signieren" (eine leere Liste wuerde in Core-Update ALLE
 # unsignierten Releases signieren).
 function Get-HMSignDecision($Plan, [string]$Answer) {
     $skip = @()
-    $mode = $(if (@($Plan.Mismatch).Count -and $Answer -ne 'Yes') { 'Skip' } else { 'Sign' })
+    $mode = $(if (@($Plan.Mismatch).Count -and $Answer -eq 'Yes') { 'Sign' } else { 'Skip' })
     if ($mode -eq 'Skip') { $skip = @($Plan.Mismatch) }
     $sign = @(@($Plan.Tags) | Where-Object { $_ -and $skip -notcontains $_ })
     return [pscustomobject]@{ OnMismatch = $mode; Skipped = $skip; SignTags = $sign }
+}
+# Zeile je Ergebnis des Signier-Laufs: erst dort erkannte Abweichung ist kein Fehler, sondern ein Hinweis mit dem naechsten Schritt
+function Get-HMSignResultLine($Item) {
+    if ($Item.Ok) { return [pscustomobject]@{ Text = "$($Item.Tag): $($Item.Text)"; Level = 'Success' } }
+    if ("$($Item.Text)" -match '^nicht signiert: weicht vom lokalen Stand') { return [pscustomobject]@{ Text = "$($Item.Tag): weicht ab, nicht signiert: Release signieren erneut starten, dann kommt die Rueckfrage"; Level = 'Info' } }
+    return [pscustomobject]@{ Text = "$($Item.Tag): $($Item.Text)"; Level = 'Error' }
 }
 #endregion HMSign
 # Merkmal "Signieren laeuft": ein zweiter Klick startet keinen zweiten Ablauf. Jeder Ausgang setzt es zurueck (Stop-HMSigning).
@@ -3079,6 +3088,8 @@ function Start-HMReleaseSigning {
     if (-not (Get-HMSigningCert $cfg.SignerThumbprint)) { Out-Console "Signatur-Zertifikat $($cfg.SignerThumbprint) mit privatem Schluessel ist auf diesem PC nicht vorhanden." 'Error'; return }
     $tok = Get-HMSignTokenOrPrompt $cfg
     if (-not $tok) { return }
+    # ohne Hintergrund-Pool kehrt Invoke-AsyncCommand sofort zurueck (kein OnComplete) - das Merkmal bliebe sonst haengen
+    if (-not $script:RunspacePool) { Out-Console 'Signieren nicht moeglich: Hintergrundlaeufe sind nicht bereit - HUMig neu starten.' 'Error'; return }
     $script:SignBusy = $true
     # Kontext je Lauf (State der Hintergrundlaeufe), kein gemeinsamer Zustand zwischen zwei Starts
     $ctx = [pscustomobject]@{ Owner = $cfg.Owner; Repo = $cfg.Repo; Thumb = $cfg.SignerThumbprint; Token = $tok; Tags = @(); Releases = @() }
@@ -3133,7 +3144,7 @@ function Start-HMReleaseSigning {
                             try {
                                 if (-not $res -or $res -is [string] -or $res.Err) { Out-Console "Signieren fehlgeschlagen: $(if ($res -is [string]) { $res } else { $res.Err })" 'Error'; return }
                                 $items = @($res.Items | Where-Object { $_ })
-                                foreach ($x in $items) { Out-Console "$($x.Tag): $($x.Text)" $(if ($x.Ok) { 'Success' } else { 'Error' }) }
+                                foreach ($x in $items) { $ln = Get-HMSignResultLine $x; Out-Console $ln.Text $ln.Level }
                                 if (@($items | Where-Object { -not $_.Ok -and "$($_.Text)" -match 'Schreibrecht' }).Count) {
                                     Remove-Item -LiteralPath (Get-HMSignTokenFile) -Force -ErrorAction SilentlyContinue
                                     Out-Console 'Gespeicherter Schreib-Token geloescht - beim naechsten Signieren neu eingeben.' 'Warning'

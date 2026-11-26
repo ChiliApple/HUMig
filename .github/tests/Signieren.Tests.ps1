@@ -18,12 +18,12 @@ Describe 'Signieren: Zeile je Release in der Bestaetigung' {
     It 'gleich, abweichend, andere Version, Fehler' {
         Get-HMSignCheckLine 'v2.1.24' (New-Chk 'v2.1.24' 'gleich' "gleich wie der lokale Stand ($(Join-Path $TestDrive 'HUMig'), 60 Dateien)") | Should -Be 'v2.1.24: gleich wie der lokale Stand'
         Get-HMSignCheckLine 'v2.1.24' (New-Chk 'v2.1.24' 'abweichend' 'weicht ab' @('HUMig.ps1: Inhalt anders', 'Pull.ps1: fehlt lokal')) | Should -Be 'v2.1.24: WEICHT vom lokalen Stand ab (2 Datei(en))'
-        Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'nicht abgleichbar' 'nicht mit lokalem Stand abgeglichen, lokal ist Version 2.1.24 (C:\Tools\HUMig)') | Should -Be 'v2.1.25: nicht abgeglichen, lokal ist Version 2.1.24'
+        Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'nicht abgleichbar' 'nicht mit lokalem Stand abgeglichen, lokal ist Version 2.1.24 (Q:\Werkzeug\Programm)') | Should -Be 'v2.1.25: nicht abgeglichen, lokal ist Version 2.1.24'
         Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'nicht abgleichbar' 'nicht abgleichbar: Zugriff verweigert') | Should -Be 'v2.1.25: nicht abgeglichen: Zugriff verweigert'
         Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'Fehler' 'Der Remoteserver hat einen Fehler zurueckgegeben') | Should -Be 'v2.1.25: nicht abgeglichen: Der Remoteserver hat einen Fehler zurueckgegeben'
         Get-HMSignCheckLine 'v2.1.25' $null | Should -Be 'v2.1.25: nicht abgeglichen'
         # Klammern im Programmordner (z.B. Program Files (x86)) und Netzpfad: Ordner wird ganz weggelassen
-        Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'nicht abgleichbar' 'nicht mit lokalem Stand abgeglichen, lokal ist Version 2.1.24 (C:\Program Files (x86)\HUMig)') | Should -Be 'v2.1.25: nicht abgeglichen, lokal ist Version 2.1.24'
+        Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'nicht abgleichbar' 'nicht mit lokalem Stand abgeglichen, lokal ist Version 2.1.24 (Q:\Programme (x86)\Werkzeug)') | Should -Be 'v2.1.25: nicht abgeglichen, lokal ist Version 2.1.24'
         Get-HMSignCheckLine 'v2.1.25' (New-Chk 'v2.1.25' 'nicht abgleichbar' 'nicht mit lokalem Stand abgeglichen, kein lokaler Stand (\\server\freigabe (alt)\HUMig)') | Should -Be 'v2.1.25: nicht abgeglichen, kein lokaler Stand'
         # Klammer ohne Pfad bleibt
         Get-HMSignCheckLine 'v1' (New-Chk 'v1' 'Fehler' 'Timeout (abgebrochen)') | Should -Be 'v1: nicht abgeglichen: Timeout (abgebrochen)'
@@ -61,7 +61,8 @@ Describe 'Signieren: Plan und Entscheidung' {
         @($p.Mismatch).Count | Should -Be 0
         $p.MismatchText | Should -Be ''
         $d = Get-HMSignDecision $p ''
-        $d.OnMismatch | Should -Be 'Sign'
+        # ohne ausdrueckliches Ja immer Skip: wirkt im Signier-Lauf nur auf echte Abweichungen
+        $d.OnMismatch | Should -Be 'Skip'
         @($d.Skipped).Count | Should -Be 0
         @($d.SignTags) | Should -Be @('v2.1.24', 'v2.1.25')
     }
@@ -107,10 +108,10 @@ Describe 'Signieren: Ablauf in der Oberflaeche (Attrappen statt GitHub und Zerti
         $script:Lines = New-Object System.Collections.Generic.List[string]; $script:Confirms = New-Object System.Collections.Generic.List[string]
         $script:Dialogs = New-Object System.Collections.Generic.List[object]; $script:Runs = New-Object System.Collections.Generic.List[object]
         $script:Answers = New-Object System.Collections.Queue; $script:ConfirmAnswer = $true; $script:MisAnswer = 'No'
-        $script:JobRunning = $false; $script:ConfigDir = $TestDrive; $script:AppRoot = $script:Root; $script:SignBusy = $false; $script:Defer = $false; $script:Pending = New-Object System.Collections.Queue
+        $script:JobRunning = $false; $script:ConfigDir = $TestDrive; $script:AppRoot = $script:Root; $script:SignBusy = $false; $script:RunspacePool = 'Pool'; $script:Defer = $false; $script:Pending = New-Object System.Collections.Queue
         $script:Rels = @([pscustomobject]@{ Tag = 'v2.1.24'; Version = '2.1.24' }, [pscustomobject]@{ Tag = 'v2.1.25'; Version = '2.1.25' })
     }
-    It 'Normalfall: ein Klick wie bisher, Abgleich steht in der Bestaetigung, signiert mit OnMismatch Sign' {
+    It 'Normalfall: ein Klick wie bisher, Abgleich steht in der Bestaetigung, Signier-Lauf mit OnMismatch Skip' {
         $script:Answers.Enqueue([pscustomobject]@{ Tags = @('v2.1.24', 'v2.1.25'); Releases = $script:Rels; Err = '' })
         $script:Answers.Enqueue([pscustomobject]@{ Checks = @((New-Chk 'v2.1.24' 'gleich'), (New-Chk 'v2.1.25' 'nicht abgleichbar' 'nicht mit lokalem Stand abgeglichen, lokal ist Version 2.1.24 (C:\x)')); Err = '' })
         $script:Answers.Enqueue([pscustomobject]@{ Items = @([pscustomobject]@{ Tag = 'v2.1.24'; Ok = $true; Text = 'signiert' }); Err = '' })
@@ -120,7 +121,7 @@ Describe 'Signieren: Ablauf in der Oberflaeche (Attrappen statt GitHub und Zerti
         $script:Dialogs.Count | Should -Be 0
         $script:Runs.Count | Should -Be 3
         $script:Runs[1].Timeout | Should -Be 90   # 30 + 30 je Release
-        @($script:Runs[2].Args)[-1] | Should -Be 'Sign'
+        @($script:Runs[2].Args)[-1] | Should -Be 'Skip'
         @(@($script:Runs[2].Args)[5]) | Should -Be @('v2.1.24', 'v2.1.25')
     }
     It 'Abweichung und Nein: diese Releases auslassen, die anderen signieren (OnMismatch Skip)' {
@@ -143,7 +144,7 @@ Describe 'Signieren: Ablauf in der Oberflaeche (Attrappen statt GitHub und Zerti
         Start-HMReleaseSigning
         @($script:Runs[2].Args)[-1] | Should -Be 'Sign'
     }
-    It 'Abgleich scheitert oder laeuft in die Zeitgrenze: signieren wie bisher, Zeile "nicht abgeglichen"' {
+    It 'Abgleich scheitert oder laeuft in die Zeitgrenze: Signier-Lauf wie bisher (Skip wirkt nur auf echte Abweichung), Zeile "nicht abgeglichen"' {
         $script:Answers.Enqueue([pscustomobject]@{ Tags = @('v2.1.24'); Releases = @($script:Rels[0]); Err = '' })
         $script:Answers.Enqueue('FEHLER: Timeout - keine Antwort nach 60 Sekunden (abgebrochen)')
         $script:Answers.Enqueue([pscustomobject]@{ Items = @(); Err = '' })
@@ -151,7 +152,7 @@ Describe 'Signieren: Ablauf in der Oberflaeche (Attrappen statt GitHub und Zerti
         $script:Confirms[0] | Should -Match 'v2\.1\.24: nicht abgeglichen: Timeout'
         $script:Dialogs.Count | Should -Be 0
         $script:Runs.Count | Should -Be 3
-        @($script:Runs[2].Args)[-1] | Should -Be 'Sign'
+        @($script:Runs[2].Args)[-1] | Should -Be 'Skip'   # erst der Signier-Lauf erkennt eine Abweichung -> nicht ohne Rueckfrage
     }
     It 'alle abweichend und Nein: kein Signier-Lauf, ruhige Zeile statt Fehlern' {
         $script:Answers.Enqueue([pscustomobject]@{ Tags = @('v2.1.24'); Releases = @($script:Rels[0]); Err = '' })
@@ -191,6 +192,21 @@ Describe 'Signieren: Ablauf in der Oberflaeche (Attrappen statt GitHub und Zerti
         $script:SignBusy | Should -BeFalse
         ($script:Lines -join "`n") | Should -Match 'Signieren fehlgeschlagen: FEHLER: Timeout'
     }
+    It 'ohne Hintergrund-Pool: Meldung, kein Lauf, Merkmal bleibt frei' {
+        $script:RunspacePool = $null
+        Start-HMReleaseSigning
+        $script:Runs.Count | Should -Be 0
+        $script:SignBusy | Should -BeFalse
+        ($script:Lines -join "`n") | Should -Match 'Error\|Signieren nicht moeglich: Hintergrundlaeufe sind nicht bereit'
+    }
+    It 'erst im Signier-Lauf erkannte Abweichung: Hinweiszeile statt Fehler' {
+        $script:Answers.Enqueue([pscustomobject]@{ Tags = @('v2.1.24'); Releases = @($script:Rels[0]); Err = '' })
+        $script:Answers.Enqueue('FEHLER: Timeout')
+        $script:Answers.Enqueue([pscustomobject]@{ Items = @([pscustomobject]@{ Tag = 'v2.1.24'; Ok = $false; Text = 'nicht signiert: weicht vom lokalen Stand (Q:\x) ab: 1 Datei(en)' }); Err = '' })
+        Start-HMReleaseSigning
+        ($script:Lines -join "`n") | Should -Match 'Info\|v2\.1\.24: weicht ab, nicht signiert: Release signieren erneut starten, dann kommt die Rueckfrage'
+        ($script:Lines -join "`n") | Should -Not -Match 'Error\|v2\.1\.24'
+    }
     It 'Bestaetigung abgelehnt: nichts wird signiert' {
         $script:ConfirmAnswer = $false
         $script:Answers.Enqueue([pscustomobject]@{ Tags = @('v2.1.24'); Releases = @($script:Rels[0]); Err = '' })
@@ -203,5 +219,39 @@ Describe 'Signieren: Ablauf in der Oberflaeche (Attrappen statt GitHub und Zerti
         Start-HMReleaseSigning
         $script:Runs.Count | Should -Be 3
         ($script:Lines -join "`n") | Should -Match 'Alle Releases mit Pruefsumme sind bereits signiert'
+    }
+}
+
+Describe 'Signieren: OnMismatch Skip im echten Signier-Lauf (Core-Update, Attrappen fuer Zertifikat und GitHub)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Core-Update.ps1')
+        function Get-HMSigningCert { [pscustomobject]@{ Thumbprint = 'AB' } }
+        function Get-HMReleases { @([pscustomobject]@{ Tag = 'v2.1.24'; Version = '2.1.24'; ManifestUrl = 'u'; ManifestApi = 'a'; SignatureUrl = '' }) }
+        function Get-HMReleaseAsset { [System.Text.Encoding]::UTF8.GetBytes((('a' * 64) + "  HUMig.ps1`n")) }
+        function Test-HMManifestRelease { '' }
+        function New-HMManifestSignature { [byte[]](1, 2, 3) }
+        function Test-HMManifestSignature { '' }
+        function Publish-HMReleaseSignature { $script:Published++ }
+    }
+    BeforeEach {
+        $script:Published = 0
+        $script:Loc = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        [void](New-Item -ItemType Directory -Path (Join-Path $script:Loc 'Config') -Force)
+        Set-Content -LiteralPath (Join-Path $script:Loc 'HUMig.ps1') -Value 'lokaler Inhalt' -Encoding UTF8
+    }
+    It 'lokal andere Version, OnMismatch Skip: wird signiert (Normalfall beim Signieren aus der aelteren Installation)' {
+        Set-Content -LiteralPath (Join-Path $script:Loc 'Config\version.json') -Value '{"version":"2.1.20"}' -Encoding UTF8
+        $r = @(Invoke-HMReleaseSigning 'o' 'r' 'AB' 'tok' @('v2.1.24') $script:Loc -OnMismatch Skip)
+        $r[0].Ok | Should -BeTrue
+        $r[0].Text | Should -Match '^signiert \(nicht mit lokalem Stand abgeglichen, lokal ist Version 2\.1\.20'
+        $script:Published | Should -Be 1
+    }
+    It 'gleiche Version, anderer Inhalt, OnMismatch Skip: nicht signiert' {
+        Set-Content -LiteralPath (Join-Path $script:Loc 'Config\version.json') -Value '{"version":"2.1.24"}' -Encoding UTF8
+        $r = @(Invoke-HMReleaseSigning 'o' 'r' 'AB' 'tok' @('v2.1.24') $script:Loc -OnMismatch Skip)
+        $r[0].Ok | Should -BeFalse
+        $r[0].Text | Should -Match '^nicht signiert: weicht vom lokalen Stand'
+        $script:Published | Should -Be 0
+        (Get-HMSignResultLine $r[0]).Level | Should -Be 'Info'
     }
 }
