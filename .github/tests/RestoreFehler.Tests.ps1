@@ -119,6 +119,9 @@ Describe 'Restore mit Fehler-Modulen: Backup aus Start-HMBackup (Robocopy ersetz
         Mock Dismount-HMHive { }
         Mock Set-HMBackupFolderAcl { [pscustomobject]@{ Ok = $true; Who = @('Test'); Extra = @(); Notes = @(); Unchanged = $true; Skipped = $false; Error = '' } }
         Mock Update-HMCatalogStats { 0 }
+        # nichts Echtes anfassen, auch nicht als Administrator auf dem Runner: Benutzer-Registry und ProgramData\HUMig
+        Mock Mount-HMHive { $false }
+        Mock Protect-HMDataDir { }
         # Ordner A: Robocopy kopiert eine Datei und meldet 2 gescheiterte; Ordner B: alle Dateien gescheitert, nichts kopiert
         Mock Invoke-HMRobocopy {
             $part = ("$Source" -like '*\A')
@@ -161,6 +164,29 @@ Describe 'Restore mit Fehler-Modulen: Backup aus Start-HMBackup (Robocopy ersetz
         [System.IO.File]::WriteAllText((Join-Path $p 'X\A\a.txt'), 'x')
         Test-HMBackupModuleHasData $m $p | Should -BeTrue
     }
+    It 'Ordnerpruefung: Zeitgrenze zaehlt als mit Daten, Verknuepfungen werden nicht verfolgt' {
+        $p = New-TDir 'viele'
+        for ($i = 0; $i -lt 300; $i++) { [void][System.IO.Directory]::CreateDirectory((Join-Path $p ("a\b{0:D3}" -f $i))) }
+        Test-HMDirHasFile $p 60000 | Should -BeFalse
+        Test-HMDirHasFile $p 1 | Should -BeTrue
+        Test-HMDirHasFile (Join-Path $p 'gibtsnicht') 1000 | Should -BeFalse
+        $z = New-TDir 'ziel'; [System.IO.File]::WriteAllText((Join-Path $z 'x.txt'), 'x')
+        $null = & cmd.exe /c mklink /J (Join-Path $p 'a\link') $z
+        if (Test-Path -LiteralPath (Join-Path $p 'a\link\x.txt')) { Test-HMDirHasFile $p 60000 | Should -BeFalse }
+    }
+    It 'Zwischenspeicher je Backup: gleiche manifest.json = gleiches Ergebnis ohne neue Ordnerpruefung, geaenderte = neu; geplante Laeufe ohne Ordnerpruefung' {
+        $p = New-TBackup 'Error' @(New-TModRes 'Daten' 'Error' @(New-TItem 'A' 'Error' 300 'alle gescheitert'))
+        @((Read-HMBackupInfo -Path $p -Modules @()).Modules).Count | Should -Be 0
+        New-Item -ItemType Directory -Path (Join-Path $p 'Daten\A') -Force | Out-Null; [System.IO.File]::WriteAllText((Join-Path $p 'Daten\A\a.txt'), 'x')
+        @((Read-HMBackupInfo -Path $p -Modules @()).Modules).Count | Should -Be 0
+        $mf = Join-Path $p 'manifest.json'; (Get-Item $mf).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(1)
+        @((Read-HMBackupInfo -Path $p -Modules @()).Modules) | Should -Be @('Daten')
+        $q = New-TBackup 'Error' @(New-TModRes 'Daten' 'Error' @(New-TItem 'A' 'Error' 300 'alle gescheitert'))
+        @((Read-HMBackupInfo -Path $q -Modules @() -NoFileCheck).Modules) | Should -Be @('Daten')
+        $bt = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Backup-Task.ps1')
+        ([regex]::Matches($bt, 'Get-HMBackupList -Root \$targetRoot -Modules \$script:Modules -NoFileCheck')).Count | Should -Be 2
+        ([regex]::Matches($bt, 'Get-HMBackupList ')).Count | Should -Be 2
+    }
 }
 
 Describe 'Restore mit Fehler-Modulen: Hinweis, Rueckfrage und Protokoll' {
@@ -201,11 +227,19 @@ Describe 'Restore mit Fehler-Modulen: Hinweis, Rueckfrage und Protokoll' {
         $o | Should -Not -Match 'Gewaehlte Module'
         Get-HMRestoreIncompleteText 'Cancelled' @() | Should -Match 'ABGEBROCHEN beendet'
     }
-    It 'Rueckfrage: Backup OK, aber gewaehltes Modul aus einem frueheren Lauf mit Fehlern - Rueckfrage ohne falsche Aussage zum Backup' {
-        $t = Get-HMRestoreIncompleteText 'OK' @('Daten')
-        $t | Should -Match 'Gewaehlte Module sind mit FEHLERN gesichert'
-        $t | Should -Match 'Gewaehlte Module mit Fehlern: Daten'
-        $t | Should -Not -Match 'beendet worden'
+    It 'Rueckfrage: Backup OK oder Warnung mit einem uebernommenen Fehler-Modul - sichtbar und markiert, aber keine Rueckfrage (kein zusaetzlicher Klick)' {
+        $prev = New-TModRes 'Daten' 'Error' @((New-TItem 'A' 'OK' 5), (New-TItem 'B' 'Error' 5 $script:Fail2))
+        $prev | Add-Member -NotePropertyName FromPrevious -NotePropertyValue '2026-11-01 10:00:00'
+        $p = New-TBackup 'OK' @((New-TModRes 'Profile' 'OK' @(New-TItem 'Dokumente' 'OK' 500)), $prev) @('Profile', 'Daten')
+        $i = Read-HMBackupInfo -Path $p -Modules @()
+        @($i.Modules) | Should -Be @('Profile', 'Daten')
+        @($i.ErrorModules) | Should -Be @('Daten')
+        Get-HMModuleErrorHint @($i.Manifest.Modules | Where-Object { $_.Id -eq 'Daten' })[0] | Should -Match 'frueheren Lauf'
+        $bad = @(Get-HMRestoreErrorModuleNames $i.Manifest @([pscustomobject]@{ Id = 'Daten' }))
+        $bad | Should -Be @('Modul Daten')
+        Get-HMRestoreIncompleteText 'OK' $bad | Should -Be ''
+        Get-HMRestoreIncompleteText 'Warning' $bad | Should -Be ''
+        Get-HMRestoreIncompleteText 'Running' $bad | Should -Be ''
     }
     It 'Restore-Knopf: eine Rueckfrage aus Get-HMRestoreIncompleteText, gewaehlte Module aus Get-HMRestoreErrorModuleNames' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'HUMig.ps1'), [ref]$null, [ref]$null)
@@ -236,8 +270,9 @@ Describe 'Restore mit Fehler-Modulen: Ablauf und Status' {
                           [pscustomobject]@{ Id = 'Profile'; Name = 'Profil'; Scope = 'Computer'; Items = @([pscustomobject]@{ Name = 'Info'; Type = 'Builtin'; Handler = 'Info' }) })
         $script:TMan = [pscustomobject]@{ Status = 'Error'; Modules = @(([pscustomobject]@{ Id = 'Daten'; Name = 'Daten'; Status = 'Error'; Bytes = 5; Items = @() }), ([pscustomobject]@{ Id = 'Profile'; Name = 'Profil'; Status = 'OK'; Bytes = 5; Items = @() })) }
     }
-    It 'Restore eines Fehler-Moduls laeuft durch: Erfolg bleibt Erfolg, Protokoll nennt das Modul' {
+    It 'Restore eines Fehler-Moduls laeuft durch: Erfolg bleibt Erfolg, Protokoll, Bericht und Ergebnis nennen das Modul' {
         Mock Restore-HMBuiltin { [pscustomobject]@{ Name = 'Info'; Status = 'OK'; Msg = 'ok' } }
+        Mock New-HMReport { $script:RepNotes = @($Notes); 'bericht.html' }
         $ctx = New-TRestoreCtx $script:TMods $script:TMan
         $j = New-TJob
         Start-HMRestore -Ctx $ctx -Job $j
@@ -245,6 +280,29 @@ Describe 'Restore mit Fehler-Modulen: Ablauf und Status' {
         @($j.Result.Modules | Where-Object { $_.Id -eq 'Daten' })[0].Status | Should -Be 'OK'
         (Get-TLog $j) | Should -Match 'Im Backup mit Fehlern gesichert: Daten - was beim Backup nicht gesichert wurde, fehlt auch nach dem Restore'
         (Get-TLog $j) | Should -Not -Match 'Fehlern gesichert: .*Profil'
+        @($script:RepNotes | Where-Object { $_ -match '^Im Backup mit Fehlern gesichert: Daten - was beim Backup nicht gesichert wurde, fehlt auch am Ziel' }).Count | Should -Be 1
+        @($j.Result.ErrorModules) | Should -Be @('Daten')
+    }
+    It 'Backup OK mit uebernommenem Fehler-Modul: Restore OK, Hinweis im Bericht' {
+        Mock Restore-HMBuiltin { [pscustomobject]@{ Name = 'Info'; Status = 'OK'; Msg = 'ok' } }
+        Mock New-HMReport { $script:RepNotes = @($Notes); 'bericht.html' }
+        $man = [pscustomobject]@{ Status = 'OK'; Modules = @(([pscustomobject]@{ Id = 'Daten'; Name = 'Daten'; Status = 'Error'; Bytes = 5; FromPrevious = '2026-11-01'; Items = @() }), ([pscustomobject]@{ Id = 'Profile'; Name = 'Profil'; Status = 'OK'; Bytes = 5; Items = @() })) }
+        $ctx = New-TRestoreCtx $script:TMods $man
+        $j = New-TJob
+        Start-HMRestore -Ctx $ctx -Job $j
+        $j.Result.Status | Should -Be 'OK'
+        ($script:RepNotes -join ' ') | Should -Match 'Im Backup mit Fehlern gesichert: Daten'
+    }
+    It 'Fehler-Modul mit ausgelassenen Admin-Teilen: weder Protokoll noch Bericht nennen es' {
+        Mock Restore-HMBuiltin { [pscustomobject]@{ Name = 'Info'; Status = 'OK'; Msg = 'ok' } }
+        Mock New-HMReport { $script:RepNotes = @($Notes); 'bericht.html' }
+        $ctx = New-TRestoreCtx $script:TMods $script:TMan
+        $ctx.SkipUntrustedMachine = @('Daten')
+        $j = New-TJob
+        Start-HMRestore -Ctx $ctx -Job $j
+        (Get-TLog $j) | Should -Not -Match 'mit Fehlern gesichert'
+        ($script:RepNotes -join ' ') | Should -Not -Match 'mit Fehlern gesichert'
+        @($j.Result.ErrorModules).Count | Should -Be 0
     }
     It 'Fehler beim Restore des Fehler-Moduls bleibt Fehler' {
         Mock Restore-HMBuiltin { [pscustomobject]@{ Name = 'Info'; Status = $(if ($Module.Id -eq 'Daten') { 'Error' } else { 'OK' }); Msg = 'x' } }
@@ -262,6 +320,7 @@ Describe 'Restore mit Fehler-Modulen: Ablauf und Status' {
         Start-HMRestore -Ctx $ctx -Job $j
         $j.Result.Status | Should -Be 'OK'
         (Get-TLog $j) | Should -Not -Match 'mit Fehlern gesichert'
+        @($j.Result.ErrorModules).Count | Should -Be 0
     }
 }
 

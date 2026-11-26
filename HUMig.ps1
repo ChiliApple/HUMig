@@ -2406,13 +2406,13 @@ $ui.btnRestore.Add_Click({
     $xt = Get-HMExtraTargetsText $b; if ($xt -and @($mods | Where-Object { $_.Id -eq 'ExtraFolders' }).Count) { $msg += "`n`nZusaetzliche Ordner:`n$xt" }
     if ($p.Loaded) { $msg += "`n`nDer Benutzer ist angemeldet: offene Programme schliessen, Einstellungen wirken nach Neuanmeldung." }
     if (-not (Confirm-Action ($msg + "`n`nStarten?") 'Restore')) { return }
-    # Backup mit Fehlern (nicht alles gesichert), abgebrochen oder gewaehlte Module mit Fehlern gesichert: ausdruecklich bestaetigen
+    # Backup mit Fehlern (nicht alles gesichert) oder abgebrochen: ausdruecklich bestaetigen, mit den gewaehlten Modulen mit Fehlern
     $bst = "$(if ($b.Manifest) { $b.Manifest.Status })"
     $bad = @(if ($b.Manifest) { Get-HMRestoreErrorModuleNames $b.Manifest $mods })
     $wm = Get-HMRestoreIncompleteText $bst $bad
     if ($wm) {
-        if ("$((Show-HMDialogBox -Owner $script:Window -Text $wm -Title 'Restore aus unvollstaendigem Backup' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { Out-Console 'Restore abgebrochen (Backup unvollstaendig).' 'Warning'; return }
-        Out-Console $(if ($bst -in @('Error', 'Cancelled')) { "Restore aus unvollstaendigem Backup ($bst) bestaetigt." } else { "Restore von Modulen mit Fehlern im Backup bestaetigt: $($bad -join ', ')" }) 'Warning'
+        if ("$((Show-HMDialogBox -Owner $script:Window -Text $wm -Title 'Restore aus unvollstaendigem Backup' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { Out-Console "Restore abgebrochen (Backup $(if ($bst -eq 'Cancelled') { 'abgebrochen' } else { 'mit Fehlern' }), nicht vollstaendig)." 'Warning'; return }
+        Out-Console "Restore aus unvollstaendigem Backup ($bst) bestaetigt." 'Warning'
     }
     $ctx = New-HMRestoreCtx
     if (-not $ctx) { return }
@@ -2441,6 +2441,7 @@ function Start-RestoreJob([hashtable]$Ctx) {
         if ($j.Result -and $j.Result.Report) { Out-Console "Protokoll: $($j.Result.Report)  (Knopf 'Bericht')" 'Info' }
         Connect-Target
         if ($script:Settings.OverviewAuto -ne $false) { Update-HMBackupOverview -Quiet }
+        if ($j.Result -and @($j.Result.ErrorModules | Where-Object { $_ }).Count) { Out-Console "Im Backup mit Fehlern gesichert: $(@($j.Result.ErrorModules) -join ', ') - was beim Backup nicht gesichert wurde, fehlt auch am Ziel (Hinweis im Bericht)" 'Warning' }
         if ($j.Result -and [int]$j.Result.MissingFiles -gt 0) { Out-Console "Kontrolle nach dem Restore: $([int]$j.Result.MissingFiles) Datei(en) aus dem Backup fehlen am Ziel - Liste: $($j.Result.MissingList)" 'Warning' }
         try { Update-HMWizardAfterJob 'Restore' $j } catch { }
         $skNames = @(@($script:RestoreSkippedApps) | Where-Object { $_ } | ForEach-Object { "$($_.Name)" })

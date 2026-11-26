@@ -1603,9 +1603,32 @@ function Test-HMBackupModuleHasData($Module, [string]$BackupPath = '') {
     $saved = ([long]::TryParse("$($Module.Bytes)", [ref]$by) -and $by -gt 0) -or
         (@(@($Module.Items) | Where-Object { $_ -and "$($_.Name)" -ne 'Hinweis' -and "$($_.Status)" -eq 'OK' }).Count -gt 0)
     if (-not $saved -or -not $BackupPath) { return [bool]$saved }
-    $d = Join-Path $BackupPath "$($Module.Id)"
-    return [bool](@(Get-ChildItem -LiteralPath $d -Recurse -File -Force -ErrorAction SilentlyContinue | Select-Object -First 1).Count)
+    return (Test-HMDirHasFile (Join-Path $BackupPath "$($Module.Id)"))
 }
+# Liegt unter einem Ordner mindestens eine Datei? Eigene Aufzaehlung mit Zeitgrenze (Freigabe ueber VPN mit tausenden leeren
+# Ordnern dauert sonst Minuten). Zeit abgelaufen = $true ("mit Daten": der Restore meldet fehlende Eintraege als "nicht im Backup").
+# Verknuepfungen (Junction/Symlink) werden nicht verfolgt, nicht lesbare Ordner uebersprungen.
+function Test-HMDirHasFile([string]$Dir, [int]$TimeoutMs = 2000) {
+    if (-not $Dir -or -not [System.IO.Directory]::Exists($Dir)) { return $false }
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $todo = New-Object System.Collections.Generic.Stack[string]
+    $todo.Push($Dir)
+    while ($todo.Count) {
+        if ($sw.ElapsedMilliseconds -ge $TimeoutMs) { return $true }
+        $d = $todo.Pop()
+        try {
+            # eine Aufzaehlung je Ordner (Dateien und Unterordner zusammen)
+            foreach ($e in [System.IO.DirectoryInfo]::new($d).EnumerateFileSystemInfos()) {
+                $a = $e.Attributes
+                if (($a -band [System.IO.FileAttributes]::Directory) -eq 0) { return $true }
+                if (($a -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) { $todo.Push($e.FullName) }
+            }
+        } catch { }
+    }
+    return $false
+}
+# Zwischenspeicher fuer die waehlbaren Module je Backup (Laufzeit der App): Schluessel Pfad, Groesse und Aenderungszeit der manifest.json
+$script:HMBackupModuleSetCache = @{}
 # Module eines Manifests fuer den Restore: Modules = waehlbar, ErrorModules = davon mit Fehlern gesichert (Markierung, Rueckfrage)
 function Get-HMBackupModuleSets($Manifest, [string]$BackupPath = '') {
     $ids = @(); $err = @()
@@ -1638,14 +1661,21 @@ function Get-HMRestoreErrorModuleNames($Manifest, [object[]]$Modules) {
 }
 
 # Liest ein Backup (neu: manifest.json, alt: Ordnerstruktur der Vorgaengerversion)
+# -NoFileCheck: ohne Blick in die Modulordner (nur Manifest), fuer Aufrufer, die Modules nicht brauchen (geplante Laeufe)
 function Read-HMBackupInfo {
-    param([string]$Path, [object[]]$Modules)
+    param([string]$Path, [object[]]$Modules, [switch]$NoFileCheck)
     $mf = Join-Path $Path 'manifest.json'
     if (Test-Path -LiteralPath $mf) {
         try {
             $m = Get-Content -LiteralPath $mf -Raw -Encoding UTF8 | ConvertFrom-Json
             # waehlbar: Module mit OK/Warning und mit Fehlern gesicherte, von denen Daten im Backup liegen (Get-HMBackupModuleSets)
-            $set = Get-HMBackupModuleSets $m $Path
+            if ($NoFileCheck) { $set = Get-HMBackupModuleSets $m }
+            else {
+                $fi = Get-Item -LiteralPath $mf -Force
+                $ck = '{0}|{1}|{2}' -f $Path.ToUpperInvariant(), $fi.Length, $fi.LastWriteTimeUtc.Ticks
+                if ($script:HMBackupModuleSetCache.ContainsKey($ck)) { $set = $script:HMBackupModuleSetCache[$ck] }
+                else { $set = Get-HMBackupModuleSets $m $Path; $script:HMBackupModuleSetCache[$ck] = $set }
+            }
             return [pscustomobject]@{ Path = $Path; Name = (Split-Path $Path -Leaf); Legacy = $false; Created = $m.Created
                 Computer = $m.SourceComputer; User = $m.UserName; Account = $m.Account; Sid = $m.UserSid; ProfilePath = $m.ProfilePath
                 Modules = @($set.Modules); ErrorModules = @($set.ErrorModules); SizeBytes = [long]$m.SizeBytes; Status = $m.Status; Manifest = $m; Archived = (Test-HMBackupArchived $Path) }
@@ -1677,11 +1707,11 @@ function Read-HMBackupInfo {
 }
 
 function Get-HMBackupList {
-    param([string]$Root, [object[]]$Modules)
+    param([string]$Root, [object[]]$Modules, [switch]$NoFileCheck)
     if (-not (Test-Path -LiteralPath $Root)) { return @() }
     $list = foreach ($d in @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue)) {
         if (($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }   # Verknuepfungen nie als Backup behandeln
-        $i = Read-HMBackupInfo -Path $d.FullName -Modules $Modules
+        $i = Read-HMBackupInfo -Path $d.FullName -Modules $Modules -NoFileCheck:$NoFileCheck
         if ($i) { $i }
     }
     return @($list | Sort-Object { $_.Name } -Descending)
@@ -5053,8 +5083,7 @@ function Start-HMRestore {
     if ($Ctx.Backup.Legacy) { Write-HMLog $Job 'Backup der Vorgaengerversion erkannt (ohne manifest.json)' 'Info' }
     $skipApps = @(@($Ctx.SkippedApps) | Where-Object { $_ } | ForEach-Object { "$($_.Name)" })
     if ($skipApps.Count) { Write-HMLog $Job "Programm-Einstellungen ausgelassen (Programm am Ziel nicht installiert): $($skipApps -join ', ') - nach der Installation Restore nur mit diesen Modulen wiederholen" 'Warning' }
-    $errMods = @(); try { if ($Ctx.Backup.Manifest) { $errMods = @(Get-HMRestoreErrorModuleNames $Ctx.Backup.Manifest $Ctx.Modules) } } catch { }
-    if ($errMods.Count) { Write-HMLog $Job "Im Backup mit Fehlern gesichert: $($errMods -join ', ') - was beim Backup nicht gesichert wurde, fehlt auch nach dem Restore (Details: Bericht_Backup.html im Backup-Ordner)" 'Warning' }
+    $errMods = @()   # im Backup mit Fehlern gesicherte Module, die zurueckgespielt werden (vor der Modulschleife gesetzt)
     if ($Ctx.Options.VerifyAfter) { Write-HMLog $Job 'Nach jedem Ordner wird kontrolliert, ob alle Dateien aus dem Backup am Ziel liegen' 'Debug' }
 
     $shareRoot = $null
@@ -5102,6 +5131,10 @@ function Start-HMRestore {
         }
         $tenv = Get-HMTargetEnv $Ctx $Ctx.UserSid $Ctx.ProfilePath
 
+        # Module, die im Backup mit Fehlern gesichert sind und wirklich zurueckgespielt werden: ohne nicht bestaetigte Admin-Teile
+        # und ohne Benutzer-Module, die mangels Profil schon ausgelassen sind (Protokoll, Hinweis im Bericht, Konsole)
+        try { if ($Ctx.Backup.Manifest) { $errMods = @(Get-HMRestoreErrorModuleNames $Ctx.Backup.Manifest @($Ctx.Modules | Where-Object { $_ -and @($Ctx.SkipUntrustedMachine) -notcontains "$($_.Id)" })) } } catch { $errMods = @() }
+        if ($errMods.Count) { Write-HMLog $Job "Im Backup mit Fehlern gesichert: $($errMods -join ', ') - was beim Backup nicht gesichert wurde, fehlt auch nach dem Restore (Details: Bericht_Backup.html im Backup-Ordner)" 'Warning' }
         $mods = @($Ctx.Modules | Where-Object { $_.Id -ne 'Usmt' })
         $total = @($mods | ForEach-Object { @($_.Items).Count } | Measure-Object -Sum).Sum
         if (-not $total) { $total = 1 }
@@ -5226,10 +5259,11 @@ function Start-HMRestore {
     $notes = @('Benutzer ab- und wieder anmelden bzw. Neustart, damit alle Einstellungen wirken.')
     if ($Ctx.MissingAfter -and $Ctx.MissingAfter.Count) { $notes += "Kontrolle: $($Ctx.MissingAfter.Count) Datei(en) aus dem Backup fehlen am Ziel$(if ($missList) { " - Liste: $(Split-Path $missList -Leaf) im Backup-Ordner" })." }
     if (@($Ctx.VerifyFailed | Where-Object { $_ }).Count) { $notes += "Kontrolle bei $(@($Ctx.VerifyFailed | Where-Object { $_ }).Count) Ordner(n) nicht moeglich - dort ist nicht geprueft, ob alle Dateien am Ziel liegen." }
+    if ($errMods.Count) { $notes += "Im Backup mit Fehlern gesichert: $($errMods -join ', ') - was beim Backup nicht gesichert wurde, fehlt auch am Ziel (Details: Bericht_Backup.html im Backup-Ordner)." }
     if ($skipApps.Count) { $notes += "Programm-Einstellungen ausgelassen (Programm fehlt am Ziel): $($skipApps -join ', ') - Programm installieren, dann Restore nur mit diesen Programm-Modulen wiederholen." }
     if (@($Ctx.LogonActions).Count -and -not @($results | Where-Object { "$($_.Id)" -eq 'LogonActions' }).Count) { $notes += 'Einige Einstellungen werden bei der naechsten Anmeldung des Benutzers automatisch uebernommen (einmalige Aufgabe).' }
     $rep = New-HMReport -Ctx $Ctx -Kind Restore -OutFile (Join-Path $Ctx.Backup.Path ("Bericht_Restore_{0}_{1}.html" -f (ConvertTo-HMSafeName $Ctx.Computer), $start.ToString('yyyyMMdd_HHmm'))) -Modules $results -Facts $facts -Notes $notes -Status $st
-    $Job.Result = [pscustomobject]@{ Status = $st; Duration = $dur; Modules = $results; Report = $rep; MissingFiles = $(if ($Ctx.MissingAfter) { $Ctx.MissingAfter.Count } else { 0 }); MissingList = $missList }
+    $Job.Result = [pscustomobject]@{ Status = $st; Duration = $dur; Modules = $results; Report = $rep; MissingFiles = $(if ($Ctx.MissingAfter) { $Ctx.MissingAfter.Count } else { 0 }); MissingList = $missList; ErrorModules = @($errMods) }
 }
 
 # ============================================================================

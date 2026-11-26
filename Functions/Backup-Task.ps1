@@ -304,7 +304,7 @@ $ctx.BackupPath = Join-Path $targetRoot ('{0}_{1}_{2}' -f (Get-Date -Format 'yyy
 $mine = @()
 $archived = $null
 try {
-    $all = Get-HMBackupList -Root $targetRoot -Modules $script:Modules
+    $all = Get-HMBackupList -Root $targetRoot -Modules $script:Modules -NoFileCheck
     $mine = @(@($all) | Where-Object { $_ -and -not $_.Legacy -and "$($_.Sid)" -eq $sid -and ("$($_.Computer)" -ieq $env:COMPUTERNAME -or "$($_.Computer)".Split('.')[0] -ieq $env:COMPUTERNAME) } | Sort-Object Name -Descending)
     if ($mine.Count -and $mine[0].Archived) { $archived = $mine[0].Name }
 } catch { Write-TaskLog "Backup-Liste nicht lesbar: $($_.Exception.Message)" 'Warning' }
@@ -353,7 +353,7 @@ if ($ret -and [bool]$ret.Enabled -and $st -in @('OK', 'Warning')) {
     $keep = [int]$ret.Keep
     if ($keep -lt 1) { $keep = 1 }
     try {
-        $all = Get-HMBackupList -Root $targetRoot -Modules $script:Modules
+        $all = Get-HMBackupList -Root $targetRoot -Modules $script:Modules -NoFileCheck
         $mine = @(@($all) | Where-Object { $_ -and -not $_.Legacy -and "$($_.Sid)" -eq $sid -and ("$($_.Computer)" -ieq $env:COMPUTERNAME -or "$($_.Computer)".Split('.')[0] -ieq $env:COMPUTERNAME) })
         # Massenloeschung in diesem Lauf oder in einem Backup der letzten 14 Tage: alte Staende sind evtl. die einzigen sauberen
         $recentAlert = @($mine | Where-Object { $_.Manifest -and $_.Manifest.MassDeleteAlert -and ((Get-Date) - (Get-HMBackupDate $_)).TotalDays -le 14 }).Count
