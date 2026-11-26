@@ -255,7 +255,7 @@ Describe 'Oberflaeche: ausgeblendet statt gesperrt' {
         Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
         $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'HUMig.ps1'), [ref]$null, [ref]$null)
         function Get-ConsoleBrush { param($c) New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($c)) }
-        foreach ($n in 'Build-ModulePanel', 'Set-HMRestoreModulesForBackup', 'Get-CheckedModules', 'New-Brush') { . ([scriptblock]::Create(@($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true))[0].Extent.Text)) }
+        foreach ($n in 'Build-ModulePanel', 'Set-HMRestoreModulesForBackup', 'Set-HMRestoreCheckMark', 'Get-CheckedModules', 'New-Brush') { . ([scriptblock]::Create(@($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true))[0].Extent.Text)) }
         $script:UserMode = $false
         $script:Groups = @('Profil', 'Browser')
         $script:Modules = @([pscustomobject]@{ Id = 'Profile'; Name = 'Benutzerprofil'; Group = 'Profil'; Show = $true; Default = $true }, [pscustomobject]@{ Id = 'Edge'; Name = 'Edge'; Group = 'Browser'; Show = $true; Default = $true }, [pscustomobject]@{ Id = 'Chrome'; Name = 'Chrome'; Group = 'Browser'; Show = $true; Default = $true })

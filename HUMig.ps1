@@ -888,6 +888,7 @@ function Build-ModulePanel {
             $nt.Text = $m.Name; $nt.TextWrapping = 'Wrap'   # lange Modulnamen brechen um statt abgeschnitten zu werden
             $cb.Content = $nt; $cb.Tag = $m.Id; $cb.VerticalAlignment = 'Center'
             $cb.ToolTip = $(if ($m.Hint) { "$($m.Name)`n$($m.Hint)" } else { $m.Name })
+            $nt.Tag = [pscustomobject]@{ Name = "$($m.Name)"; Tip = $cb.ToolTip }   # Grundtext fuer die Markierung "mit Fehlern gesichert" (Set-HMRestoreCheckMark)
             $row = New-Object System.Windows.Controls.Grid
             $row.Width = 300; $row.Margin = [System.Windows.Thickness]::new(0, 1, 14, 1)
             $c0 = New-Object System.Windows.Controls.ColumnDefinition; $c0.Width = [System.Windows.GridLength]::new(1, 'Star')
@@ -915,13 +916,32 @@ function Build-ModulePanel {
 }
 # Restore: Module, die das markierte Backup nicht enthaelt, sind gesperrt (fuer die Auswahl) und ausgeblendet, leere Gruppen ebenso.
 # Aufbau wie Build-ModulePanel: Gruppe = Border > StackPanel (Ueberschrift, WrapPanel mit Zeilen), Zeile = Grid mit dem Haken.
+# Module, die mit Fehlern gesichert sind (Backup.ErrorModules), sind waehlbar und markiert: Zusatz im Text, Warnfarbe, Grund im Tooltip.
+# Ohne Hinweis: Grundtext, Grundfarbe und Grund-Tooltip (beim Wechsel auf ein anderes Backup).
+function Set-HMRestoreCheckMark($Check, [string]$Hint) {
+    $nt = $Check.Content
+    if (-not ($nt -is [System.Windows.Controls.TextBlock]) -or -not $nt.Tag) { return }
+    if ($Hint) {
+        $nt.Text = "$($nt.Tag.Name) (mit Fehlern gesichert)"
+        $nt.Foreground = New-Brush $(if ($script:StatusColors -and $script:StatusColors.Warning) { $script:StatusColors.Warning } else { '#FFFAB387' })
+        $Check.ToolTip = "$($nt.Tag.Tip)`n`n$Hint"
+    } else {
+        $nt.Text = "$($nt.Tag.Name)"
+        $nt.ClearValue([System.Windows.Controls.TextBlock]::ForegroundProperty)
+        $Check.ToolTip = $nt.Tag.Tip
+    }
+}
 # Rueckgabe: Zahl der ausgeblendeten Module
 function Set-HMRestoreModulesForBackup($Backup) {
     $absent = 0
+    $errIds = @(@($Backup.ErrorModules) | Where-Object { $_ } | ForEach-Object { "$_" })
     foreach ($k in @($script:RestoreChecks.Keys)) {
         $has = @($Backup.Modules) -contains $k
         $script:RestoreChecks[$k].IsEnabled = $has
         $script:RestoreChecks[$k].IsChecked = ($has -and $k -notin @('Info', 'Drivers', 'Tasks', 'PrintersFull'))
+        $hint = ''
+        if ($has -and $errIds -contains "$k") { $hint = Get-HMModuleErrorHint (@(@($Backup.Manifest.Modules) | Where-Object { $_ -and "$($_.Id)" -eq "$k" })[0]) }
+        Set-HMRestoreCheckMark $script:RestoreChecks[$k] $hint
         $rowEl = $script:RestoreChecks[$k].Parent
         if ($rowEl -is [System.Windows.UIElement]) { $rowEl.Visibility = $(if ($has) { 'Visible' } else { 'Collapsed' }) }
         if (-not $has) { $absent++ }
@@ -2386,13 +2406,12 @@ $ui.btnRestore.Add_Click({
     $xt = Get-HMExtraTargetsText $b; if ($xt -and @($mods | Where-Object { $_.Id -eq 'ExtraFolders' }).Count) { $msg += "`n`nZusaetzliche Ordner:`n$xt" }
     if ($p.Loaded) { $msg += "`n`nDer Benutzer ist angemeldet: offene Programme schliessen, Einstellungen wirken nach Neuanmeldung." }
     if (-not (Confirm-Action ($msg + "`n`nStarten?") 'Restore')) { return }
-    # Backup mit Fehlern (nicht alles gesichert) oder abgebrochen: ausdruecklich bestaetigen
+    # Backup mit Fehlern (nicht alles gesichert) oder abgebrochen: ausdruecklich bestaetigen, mit den gewaehlten Modulen mit Fehlern
     $bst = "$(if ($b.Manifest) { $b.Manifest.Status })"
-    if ($bst -in @('Error', 'Cancelled')) {
-        $bad = @(@($b.Manifest.Modules) | Where-Object { "$($_.Status)" -eq 'Error' -and ($mods | Where-Object Id -eq "$($_.Id)") } | ForEach-Object { "$($_.Name)" })
-        $wm = "ACHTUNG: Dieses Backup ist $(if ($bst -eq 'Error') { 'mit FEHLERN' } else { 'ABGEBROCHEN' }) beendet worden - es ist nicht vollstaendig.`n" +
-            "$(if ($bad.Count) { "Gewaehlte Module mit Fehlern: $($bad -join ', ')`n" })Details: Bericht_Backup.html im Backup-Ordner.`n`nTrotzdem wiederherstellen?"
-        if ("$((Show-HMDialogBox -Owner $script:Window -Text $wm -Title 'Restore aus unvollstaendigem Backup' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { Out-Console 'Restore abgebrochen (Backup unvollstaendig).' 'Warning'; return }
+    $bad = @(if ($b.Manifest) { Get-HMRestoreErrorModuleNames $b.Manifest $mods })
+    $wm = Get-HMRestoreIncompleteText $bst $bad
+    if ($wm) {
+        if ("$((Show-HMDialogBox -Owner $script:Window -Text $wm -Title 'Restore aus unvollstaendigem Backup' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') { Out-Console "Restore abgebrochen (Backup $(if ($bst -eq 'Cancelled') { 'abgebrochen' } else { 'mit Fehlern' }), nicht vollstaendig)." 'Warning'; return }
         Out-Console "Restore aus unvollstaendigem Backup ($bst) bestaetigt." 'Warning'
     }
     $ctx = New-HMRestoreCtx
@@ -2422,6 +2441,7 @@ function Start-RestoreJob([hashtable]$Ctx) {
         if ($j.Result -and $j.Result.Report) { Out-Console "Protokoll: $($j.Result.Report)  (Knopf 'Bericht')" 'Info' }
         Connect-Target
         if ($script:Settings.OverviewAuto -ne $false) { Update-HMBackupOverview -Quiet }
+        if ($j.Result -and @($j.Result.ErrorModules | Where-Object { $_ }).Count) { Out-Console "Im Backup mit Fehlern gesichert: $(@($j.Result.ErrorModules) -join ', ') - was beim Backup nicht gesichert wurde, fehlt auch am Ziel (Hinweis im Bericht)" 'Warning' }
         if ($j.Result -and [int]$j.Result.MissingFiles -gt 0) { Out-Console "Kontrolle nach dem Restore: $([int]$j.Result.MissingFiles) Datei(en) aus dem Backup fehlen am Ziel - Liste: $($j.Result.MissingList)" 'Warning' }
         try { Update-HMWizardAfterJob 'Restore' $j } catch { }
         $skNames = @(@($script:RestoreSkippedApps) | Where-Object { $_ } | ForEach-Object { "$($_.Name)" })
