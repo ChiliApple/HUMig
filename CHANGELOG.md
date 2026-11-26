@@ -10,7 +10,7 @@
 - **Neu laden:** Das Ergebnis der Prüfung der Modulordner merkt sich HUMig bis zum Knopf "Neu laden" im Reiter Restore, auch wenn eine langsame Freigabe die Prüfung abbrechen ließ. Das Fenster wartet dadurch nicht bei jedem Auffrischen der Liste. "Neu laden" prüft die Modulordner neu.
 - **Konsole:** Der Hinweis auf im Backup mit Fehlern gesicherte Module steht nur noch einmal in der Konsole, mit gleichem Wortlaut wie im Bericht.
 ### ✅ Qualität
-- **Tests:** PLATZHALTER
+- **Tests:** 837 bestanden.
 
 ## v2.1.32 - 2026-11-26
 ### 💾 Backup und Restore
