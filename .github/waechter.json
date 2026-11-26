@@ -1,0 +1,22 @@
+{
+  "_hinweis": "Waechter fuer fremde Werkzeuge von HUMig. Versionen von PowerShell 7 und WinGet-Modul aus Config/tools.json. Der Waechter aendert nichts, er meldet nur.",
+  "modul": "HUMig",
+  "werkzeugpaket": "Config/tools.json",
+  "eintraege": [
+    {
+      "id": "powershell7",
+      "neueste": { "art": "endoflife", "produkt": "powershell", "zweig": "7.6" },
+      "cpe": "cpe:2.3:a:microsoft:powershell",
+      "download": "https://github.com/PowerShell/PowerShell/releases/download/v{version}/PowerShell-{version}-win-x64.zip"
+    },
+    {
+      "id": "winget-modul",
+      "neueste": { "art": "github", "repo": "microsoft/winget-cli" }
+    },
+    {
+      "id": "actions-checkout",
+      "version": "4.4.0",
+      "neueste": { "art": "github", "repo": "actions/checkout" }
+    }
+  ]
+}

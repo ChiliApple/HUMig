@@ -1,5 +1,46 @@
 ﻿# Changelog
 
+## v2.1.31 - 2026-11-26
+### 🧰 Fremde Werkzeuge
+- **Feste Versionen:** HUMig lädt PowerShell 7 und das WinGet-Modul nur noch in genau der Version, die mit dem Release geprüft wurde, nie mehr die jeweils neueste.
+  - PowerShell 7.6.10 (LTS) für das Lesen als SYSTEM und den Zeitplan, mit Prüfsumme (SHA256).
+  - WinGet-Modul (Microsoft.WinGet.Client) 1.29.380, vor dem Laden werden die Signaturen geprüft. Veränderte oder unsignierte Dateien werden erkannt.
+  - Neue Versionen kommen nur mit einem neuen Release von HUMig.
+- **PowerShell 7 am Ziel-PC:** Eine ältere eigene Kopie von HUMig wird beim nächsten Lesen oder Zeitplan-Anlegen ohne Rückfrage durch die feste Version ersetzt.
+  - Scheitert Download, Prüfsumme oder Tausch, bleibt die vorhandene Kopie und der Lauf geht mit ihr weiter (Hinweis im Protokoll). Der nächste Versuch folgt frühestens nach 24 Stunden, damit Suchen und Zeitplan nicht jedes Mal laden.
+  - Läuft die Kopie gerade (z. B. der Zeitplan), wird sie erst bei einem späteren Lauf ersetzt.
+  - Ein vom Administrator installiertes PowerShell 7 (MSI) wird verwendet und nie verändert.
+- **WinGet-Modul:** Die feste Version wird neben einer vorhandenen anderen installiert und geladen.
+  - Lässt sich die Signatur nicht prüfen (z. B. fehlende Stammzertifikate, PC ohne Netz), wird das Modul wie bisher geladen, mit Hinweis im Protokoll.
+  - Ist eine Moduldatei eindeutig verändert, lädt HUMig die feste Version einmal frisch, prüft sie und tauscht sie gegen die veränderte. Die bisherige Fassung bleibt unverändert unter "Programme\WindowsPowerShell\HUMig-Modulreparatur\alt" liegen.
+  - Hilft das nicht, nimmt HUMig eine vorhandene andere Version. Gibt es keine, meldet HUMig den Modulordner und was zu tun ist.
+  - Scheitert die Installation der festen Version und ist eine andere da, versucht HUMig es erst nach 24 Stunden wieder. Gelöscht wird nichts.
+  - Hinweise zum Modul (Signatur nicht prüfbar, andere Version wird verwendet) stehen im Status der App-Updates und nach "Quelle hinzufügen" bzw. "Quelle entfernen" in der Konsole.
+- **Zeitplan:** Der Zeitplan am Ziel-PC lädt nie selbst etwas nach. Welche Modulversion er nimmt, legt HUMig beim Anlegen des Zeitplans fest.
+- **USMT-Version:** Einstellungen, Backup-Bericht und Restore-Bericht zeigen die Version des verwendeten USMT.
+### ⚠️ Nach dem Update
+- **Ziel-PCs mit eigener PowerShell 7 von HUMig:** Beim nächsten "Updates suchen", das als SYSTEM liest, oder beim nächsten Anlegen eines Zeitplans wird die Kopie auf 7.6.10 gebracht (einmaliger Download je PC). Eine neuere Kopie und eine Kopie mit nicht lesbarer Version bleiben unverändert.
+- **WinGet-Modul:** Am HUMig-PC und an den Ziel-PCs wird 1.29.380 zusätzlich installiert, sobald "WinGet einrichten", "Updates suchen" oder "Zeitplan anlegen" läuft. Vorhandene Versionen bleiben. "Updates suchen" dauert durch die Signaturprüfung etwa 1 Sekunde länger.
+- **Bestehende Zeitpläne** laufen weiter und laden das Modul wie bisher nach Namen, also die höchste installierte Version ohne Prüfung der Signatur. Erst ein neu angelegter Zeitplan nimmt die feste, geprüfte Version. Empfehlung: Zeitpläne nach dem Update einmal neu anlegen.
+- **App Installer (WinGet):** bleibt bewusst ohne feste Version. Er wird nur repariert, wenn WinGet fehlt oder nicht läuft, und dann in der Fassung von Microsoft geladen.
+### 🚧 Grenzen
+- Der NuGet-Anbieter (Voraussetzung für die Installation des Moduls) wird weiter mit Mindestversion von Microsoft geladen.
+- Die Prüfung stützt sich auf die Stammzertifikate des PCs. Fehlen sie, gilt die Signatur als nicht prüfbar und das Modul wird wie bisher geladen.
+- Die Prüfung erkennt veränderte und unsignierte Dateien. Den Herausgeber der mitgelieferten fremden Bibliotheken (z. B. Newtonsoft.Json) beweist sie nicht: dort zählt nur eine gültige Signatur, egal von wem.
+- Geprüft werden nur Dateitypen, die eine Signatur tragen können (Moduldateien, DLLs, Kataloge), keine Hilfe- und Textdateien.
+- Ist das WinGet-Modul gesperrt (veränderte feste Version, keine andere), endet "Aktualisieren" für Programme, die nur für einen Benutzer installiert sind, mit der allgemeinen Meldung des Workers, ohne den Ordner und die Abhilfe.
+### ✅ Qualität
+- **Tests:** 801 bestanden.
+
+## v2.1.30 - 2026-11-26
+### 📖 Hilfe
+- **Neue Bilder:** Die Bilder in Anleitung, Funktionsübersicht und README zeigen die aktuelle Oberfläche mit allen sechs Reitern und die aktuelle Handy-Ansicht, mit Beispieldaten.
+- **Werkzeuge nach Ziel:** Die Anleitung gliedert die Werkzeuge wie die App nach gewähltem PC, mehreren PCs, gewähltem Benutzer, Diagnose, Software und Treiber und ohne Ziel-PC.
+- **Begriffe wie in der App:** "Neu laden", "Bericht", "Fortlaufendes Backup", "Abbrechen: <Vorgang>" und die Knöpfe der Rückfragen heißen in der Hilfe wie in der Oberfläche.
+- **Neue Abläufe beschrieben:** Anzeige "verbunden mit", Rückfrage bei anderem PC im Feld, Ergebnis in der Statuszeile, Prüfungen beim Update, Signieren mit Abgleich und Zugriffsprotokoll der Fernbedienung.
+- **Nur, was die App tut:** Texte zu Vorschau, Vorab-Prüfung, Umzugs-Assistent, Backup mit Fehlern und Erstinstallation sind auf das gekürzt, was die App wirklich macht.
+- **Verweise repariert:** Doppelte Sprungmarken in der Anleitung zeigen jetzt auf die richtige Stelle.
+
 ## v2.1.29 - 2026-11-26
 ### 🔐 Rechte
 - **Meldungen der Ordnerrechte-Prüfung erscheinen wieder:** Was die Prüfung des Programmordners beim Start feststellt, steht jetzt in der Konsole, zum Beispiel dass HUMig in einem Benutzerprofil liegt oder dass die Prüfung abgeschaltet ist.

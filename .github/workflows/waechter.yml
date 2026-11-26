@@ -1,0 +1,22 @@
+# Vorlage fuer ein Modul: als .github/workflows/waechter.yml ins Modul-Repository kopieren, sonst nichts aendern.
+# Dazu im Modul nur .github/waechter.json (Liste der Werkzeuge und Bibliotheken, Aufbau siehe LIESMICH.md).
+# Optional im Modul-Repository als Secret: TEAMS_WEBHOOK (Teams-Nachricht bei geaenderten Befunden), NVD_API_KEY.
+name: Waechter
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: waechter
+  cancel-in-progress: false
+
+jobs:
+  waechter:
+    uses: ChiliApple/HU-Amt/.github/workflows/waechter.yml@main
+    secrets: inherit

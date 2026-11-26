@@ -77,7 +77,7 @@ function Get-HMUsmtLabel([string]$Path) {
     $p = "$Path".Trim().TrimEnd('\')
     if ($p -and -not (Test-Path -LiteralPath $p)) { return "ACHTUNG: eingetragener Ordner existiert nicht ($p)$(if ($u) { " - verwendet wird: $u" } else { ' - USMT nicht gefunden' })" }
     if ($p -and $u -and -not "$u".StartsWith($p, [StringComparison]::OrdinalIgnoreCase)) { return "ACHTUNG: im eingetragenen Ordner liegt keine scanstate.exe - verwendet wird: $u (Feld leeren = automatisch suchen)" }
-    if ($u) { return "gefunden: $u" }
+    if ($u) { $v = Get-HMUsmtVersion $u; return "gefunden: $u$(if ($v) { " (Version $v)" })" }
     return 'USMT nicht gefunden - nur fuer das Modul Windows-Einstellungen noetig (Windows ADK bzw. BIN\USMT\amd64)'
 }
 

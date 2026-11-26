@@ -1,0 +1,27 @@
+{
+  "_hinweis": "Feste Versionen fremder Werkzeuge. HUMig laedt nur genau diese Fassungen und prueft die Pruefsumme bzw. Signatur. Neue Versionen kommen nur mit einem getesteten Release. Der Waechter (.github/waechter.json) meldet neue Versionen und Luecken, er aendert nichts.",
+  "dateien": [
+    {
+      "id": "powershell7",
+      "version": "7.6.10",
+      "pakete": {
+        "x64": {
+          "datei": "PowerShell-7.6.10-win-x64.zip",
+          "url": "https://github.com/PowerShell/PowerShell/releases/download/v7.6.10/PowerShell-7.6.10-win-x64.zip",
+          "sha256": "7d871531806eb1646264e4bbabd9f0c30c23355591bc756bb9909448c29ae166"
+        },
+        "arm64": {
+          "datei": "PowerShell-7.6.10-win-arm64.zip",
+          "url": "https://github.com/PowerShell/PowerShell/releases/download/v7.6.10/PowerShell-7.6.10-win-arm64.zip",
+          "sha256": "1d36ecac1d8f5ac9577cfdfc426af41f3e90cbca6c52445e7db167f532b3a7ab"
+        }
+      }
+    },
+    {
+      "id": "winget-modul",
+      "version": "1.29.380",
+      "name": "Microsoft.WinGet.Client",
+      "herausgeber": ", O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+    }
+  ]
+}
