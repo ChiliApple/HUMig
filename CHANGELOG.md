@@ -28,7 +28,6 @@
 - Die Prüfung stützt sich auf die Stammzertifikate des PCs. Fehlen sie, gilt die Signatur als nicht prüfbar und das Modul wird wie bisher geladen.
 - Die Prüfung erkennt veränderte und unsignierte Dateien. Den Herausgeber der mitgelieferten fremden Bibliotheken (z. B. Newtonsoft.Json) beweist sie nicht: dort zählt nur eine gültige Signatur, egal von wem.
 - Geprüft werden nur Dateitypen, die eine Signatur tragen können (Moduldateien, DLLs, Kataloge), keine Hilfe- und Textdateien.
-- Der Wächter-Workflow hängt am Branch main des Kerns von HU-Amt. Änderungen daran gehören in die Vorlage dort.
 - Ist das WinGet-Modul gesperrt (veränderte feste Version, keine andere), endet "Aktualisieren" für Programme, die nur für einen Benutzer installiert sind, mit der allgemeinen Meldung des Workers, ohne den Ordner und die Abhilfe.
 ### ✅ Qualität
 - **Tests:** PLATZHALTER
