@@ -882,10 +882,10 @@ function Build-ModulePanel {
         [void]$sp.Children.Add($h)
         $wp = New-Object System.Windows.Controls.WrapPanel
         foreach ($m in $mods) {
-            # Zeile: Checkbox (Name gekuerzt mit ...) | Groesse rechtsbuendig, Abstand zur naechsten Spalte
+            # Zeile: Checkbox (Name umbrechend) | Groesse rechtsbuendig, Abstand zur naechsten Spalte
             $cb = New-Object System.Windows.Controls.CheckBox
             $nt = New-Object System.Windows.Controls.TextBlock
-            $nt.Text = $m.Name; $nt.TextTrimming = 'CharacterEllipsis'
+            $nt.Text = $m.Name; $nt.TextWrapping = 'Wrap'   # lange Modulnamen brechen um statt abgeschnitten zu werden
             $cb.Content = $nt; $cb.Tag = $m.Id; $cb.VerticalAlignment = 'Center'
             $cb.ToolTip = $(if ($m.Hint) { "$($m.Name)`n$($m.Hint)" } else { $m.Name })
             $row = New-Object System.Windows.Controls.Grid

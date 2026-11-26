@@ -373,6 +373,7 @@ function Update-HMSbVms {
                 $cb = New-Object System.Windows.Controls.CheckBox
                 $cb.Content = ('{0}   [{1}]   {2:N1} GB{3}' -f $v.Name, (Format-HMSbState $v.State), ($v.SizeBytes / 1GB), $(if ([int]$v.Checkpoints) { "   $($v.Checkpoints) Pruefpunkt(e)" } else { '' }))
                 $cb.Tag = $v.Name
+                try { $cb.Style = $script:Window.FindResource('WrapCheck') } catch { }   # lange Namen brechen um
                 $cb.ToolTip = "Speicherort: $($v.VmPath)`nFestplatten: $(@($v.Paths) -join ', ')"
                 if ($v.OfflineHint) {
                     $cb.Content = "$($cb.Content)   ! nur offline ($($v.OfflineHint))"
@@ -392,12 +393,13 @@ function Update-HMSbVms {
             $cb = New-Object System.Windows.Controls.CheckBox
             $cb.Content = ('{0}  {1}   {2} belegt von {3}{4}' -f $v.Letter, $(if ($v.Label) { $v.Label } else { '' }), (Format-HMSize $v.Used), (Format-HMSize $v.Size), $(if ($v.System) { '   (System)' } else { '' }))
             $cb.Tag = "vol:$($v.Letter)"
+            try { $cb.Style = $script:Window.FindResource('WrapCheck') } catch { }
             $cb.ToolTip = "Sichert das ganze Laufwerk $($v.Letter) blockbasiert (Dateien und Ordner einzeln wiederherstellbar).$(if ($script:SbHyperV) { "`nAuf einem Hyper-V-Host: Laufwerke mit VM-Dateien besser ueber die VM-Sicherung sichern." })"
             $cb.Add_Click({ Update-HMSbSize })
             [void]$ui.pnlSbVms.Children.Add($cb)
         }
         if (-not $script:SbVols.Count) { Add-HMSbInfoText 'Keine lokalen NTFS/ReFS-Laufwerke gefunden.' '#FFA6ADC8' }
-        $ui.chkSbHostSystem.Content = $(if ($script:SbHyperV) { 'Host-System mitsichern (nur der Host: C:, Boot/EFI - fuer Bare-Metal-Wiederherstellung)' } else { 'System dieses Servers mitsichern (C:, Boot/EFI - fuer Bare-Metal-Wiederherstellung)' })
+        $ui.chkSbHostSystem.Content = $(if ($script:SbHyperV) { 'Host-System mitsichern (C:, Boot/EFI)' } else { 'System dieses Servers mitsichern (C:, Boot/EFI)' })   # Einzelheiten im Tooltip
         $ui.lblSbHost.Text = "$(if ($script:SbHyperV) { 'Hyper-V-Host' } else { 'Server (kein Hyper-V)' }) $env:COMPUTERNAME - $($script:SbVms.Count) VM(s), $($script:SbVols.Count) Laufwerk(e)" + $(if ($script:SbPrereq) { " - Windows Server-Sicherung: $(if ($script:SbPrereq.Feature -eq $false -or -not $script:SbPrereq.Wbadmin) { 'FEHLT' } else { 'OK' })" } else { '' })
         Set-HMSbFromProfile
         Update-HMSbHostSysInfo
