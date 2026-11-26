@@ -2155,7 +2155,7 @@ $ui.dgBackups.Add_SelectionChanged({
     Update-HMBackupMultiUi
     if (Test-HMBackupMulti) {
         $script:SelectedBackup = $null
-        $ui.lblRestoreInfo.Text = "$(@($ui.dgBackups.SelectedItems).Count) Backups markiert - 'Loeschen' gilt fuer alle markierten; Restore, Protokoll, Pruefen usw. brauchen genau ein markiertes Backup"
+        $ui.lblRestoreInfo.Text = "$(@($ui.dgBackups.SelectedItems).Count) Backups markiert - 'Loeschen' gilt fuer alle markierten; Restore, Bericht, Pruefen usw. brauchen genau ein markiertes Backup"
         Update-RestoreTargetLabel
         Update-HMExtraTargetsUi
         return
