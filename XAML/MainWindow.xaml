@@ -302,6 +302,7 @@
                         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,2">
                             <Button x:Name="btnStatusRefresh" Content="Aktualisieren" Style="{StaticResource BtnDefault}" ToolTip="Zeitplaene, letzte Backups, Server-Backup und App-Updates neu einlesen"/>
                             <TextBlock x:Name="lblStatusTime" Text="" Foreground="{StaticResource CatSubtext}" VerticalAlignment="Center" Margin="10,0,0,4"/>
+                            <TextBlock x:Name="lblScopeStatus" Text="Computer und Benutzer oben wirken hier nicht." Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="16,0,0,4" TextWrapping="Wrap" ToolTip="Der Status gilt fuer den Backup-Ordner und diesen PC: Zeitplaene, Server-Backup und App-Updates, die von hier aus laufen"/>
                         </WrapPanel>
                         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                             <StackPanel x:Name="pnlStatus" Margin="0,0,8,8"/>
@@ -329,6 +330,7 @@
                         </DockPanel>
                         <DockPanel Grid.Column="1" Margin="8,0,0,0">
                             <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+                                <TextBlock x:Name="lblScopeBackup" Text="" Foreground="{StaticResource CatText}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4" ToolTip="PC und Benutzer, die Backup starten sichert - aendern ueber Computer und Benutzer oben"/>
                                 <Grid>
                                     <Button x:Name="btnBackup" Content="Backup starten" Style="{StaticResource BtnMain}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4" ToolTip="Angehakte Module des gewaehlten Benutzers in den Backup-Ordner sichern"/>
                                     <Button x:Name="btnCancel" Content="Abbrechen" Style="{StaticResource BtnDanger}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed" ToolTip="Laufenden Vorgang abbrechen (mit Rueckfrage), bereits gesicherte Dateien bleiben im Backup-Ordner"/>
@@ -442,7 +444,7 @@
                             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                                 <StackPanel>
                                     <TextBlock Text="ZIEL" Style="{StaticResource SectionLabel}"/>
-                                    <TextBlock x:Name="lblRestoreTarget" Text="" Foreground="{StaticResource CatText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                    <TextBlock x:Name="lblRestoreTarget" Text="" Foreground="{StaticResource CatText}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
                                     <TextBlock Text="OPTIONEN" Style="{StaticResource SectionLabel}"/>
                                     <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkKeepNewer" Content="Neuere Dateien am Ziel nicht ueberschreiben" ToolTip="Robocopy /XO: ist eine Datei am Ziel-PC neuer als im Backup, bleibt sie erhalten"/>
                                     <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkRestoreOneDrive" Content="OneDrive-Dateien in eigenen Ordner" Margin="0,0,0,8" ToolTip="Mitgesicherte OneDrive/SharePoint-Dateien nach Profil\OneDrive-Wiederherstellung kopieren (nie direkt in den Sync-Ordner - dort koennten neuere Cloud-Versionen ueberschrieben werden)."/>
@@ -568,7 +570,10 @@
                                     <Button x:Name="btnAuSchedule" Content="Zeitplan ..." Style="{StaticResource BtnDefault}" Padding="10,4" Margin="14,0,4,4" ToolTip="Programme fuer alle Benutzer auf den Ziel-PCs automatisch aktualisieren (taeglich/woechentlich, als SYSTEM, Ausnahmen dieses Standorts gelten)"/>
                                     <Button x:Name="btnAuScheduleView" Content="Zeitplaene ansehen ..." Style="{StaticResource BtnDefault}" Padding="10,4" ToolTip="Zeitplan, letzter Lauf und Verlauf je Ziel-PC - entfernen, Verlauf uebernehmen"/>
                                 </WrapPanel>
-                                <TextBlock x:Name="lblAuInfo" Text="" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatSubtext}" Margin="2,2,0,0"/>
+                                <WrapPanel Margin="0,2,0,0">
+                                    <TextBlock x:Name="lblAuInfo" Text="" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatSubtext}" Margin="2,0,16,0"/>
+                                    <TextBlock x:Name="lblScopeAu" Text="Benutzer und Backup-Ordner oben wirken hier nicht." FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatSubtext}"/>
+                                </WrapPanel>
                             </StackPanel>
                         </Border>
                         <Grid Grid.Row="1" Margin="0,4,0,0">
@@ -676,7 +681,7 @@
                                             <Button x:Name="btnSbProfileDel" Content="Loeschen" Style="{StaticResource BtnDanger}" ToolTip="Profil loeschen (Sicherungen auf den Platten bleiben erhalten)"/>
                                             <Ellipse x:Name="dotSbBusy" Width="11" Height="11" Fill="{StaticResource CatGreen}" Margin="10,0,6,4" VerticalAlignment="Center" Visibility="Collapsed"/>
                                             <TextBlock x:Name="lblSbBusy" Text="" Foreground="{StaticResource CatGreen}" FontSize="11" VerticalAlignment="Center" Margin="0,0,0,4" Visibility="Collapsed"/>
-                                            <TextBlock x:Name="lblSbHost" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,4"/>
+                                            <TextBlock x:Name="lblSbHost" Text="" Foreground="{StaticResource CatText}" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,4" TextWrapping="Wrap"/>
                                         </WrapPanel>
                                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Ziel-Platte:" Style="{StaticResource Lbl}"/>
                                         <ComboBox x:Name="cmbSbDrive" Grid.Row="1" Grid.Column="1" Margin="0,0,4,4" ToolTip="Angesteckte Platte (USB). Platten des Profils werden an der Bezeichnung erkannt."/>

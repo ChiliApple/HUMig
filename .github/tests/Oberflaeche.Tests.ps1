@@ -198,7 +198,7 @@ Describe 'Oberflaeche: Werkzeuge stehen im Abschnitt ihrer Einstufung' {
         function Get-HMTargetCaption { 'PC-TEST-01' }
         function Get-SelectedProfile { [pscustomobject]@{ Account = 'DOM\max.muster' } }
         $ui = @{}
-        foreach ($n in 'lblToolsPc', 'lblToolsDiag', 'lblToolsSoft', 'lblToolsUser') { $ui[$n] = [pscustomobject]@{ Text = '' } }
+        foreach ($n in 'lblToolsPc', 'lblToolsDiag', 'lblToolsSoft', 'lblToolsUser', 'lblScopeBackup') { $ui[$n] = [pscustomobject]@{ Text = '' } }
         $ui['cmbUser'] = [pscustomobject]@{ Text = '' }
         $script:UserMode = $false
         Update-HMToolHeads
@@ -206,6 +206,7 @@ Describe 'Oberflaeche: Werkzeuge stehen im Abschnitt ihrer Einstufung' {
         $ui.lblToolsDiag.Text | Should -Match 'PC-TEST-01$'
         $ui.lblToolsSoft.Text | Should -Match 'PC-TEST-01$'
         $ui.lblToolsUser.Text | Should -Be 'GEWAEHLTER BENUTZER: DOM\max.muster auf PC-TEST-01'
+        $ui.lblScopeBackup.Text | Should -Be 'Sichert DOM\max.muster von PC-TEST-01'
     }
 }
 

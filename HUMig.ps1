@@ -732,7 +732,7 @@ foreach ($n in @('btnWizard', 'btnRemote', 'brdMonBackup', 'brdMonRestore', 'brd
     'btnRestore', 'btnCancelRestore', 'btnExtraTargets', 'lblExtraTargets', 'btnToolCredWiz', 'btnToolCredList', 'btnToolUserAppData', 'btnToolUserStartup', 'btnToolProfileFolder', 'pnlSysTools',
     'pnlLinks', 'rtbConsole', 'pbMain', 'lblStatus', 'lblElapsed', 'rowConsole', 'btnToolSoftDeploy', 'btnToolDrvDeploy', 'btnToolSoftList', 'lblSizeTotal', 'lstExclude',
     'btnExclAdd', 'btnExclDel', 'btnBigFiles', 'lblBigFilesHint', 'chkIncremental', 'lblIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport',
-    'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag', 'pnlToolsMulti', 'pnlToolsNoTarget', 'pnlToolsSoft', 'lblToolsPc', 'lblToolsMulti', 'lblToolsUser', 'lblToolsDiag', 'lblToolsSoft', 'lblToolsNoTarget',
+    'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag', 'pnlToolsMulti', 'pnlToolsNoTarget', 'pnlToolsSoft', 'lblScopeStatus', 'lblScopeBackup', 'lblScopeAu', 'lblToolsPc', 'lblToolsMulti', 'lblToolsUser', 'lblToolsDiag', 'lblToolsSoft', 'lblToolsNoTarget',
     'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnBackupSearch', 'btnFileSearch', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnFeedback', 'btnFeedbackR', 'btnReinstall', 'btnADDevices',
     'tabServerBackup', 'btnSbHealth', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
     'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'cmbSbAfter', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
@@ -2109,8 +2109,8 @@ function Update-BackupList {
 function Update-RestoreTargetLabel {
     $p = Get-SelectedProfile
     $c = Get-TargetComputer
-    if (-not $p) { $ui.lblRestoreTarget.Text = "$c - kein Benutzer gewaehlt"; return }
-    $t = "$c \ $($p.Folder)"
+    if (-not $p) { $ui.lblRestoreTarget.Text = "$c`nBenutzer: keiner gewaehlt"; return }
+    $t = "$c`nBenutzer: $($p.Folder)"
     if ($p.NoProfile) { $t += "`n(noch kein Profil - Modul 'Windows-Einstellungen (USMT)' legt es an)" }
     if ($script:SelectedBackup -and $script:SelectedBackup.User -and ($script:SelectedBackup.User -ne $p.Folder)) { $t += "`nACHTUNG: Backup stammt von '$($script:SelectedBackup.User)'" }
     $ui.lblRestoreTarget.Text = $t
@@ -2549,6 +2549,8 @@ function Update-HMToolHeads {
     $ui.lblToolsDiag.Text = "DIAGNOSE UND WARTUNG: $pc"
     $ui.lblToolsSoft.Text = "SOFTWARE UND TREIBER: $pc"
     $ui.lblToolsUser.Text = $(if ($acc) { "GEWAEHLTER BENUTZER: $acc auf $pc" } else { "GEWAEHLTER BENUTZER: keiner gewaehlt (auf $pc)" })
+    # Bezug im Reiter Backup, direkt ueber dem Startknopf
+    if ($ui.lblScopeBackup) { $ui.lblScopeBackup.Text = $(if ($acc) { "Sichert $acc von $pc" } else { "Kein Benutzer gewaehlt - oben einen Benutzer waehlen." }) }
 }
 Update-HMToolHeads$sysTools = @(
     @('Taskmanager', 'taskmgr.exe', ''), @('Autostart-Apps', 'ms-settings:startupapps', ''), @('Netzwerkadapter', 'ncpa.cpl', ''),
