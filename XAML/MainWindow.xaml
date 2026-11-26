@@ -350,7 +350,8 @@
                                     <WrapPanel Margin="0,4,0,6">
                                         <Button x:Name="btnExclAdd" Content="+ Ordner" Style="{StaticResource BtnDefault}" ToolTip="Links: Ordner waehlen | Rechts: Pfad eintippen (Datei oder Ordner am Quell-PC)"/>
                                         <Button x:Name="btnExclDel" Content="- Entfernen" Style="{StaticResource BtnDefault}" ToolTip="Markierten Pfad wieder mitsichern (aus der Ausschlussliste nehmen)"/>
-                                        <Button x:Name="btnBigFiles" Content="Grosse Dateien ..." Style="{StaticResource BtnDefault}" IsEnabled="False" ToolTip="Groesste Ordner und Dateien der letzten Groessenermittlung - markierte ausschliessen"/>
+                                        <Button x:Name="btnBigFiles" Content="Grosse Dateien ..." Style="{StaticResource BtnDefault}" Visibility="Collapsed" ToolTip="Groesste Ordner und Dateien der letzten Groessenermittlung - markierte ausschliessen"/>
+                                        <TextBlock x:Name="lblBigFilesHint" Text="Grosse Dateien: nach Groesse ermitteln" Foreground="{StaticResource CatOverlay0}" FontSize="11" VerticalAlignment="Center" Margin="4,0,0,4" ToolTip="Der Knopf Grosse Dateien erscheint, sobald Groesse ermitteln fuer diesen PC und Benutzer gelaufen ist"/>
                                     </WrapPanel>
                                     <TextBlock Text="AUSNAHMEN" Style="{StaticResource SectionLabel}"/>
                                     <CheckBox x:Name="chkMinProfileExc" Content="Profil: nur AppData ausnehmen" ToolTip="Statt der Ausnahmeliste nur AppData und Intel* ausnehmen"/>

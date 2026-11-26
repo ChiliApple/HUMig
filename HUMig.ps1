@@ -731,7 +731,7 @@ foreach ($n in @('btnWizard', 'btnRemote', 'brdMonBackup', 'brdMonRestore', 'brd
     'pnlRestoreModules', 'lblRestoreTarget', 'chkGpUpdate', 'chkWUDrivers', 'chkNumLock', 'chkFavorites', 'chkFastBoot', 'txtPostScript', 'btnPostScript',
     'btnRestore', 'btnCancelRestore', 'btnExtraTargets', 'lblExtraTargets', 'btnToolCredWiz', 'btnToolCredList', 'btnToolUserAppData', 'btnToolUserStartup', 'btnToolProfileFolder', 'pnlSysTools',
     'pnlLinks', 'rtbConsole', 'pbMain', 'lblStatus', 'lblElapsed', 'rowConsole', 'btnToolSoftDeploy', 'btnToolDrvDeploy', 'btnToolSoftList', 'lblSizeTotal', 'lstExclude',
-    'btnExclAdd', 'btnExclDel', 'btnBigFiles', 'chkIncremental', 'lblIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport',
+    'btnExclAdd', 'btnExclDel', 'btnBigFiles', 'lblBigFilesHint', 'chkIncremental', 'lblIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport',
     'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag', 'pnlToolsMulti', 'pnlToolsNoTarget', 'pnlToolsSoft', 'lblToolsPc', 'lblToolsMulti', 'lblToolsUser', 'lblToolsDiag', 'lblToolsSoft', 'lblToolsNoTarget',
     'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnBackupSearch', 'btnFileSearch', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnFeedback', 'btnFeedbackR', 'btnReinstall', 'btnADDevices',
     'tabServerBackup', 'btnSbHealth', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
@@ -968,7 +968,10 @@ function Show-ModuleSizes {
         $l = $script:ModuleSizeLbl[$k]; $l.Text = ''
         if ($valid -and $script:SizeCache.Modules.ContainsKey($k)) { $v = [long]$script:SizeCache.Modules[$k]; $l.Text = $(if ($v -lt 0) { '-' } else { Format-HMSize $v }) }
     }
-    $ui.btnBigFiles.IsEnabled = [bool]($valid -and @($script:SizeCache.Top).Count)
+    # ohne Groessenermittlung kann der Knopf nichts zeigen: ausgeblendet, an seiner Stelle ein kurzer Hinweis
+    $big = [bool]($valid -and @($script:SizeCache.Top).Count)
+    $ui.btnBigFiles.Visibility = $(if ($big) { 'Visible' } else { 'Collapsed' })
+    if ($ui.lblBigFilesHint) { $ui.lblBigFilesHint.Visibility = $(if ($big) { 'Collapsed' } else { 'Visible' }) }
     Update-SizeTotal
 }
 
@@ -2145,12 +2148,22 @@ $ui.dgBackups.Add_SelectionChanged({
         $script:RestoreExtraIds = @(@($script:RestoreExtraIds) + $hidden | Where-Object { $_ } | Select-Object -Unique)
         Build-ModulePanel $ui.pnlRestoreModules $script:RestoreChecks -Restore -Extra $script:RestoreExtraIds
     }
+    # Module, die das Backup nicht enthaelt: gesperrt (fuer die Auswahl) und ausgeblendet, leere Gruppen ebenso
+    $absent = 0
     foreach ($k in $script:RestoreChecks.Keys) {
         $has = @($b.Modules) -contains $k
         $script:RestoreChecks[$k].IsEnabled = $has
         $script:RestoreChecks[$k].IsChecked = ($has -and $k -notin @('Info', 'Drivers', 'Tasks', 'PrintersFull'))
+        $rowEl = $script:RestoreChecks[$k].Parent
+        if ($rowEl -is [System.Windows.UIElement]) { $rowEl.Visibility = $(if ($has) { 'Visible' } else { 'Collapsed' }) }
+        if (-not $has) { $absent++ }
+    }
+    foreach ($grp in @($ui.pnlRestoreModules.Children)) {
+        $rows = @(); try { $rows = @($grp.Child.Children[1].Children) } catch { }
+        if ($rows.Count) { $grp.Visibility = $(if (@($rows | Where-Object { $_.Visibility -eq 'Visible' }).Count) { 'Visible' } else { 'Collapsed' }) }
     }
     $txt = "Backup: $($b.Name)"
+    if ($absent) { $txt += "  |  $absent Module nicht in diesem Backup (ausgeblendet)" }
     if ($b.Archived) { $txt += '  |  ARCHIV: wird nicht weitergefuehrt, nicht geloescht, _GELOESCHT bleibt erhalten' }
     if ($b.Legacy) { $txt += '  |  Format der Vorgaengerversion' }
     if ($b.Manifest -and $b.Manifest.SourceOS) { $txt += "  |  Quelle: $($b.Manifest.SourceOS)" }

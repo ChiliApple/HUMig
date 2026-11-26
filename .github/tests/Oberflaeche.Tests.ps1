@@ -208,3 +208,28 @@ Describe 'Oberflaeche: Werkzeuge stehen im Abschnitt ihrer Einstufung' {
         $ui.lblToolsUser.Text | Should -Be 'GEWAEHLTER BENUTZER: DOM\max.muster auf PC-TEST-01'
     }
 }
+
+Describe 'Oberflaeche: ausgeblendet statt gesperrt' {
+    It 'Grosse Dateien: ohne Groessenermittlung ausgeblendet mit Hinweis, danach sichtbar' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'HUMig.ps1'), [ref]$null, [ref]$null)
+        $fn = @($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq 'Show-ModuleSizes' }, $true))[0]
+        . ([scriptblock]::Create($fn.Extent.Text))
+        function Update-SizeTotal { }
+        $script:ModuleSizeLbl = @{}
+        $ui = @{ btnBigFiles = [pscustomobject]@{ Visibility = 'Visible' }; lblBigFilesHint = [pscustomobject]@{ Visibility = 'Visible' } }
+        function Test-SizeCacheValid { $false }
+        Show-ModuleSizes
+        $ui.btnBigFiles.Visibility | Should -Be 'Collapsed'
+        $ui.lblBigFilesHint.Visibility | Should -Be 'Visible'
+        function Test-SizeCacheValid { $true }
+        $script:SizeCache = @{ Modules = @{}; Top = @('x') }
+        Show-ModuleSizes
+        $ui.btnBigFiles.Visibility | Should -Be 'Visible'
+        $ui.lblBigFilesHint.Visibility | Should -Be 'Collapsed'
+    }
+    It 'Grosse Dateien ist im XAML ausgeblendet und nie gesperrt' {
+        $b = @($script:MainXml.SelectNodes('//*') | Where-Object { (Get-UiName $_) -eq 'btnBigFiles' })[0]
+        $b.GetAttribute('Visibility') | Should -Be 'Collapsed'
+        $b.HasAttribute('IsEnabled') | Should -BeFalse
+    }
+}
