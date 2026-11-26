@@ -29,6 +29,8 @@
 ### ⚙️ Einstellungen
 - **Hinweis zu Speichern:** Die Fußzeile sagt, dass Speichern für Haken und Felder gilt und Knöpfe in den Reitern sofort wirken.
 - **Reiter Restore mit Bildlauf:** lange Haken und Erklärtexte brechen um.
+### ✅ Qualität
+- **Tests:** 649 automatische Tests bestanden.
 
 ## v2.1.27 - 2026-11-26
 ### 📱 Fernbedienung
