@@ -15,10 +15,11 @@
         <Border DockPanel.Dock="Bottom" Background="#FF11111B" Padding="10,6">
             <DockPanel>
                 <Button x:Name="btnOpenConfig" DockPanel.Dock="Left" Content="Config-Ordner oeffnen" Style="{DynamicResource BtnDefault}" Margin="0"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button x:Name="btnSave" Content="Speichern" Style="{DynamicResource BtnGreen}" Width="110" Margin="0,0,6,0" FontWeight="Bold"/>
                     <Button x:Name="btnCancel" Content="Abbrechen" Style="{DynamicResource BtnDefault}" Width="100" Margin="0"/>
                 </StackPanel>
+                <TextBlock x:Name="lblSaveScope" Text="Speichern gilt fuer Haken und Felder. Knoepfe in den Reitern wirken sofort." Foreground="#FFA6ADC8" FontSize="11" VerticalAlignment="Center" Margin="12,0,12,0" TextWrapping="Wrap"/>
             </DockPanel>
         </Border>
 
