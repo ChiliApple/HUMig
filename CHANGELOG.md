@@ -1,5 +1,14 @@
 ﻿# Changelog
 
+## v2.1.32 - 2026-11-26
+### 💾 Backup und Restore
+- **Module mit Fehlern bleiben wählbar:** Ein Modul, bei dem im Backup einzelne Dateien nicht gesichert wurden (z. B. gesperrt), ist im Reiter Restore wieder sichtbar und angehakt wie ein Modul mit Warnung.
+  - Der Name trägt den Zusatz "(mit Fehlern gesichert)" in Warnfarbe, der Tooltip nennt die betroffenen Einträge mit Grund.
+  - Das gilt auch für ein Modul, das ein fortlaufendes Backup aus einem früheren Lauf mit Fehlern übernommen hat. Solche Module sind in Backups mit Status OK oder Warnung neu sichtbar, die Spalte Anzahl der Backup-Liste steigt dadurch.
+- **Hinweis im Restore-Bericht:** Was im Backup fehlt, fehlt auch nach dem Restore. Bericht, Protokoll und Konsole nennen die betroffenen Module, der Status des Restores ändert sich dadurch nicht.
+- **Ohne gesicherte Daten bleibt es ausgeblendet:** Module, von denen keine Datei im Backup liegt (z. B. Ordner nicht lesbar, Quelle nicht erreichbar, alle Dateien gesperrt), und Windows-Einstellungen (USMT) mit Fehler bleiben ausgeblendet.
+- **Rückfrage nennt die Module:** Die Rückfrage vor einem Restore aus einem Backup mit Fehlern oder einem abgebrochenen Backup nennt jetzt die gewählten Module mit Fehlern. Backups mit Status OK oder Warnung: keine Rückfrage, kein zusätzlicher Klick.
+
 ## v2.1.31 - 2026-11-26
 ### 🧰 Fremde Werkzeuge
 - **Feste Versionen:** HUMig lädt PowerShell 7 und das WinGet-Modul nur noch in genau der Version, die mit dem Release geprüft wurde, nie mehr die jeweils neueste.
