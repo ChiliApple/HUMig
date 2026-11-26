@@ -621,85 +621,8 @@
                 </TabItem>
                 <!-- SERVER-BACKUP (Hyper-V-Host) -->
                 <TabItem x:Name="tabServerBackup" Header="Server-Backup">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        <Border Grid.Row="0" Style="{StaticResource SectionBorder}">
-                            <Grid>
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="340"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Profil:" Style="{StaticResource Lbl}"/>
-                                <ComboBox x:Name="cmbSbProfile" Grid.Row="0" Grid.Column="1" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Sicherungs-Profil (z.B. je Schule): welche VMs, welche Platten (Bezeichnung), Optionen"/>
-                                <WrapPanel Grid.Row="0" Grid.Column="2">
-                                    <Button x:Name="btnSbProfileNew" Content="Neu ..." Style="{StaticResource BtnBlue}" ToolTip="Neues Profil: Name, Platten-Bezeichnung (z.B. HUMIG-SCHULE1) und Anzahl Platten. Die angehakten VMs werden uebernommen."/>
-                                    <Button x:Name="btnSbProfileSave" Content="Profil speichern" Style="{StaticResource BtnGreen}" ToolTip="Angehakte VMs und Optionen im gewaehlten Profil speichern"/>
-                                    <Button x:Name="btnSbProfileEdit" Content="Bearbeiten ..." Style="{StaticResource BtnDefault}" ToolTip="Profil umbenennen (Verlauf wird uebernommen), Platten-Bezeichnung, Anzahl Platten, Warnung nach Tagen"/>
-                                    <Button x:Name="btnSbProfileDel" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Profil loeschen (Sicherungen auf den Platten bleiben erhalten)"/>
-                                    <Ellipse x:Name="dotSbBusy" Width="11" Height="11" Fill="{StaticResource CatGreen}" Margin="10,0,6,4" VerticalAlignment="Center" Visibility="Collapsed"/>
-                                    <TextBlock x:Name="lblSbBusy" Text="" Foreground="{StaticResource CatGreen}" FontSize="11" VerticalAlignment="Center" Margin="0,0,0,4" Visibility="Collapsed"/>
-                                    <TextBlock x:Name="lblSbHost" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,4"/>
-                                </WrapPanel>
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Ziel-Platte:" Style="{StaticResource Lbl}"/>
-                                <ComboBox x:Name="cmbSbDrive" Grid.Row="1" Grid.Column="1" Margin="0,0,4,4" ToolTip="Angesteckte Platte (USB). Platten des Profils werden an der Bezeichnung erkannt."/>
-                                <WrapPanel Grid.Row="1" Grid.Column="2">
-                                    <Button x:Name="btnSbDrives" Content="Aktualisieren" Style="{StaticResource BtnDefault}" ToolTip="Laufwerke und VMs neu einlesen (offline geschaltete USB-Platten werden online geschaltet)"/>
-                                    <Button x:Name="btnSbOpenDrive" Content="Oeffnen" Style="{StaticResource BtnDefault}" ToolTip="Berichtsordner HUMig-ServerBackup auf der Platte oeffnen"/>
-                                    <Button x:Name="btnSbEject" Content="Auswerfen" Style="{StaticResource BtnTeal}" ToolTip="Schreibcache leeren und Platte sicher entfernen"/>
-                                    <Button x:Name="btnSbDiskSetup" Content="Platte einrichten ..." Style="{StaticResource BtnPeach}" ToolTip="USB-Platte vorbereiten: Einrichten = ALLE Daten loeschen, GPT, NTFS (64K), Bezeichnung nach Profil (z.B. HUMIG-SCHULE1-2) - oder Uebernehmen = schon genutzte Platte nur umbenennen, Daten bleiben"/>
-                                    <TextBlock Text="Nach Sicherung:" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="8,0,4,4"/>
-                                    <ComboBox x:Name="cmbSbAfter" Width="130" Margin="0,0,0,4" VerticalAlignment="Center" ToolTip="Gilt fuer die gewaehlte Platte des Profils (auch im Zeitplan). Auswerfen: bis zum Ab- und Anstecken weg. Offline schalten: kein Laufwerksbuchstabe mehr, der naechste geplante Lauf oder 'Aktualisieren' schaltet sie wieder online.">
-                                        <ComboBoxItem Content="nichts tun"/>
-                                        <ComboBoxItem Content="auswerfen"/>
-                                        <ComboBoxItem Content="offline schalten"/>
-                                    </ComboBox>
-                                </WrapPanel>
-                                <TextBlock x:Name="lblSbDiskInfo" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Text="" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatSubtext}" Margin="0,0,0,2"/>
-                            </Grid>
-                        </Border>
-                        <Grid Grid.Row="1" Margin="0,4,0,0">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="1.3*"/></Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
-                                <DockPanel>
-                                    <TextBlock DockPanel.Dock="Top" Text="VIRTUELLE COMPUTER (HAKEN = SICHERN)" Style="{StaticResource SectionLabel}"/>
-                                    <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
-                                        <TextBlock x:Name="lblSbSize" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" Margin="0,0,0,4"/>
-                                        <CheckBox x:Name="chkSbHostConfig" Content="Host-Konfiguration sichern (Switches, VLANs, Netzwerk, VM-Einstellungen + Wiederherstellungs-Skript)" IsChecked="True"/>
-                                        <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkSbVerify" Content="Sicherung pruefen (Version und enthaltene VMs)" IsChecked="True"/>
-                                        <CheckBox x:Name="chkSbHostSystem" Content="Host-System mitsichern (nur der Host: C:, Boot/EFI - fuer Bare-Metal-Wiederherstellung)" ToolTip="wbadmin -allCritical: sichert nur den Host selbst - Systemlaufwerk C: (Windows, Hyper-V-Rolle, Switches, Einstellungen) und EFI-/Boot-/Wiederherstellungspartition. Datenlaufwerke mit den VMs (z.B. D:) sind NICHT enthalten - dafuer die VM-Sicherung. Komplette Wiederherstellung nach Totalausfall: Host-System UND VMs sichern. Liegen VMs auf C:, werden sie hier zusaetzlich mitgesichert."/>
-                                        <TextBlock x:Name="lblSbHostSystem" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="11" Margin="20,0,0,0"/>
-                                        <Border x:Name="brdMonServer" Visibility="Collapsed" Background="{StaticResource CatBase}" CornerRadius="4" Padding="10,6" Margin="0,8,0,0" ToolTip="Live-Anzeige waehrend der Sicherung: Durchsatz der Windows Server-Sicherung, CPU und Arbeitsspeicher dieses Servers"/>
-                                    </StackPanel>
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                                        <StackPanel x:Name="pnlSbVms"/>
-                                    </ScrollViewer>
-                                </DockPanel>
-                            </Border>
-                            <Border Grid.Column="2" Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
-                                <DockPanel>
-                                    <DockPanel DockPanel.Dock="Top" LastChildFill="False">
-                                        <TextBlock Text="PLATTEN / VERLAUF DES PROFILS" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
-                                        <Button x:Name="btnSbHealth" DockPanel.Dock="Right" Content="Plattenzustand pruefen" Style="{StaticResource BtnDefault}" Padding="8,2" FontSize="11" ToolTip="Gesundheitsstatus (SMART) der angesteckten USB-Platten lesen - Windows-Status und, wenn das Gehaeuse sie durchreicht, Temperatur, Betriebsstunden, Lesefehler. Wird beim Aktualisieren und nach jeder Sicherung automatisch gelesen."/>
-                                    </DockPanel>
-                                    <StackPanel x:Name="pnlSbDisks" DockPanel.Dock="Top" Margin="0,0,0,2"/>
-                                    <TextBlock x:Name="lblSbSchedule" DockPanel.Dock="Top" Text="" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource CatMauve}" Margin="2,2,0,8"/>
-                                    <DataGrid x:Name="dgSbHistory" Style="{StaticResource DarkGrid}" ToolTip="Doppelklick = Bericht des Laufs oeffnen (Details, wbadmin-Ausgabe, Pruefung)">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="Auto"/>
-                                            <DataGridTextColumn Header="Platte" Binding="{Binding Platte}" Width="Auto"/>
-                                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="Auto"/>
-                                            <DataGridTextColumn Header="Dauer" Binding="{Binding Minuten}" Width="Auto"/>
-                                            <DataGridTextColumn Header="GB" Binding="{Binding GB}" Width="Auto"/>
-                                            <DataGridTextColumn Header="VMs" Binding="{Binding VMs}" Width="Auto"/>
-                                            <DataGridTextColumn Header="Hinweis" Binding="{Binding Hinweis}" Width="Auto"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </DockPanel>
-                            </Border>
-                        </Grid>
-                        <Border Grid.Row="2" Style="{StaticResource SectionBorder}">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Bottom" Style="{StaticResource SectionBorder}">
                             <WrapPanel>
                                 <Grid>
                                     <Button x:Name="btnSbBackup" Content="Server-Backup starten" Style="{StaticResource BtnGreen}" FontWeight="SemiBold" Padding="18,6" ToolTip="Angehakte VMs online (VSS) auf die Ziel-Platte sichern - Windows Server-Sicherung (wbadmin)"/>
@@ -725,7 +648,88 @@
                                 <Button x:Name="btnSbFeature" Content="Windows Server-Sicherung installieren" Style="{StaticResource BtnYellow}" Padding="10,6" Visibility="Collapsed" ToolTip="Install-WindowsFeature Windows-Server-Backup (kein Neustart noetig)"/>
                             </WrapPanel>
                         </Border>
-                    </Grid>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <Grid MinHeight="220">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Border Grid.Row="0" Style="{StaticResource SectionBorder}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="340"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Profil:" Style="{StaticResource Lbl}"/>
+                                        <ComboBox x:Name="cmbSbProfile" Grid.Row="0" Grid.Column="1" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Sicherungs-Profil (z.B. je Schule): welche VMs, welche Platten (Bezeichnung), Optionen"/>
+                                        <WrapPanel Grid.Row="0" Grid.Column="2">
+                                            <Button x:Name="btnSbProfileNew" Content="Neu ..." Style="{StaticResource BtnBlue}" ToolTip="Neues Profil: Name, Platten-Bezeichnung (z.B. HUMIG-SCHULE1) und Anzahl Platten. Die angehakten VMs werden uebernommen."/>
+                                            <Button x:Name="btnSbProfileSave" Content="Profil speichern" Style="{StaticResource BtnGreen}" ToolTip="Angehakte VMs und Optionen im gewaehlten Profil speichern"/>
+                                            <Button x:Name="btnSbProfileEdit" Content="Bearbeiten ..." Style="{StaticResource BtnDefault}" ToolTip="Profil umbenennen (Verlauf wird uebernommen), Platten-Bezeichnung, Anzahl Platten, Warnung nach Tagen"/>
+                                            <Button x:Name="btnSbProfileDel" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Profil loeschen (Sicherungen auf den Platten bleiben erhalten)"/>
+                                            <Ellipse x:Name="dotSbBusy" Width="11" Height="11" Fill="{StaticResource CatGreen}" Margin="10,0,6,4" VerticalAlignment="Center" Visibility="Collapsed"/>
+                                            <TextBlock x:Name="lblSbBusy" Text="" Foreground="{StaticResource CatGreen}" FontSize="11" VerticalAlignment="Center" Margin="0,0,0,4" Visibility="Collapsed"/>
+                                            <TextBlock x:Name="lblSbHost" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,4"/>
+                                        </WrapPanel>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Ziel-Platte:" Style="{StaticResource Lbl}"/>
+                                        <ComboBox x:Name="cmbSbDrive" Grid.Row="1" Grid.Column="1" Margin="0,0,4,4" ToolTip="Angesteckte Platte (USB). Platten des Profils werden an der Bezeichnung erkannt."/>
+                                        <WrapPanel Grid.Row="1" Grid.Column="2">
+                                            <Button x:Name="btnSbDrives" Content="Aktualisieren" Style="{StaticResource BtnDefault}" ToolTip="Laufwerke und VMs neu einlesen (offline geschaltete USB-Platten werden online geschaltet)"/>
+                                            <Button x:Name="btnSbOpenDrive" Content="Oeffnen" Style="{StaticResource BtnDefault}" ToolTip="Berichtsordner HUMig-ServerBackup auf der Platte oeffnen"/>
+                                            <Button x:Name="btnSbEject" Content="Auswerfen" Style="{StaticResource BtnTeal}" ToolTip="Schreibcache leeren und Platte sicher entfernen"/>
+                                            <Button x:Name="btnSbDiskSetup" Content="Platte einrichten ..." Style="{StaticResource BtnPeach}" ToolTip="USB-Platte vorbereiten: Einrichten = ALLE Daten loeschen, GPT, NTFS (64K), Bezeichnung nach Profil (z.B. HUMIG-SCHULE1-2) - oder Uebernehmen = schon genutzte Platte nur umbenennen, Daten bleiben"/>
+                                            <TextBlock Text="Nach Sicherung:" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="8,0,4,4"/>
+                                            <ComboBox x:Name="cmbSbAfter" Width="130" Margin="0,0,0,4" VerticalAlignment="Center" ToolTip="Gilt fuer die gewaehlte Platte des Profils (auch im Zeitplan). Auswerfen: bis zum Ab- und Anstecken weg. Offline schalten: kein Laufwerksbuchstabe mehr, der naechste geplante Lauf oder 'Aktualisieren' schaltet sie wieder online.">
+                                                <ComboBoxItem Content="nichts tun"/>
+                                                <ComboBoxItem Content="auswerfen"/>
+                                                <ComboBoxItem Content="offline schalten"/>
+                                            </ComboBox>
+                                        </WrapPanel>
+                                        <TextBlock x:Name="lblSbDiskInfo" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Text="" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatSubtext}" Margin="0,0,0,2"/>
+                                    </Grid>
+                                </Border>
+                                <Grid Grid.Row="1" Margin="0,4,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="1.3*"/></Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Top" Text="VIRTUELLE COMPUTER (HAKEN = SICHERN)" Style="{StaticResource SectionLabel}"/>
+                                            <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+                                                <TextBlock x:Name="lblSbSize" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" Margin="0,0,0,4"/>
+                                                <CheckBox x:Name="chkSbHostConfig" Content="Host-Konfiguration sichern (Switches, VLANs, Netzwerk, VM-Einstellungen + Wiederherstellungs-Skript)" IsChecked="True"/>
+                                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkSbVerify" Content="Sicherung pruefen (Version und enthaltene VMs)" IsChecked="True"/>
+                                                <CheckBox x:Name="chkSbHostSystem" Content="Host-System mitsichern (nur der Host: C:, Boot/EFI - fuer Bare-Metal-Wiederherstellung)" ToolTip="wbadmin -allCritical: sichert nur den Host selbst - Systemlaufwerk C: (Windows, Hyper-V-Rolle, Switches, Einstellungen) und EFI-/Boot-/Wiederherstellungspartition. Datenlaufwerke mit den VMs (z.B. D:) sind NICHT enthalten - dafuer die VM-Sicherung. Komplette Wiederherstellung nach Totalausfall: Host-System UND VMs sichern. Liegen VMs auf C:, werden sie hier zusaetzlich mitgesichert."/>
+                                                <TextBlock x:Name="lblSbHostSystem" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="11" Margin="20,0,0,0"/>
+                                                <Border x:Name="brdMonServer" Visibility="Collapsed" Background="{StaticResource CatBase}" CornerRadius="4" Padding="10,6" Margin="0,8,0,0" ToolTip="Live-Anzeige waehrend der Sicherung: Durchsatz der Windows Server-Sicherung, CPU und Arbeitsspeicher dieses Servers"/>
+                                            </StackPanel>
+                                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                                <StackPanel x:Name="pnlSbVms"/>
+                                            </ScrollViewer>
+                                        </DockPanel>
+                                    </Border>
+                                    <Border Grid.Column="2" Style="{StaticResource SectionBorder}" Background="{StaticResource CatMantle}">
+                                        <DockPanel>
+                                            <DockPanel DockPanel.Dock="Top" LastChildFill="False">
+                                                <TextBlock Text="PLATTEN / VERLAUF DES PROFILS" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
+                                                <Button x:Name="btnSbHealth" DockPanel.Dock="Right" Content="Plattenzustand pruefen" Style="{StaticResource BtnDefault}" Padding="8,2" FontSize="11" ToolTip="Gesundheitsstatus (SMART) der angesteckten USB-Platten lesen - Windows-Status und, wenn das Gehaeuse sie durchreicht, Temperatur, Betriebsstunden, Lesefehler. Wird beim Aktualisieren und nach jeder Sicherung automatisch gelesen."/>
+                                            </DockPanel>
+                                            <StackPanel x:Name="pnlSbDisks" DockPanel.Dock="Top" Margin="0,0,0,2"/>
+                                            <TextBlock x:Name="lblSbSchedule" DockPanel.Dock="Top" Text="" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource CatMauve}" Margin="2,2,0,8"/>
+                                            <DataGrid x:Name="dgSbHistory" Style="{StaticResource DarkGrid}" ToolTip="Doppelklick = Bericht des Laufs oeffnen (Details, wbadmin-Ausgabe, Pruefung)">
+                                                <DataGrid.Columns>
+                                                    <DataGridTextColumn Header="Datum" Binding="{Binding Datum}" Width="Auto"/>
+                                                    <DataGridTextColumn Header="Platte" Binding="{Binding Platte}" Width="Auto"/>
+                                                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="Auto"/>
+                                                    <DataGridTextColumn Header="Dauer" Binding="{Binding Minuten}" Width="Auto"/>
+                                                    <DataGridTextColumn Header="GB" Binding="{Binding GB}" Width="Auto"/>
+                                                    <DataGridTextColumn Header="VMs" Binding="{Binding VMs}" Width="Auto"/>
+                                                    <DataGridTextColumn Header="Hinweis" Binding="{Binding Hinweis}" Width="Auto"/>
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                        </DockPanel>
+                                    </Border>
+                                </Grid>
+                            </Grid>
+                        </ScrollViewer>
+                    </DockPanel>
                 </TabItem>
             </TabControl>
 
