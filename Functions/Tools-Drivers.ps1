@@ -889,7 +889,7 @@ function Update-DrvWindowList([string]$SelectId = '') {
     }
     $dw.Loading = $false
     $dw.LblFolder.Text = "Ordner: $(Get-DrvFolder)   ($($dw.Pkgs.Count) Pakete, * = noch nicht gespeichert)"
-    $dw.LblTarget.Text = "Gewaehlter Computer: $(Get-TargetComputer)"
+    Set-SwTargetLabel $dw.LblTarget
     $idx = 0
     if ($SelectId) { for ($i = 0; $i -lt $dw.Pkgs.Count; $i++) { if ($dw.Pkgs[$i].Id -eq $SelectId) { $idx = $i } } }
     if ($dw.Pkgs.Count -gt 0) { $dw.Lst.SelectedIndex = -1; $dw.Lst.SelectedIndex = $idx } else { Show-DrvPackageDetails $null }
@@ -1147,13 +1147,13 @@ function Show-DriverWindow {
     $w.FindName('btnCheck').Add_Click({
         $dw = $script:DrvUi; $i = $dw.Lst.SelectedIndex
         if ($i -lt 0 -or $i -ge $dw.Pkgs.Count) { return }
-        Start-DriverCheck -Package $dw.Pkgs[$i] -Computer (Get-TargetComputer)
+        $h = Resolve-SwActionTarget 'Treiber' $dw.LblTarget; if (-not $h) { return }
     })
-    $w.FindName('btnLocks').Add_Click({ Show-DriverLocks -Computer (Get-TargetComputer) })
-    $w.Add_Activated({ if ($script:DrvUi) { $script:DrvUi.LblTarget.Text = "Gewaehlter Computer: $(Get-TargetComputer)" } })
+    $w.FindName('btnLocks').Add_Click({ $h = Resolve-SwActionTarget 'Treiber' $script:DrvUi.LblTarget; if ($h) { Show-DriverLocks -Computer $h } })
+    $w.Add_Activated({ if ($script:DrvUi) { Set-SwTargetLabel $script:DrvUi.LblTarget } })
     $w.FindName('btnClient').Add_Click({
         $dw = $script:DrvUi
-        $h = Get-TargetComputer
+        $h = Resolve-SwActionTarget 'Treiber' $dw.LblTarget; if (-not $h) { return }
         $p = Save-DrvForm; if (-not $p) { return }
         $force = [bool]$dw.ChkForce.IsChecked
         if (-not (Confirm-DrvDeploy -Package $p -Hosts @($h) -Force $force)) { return }

@@ -827,3 +827,51 @@ Describe 'Selbsttest und Testdateien: keine privaten Adressen, Ergebnisdatei mit
         $t | Should -Not -Match ([regex]::Escape("Invoke-HMAuTarget @(`$env:COMPUTERNAME) 'ScheduleGet'"))
     }
 }
+
+Describe 'Fenster Softwareverteilung und Treiber folgen dem Feld Computer (erst bei einer Aktion)' {
+    BeforeAll {
+        . (Join-Path $script:Root 'Functions\Tools-Software.ps1')
+        # Entscheidung der PC-Werkzeuge aus HUMig.ps1 (unveraendert) fuer den Durchlauf-Test laden
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'HUMig.ps1'), [ref]$null, [ref]$null)
+        foreach ($n in @('Get-HMToolDecision', 'Get-HMTargetState', 'Test-HMSameComputer', 'Get-HMComputerKey')) {
+            $fn = $ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $n }, $true) | Select-Object -First 1
+            if ($fn) { . ([scriptblock]::Create($fn.Extent.Text.Replace("function $n", "function global:$n"))) }
+        }
+        $script:SwSrc = [IO.File]::ReadAllText((Join-Path $script:Root 'Functions\Tools-Software.ps1'))
+        $script:DrvSrc = [IO.File]::ReadAllText((Join-Path $script:Root 'Functions\Tools-Drivers.ps1'))
+    }
+    It 'Anzeige: gleicher PC ohne Zusatz, anderer PC im Feld mit Zusatz "im Feld", ohne Zustand das Ziel' {
+        $a = Get-SwTargetDisplay ([pscustomobject]@{ Kind = 'Match'; Field = 'PC01'; Computer = 'PC01' }) 'X'
+        $a.Main | Should -Be 'Gewaehlter Computer: PC01'; $a.Hint | Should -Be ''
+        $b = Get-SwTargetDisplay ([pscustomobject]@{ Kind = 'Differs'; Field = 'PC02'; Computer = 'PC01' }) 'X'
+        $b.Main | Should -Be 'Gewaehlter Computer: PC01'; $b.Hint | Should -Match '^im Feld: PC02'
+        (Get-SwTargetDisplay $null 'PC09').Main | Should -Be 'Gewaehlter Computer: PC09'
+    }
+    It 'Entscheidung der PC-Werkzeuge: anderer PC im Feld -> umschalten, waehrend Backup/Restore -> nachfragen, gleicher PC -> ausfuehren' {
+        $st = Get-HMTargetState 'PC02' @{ Computer = 'PC01'; Connected = $true } 'LOKAL'
+        $st.Kind | Should -Be 'Differs'
+        Get-HMToolDecision 'Pc' $st $false | Should -Be 'Switch'
+        Get-HMToolDecision 'Pc' $st $true | Should -Be 'Ask'
+        Get-HMToolDecision 'Pc' (Get-HMTargetState 'PC01' @{ Computer = 'PC01'; Connected = $true } 'LOKAL') $false | Should -Be 'Run'
+    }
+    It 'Aktion: nach dem stillen Umschalten laeuft sie auf dem PC im Feld, abgelehnt laeuft nichts' {
+        $script:T_Ziel = 'PC01'
+        function global:Get-TargetComputer { $script:T_Ziel }
+        function global:Use-HMPcTarget([string]$Action) { if ($script:T_Antwort) { $script:T_Ziel = 'PC02'; return $true }; return $false }
+        try {
+            $script:T_Antwort = $true
+            Resolve-SwActionTarget 'Softwareverteilung' | Should -Be 'PC02'
+            $script:T_Ziel = 'PC01'; $script:T_Antwort = $false
+            Resolve-SwActionTarget 'Treiber' | Should -Be ''
+        } finally { Remove-Item Function:\global:Get-TargetComputer, Function:\global:Use-HMPcTarget -ErrorAction SilentlyContinue }
+    }
+    It 'Aktivieren und Oeffnen zeigen nur an (kein Umschalten), alle Aktionen fuer den gewaehlten Computer gehen ueber die Regel' {
+        $script:SwSrc | Should -Match ([regex]::Escape('$w.Add_Activated({ if ($script:SwUi) { Set-SwTargetLabel $script:SwUi.LblTarget; Update-SwSandboxButton } })'))
+        $script:DrvSrc | Should -Match ([regex]::Escape('$w.Add_Activated({ if ($script:DrvUi) { Set-SwTargetLabel $script:DrvUi.LblTarget } })'))
+        foreach ($src in @($script:SwSrc, $script:DrvSrc)) { $src | Should -Not -Match 'Add_Activated\(\{[^\r\n]*Resolve-SwActionTarget' }
+        ([regex]::Matches($script:SwSrc, [regex]::Escape("Resolve-SwActionTarget 'Softwareverteilung'"))).Count | Should -Be 2
+        ([regex]::Matches($script:DrvSrc, [regex]::Escape("Resolve-SwActionTarget 'Treiber'"))).Count | Should -Be 3
+        # nirgends mehr direkt "Gewaehlter Computer: $(Get-TargetComputer)"
+        ($script:SwSrc + $script:DrvSrc) | Should -Not -Match ([regex]::Escape('"Gewaehlter Computer: $(Get-TargetComputer)"'))
+    }
+}

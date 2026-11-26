@@ -17,6 +17,38 @@
     Zielmaschine: der/die gewaehlten PCs.
 #>
 
+# ----------------------------------------------------------------------------
+# Ziel der Fenster Softwareverteilung und Treiber (ohne Benutzerbezug). Beim Oeffnen und Aktivieren wird nur angezeigt; steht im
+# Feld Computer ein anderer PC, kommt der Zusatz "im Feld: Y". Erst eine Aktion fuer den gewaehlten Computer schaltet nach der
+# Regel der PC-Werkzeuge um (Use-HMPcTarget in HUMig.ps1: still auf den PC im Feld, waehrend Backup/Restore Rueckfrage).
+# ----------------------------------------------------------------------------
+# Anzeige als reine Funktion: Zustand aus Get-HMTargetState (Kind, Field, Computer) -> Haupttext und Zusatz ('' = keiner)
+function Get-SwTargetDisplay($State, [string]$Fallback) {
+    $c = if ($State -and "$($State.Computer)".Trim()) { "$($State.Computer)".Trim() } else { "$Fallback".Trim() }
+    $hint = if ($State -and "$($State.Kind)" -eq 'Differs') { "im Feld: $($State.Field) - wird bei der naechsten Aktion uebernommen" } else { '' }
+    return [pscustomobject]@{ Main = "Gewaehlter Computer: $(if ($c) { $c } else { '(keiner)' })"; Hint = $hint; Computer = $c; Field = $(if ($State) { "$($State.Field)" } else { '' }) }
+}
+# aktueller Zustand (ohne HUMig.ps1, z. B. in Tests: nur das Ziel)
+function Get-SwTargetDisplayNow {
+    $st = $null
+    if (Get-Command Get-HMTargetState -ErrorAction SilentlyContinue) { try { $st = Get-HMTargetState (Get-HMFieldComputer) $script:Target } catch { $st = $null } }
+    return (Get-SwTargetDisplay $st "$(Get-TargetComputer)")
+}
+# Anzeige in den TextBlock "lblTarget" eines Fensters schreiben (Zusatz in Hinweisfarbe) - schaltet nichts um
+function Set-SwTargetLabel($Label) {
+    if (-not $Label) { return }
+    $d = Get-SwTargetDisplayNow
+    $Label.Inlines.Clear()
+    [void]$Label.Inlines.Add((New-Object System.Windows.Documents.Run $d.Main))
+    if ($d.Hint) { $r = New-Object System.Windows.Documents.Run ("   " + $d.Hint); try { $r.Foreground = New-Brush '#FFF9E2AF' } catch { }; [void]$Label.Inlines.Add($r) }
+}
+# Vor einer Aktion fuer den gewaehlten Computer: Regel der PC-Werkzeuge anwenden, danach den Ziel-PC liefern ('' = abgelehnt)
+function Resolve-SwActionTarget([string]$Action, $Label = $null) {
+    if (Get-Command Use-HMPcTarget -ErrorAction SilentlyContinue) { if (-not (Use-HMPcTarget $Action)) { return '' } }
+    if ($Label) { Set-SwTargetLabel $Label }
+    return "$(Get-TargetComputer)".Trim()
+}
+
 function Get-SwFolder {
     $f = "$($script:Settings.SoftwareFolder)".Trim()
     if ($f) { return $f }
@@ -999,7 +1031,7 @@ function Update-SwWindowList([string]$SelectId = '') {
     }
     $sw.Loading = $false
     $sw.LblFolder.Text = "Ordner: $(Get-SwFolder)   ($($sw.Pkgs.Count) Pakete, * = noch nicht geprueft/gespeichert)"
-    $sw.LblTarget.Text = "Gewaehlter Computer: $(Get-TargetComputer)"
+    Set-SwTargetLabel $sw.LblTarget
     $idx = 0
     if ($SelectId) { for ($i = 0; $i -lt $sw.Pkgs.Count; $i++) { if ($sw.Pkgs[$i].Id -eq $SelectId) { $idx = $i } } }
     if ($sw.Pkgs.Count -gt 0) { $sw.Lst.SelectedIndex = $idx } else { Show-SwPackageDetails $null }
@@ -1391,9 +1423,9 @@ function Complete-SwSandboxTest($Watch, $Result) {
 # Deinstallation / Status: Menue "gewaehlter Computer" oder "mehrere PCs"
 function Show-SwTargetMenu($Button, [string]$Kind) {
     $cm = New-Object System.Windows.Controls.ContextMenu
-    $h = "$(Get-TargetComputer)".Trim()
+    $d = Get-SwTargetDisplayNow; $h = $d.Computer
     $m1 = New-Object System.Windows.Controls.MenuItem
-    $m1.Header = $(if ($h) { "Gewaehlter Computer ($h)" } else { 'Gewaehlter Computer (keiner gewaehlt)' }); $m1.IsEnabled = [bool]$h; $m1.Tag = $Kind
+    $m1.Header = $(if ($d.Hint) { "Gewaehlter Computer ($h, im Feld: $($d.Field) - wird uebernommen)" } elseif ($h) { "Gewaehlter Computer ($h)" } else { 'Gewaehlter Computer (keiner gewaehlt)' }); $m1.IsEnabled = [bool]$h; $m1.Tag = $Kind
     $m1.Add_Click({ param($s, $e) Invoke-SwTargetAction "$($s.Tag)" $false })
     $m2 = New-Object System.Windows.Controls.MenuItem
     $m2.Header = 'Mehrere PCs ...'; $m2.Tag = $Kind
@@ -1410,7 +1442,7 @@ function Invoke-SwTargetAction([string]$Kind, [bool]$Multi) {
         return
     }
     if (-not $Multi) {
-        $h = "$(Get-TargetComputer)".Trim(); if (-not $h) { return }
+        $h = Resolve-SwActionTarget 'Softwareverteilung' $sw.LblTarget; if (-not $h) { return }
         Invoke-SwTargetRun $Kind $p @($h)
         return
     }
@@ -1800,7 +1832,7 @@ function Show-SoftwareWindow {
     $w.FindName('btnStatus').Add_Click({ param($s, $e) Show-SwTargetMenu $s 'Status' })
     $w.FindName('btnClient').Add_Click({
         $sw = $script:SwUi
-        $h = Get-TargetComputer
+        $h = Resolve-SwActionTarget 'Softwareverteilung' $sw.LblTarget; if (-not $h) { return }
         $p = Save-SwForm; if (-not $p) { return }
         $force = [bool]$sw.ChkForce.IsChecked
         if (-not (Confirm-SwDeploy -Package $p -Hosts @($h) -Force $force)) { return }
@@ -1820,7 +1852,7 @@ function Show-SoftwareWindow {
             Start-SoftwareDeploy -Hosts $hosts -Package $pp.Package -Force $pp.Force -Label 'Mehrere PCs'
         }
     })
-    $w.Add_Activated({ if ($script:SwUi) { $script:SwUi.LblTarget.Text = "Gewaehlter Computer: $(Get-TargetComputer)"; Update-SwSandboxButton } })
+    $w.Add_Activated({ if ($script:SwUi) { Set-SwTargetLabel $script:SwUi.LblTarget; Update-SwSandboxButton } })
     $w.Add_Closed({ $script:SwUi = $null })
     $w.Owner = $script:Window; Set-HMWindowScale $w
     $w.Show()
