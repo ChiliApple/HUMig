@@ -187,7 +187,7 @@ function Start-HMRenameComputer {
 }
 
 # ============================================================================
-# 2. IP-ADRESSE STATISCH / DHCP (als SYSTEM-Aufgabe am Ziel - Verbindungsabbruch egal)
+# 2. IP-ADRESSE STATISCH / DHCP (als SYSTEM-Aufgabe am Ziel, Ergebnis wird danach abgeholt - Verbindungsabbruch durch die neue Adresse ist erwartet)
 # ============================================================================
 $script:RS_NetInfo = {
     # ohne Get-NetIPConfiguration: das bricht auf manchen PCs ab ("Exception setting NetAdapter ... Object[]", z.B. bei
@@ -229,7 +229,8 @@ function Start-HMNetworkConfig {
         $idx = [int]("$($f.Adapter)".Split(' ')[0])
         if ($f.Mode -eq 'DHCP') {
             if (-not (Confirm-Action "DHCP auf $comp (Adapter $idx) aktivieren und DNS zuruecksetzen?`n`nDie IP-Adresse kann sich aendern.")) { return }
-            $body = "Remove-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -Confirm:`$false -ErrorAction SilentlyContinue`r`nRemove-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -PrefixOrigin Manual -Confirm:`$false -ErrorAction SilentlyContinue`r`nSet-NetIPInterface -InterfaceIndex $idx -Dhcp Enabled`r`nSet-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses`r`nipconfig.exe /renew | Out-Null"
+            $name = "HUMig_Netzwerk_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+            $body = New-HMNetChangeScript -Index $idx -Mode 'DHCP' -Name $name
         } else {
             $ip = "$($f.IP)"; $mk = "$($f.Mask)"
             if ($ip -match '^(.+)/(\d{1,2})$') { $ip = $Matches[1]; $mk = $Matches[2] }
@@ -241,26 +242,230 @@ function Start-HMNetworkConfig {
             $dns = @("$($f.Dns)" -split '[,; ]+' | Where-Object { $_ })
             foreach ($x in $dns) { if (-not (Test-HMIPv4 $x)) { Out-Console "Ungueltiger DNS-Server: '$x'" 'Warning'; return } }
             if (-not (Confirm-Action "Statische IP auf $comp setzen:`n`n  Adapter: $idx`n  IP:      $ip/$pfx`n  Gateway: $gw`n  DNS:     $($dns -join ', ')`n`nBei falschen Werten verliert der PC die Netzwerkverbindung. Fortfahren?")) { return }
-            $gwPart = if ($gw) { " -DefaultGateway '$gw'" } else { '' }
-            $dnsPart = if ($dns.Count) { "Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses @('" + ($dns -join "','") + "')" } else { '' }
-            $body = "Set-NetIPInterface -InterfaceIndex $idx -Dhcp Disabled -ErrorAction SilentlyContinue`r`nRemove-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -Confirm:`$false -ErrorAction SilentlyContinue`r`nRemove-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -Confirm:`$false -ErrorAction SilentlyContinue`r`nNew-NetIPAddress -InterfaceIndex $idx -IPAddress '$ip' -PrefixLength $pfx$gwPart | Out-Null`r`n$dnsPart"
+            $name = "HUMig_Netzwerk_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+            $body = New-HMNetChangeScript -Index $idx -Mode 'Static' -Ip $ip -Prefix $pfx -Gateway $gw -Dns $dns -Name $name
         }
-        Invoke-HMTool -Title "Netzwerk ($($f.Mode))" -Computer $comp -ArgumentList @($body) -Script {
-            param($b)
-            try {
-                $name = "HUMig_Netzwerk_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
-                $full = "Start-Sleep -Seconds 3`r`ntry {`r`n$b`r`n} finally { Unregister-ScheduledTask -TaskName '$name' -Confirm:`$false -ErrorAction SilentlyContinue }"
-                $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($full))
-                $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand $enc"
-                $p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-                $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
-                Register-ScheduledTask -TaskName $name -Action $a -Principal $p -Settings $s -Force -ErrorAction Stop | Out-Null
-                Start-ScheduledTask -TaskName $name -ErrorAction Stop
-                'OK Aenderung wird in ca. 3 Sekunden angewendet (SYSTEM-Aufgabe)'
-            } catch { "FEHLER: $($_.Exception.Message)" }
+        # Ablauf in zwei Schritten: (1) am Ziel die SYSTEM-Aufgabe anlegen und starten - scheitert das, ist es ein echter Fehler;
+        # (2) im Hintergrund das Ergebnis abholen (%ProgramData%\HUMig\Netzwerk\<Name>.txt). Reisst die Verbindung durch die
+        # neue Adresse ab, ist das der erwartete Fall: ehrlicher Hinweis, Nachkontrolle der neuen Adresse, kein Fehler.
+        $newIp = if ($f.Mode -eq 'DHCP') { '' } else { $ip }
+        $wait = if ($f.Mode -eq 'DHCP') { 60 } else { 45 }
+        Invoke-HMTool -Title "Netzwerk ($($f.Mode))" -Computer $comp -TimeoutSec 60 -ArgumentList @($body, $name) -Script $script:RS_NetApply -ProtectData -State @{ NewIp = $newIp; Wait = $wait } -OnResult {
+            param($r, $c2, $s2)
+            $st0 = @(@($r) | Where-Object { "$_" -like 'STARTED|*' })[0]
+            if (-not $st0) { Write-HMToolResult $r; return }
+            Start-HMNetResultPoll -Computer $c2 -ResultPath ("$st0".Substring(8)) -NewIp $s2.NewIp -WaitSec $s2.Wait
         }
     }
 }
+# Ergebnis der Netzwerk-Aufgabe im Hintergrund abholen und melden
+function Start-HMNetResultPoll([string]$Computer, [string]$ResultPath, [string]$NewIp, [int]$WaitSec) {
+    Out-Console "   Aenderung laeuft am PC (SYSTEM-Aufgabe) - Ergebnis wird abgeholt (bis $WaitSec s) ..." 'Info'
+    Invoke-AsyncCommand -ScriptBlock $script:RS_NetPoll -ArgumentList @($Computer, $script:RemoteCred, $ResultPath, $WaitSec, $NewIp, [bool](Test-HMIsLocal $Computer)) -TimeoutSec ($WaitSec + 60) -State @{ Computer = $Computer } -OnComplete {
+        param($r, $st)
+        if ("$r" -match '^FEHLER: ' -and -not ($r -is [System.Array])) { Out-Console "   Netzwerk ($($st.Computer)): Ergebnis nicht abholbar ($r) - am PC in %ProgramData%\HUMig\Netzwerk nachsehen" 'Warning'; return }
+        Write-HMToolResult $r
+    }
+}
+# Im Hintergrund: Ergebnisdatei lesen (am eigenen PC direkt, sonst per kurzer Verbindung ueber den Namen und - bei statischer
+# Adresse - ueber die neue Adresse). Bleibt der PC unerreichbar: Hinweis "Verbindung getrennt" und Ping auf die neue Adresse.
+$script:RS_NetPoll = {
+    param($h, $cred, $res, $deadlineSec, $newIp, $isLocal)
+    $t0 = Get-Date; $lost = $false
+    $targets = @($h); if ($newIp -and $newIp -ne $h) { $targets += $newIp }
+    while (((Get-Date) - $t0).TotalSeconds -lt $deadlineSec) {
+        if ($isLocal) {
+            if (Test-Path -LiteralPath $res) { return @(Get-Content -LiteralPath $res -Encoding UTF8 | ForEach-Object { "$_" }) }
+        } else {
+            foreach ($t in $targets) {
+                $p = @{ ComputerName = $t; ArgumentList = @($res); ErrorAction = 'Stop'; SessionOption = (New-PSSessionOption -OpenTimeout 5000 -OperationTimeout 15000)
+                        ScriptBlock = { param($fi) if (Test-Path -LiteralPath $fi) { @(Get-Content -LiteralPath $fi -Encoding UTF8 | ForEach-Object { "$_" }) } else { 'NOCH-NICHT' } } }
+                if ($cred) { $p.Credential = $cred }
+                $r = $null
+                try { $r = @(Invoke-Command @p) } catch { $lost = $true; continue }
+                $lost = $false   # PC antwortet wieder: das Urteil am Ende richtet sich nach dem LETZTEN Zustand
+                if ($r.Count -and "$($r[0])" -ne 'NOCH-NICHT') { return $r }
+                break
+            }
+        }
+        Start-Sleep -Seconds 3
+    }
+    if ($isLocal) { return "WARN Ergebnis liegt nach $deadlineSec Sekunden noch nicht vor - die Aenderung laeuft evtl. noch. Ergebnis: $res" }
+    # Verbindung stand, aber kein Ergebnis: die Aufgabe lief nicht (oder haengt) - Warnung
+    if (-not $lost) { return "WARN Verbindung zum PC steht, aber nach $deadlineSec Sekunden liegt kein Ergebnis vor - die Aufgabe lief vermutlich nicht. Am PC pruefen: $res" }
+    if ($newIp) {
+        $ok = $false; try { $ok = [bool](Test-Connection -ComputerName $newIp -Count 2 -Quiet -ErrorAction Stop) } catch { $ok = $false }
+        # Verbindung weg und neue Adresse antwortet nicht: Warnung (Hinweis nur, wenn die neue Adresse antwortet)
+        if (-not $ok) { return @("WARN PC unter beiden Adressen nicht erreichbar (Name und neue Adresse $newIp antworten nicht) - bitte am PC pruefen. Ergebnis am PC: $res") }
+        return @("INFO Verbindung getrennt, wie bei einer Adressaenderung zu erwarten. Ergebnis am PC: $res", "INFO Nachkontrolle: die neue Adresse $newIp antwortet (Ping)")
+    }
+    return @("INFO Verbindung getrennt, wie bei einer Adressaenderung zu erwarten. Ergebnis am PC: $res", 'INFO Ergebnis offen - nach dem Neu-Verbinden zeigt "IP-Adresse" den aktuellen Stand')
+}
+# Am Ziel-PC: Aufgabe als SYSTEM anlegen und starten. Die Aufgabe laeuft ueber -Command mit einem Skriptblock aus der Textdatei -
+# eine Ausfuehrungsrichtlinie (z. B. AllSigned per Gruppenrichtlinie) gilt nur fuer Skriptdateien, nicht fuer Befehle.
+# Rueckgabe "STARTED|<Ergebnisdatei>" oder "FEHLER - ..."
+$script:RS_NetApply = {
+    param($body, $name)
+    try {
+        $dir = Join-Path $env:ProgramData 'HUMig\Netzwerk'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } | Remove-Item -Force -ErrorAction SilentlyContinue
+        $tf = Join-Path $dir "$name.task.txt"; $res = Join-Path $dir "$name.txt"
+        $full = "Start-Sleep -Seconds 3`r`ntry {`r`n$body`r`n} finally { Unregister-ScheduledTask -TaskName '$name' -Confirm:`$false -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '$tf' -Force -ErrorAction SilentlyContinue }"
+        [System.IO.File]::WriteAllText($tf, $full, (New-Object System.Text.UTF8Encoding($true)))
+        $cmd = "& ([scriptblock]::Create([System.IO.File]::ReadAllText('$tf')))"
+        $a = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -Command `"$cmd`""
+        $p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+        Register-ScheduledTask -TaskName $name -Action $a -Principal $p -Settings $s -Force -ErrorAction Stop | Out-Null
+        # scheitert der Start, Aufgabe und Hilfsdatei wieder entfernen (sonst bleiben beide liegen)
+        try { Start-ScheduledTask -TaskName $name -ErrorAction Stop }
+        catch {
+            Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $tf -Force -ErrorAction SilentlyContinue
+            throw
+        }
+        "STARTED|$res"
+    } catch { "FEHLER - Aufgabe nicht ausfuehrbar: $($_.Exception.Message)" }
+}# Text der SYSTEM-Aufgabe fuer "IP-Adresse": alten Zustand merken, aendern, Ergebnis pruefen, bei Fehlschlag alten Zustand
+# wiederherstellen, Ergebnis (Zeilen OK/WARN/FEHLER) in eine Datei schreiben. -ResultFile nur fuer Tests (sonst ProgramData\HUMig\Netzwerk).
+function New-HMNetChangeScript {
+    param([int]$Index, [ValidateSet('DHCP', 'Static')][string]$Mode, [string]$Ip = '', [int]$Prefix = 0, [string]$Gateway = '', [string[]]$Dns = @(),
+          [string]$Name = 'HUMig_Netzwerk', [string]$ResultFile = '', [int]$WaitAddrSec = 15, [int]$WaitDhcpSec = 30)
+    $q = { param($s) "'" + ("$s" -replace "'", "''") + "'" }
+    $res = if ($ResultFile) { & $q $ResultFile } else { "(Join-Path `$env:ProgramData " + (& $q "HUMig\Netzwerk\$Name.txt") + ')' }
+    $dnsList = (@($Dns | Where-Object { "$_".Trim() } | ForEach-Object { & $q "$_".Trim() }) -join ', ')
+    $t = $script:HMNetChangeTemplate
+    $t = $t.Replace('__IDX__', "$Index").Replace('__MODE__', (& $q $Mode)).Replace('__IP__', (& $q $Ip)).Replace('__PFX__', "$Prefix")
+    $t = $t.Replace('__GW__', (& $q $Gateway)).Replace('__DNS__', $dnsList).Replace('__RES__', $res).Replace('__WA__', "$WaitAddrSec").Replace('__WD__', "$WaitDhcpSec")
+    return $t
+}
+$script:HMNetChangeTemplate = @'
+$ErrorActionPreference = 'Stop'
+$idx = __IDX__; $mode = __MODE__; $ip = __IP__; $pfx = __PFX__; $gw = __GW__; $dns = @(__DNS__); $res = __RES__
+$out = New-Object System.Collections.Generic.List[string]
+function Get-HUNetState {
+    $if = Get-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4
+    $guid = "$((Get-NetAdapter -InterfaceIndex $idx).InterfaceGuid)"
+    $ns = ''
+    if ($guid) { try { $ns = "$((Get-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\$guid" -Name NameServer -ErrorAction Stop).NameServer)".Trim() } catch { $ns = '' } }
+    [pscustomobject]@{
+        Dhcp      = ("$($if.Dhcp)" -eq 'Enabled')
+        Ips       = @(Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { "$($_.PrefixOrigin)" -eq 'Manual' } | ForEach-Object { [pscustomobject]@{ Ip = "$($_.IPAddress)"; Pfx = [int]$_.PrefixLength } })
+        Gw        = @(Get-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | ForEach-Object { "$($_.NextHop)" } | Where-Object { $_ -and $_ -ne '0.0.0.0' })
+        Dns       = @(@(Get-DnsClientServerAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue) | ForEach-Object { $_.ServerAddresses } | Where-Object { $_ })
+        DnsStatic = [bool]$ns
+    }
+}
+# Adresse vom DHCP-Server nur fuer diesen Adapter erneuern (ohne Namen erneuerte ipconfig alle Adapter und konnte lange blockieren)
+function Invoke-HURenew {
+    $n = ''; try { $n = "$((Get-NetAdapter -InterfaceIndex $idx).Name)" } catch { $n = '' }
+    # ohne Warten: ipconfig /renew kann lange blockieren, die Antwort kommt ueber Wait-HUDhcp
+    if ($n) { Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\ipconfig.exe') -ArgumentList @('/renew', "`"$n`"") -WindowStyle Hidden }
+}
+function Clear-HUNet([bool]$ManualOnly) {
+    Remove-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue
+    if ($ManualOnly) { Remove-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -PrefixOrigin Manual -Confirm:$false -ErrorAction SilentlyContinue }
+    else { Remove-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue }
+}
+# wartet, bis die Adresse nicht mehr "Tentative" ist (Pruefung auf doppelte Adresse im Netz); Rueckgabe Zustand oder ''
+function Wait-HUAddr([string]$a, [int]$sec) {
+    $x = $null
+    for ($i = 0; $i -le $sec; $i++) {
+        $x = @(Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { "$($_.IPAddress)" -eq $a })[0]
+        if ($x -and "$($x.AddressState)" -ne 'Tentative') { return "$($x.AddressState)" }
+        if ($i -lt $sec) { Start-Sleep -Seconds 1 }
+    }
+    if ($x) { return "$($x.AddressState)" }
+    return ''
+}
+# wartet auf eine Adresse vom DHCP-Server (Herkunft Dhcp, nicht die automatische 169.254-Adresse)
+function Wait-HUDhcp([int]$sec) {
+    for ($i = 0; $i -le $sec; $i++) {
+        $x = @(Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { "$($_.PrefixOrigin)" -eq 'Dhcp' -and "$($_.AddressState)" -eq 'Preferred' })[0]
+        if ($x) { return "$($x.IPAddress)" }
+        if ($i -lt $sec) { Start-Sleep -Seconds 1 }
+    }
+    return ''
+}
+function Format-HUOld($o) {
+    if ($o.Dhcp) { return 'DHCP' }
+    $t = (@($o.Ips | ForEach-Object { "$($_.Ip)/$($_.Pfx)" }) -join ', ')
+    if (@($o.Gw).Count) { $t += ", Gateway $(@($o.Gw)[0])" }
+    if ($o.DnsStatic -and @($o.Dns).Count) { $t += ", DNS $(@($o.Dns) -join ', ')" }
+    return $t
+}
+$old = $null
+try {
+    $old = Get-HUNetState
+    if ($mode -eq 'DHCP') {
+        Clear-HUNet $true
+        Set-NetIPInterface -InterfaceIndex $idx -Dhcp Enabled
+        Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses
+        Invoke-HURenew
+        $now = Get-HUNetState
+        if (-not $now.Dhcp) { throw 'DHCP ist danach nicht eingeschaltet' }
+        # keine Antwort vom DHCP-Server ist kein Grund fuer einen Rueckbau (z. B. PC wird vor dem Umzug in ein anderes Netz umgestellt)
+        $got = Wait-HUDhcp __WD__
+        if ($got) { $out.Add("OK DHCP aktiv, Adresse vom DHCP-Server: $got") }
+        else { $out.Add('WARN DHCP ist eingeschaltet, aber nach __WD__ Sekunden kam noch keine Adresse vom DHCP-Server - Netzwerkkabel und DHCP-Server pruefen') }
+    } else {
+        Set-NetIPInterface -InterfaceIndex $idx -Dhcp Disabled
+        Clear-HUNet $false
+        $p = @{ InterfaceIndex = $idx; IPAddress = $ip; PrefixLength = $pfx }
+        if ($gw) { $p.DefaultGateway = $gw }
+        New-NetIPAddress @p | Out-Null
+        if ($dns.Count) { Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses $dns }
+        $st = Wait-HUAddr $ip __WA__
+        if ($st -eq 'Duplicate') { throw "die Adresse $ip wird im Netz bereits verwendet" }
+        if (-not $st) { throw "die Adresse $ip ist danach nicht am Adapter" }
+        $now = Get-HUNetState
+        if ($now.Dhcp) { throw 'DHCP ist danach noch eingeschaltet' }
+        if ($gw -and @($now.Gw) -notcontains $gw) { throw "das Gateway $gw ist danach nicht eingetragen" }
+        if ($dns.Count -and ((@($now.Dns) -join ',') -ne ($dns -join ','))) { throw "die DNS-Server sind danach '$(@($now.Dns) -join ', ')' statt '$($dns -join ', ')'" }
+        $out.Add("OK statische Adresse $ip/$pfx aktiv$(if ($gw) { ", Gateway $gw" })$(if ($dns.Count) { ", DNS $($dns -join ', ')" })")
+        if ($st -ne 'Preferred') { $out.Add("WARN Zustand der Adresse: $st (noch nicht bestaetigt)") }
+    }
+} catch {
+    $why = "$($_.Exception.Message)"
+    if (-not $old) { $out.Add("FEHLER - $why - nichts geaendert") }
+    else {
+        try {
+            Clear-HUNet $false
+            if ($old.Dhcp) { Set-NetIPInterface -InterfaceIndex $idx -Dhcp Enabled }
+            else {
+                Set-NetIPInterface -InterfaceIndex $idx -Dhcp Disabled
+                $first = $true
+                foreach ($a in @($old.Ips)) {
+                    $p = @{ InterfaceIndex = $idx; IPAddress = $a.Ip; PrefixLength = $a.Pfx }
+                    if ($first -and @($old.Gw).Count) { $p.DefaultGateway = @($old.Gw)[0] }
+                    New-NetIPAddress @p | Out-Null
+                    $first = $false
+                }
+            }
+            if ($old.DnsStatic -and @($old.Dns).Count) { Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses @($old.Dns) }
+            else { Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses }
+            if ($old.Dhcp) { Invoke-HURenew }
+            # weitere Standardgateways (selten) einzeln wieder eintragen
+            if (-not $old.Dhcp) { foreach ($g2 in @($old.Gw | Select-Object -Skip 1)) { New-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -NextHop $g2 -ErrorAction SilentlyContinue | Out-Null } }
+            $chk = Get-HUNetState
+            $have = @($chk.Ips | ForEach-Object { $_.Ip })
+            $miss = @($old.Ips | Where-Object { $have -notcontains $_.Ip } | ForEach-Object { $_.Ip })
+            if (-not $old.Dhcp) { $miss += @($old.Gw | Where-Object { @($chk.Gw) -notcontains $_ } | ForEach-Object { "Gateway $_" }) }
+            if ($old.DnsStatic -and ((@($chk.Dns) -join ',') -ne (@($old.Dns) -join ','))) { $miss += 'DNS-Server' }
+            if ($chk.Dhcp -ne $old.Dhcp -or $miss.Count) { throw "nicht vollstaendig$(if ($miss.Count) { " (fehlt: $($miss -join ', '))" })" }
+            $out.Add("FEHLER - $why - alter Zustand wiederhergestellt ($(Format-HUOld $old))")
+        } catch {
+            $out.Add("FEHLER - $why")
+            $out.Add("FEHLER - alter Zustand nicht wiederhergestellt: $($_.Exception.Message) - vorher war eingestellt: $(Format-HUOld $old)")
+        }
+    }
+}
+try {
+    [System.IO.File]::WriteAllLines("$res.tmp", [string[]]$out.ToArray(), (New-Object System.Text.UTF8Encoding($true)))
+    Move-Item -LiteralPath "$res.tmp" -Destination $res -Force
+} catch { }
+'@
 
 # ============================================================================
 # 3. LOKALE GRUPPEN: Administratoren / Netzwerkkonfigurations-Operatoren (per SID, sprachunabhaengig)
@@ -271,7 +476,7 @@ $script:RS_GroupList = {
     foreach ($g in $groups.GetEnumerator()) {
         $sid = $g.Value
         $list = @()
-        try { $list = @(Get-LocalGroupMember -SID $sid -ErrorAction Stop | ForEach-Object { [pscustomobject]@{ Name = "$($_.Name)"; Type = "$($_.ObjectClass)"; Source = "$($_.PrincipalSource)" } }) }
+        try { $list = @(Get-LocalGroupMember -SID $sid -ErrorAction Stop | ForEach-Object { [pscustomobject]@{ Name = "$($_.Name)"; Type = "$($_.ObjectClass)"; Source = "$($_.PrincipalSource)"; MSid = "$($_.SID)" } }) }
         catch {
             try {
                 $gn = (New-Object System.Security.Principal.SecurityIdentifier($sid)).Translate([System.Security.Principal.NTAccount]).Value.Split('\')[-1]
@@ -279,8 +484,14 @@ $script:RS_GroupList = {
                 $list = @($ad.Invoke('Members') | ForEach-Object { [pscustomobject]@{ Name = (($_.GetType().InvokeMember('AdsPath', 'GetProperty', $null, $_, $null)) -replace '^WinNT://', '' -replace '/', '\'); Type = "$($_.GetType().InvokeMember('Class', 'GetProperty', $null, $_, $null))"; Source = '' } })
             } catch { $list = @([pscustomobject]@{ Name = "FEHLER: $($_.Exception.Message)"; Type = ''; Source = '' }) }
         }
-        foreach ($m in $list) { [pscustomobject]@{ Gruppe = $g.Key; Sid = $sid; Mitglied = $m.Name; Typ = $m.Type; Quelle = $m.Source } }
+        foreach ($m in $list) { [pscustomobject]@{ Gruppe = $g.Key; Sid = $sid; Mitglied = $m.Name; Typ = $m.Type; Quelle = $m.Source; MitgliedSid = "$($m.MSid)" } }
     }
+}
+# Eingebauter Administrator (RID 500) oder Domaenen-Admins (RID 512)? Ueber die SID sprachunabhaengig, ohne SID ueber den Namen
+# (auch "Domaenen-Admins" mit Umlaut und die franzoesische Form)
+function Test-HMCriticalAdmin([string]$Name, [string]$Sid) {
+    if ("$Sid" -match '^S-1-5-21-\d+-\d+-\d+-(500|512)$') { return $true }
+    return ("$Name" -match '\\Administrat(or|eur)$' -or "$Name" -match '(?i)\\(Domain Admins|Dom(ae|ä)nen-Admins|Admins du domaine)$')
 }
 $script:RS_GroupChange = {
     param($action, $sid, $member)
@@ -303,10 +514,11 @@ function Show-HMLocalGroups {
     Invoke-HMTool -Title 'Lokale Gruppen lesen' -Computer $c -ArgumentList @(, $script:HMLocalGroups) -Script $script:RS_GroupList -OnResult {
         param($r, $comp)
         $rows = New-Object System.Collections.Generic.List[object]
-        foreach ($m in @($r)) { if ($m -and $m.Gruppe) { $rows.Add(@($m.Gruppe, $m.Mitglied, $m.Typ, $m.Quelle)) } }
+        $sids = @{}
+        foreach ($m in @($r)) { if ($m -and $m.Gruppe) { $rows.Add(@($m.Gruppe, $m.Mitglied, $m.Typ, $m.Quelle)); $sids["$($m.Gruppe)|$($m.Mitglied)"] = "$($m.MitgliedSid)" } }
         Out-Console "$($rows.Count) Gruppenmitglieder auf $comp" 'Success'
         Show-DataGridWindow -Title "Lokale Gruppen - $comp" -Columns @('Gruppe', 'Mitglied', 'Typ', 'Quelle') -Rows $rows.ToArray() -Sort 'Gruppe ASC, Mitglied ASC' -Width 900 -Height 520 `
-            -ActionContext @{ Computer = $comp } -Actions @(
+            -ActionContext @{ Computer = $comp; Sids = $sids } -Actions @(
                 @{ Text = 'Hinzufuegen ...'; Color = '#FFA6E3A1'; NoSelection = $true; Handler = {
                     param($rows, $win, $ctx)
                     $f = Show-HMFormDialog -Title "Mitglied hinzufuegen - $($ctx.Computer)" -OkText 'Hinzufuegen' -Fields @(
@@ -321,7 +533,7 @@ function Show-HMLocalGroups {
                     param($rows, $win, $ctx)
                     $sel = @($rows | Where-Object { $_.Mitglied -and $_.Mitglied -notlike 'FEHLER*' })
                     if (-not $sel.Count) { return }
-                    $bad = @($sel | Where-Object { $_.Gruppe -eq 'Administratoren' -and ($_.Mitglied -match '\\Administrator$' -or $_.Mitglied -match '\\Domain Admins$|\\Domaenen-Admins$') })
+                    $bad = @($sel | Where-Object { $_.Gruppe -eq 'Administratoren' -and (Test-HMCriticalAdmin "$($_.Mitglied)" "$($ctx.Sids["$($_.Gruppe)|$($_.Mitglied)"])") })
                     $msg = "Auf $($ctx.Computer) entfernen?`n`n" + (($sel | ForEach-Object { "  $($_.Gruppe): $($_.Mitglied)" }) -join "`n")
                     if ($bad.Count) { $msg += "`n`nACHTUNG: eingebauter Administrator / Domaenen-Admins dabei - Zugriff kann verloren gehen!" }
                     if ("$((Show-HMDialogBox -Owner $win -Text $msg -Title 'Lokale Gruppen' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
@@ -397,6 +609,8 @@ $script:RS_Autologon = {
                 if ($p.AutoLogonCount) { "INFO Verbleibende Anmeldungen: $($p.AutoLogonCount)" }
             }
             'Enable' {
+                # lokales Konto: Domaene ist der Name dieses PCs (am Ziel bestimmt - ein eingetippter Name oder eine IP-Adresse taugt nicht)
+                if (-not "$domain".Trim() -or "$domain" -eq '.') { $domain = $env:COMPUTERNAME }
                 $pw = if ($cred) { $cred.GetNetworkCredential().Password } else { '' }
                 [HMLsa]::Store('DefaultPassword', $pw)
                 Set-ItemProperty -LiteralPath $k -Name AutoAdminLogon -Value '1' -Type String
@@ -432,11 +646,13 @@ function Start-HMAutologon {
     if ($act -eq 'Enable') {
         $u = "$($f.User)".Trim()
         if (-not $u) { Out-Console 'Benutzer fehlt' 'Warning'; return }
-        if ($u -match '^(.+)\\(.+)$') { $dom = $Matches[1]; $user = $Matches[2] } else { $dom = if ($c -and -not (Test-HMIsLocal $c)) { $c.Split('.')[0] } else { $env:COMPUTERNAME }; $user = $u }
-        if ($dom -eq '.') { $dom = if (Test-HMIsLocal $c) { $env:COMPUTERNAME } else { $c.Split('.')[0] } }
+        # lokales Konto (nur Name oder .\Name): Domaene leer lassen - das Ziel setzt seinen eigenen PC-Namen ein
+        # (aus dem Feld abgeleitet ergab eine IP-Adresse als Ziel sonst z.B. die Domaene "10")
+        if ($u -match '^(.+)\\(.+)$') { $dom = $Matches[1]; $user = $Matches[2] } else { $dom = ''; $user = $u }
+        if ($dom -eq '.') { $dom = '' }
         if ("$($f.Count)" -match '^\d+$') { $count = [int]$f.Count } elseif ("$($f.Count)".Trim()) { Out-Console "Anzahl ungueltig: '$($f.Count)'" 'Warning'; return }
-        $cred = New-Object System.Management.Automation.PSCredential ("$dom\$user", $f.Pw)
-        if (-not (Confirm-Action "Autologon auf $c fuer $dom\$user aktivieren?")) { return }
+        $cred = New-Object System.Management.Automation.PSCredential ("$(if ($dom) { $dom } else { '.' })\$user", $f.Pw)
+        if (-not (Confirm-Action "Autologon auf $c fuer $(if ($dom) { "$dom\$user" } else { "das lokale Konto $user" }) aktivieren?")) { return }
     }
     Invoke-HMTool -Title "Autologon ($($f.Action))" -Computer $c -ArgumentList @($act, $user, $dom, $cred, $count, $script:HMLsaSource) -Script $script:RS_Autologon
 }
@@ -886,6 +1102,10 @@ function Set-HMFirewallRow($Rows, $Win, $Ctx, [string]$What) {
     if ($What -in @('Private', 'Public')) {
         if ($r.Art -ne 'Netzwerk') { [void](Show-HMDialogBox -Owner $Win -Text 'Bitte eine Zeile "Netzwerk" markieren.' -Title 'Firewall' -Mode 'OK' -Icon 'Information'); return }
         if ($r.Wert -eq 'DomainAuthenticated') { [void](Show-HMDialogBox -Owner $Win -Text 'Domaenennetzwerke werden automatisch erkannt und koennen nicht umgestellt werden.' -Title 'Firewall' -Mode 'OK' -Icon 'Information'); return }
+        # Ausnahmefall: anderer PC auf "Oeffentlich" - die Firewall laesst dann oft keine Fernwartung mehr zu (Standard Nein)
+        if (Test-HMFirewallPublicRisk $What "$($r.Wert)" $Ctx.Computer) {
+            if ("$((Show-HMDialogBox -Owner $Win -Text (Get-HMFirewallPublicText "$($r.Name)" $Ctx.Computer) -Title 'Firewall' -Mode 'YesNo' -Icon 'Warning'))" -ne 'Yes') { return }
+        }
         $arg = @{ Alias = "$($r.Name)"; Category = $What }; $act = 'Category'
     } else {
         if ($r.Art -ne 'Firewall-Profil') { [void](Show-HMDialogBox -Owner $Win -Text 'Bitte eine Zeile "Firewall-Profil" markieren.' -Title 'Firewall' -Mode 'OK' -Icon 'Information'); return }
@@ -895,13 +1115,24 @@ function Set-HMFirewallRow($Rows, $Win, $Ctx, [string]$What) {
     $Win.Close()
     Invoke-HMTool -Title 'Firewall/Netzwerk aendern' -Computer $Ctx.Computer -ArgumentList @($act, $arg) -Script $script:RS_Firewall -OnResult { param($x) Write-HMToolResult $x; Show-HMFirewall }
 }
+# Rueckfrage noetig? Nur beim Umstellen eines ANDEREN PCs auf "Oeffentlich" (eigener PC oder schon oeffentlich: keine)
+function Test-HMFirewallPublicRisk([string]$What, [string]$Current, [string]$Computer) {
+    if ($What -ne 'Public' -or $Current -eq 'Public') { return $false }
+    $c = "$Computer".Trim()
+    if (-not $c -or $c -eq '.' -or $c -ieq 'localhost' -or $c -ieq $env:COMPUTERNAME -or $c -ilike "$($env:COMPUTERNAME).*") { return $false }
+    return $true
+}
+function Get-HMFirewallPublicText([string]$Network, [string]$Computer) {
+    return "Netzwerk '$Network' auf $Computer auf 'Oeffentlich' stellen?`n`nIm oeffentlichen Netz laesst die Firewall Fernwartung (WinRM, Remotedesktop, Freigaben) oft nicht mehr zu - die Verbindung zu diesem PC kann danach abbrechen und ist nur noch am PC selbst zurueckzustellen."
+}
 
 # ============================================================================
 # 13. PROFIL EINEM ANDEREN KONTO ZUWEISEN (z.B. Domaene -> lokal). Profil bleibt am Ort, nichts wird kopiert.
 #     Benutzer abgemeldet; Sicherung: ProfileList-.reg + Dateirechte (icacls /save) unter ProgramData\HUMig\ProfilZuweisung
 # ============================================================================
 $script:RS_ProfileAssign = {
-    param($srcSid, $target, $createLocal, $cred, $addAdmin, $setOwner)
+    # $allowBlank: lokales Konto darf ohne Kennwort angelegt werden (erst nach Rueckfrage). Ohne: Rueckgabe 'FRAGE OHNE_KENNWORT', bevor etwas geaendert wird
+    param($srcSid, $target, $createLocal, $cred, $addAdmin, $setOwner, $allowBlank = $false)
     # Verknuepfungen (Junction/SymbolicLink) unter $Root mit Ziel ausserhalb $Root, max. $Max Treffer ("<link> -> <ziel>")
     function Find-HUOutsideLinks([string]$Root, [int]$Max = 20) {
         $hits = New-Object System.Collections.Generic.List[string]
@@ -953,6 +1184,9 @@ $script:RS_ProfileAssign = {
         if (-not $sid2) {
             if (-not $createLocal -or $name -notlike "$env:COMPUTERNAME\*") { return "FEHLER: Konto $name nicht gefunden$(if ($name -notlike "$env:COMPUTERNAME\*") { ' (Domaene erreichbar?)' } else { ' - Option Lokales Konto anlegen waehlen' })" }
             $short = $name.Split('\')[-1]
+            # ohne Kennwort nur nach ausdruecklicher Rueckfrage (bis hier ist nichts geaendert)
+            if ((-not $cred -or -not $cred.Password -or $cred.Password.Length -eq 0) -and -not $allowBlank) { return 'FRAGE OHNE_KENNWORT' }
+            if (-not $cred) { $cred = New-Object System.Management.Automation.PSCredential ('x', (New-Object System.Security.SecureString)) }
             New-LocalUser -Name $short -Password $cred.Password -FullName $short -PasswordNeverExpires:$false -ErrorAction Stop | Out-Null
             Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $short -ErrorAction SilentlyContinue
             $sid2 = (New-Object System.Security.Principal.NTAccount($name)).Translate([System.Security.Principal.SecurityIdentifier]).Value
@@ -1019,6 +1253,8 @@ $script:RS_ProfileAssign = {
             $out.Add("OK Registry $(Split-Path $h[0] -Leaf): $keys Schluessel geprueft, $changed angepasst$(if ($denied) { ", $denied nicht aenderbar" })")
         }
         foreach ($l in $loaded) { [GC]::Collect(); [GC]::WaitForPendingFinalizers(); for ($i = 0; $i -lt 5; $i++) { & reg.exe unload "HKU\$l" 2>&1 | Out-Null; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 } }
+        # noch geladen: die Datei bleibt bis zum Neustart gesperrt, die Anmeldung des Kontos bekaeme sonst ein temporaeres Profil
+        foreach ($l in $loaded) { if (Test-Path -LiteralPath "Registry::HKEY_USERS\$l") { $out.Add("WARN Registry-Datei (HKU\$l) liess sich nicht entladen - PC VOR der ersten Anmeldung mit dem neuen Konto neu starten") } }
         $loaded = @()
 
         # --- ProfileList: Eintrag auf das neue Konto umhaengen ---
@@ -1066,7 +1302,7 @@ function Start-HMProfileAssign {
     if (-not $t -or $t -match '^AzureAD\\' -or $t -match '@') { Out-Console "Ungueltiges oder nicht unterstuetztes Konto: '$t' (Entra-ID/UPN nicht moeglich)" 'Warning'; return }
     $cred = $null
     if ($f.Create) {
-        if ($f.Pw_Len -gt 0) {
+        if ($f.Pw_Len -gt 0 -or $f.Pw2_Len -gt 0) {
             $a = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($f.Pw))
             $b = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($f.Pw2))
             $same = ($a -ceq $b); $a = $null; $b = $null
@@ -1075,7 +1311,24 @@ function Start-HMProfileAssign {
         $cred = New-Object System.Management.Automation.PSCredential ('x', $f.Pw)
     }
     if (-not (Confirm-Action "Profil $($p.LocalPath)`nvon $($p.Account)`nan $t uebergeben (auf $c)?`n`nDer Profil-Eintrag des alten Kontos wird entfernt (Sicherung unter ProgramData\HUMig\ProfilZuweisung).`nDauer: je nach Profilgroesse einige Minuten.`n`nFortfahren?")) { return }
-    Invoke-HMTool -Title "Profil zuweisen ($($p.Folder) -> $t)" -Computer $c -TimeoutSec 3600 -ArgumentList @($p.SID, $t, [bool]$f.Create, $cred, [bool]$f.Admin, [bool]$f.Owner) -Script $script:RS_ProfileAssign -ProtectData -OnResult { param($r) Write-HMToolResult $r; Connect-Target }
+    Invoke-HMProfileAssign -Prof $p -Computer $c -Target $t -Create ([bool]$f.Create) -Cred $cred -Admin ([bool]$f.Admin) -Owner ([bool]$f.Owner) -AllowBlank $false
+}
+# Lauf der Profil-Zuweisung; meldet das Ziel "wuerde ohne Kennwort anlegen", folgt eine Rueckfrage (Standard Nein) und ein zweiter Lauf
+function Invoke-HMProfileAssign($Prof, [string]$Computer, [string]$Target, [bool]$Create, $Cred, [bool]$Admin, [bool]$Owner, [bool]$AllowBlank) {
+    $st = @{ Prof = $Prof; Computer = $Computer; Target = $Target; Create = $Create; Cred = $Cred; Admin = $Admin; Owner = $Owner }
+    Invoke-HMTool -Title "Profil zuweisen ($($Prof.Folder) -> $Target)" -Computer $Computer -TimeoutSec 3600 -ArgumentList @($Prof.SID, $Target, $Create, $Cred, $Admin, $Owner, $AllowBlank) -Script $script:RS_ProfileAssign -ProtectData -State $st -OnResult {
+        param($r, $comp, $s)
+        if (Test-HMBlankPasswordQuestion $r) {
+            if (-not (Confirm-Action (Get-HMBlankPasswordText $s.Target $comp $s.Admin) 'Profil zuweisen')) { Out-Console "   Profil-Zuweisung abgebrochen - kein Konto ohne Kennwort angelegt, nichts geaendert." 'Warning'; return }
+            Invoke-HMProfileAssign -Prof $s.Prof -Computer $s.Computer -Target $s.Target -Create $s.Create -Cred $s.Cred -Admin $s.Admin -Owner $s.Owner -AllowBlank $true
+            return
+        }
+        Write-HMToolResult $r; Connect-Target
+    }
+}
+function Test-HMBlankPasswordQuestion($Result) { return (@(@($Result) | ForEach-Object { "$_".Trim() }) -contains 'FRAGE OHNE_KENNWORT') }
+function Get-HMBlankPasswordText([string]$Target, [string]$Computer, [bool]$Admin) {
+    return "Das Konto $Target gibt es auf $Computer noch nicht und es wuerde OHNE Kennwort angelegt$(if ($Admin) { ' - als lokaler Administrator' }).`n`nJeder, der an diesem PC sitzt, kann sich dann damit anmelden.`n`nTrotzdem ohne Kennwort anlegen? (Nein = abbrechen und ein Kennwort eintragen)"
 }
 
 # ============================================================================
@@ -1344,6 +1597,8 @@ function Start-HMSpoolerReset {
     $c = Get-TargetComputer
     if (-not (Confirm-Action "Druckwarteschlange auf $c leeren und Druckspooler neu starten?`n`nAlle wartenden Druckauftraege gehen verloren.")) { return }
     Invoke-HMTool -Title 'Druckspooler' -Computer $c -Script {
+        # abhaengige Dienste (z.B. Fax, Druckerdienste von Herstellern) stoppt -Force mit - danach wieder starten
+        $dep = @(); try { $dep = @(Get-Service Spooler -DependentServices -ErrorAction Stop | Where-Object { "$($_.Status)" -eq 'Running' } | ForEach-Object { "$($_.Name)" }) } catch { }
         try {
             Stop-Service Spooler -Force -ErrorAction Stop
             $d = Join-Path $env:windir 'System32\spool\PRINTERS'
@@ -1352,6 +1607,7 @@ function Start-HMSpoolerReset {
             Start-Service Spooler -ErrorAction Stop
             "OK $($f.Count) Datei(en) aus der Warteschlange geloescht, Spooler laeuft"
         } catch { "FEHLER: $($_.Exception.Message)"; try { Start-Service Spooler -ErrorAction SilentlyContinue } catch { } }
+        foreach ($n in $dep) { try { Start-Service -Name $n -ErrorAction Stop; "OK abhaengiger Dienst $n wieder gestartet" } catch { "WARN abhaengiger Dienst $n nicht wieder gestartet: $($_.Exception.Message)" } }
     }
 }
 
@@ -1463,7 +1719,8 @@ function Start-HMSystemRepair([bool]$StatusOnly) {
         $t = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($status) {
             if ($t -and $t.State -eq 'Running') { 'INFO laeuft noch ...' }
-            if (Test-Path $log) { Get-Content -LiteralPath $log -Tail 12 | ForEach-Object { "INFO $_" } } else { 'INFO noch keine Reparatur gelaufen' }
+            # Rueckgabecode ungleich 0 bei DISM/SFC nicht als neutrale Info zeigen
+            if (Test-Path $log) { Get-Content -LiteralPath $log -Tail 12 | ForEach-Object { if ("$_" -match '^(DISM|SFC) Code (-?\d+)' -and $Matches[2] -ne '0') { "WARN $_ (Code ungleich 0 - Protokoll pruefen)" } else { "INFO $_" } } } else { 'INFO noch keine Reparatur gelaufen' }
             return
         }
         if ($t -and $t.State -eq 'Running') { return 'WARN Reparatur laeuft bereits' }

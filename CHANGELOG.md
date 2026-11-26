@@ -1,5 +1,55 @@
 ﻿# Changelog
 
+## v2.1.26 - 2026-11-26
+### 🔐 Herausgeber
+- **Release signieren zeigt den Abgleich:** Die Bestätigung nennt je Release, ob die Prüfsummen-Datei gleich wie der lokale Stand ist, nicht abgeglichen werden konnte (z. B. andere Version installiert) oder abweicht.
+  - Im Normalfall bleibt es bei einer Bestätigung, kein zusätzlicher Klick.
+- **Rückfrage nur bei echter Abweichung:** Weicht die Prüfsummen-Datei bei gleicher Version vom lokalen Stand ab, fragt HUMig mit den betroffenen Dateien nach, Standard ist Nein.
+  - Nein lässt diese Releases aus und signiert die anderen.
+  - Erkennt erst das Signieren selbst eine Abweichung, wird dieses Release nicht ohne Rückfrage signiert. HUMig sagt dann, dass es beim nächsten Start nachfragt.
+- **Signieren wird nie verhindert:** Scheitert der Abgleich oder dauert er zu lange, wird wie bisher signiert, die Bestätigung sagt "nicht abgeglichen".
+- **Kein zweiter Ablauf:** Ein weiterer Klick auf "Release signieren", während ein Ablauf läuft, meldet "Signieren läuft bereits".
+- **Nichts zu signieren:** Werden alle Releases ausgelassen, steht dort eine Hinweiszeile, es wird nichts gestartet.
+### ✅ Qualität
+- **Tests:** 596 bestanden.
+
+## v2.1.25 - 2026-11-26
+### 🛠️ Werkzeuge
+- **IP-Adresse ändern prüft das Ergebnis:** Meldet erst nach der Kontrolle am PC, ob Adresse, Gateway und DNS eingetragen sind.
+  - Scheitert die Änderung, zum Beispiel weil die Adresse im Netz schon vergeben ist, stellt HUMig den vorherigen Zustand wieder her und sagt es.
+  - Kommt nach dem Umstellen auf DHCP keine Adresse vom DHCP-Server, bleibt DHCP eingeschaltet und HUMig warnt.
+  - Bricht die Verbindung wegen der neuen Adresse ab und antwortet die neue Adresse auf Ping, meldet HUMig das als Hinweis und zeigt, wo am PC das Ergebnis steht.
+  - Ist der PC unter keiner der beiden Adressen erreichbar oder liegt trotz stehender Verbindung kein Ergebnis vor, warnt HUMig. Rot bleibt nur ein Fehler beim Start der Änderung.
+- **Konto ohne Kennwort nur nach Rückfrage:** "Profil anderem Konto zuweisen" fragt nach, bevor ein neues lokales Konto ohne Kennwort angelegt wird.
+- **Netzwerk "Öffentlich" an einem anderen PC:** Rückfrage, weil danach die Fernwartung abbrechen kann.
+- **Warnung beim Entfernen von Administratoren:** erkennt den eingebauten Administrator und die Domänen-Admins jetzt auch umbenannt und in jeder Sprache.
+- **Profil zuweisen:** Hinweis auf einen Neustart, wenn die Registry-Datei des Profils geladen blieb.
+- **Autologon:** Bei lokalen Konten stimmt die Domäne jetzt auch, wenn der PC über seine IP-Adresse gewählt ist.
+- **Druckwarteschlange leeren:** startet abhängige Dienste danach wieder.
+- **Systemdateien reparieren:** Ein Rückgabecode ungleich 0 erscheint als Warnung.
+### 📦 Softwareverteilung
+- **Mindestversion wird nachgeprüft:** Bleibt nach dem Update die alte Version, gilt das Paket nicht mehr als installiert. Schreibweisen wie "1.2.3" und "1.2.3.0" gelten als gleich, eine nicht lesbare Version als "nicht prüfbar".
+- **Warnung bei offener Paketablage:** Dürfen normale Benutzer im Paketordner schreiben, steht das in der Rückfrage. Auf FAT- und exFAT-Datenträgern kommt einmal ein Hinweis.
+### 🔌 Treiberverteilung
+- **Kein "installiert" ohne neuen Treiber:** Hat danach kein Gerät die Paketversion aktiv, zählt der PC als übersprungen. Schreibweisen wie "1.02.0003" und "1.2.3.0" gelten als gleich; ist eine Version nicht vergleichbar, zählen nur die übrigen Geräte.
+- **Geräte-Sperre erklärt:** Die Sperre gilt auch für dasselbe Gerät an einem anderen USB-Anschluss oder an einer Dockingstation.
+- **Offene Fenster folgen dem Feld Computer:** Steht im Hauptfenster ein anderer PC im Feld, zeigen die offenen Fenster Softwareverteilung und Treiber das an ("im Feld: ..."). Ein Klick auf eine Aktion für den gewählten Computer übernimmt diesen PC und führt sie dort aus; läuft gerade ein Backup oder Restore, fragt HUMig vorher nach.
+### 🔄 App-Updates
+- **Zeitlimit je Programm:** Der Lauf wartet höchstens 120 Minuten auf ein Programm und macht dann mit dem nächsten weiter, auch im Zeitplan. Ob ein hängender Installer dabei selbst endet, ist beim Lauf als SYSTEM nicht gesichert.
+- **Kein zweiter Lauf aus Versehen:** Ein zweiter Klick auf "Aktualisieren", während die Prüfung der laufenden Programme noch läuft, fragt nach.
+- **Zeitpläne ehrlich:** Das Fenster "Zeitpläne ansehen" zeigt "Fehler (n)" statt "OK", wenn Programme gescheitert sind.
+### 🔍 Restore-Vorschau
+- **Zeigt, was nicht zurückkommt:** Benutzer ohne Profil, fehlendes Laufwerk, an den PC gebundene Einstellungen, Browser auf einem anderen PC und abgewählte Zusätzliche Ordner stehen jetzt in der Vorschau.
+### 📋 Programm-Katalog
+- **Eigene Einträge sicher speichern:** Der Katalog wird über eine Hilfsdatei geschrieben, die Sicherung entsteht nur aus einer lesbaren Datei. Ist die Datei beschädigt, fragt HUMig vor dem Speichern nach.
+### 🏠 Status
+- **Kein "Alles in Ordnung" ohne Daten:** Konnte eine Quelle nicht gelesen werden, steht eine Warnung da.
+- **Server-Backup ohne Lauf:** Ein Profil, das noch nie gelaufen ist, erscheint als Hinweis, nicht als Warnung.
+### ⚠️ Nach dem Update
+- **Zeitlimit je Programm bei App-Updates:** Neu wartet ein Lauf höchstens 120 Minuten auf ein einzelnes Programm (vorher nur 3 Stunden für den ganzen Lauf bzw. 4 Stunden im Zeitplan). In der App gibt es dafür keine Einstellung; im Zeitplan liest das Skript den Wert ItemTimeoutMin aus config.json im Zeitplan-Ordner, die Datei wird beim erneuten Anlegen des Zeitplans neu geschrieben.
+### ✅ Qualität
+- **Tests:** 102 neue Tests für Werkzeuge, Software, Treiber und App-Updates.
+
 ## v2.1.24 - 2026-11-26
 ### 🪟 Hauptfenster
 - **Anzeige "verbunden mit":** Unter dem Feld Computer steht dauerhaft, mit welchem PC HUMig verbunden ist. Die Statuszeile überschreibt das nicht mehr.

@@ -3008,48 +3008,156 @@ function Get-HMSignTokenOrPrompt($Cfg) {
     try { New-Item -ItemType Directory -Path (Split-Path $f -Parent) -Force | Out-Null; $c | Export-Clixml -Path $f -Force } catch { Out-Console "Token nicht gespeichert: $($_.Exception.Message)" 'Warning' }
     return $tok
 }
+#region HMSign - reine Funktionen fuer "Release signieren" (ohne Fenster testbar, .github\tests\Signieren.Tests.ps1)
+# Eine Zeile je Release fuer die Bestaetigung: Ergebnis des Abgleichs der Pruefsummen-Datei mit dem lokalen Stand
+function Get-HMSignCheckLine([string]$Tag, $Check) {
+    if (-not $Check) { return "${Tag}: nicht abgeglichen" }
+    switch ("$($Check.State)") {
+        'gleich' { return "${Tag}: gleich wie der lokale Stand" }
+        'abweichend' { return "${Tag}: WEICHT vom lokalen Stand ab ($(@($Check.Diff).Count) Datei(en))" }
+    }
+    $why = "$($Check.Text)".Trim()
+    # Ordner des lokalen Stands am Ende weglassen: letzte " (" vor einem Pfad (Laufwerk oder \\), Klammern im Pfad
+    # wie "Program Files (x86)" bleiben dabei Teil des weggelassenen Ordners
+    if ($why.EndsWith(')')) {
+        $ms = [regex]::Matches($why, '\s\((?=[A-Za-z]:\\|\\\\)')
+        if ($ms.Count) { $why = $why.Substring(0, $ms[$ms.Count - 1].Index).TrimEnd() }
+    }
+    if ($why -match '^nicht mit lokalem Stand abgeglichen, (.+)$') { return "${Tag}: nicht abgeglichen, $($Matches[1])" }
+    if ($why -match '^nicht abgleichbar: (.+)$') { $why = $Matches[1] }
+    return "${Tag}: nicht abgeglichen: $(if ($why) { $why } else { 'unbekannter Grund' })"
+}
+# Abgleich je Release aus dem Ergebnis des Hintergrundlaufs. Fehlt er (Fehler, Zeitgrenze), gilt das Release als nicht abgeglichen
+# und wird wie bisher signiert - der Abgleich verhindert das Signieren nie.
+function Get-HMSignChecks([string[]]$Tags, $Result) {
+    $why = ''
+    if (-not $Result) { $why = 'keine Antwort' }
+    elseif ($Result -is [string]) { $why = "$Result" -replace '^FEHLER:\s*', '' }
+    elseif ("$($Result.Err)") { $why = "$($Result.Err)" }
+    $by = @{}
+    if (-not $why) { foreach ($c in @($Result.Checks | Where-Object { $_ -and "$($_.Tag)" })) { $by["$($c.Tag)"] = $c } }
+    return @(foreach ($tg in @($Tags | Where-Object { $_ })) {
+        if ($by.ContainsKey($tg)) { $by[$tg] }
+        else { [pscustomobject]@{ Tag = $tg; State = 'Fehler'; Text = $(if ($why) { $why } else { 'kein Ergebnis' }); Diff = @() } }
+    })
+}
+# Was gefragt und was signiert wird. Mismatch: Releases mit gleicher Version und anderem Inhalt (nur dann zweite Rueckfrage).
+function Get-HMSignPlan([string[]]$Tags, $Checks) {
+    $tags = @($Tags | Where-Object { $_ })
+    $by = @{}; foreach ($c in @($Checks | Where-Object { $_ })) { $by["$($c.Tag)"] = $c }
+    $lines = @(foreach ($tg in $tags) { Get-HMSignCheckLine $tg $by[$tg] })
+    $bad = @(foreach ($tg in $tags) { if ($by.ContainsKey($tg) -and "$($by[$tg].State)" -eq 'abweichend') { $by[$tg] } })
+    $confirm = "Diese Releases jetzt mit deinem Zertifikat signieren?`n`n$($lines -join "`n")`n`nDanach werden sie allen HUMig-Installationen als Update angeboten (je nach Kanal Stabil/Test)."
+    $mis = ''
+    if ($bad.Count) {
+        $det = @(foreach ($b in $bad) {
+            $dl = @($b.Diff)
+            "$($b.Tag):`n" + (@($dl | Select-Object -First 8 | ForEach-Object { "   $_" }) -join "`n") + $(if ($dl.Count -gt 8) { "`n   ... und $($dl.Count - 8) weitere" } else { '' })
+        })
+        $mis = "Die Pruefsummen-Datei auf GitHub weicht bei gleicher Version vom lokalen Stand ab:`n`n$($det -join "`n`n")`n`nTrotzdem signieren? Die Signatur bestaetigt dann den Stand auf GitHub, nicht deinen lokalen.`n`nJa = trotzdem signieren`nNein = diese Releases auslassen, die anderen signieren"
+    }
+    return [pscustomobject]@{ Tags = $tags; Lines = $lines; ConfirmText = $confirm; Mismatch = @($bad | ForEach-Object { "$($_.Tag)" }); MismatchText = $mis }
+}
+# Antwort auf die zweite Rueckfrage -> Parameter fuer Invoke-HMReleaseSigning, ausgelassene und zu signierende Releases.
+# OnMismatch 'Sign' NUR nach ausdruecklichem Ja in der zweiten Rueckfrage, sonst 'Skip': findet erst der Signier-Lauf eine echte
+# Abweichung (Abgleich vorher gescheitert, Datei inzwischen ersetzt), wird dieses Release nicht ohne Rueckfrage signiert.
+# 'Skip' laesst dort nur wirklich abweichende aus (gleiche Version, anderer Inhalt), nicht abgleichbare werden signiert.
+# SignTags ist nie leer, wenn signiert wird: leer heisst "nichts signieren" (eine leere Liste wuerde in Core-Update ALLE
+# unsignierten Releases signieren).
+function Get-HMSignDecision($Plan, [string]$Answer) {
+    $skip = @()
+    $mode = $(if (@($Plan.Mismatch).Count -and $Answer -eq 'Yes') { 'Sign' } else { 'Skip' })
+    if ($mode -eq 'Skip') { $skip = @($Plan.Mismatch) }
+    $sign = @(@($Plan.Tags) | Where-Object { $_ -and $skip -notcontains $_ })
+    return [pscustomobject]@{ OnMismatch = $mode; Skipped = $skip; SignTags = $sign }
+}
+# Zeile je Ergebnis des Signier-Laufs: erst dort erkannte Abweichung ist kein Fehler, sondern ein Hinweis mit dem naechsten Schritt
+function Get-HMSignResultLine($Item) {
+    if ($Item.Ok) { return [pscustomobject]@{ Text = "$($Item.Tag): $($Item.Text)"; Level = 'Success' } }
+    if ("$($Item.Text)" -match '^nicht signiert: weicht vom lokalen Stand') { return [pscustomobject]@{ Text = "$($Item.Tag): weicht ab, nicht signiert: Release signieren erneut starten, dann kommt die Rueckfrage"; Level = 'Info' } }
+    return [pscustomobject]@{ Text = "$($Item.Tag): $($Item.Text)"; Level = 'Error' }
+}
+#endregion HMSign
+# Merkmal "Signieren laeuft": ein zweiter Klick startet keinen zweiten Ablauf. Jeder Ausgang setzt es zurueck (Stop-HMSigning).
+$script:SignBusy = $false
+function Stop-HMSigning { $script:SignBusy = $false }
 function Start-HMReleaseSigning {
     if ($script:JobRunning) { Out-Console 'Waehrend eines Backups/Restores nicht moeglich.' 'Warning'; return }
+    if ($script:SignBusy) { Out-Console 'Signieren laeuft bereits - bitte warten, bis der laufende Ablauf fertig ist.' 'Warning'; return }
     $cfg = Get-HMUpdateConfig $script:ConfigDir
     if (-not (Get-HMSigningCert $cfg.SignerThumbprint)) { Out-Console "Signatur-Zertifikat $($cfg.SignerThumbprint) mit privatem Schluessel ist auf diesem PC nicht vorhanden." 'Error'; return }
     $tok = Get-HMSignTokenOrPrompt $cfg
     if (-not $tok) { return }
-    $script:SignCtx = [pscustomobject]@{ Owner = $cfg.Owner; Repo = $cfg.Repo; Thumb = $cfg.SignerThumbprint; Token = $tok }
+    # ohne Hintergrund-Pool kehrt Invoke-AsyncCommand sofort zurueck (kein OnComplete) - das Merkmal bliebe sonst haengen
+    if (-not $script:RunspacePool) { Out-Console 'Signieren nicht moeglich: Hintergrundlaeufe sind nicht bereit - HUMig neu starten.' 'Error'; return }
+    $script:SignBusy = $true
+    # Kontext je Lauf (State der Hintergrundlaeufe), kein gemeinsamer Zustand zwischen zwei Starts
+    $ctx = [pscustomobject]@{ Owner = $cfg.Owner; Repo = $cfg.Repo; Thumb = $cfg.SignerThumbprint; Token = $tok; Tags = @(); Releases = @() }
     Out-Console 'Releases ohne Signatur werden gesucht ...' 'Info'
-    Invoke-AsyncCommand -ScriptBlock {
-        param($lib, $tok, $owner, $repo)
-        try {
-            . $lib
-            try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
-            $l = @(Get-HMReleases $owner $repo $tok | Where-Object { $_.ManifestUrl -and -not $_.SignatureUrl })
-            return [pscustomobject]@{ Tags = @($l | ForEach-Object { "$($_.Tag)" }); Err = '' }
-        } catch { return [pscustomobject]@{ Tags = @(); Err = "$($_.Exception.Message)" } }
-    } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $tok, $cfg.Owner, $cfg.Repo) -TimeoutSec 40 -OnComplete {
-        param($r)
-        if (-not $r -or $r -is [string] -or $r.Err) { Out-Console "Releases nicht lesbar: $(if ($r -is [string]) { $r } else { $r.Err })" 'Error'; return }
-        $tags = @($r.Tags | Where-Object { $_ })
-        if (-not $tags.Count) { Out-Console 'Alle Releases mit Pruefsumme sind bereits signiert.' 'Success'; return }
-        if (-not (Confirm-Action "Diese Releases jetzt mit deinem Zertifikat signieren?`n`n$($tags -join ', ')`n`nDanach werden sie allen HUMig-Installationen als Update angeboten (je nach Kanal Stabil/Test)." 'Release signieren')) { return }
-        Out-Console "Signiere $($tags -join ', ') ..." 'Info'
-        $sc = $script:SignCtx
+    try {
         Invoke-AsyncCommand -ScriptBlock {
-            param($lib, $owner, $repo, $tp, $tok, $tags)
-            try { . $lib; return [pscustomobject]@{ Items = @(Invoke-HMReleaseSigning $owner $repo $tp $tok $tags); Err = '' } }
-            catch { return [pscustomobject]@{ Items = @(); Err = "$($_.Exception.Message)" } }
-        } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $sc.Owner, $sc.Repo, $sc.Thumb, $sc.Token, [string[]]$tags) -TimeoutSec 180 -OnComplete {
-            param($res)
-            $script:SignCtx = $null
-            if (-not $res -or $res -is [string] -or $res.Err) { Out-Console "Signieren fehlgeschlagen: $(if ($res -is [string]) { $res } else { $res.Err })" 'Error'; return }
-            $items = @($res.Items | Where-Object { $_ })
-            foreach ($x in $items) { Out-Console "$($x.Tag): $($x.Text)" $(if ($x.Ok) { 'Success' } else { 'Error' }) }
-            if (@($items | Where-Object { -not $_.Ok -and "$($_.Text)" -match 'Schreibrecht' }).Count) {
-                Remove-Item -LiteralPath (Get-HMSignTokenFile) -Force -ErrorAction SilentlyContinue
-                Out-Console 'Gespeicherter Schreib-Token geloescht - beim naechsten Signieren neu eingeben.' 'Warning'
-            }
-            if (@($items | Where-Object { $_.Ok }).Count) { Out-Console 'Naechster Schritt: testen, dann Rechtsklick auf Update > Release freigeben.' 'Info' }
-            Invoke-UpdateCheck -Force
+            param($lib, $tok, $owner, $repo)
+            try {
+                . $lib
+                try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+                $l = @(Get-HMReleases $owner $repo $tok | Where-Object { $_.ManifestUrl -and -not $_.SignatureUrl })
+                return [pscustomobject]@{ Tags = @($l | ForEach-Object { "$($_.Tag)" }); Releases = $l; Err = '' }
+            } catch { return [pscustomobject]@{ Tags = @(); Releases = @(); Err = "$($_.Exception.Message)" } }
+        } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $tok, $cfg.Owner, $cfg.Repo) -TimeoutSec 40 -State $ctx -OnComplete {
+            param($r, $ctx)
+            try {
+                if (-not $r -or $r -is [string] -or $r.Err) { Out-Console "Releases nicht lesbar: $(if ($r -is [string]) { $r } else { $r.Err })" 'Error'; Stop-HMSigning; return }
+                $tags = @($r.Tags | Where-Object { $_ })
+                if (-not $tags.Count) { Out-Console 'Alle Releases mit Pruefsumme sind bereits signiert.' 'Success'; Stop-HMSigning; return }
+                $ctx.Tags = $tags; $ctx.Releases = @($r.Releases)
+                # Abgleich mit dem lokalen Stand als eigener Lauf mit eigener Zeitgrenze (je Release eine Pruefsummen-Datei):
+                # scheitert er oder dauert er zu lange, wird wie bisher signiert ("nicht abgeglichen")
+                Out-Console 'Pruefsummen-Dateien werden mit dem lokalen Stand abgeglichen ...' 'Info'
+                Invoke-AsyncCommand -ScriptBlock {
+                    param($lib, $tok, $rels)
+                    try {
+                        . $lib
+                        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+                        return [pscustomobject]@{ Checks = @(Get-HMReleaseSignCheck $rels $tok); Err = '' }
+                    } catch { return [pscustomobject]@{ Checks = @(); Err = "$($_.Exception.Message)" } }
+                } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $ctx.Token, @($ctx.Releases)) -TimeoutSec ([Math]::Min(300, 30 + 30 * $tags.Count)) -State $ctx -OnComplete {
+                    param($cr, $ctx)
+                    try {
+                        $plan = Get-HMSignPlan $ctx.Tags (Get-HMSignChecks $ctx.Tags $cr)
+                        if (-not (Confirm-Action $plan.ConfirmText 'Release signieren')) { Stop-HMSigning; return }
+                        $ans = ''
+                        if (@($plan.Mismatch).Count) { $ans = "$((Show-HMDialogBox -Owner $script:Window -Text $plan.MismatchText -Title 'Release signieren' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" }
+                        $dec = Get-HMSignDecision $plan $ans
+                        # ausgelassene Releases sind kein Fehler (Hinweis) und gehen gar nicht erst an den Signier-Lauf
+                        if (-not @($dec.SignTags).Count) {
+                            Out-Console "Nichts signiert: $(@($dec.Skipped) -join ', ') ausgelassen (weicht vom lokalen Stand ab)." 'Info'
+                            Stop-HMSigning; return
+                        }
+                        if (@($dec.Skipped).Count) { Out-Console "Ausgelassen (weicht vom lokalen Stand ab): $(@($dec.Skipped) -join ', ')" 'Info' }
+                        Out-Console "Signiere $(@($dec.SignTags) -join ', ') ..." 'Info'
+                        Invoke-AsyncCommand -ScriptBlock {
+                            param($lib, $owner, $repo, $tp, $tok, $tags, $onMis)
+                            try { . $lib; return [pscustomobject]@{ Items = @(Invoke-HMReleaseSigning $owner $repo $tp $tok $tags -OnMismatch $onMis); Err = '' } }
+                            catch { return [pscustomobject]@{ Items = @(); Err = "$($_.Exception.Message)" } }
+                        } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $ctx.Owner, $ctx.Repo, $ctx.Thumb, $ctx.Token, [string[]]@($dec.SignTags), $dec.OnMismatch) -TimeoutSec 180 -State $ctx -OnComplete {
+                            param($res, $ctx)
+                            try {
+                                if (-not $res -or $res -is [string] -or $res.Err) { Out-Console "Signieren fehlgeschlagen: $(if ($res -is [string]) { $res } else { $res.Err })" 'Error'; return }
+                                $items = @($res.Items | Where-Object { $_ })
+                                foreach ($x in $items) { $ln = Get-HMSignResultLine $x; Out-Console $ln.Text $ln.Level }
+                                if (@($items | Where-Object { -not $_.Ok -and "$($_.Text)" -match 'Schreibrecht' }).Count) {
+                                    Remove-Item -LiteralPath (Get-HMSignTokenFile) -Force -ErrorAction SilentlyContinue
+                                    Out-Console 'Gespeicherter Schreib-Token geloescht - beim naechsten Signieren neu eingeben.' 'Warning'
+                                }
+                                if (@($items | Where-Object { $_.Ok }).Count) { Out-Console 'Naechster Schritt: testen, dann Rechtsklick auf Update > Release freigeben.' 'Info' }
+                                Invoke-UpdateCheck -Force
+                            } finally { Stop-HMSigning }
+                        }
+                    } catch { Out-Console "Signieren: $($_.Exception.Message)" 'Error'; Stop-HMSigning }
+                }
+            } catch { Out-Console "Signieren: $($_.Exception.Message)" 'Error'; Stop-HMSigning }
         }
-    }
+    } catch { Out-Console "Signieren: $($_.Exception.Message)" 'Error'; Stop-HMSigning }
 }
 # Release freigeben: neuestes signiertes Vorab-Release (Kanal Test), das neuer als die freigegebene Version ist -> Kanal Stabil
 function Start-HMReleasePublish {
