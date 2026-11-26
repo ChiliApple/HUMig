@@ -1680,14 +1680,19 @@ function Set-JobUi([bool]$Running) {
     foreach ($b in @($ui.btnBackup, $ui.btnRestore, $ui.btnProfileSize, $ui.btnConnect, $ui.btnLocal, $ui.btnDeleteBackup, $ui.btnCleanupBackups, $ui.btnEmptyDeleted, $ui.btnUpdate, $ui.btnPrecheck)) { $b.IsEnabled = -not $Running }
     # waehrend des Mehrfach-Loeschens bleiben Loeschen und Alte loeschen gesperrt, auch wenn ein anderer Vorgang endet (B48)
     if ($script:MultiDelBusy) { foreach ($b in @($ui.btnDeleteBackup, $ui.btnCleanupBackups)) { if ($b) { $b.IsEnabled = $false } } }
-    $ui.btnCancel.IsEnabled = $Running
-    $ui.btnCancelRestore.IsEnabled = $Running
     $ui.cmbComputer.IsEnabled = -not $Running -and -not $script:UserMode
     $ui.cmbUser.IsEnabled = -not $Running -and -not $script:UserMode
     foreach ($b in @($script:SbButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
-    if ($ui.btnSbCancel) { $ui.btnSbCancel.IsEnabled = $Running }
     foreach ($b in @($script:AuButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
-    if ($ui.btnAuCancel) { $ui.btnAuCancel.IsEnabled = $Running }
+    # Start und Abbrechen teilen sich je Reiter eine Zelle: im Lauf ist der Startknopf unsichtbar (behaelt seinen Platz)
+    # und Abbrechen liegt an seiner Stelle, im Leerlauf ist Abbrechen ausgeblendet
+    foreach ($pair in @(@($ui.btnBackup, $ui.btnCancel), @($ui.btnRestore, $ui.btnCancelRestore), @($ui.btnSbBackup, $ui.btnSbCancel), @($ui.btnAuUpdateSel, $ui.btnAuCancel))) {
+        $startBtn = $pair[0]; $cancelBtn = $pair[1]
+        if (-not $cancelBtn) { continue }
+        $cancelBtn.IsEnabled = $Running
+        $cancelBtn.Visibility = $(if ($Running) { 'Visible' } else { 'Collapsed' })
+        if ($startBtn) { $startBtn.Visibility = $(if ($Running) { 'Hidden' } else { 'Visible' }) }
+    }
     # mehrere Backups markiert: Restore/Geloeschte leeren bleiben gesperrt
     if (-not $Running -and (Get-Command Update-HMBackupMultiUi -ErrorAction SilentlyContinue)) { try { Update-HMBackupMultiUi } catch { } }
 }

@@ -368,8 +368,10 @@
                                     <Button x:Name="btnFeedback" Content="Rueckmeldung" Style="{StaticResource BtnYellow}" ToolTip="Rueckmeldung zu den erkannten Programmen mit Katalog-Eintrag 'ungeprueft' (nur testweise): GitHub-Issue im Browser oder E-Mail (Adresse in Einstellungen > Allgemein). Es wird nichts automatisch gesendet."/>
                                     <Button x:Name="btnWizard" Content="Umzug ..." Style="{StaticResource BtnMauve}" ToolTip="Umzugs-Assistent: Schritt fuer Schritt alter PC - Vorab-Pruefung - Backup - neuer PC - Restore (fehlende Programme zuerst) - Checkliste. Fortsetzbar nach Abbruch."/>
                                 </WrapPanel>
-                                <Button x:Name="btnBackup" Content="Backup starten" Style="{StaticResource BtnGreen}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
-                                <Button x:Name="btnCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False"/>
+                                <Grid>
+                                    <Button x:Name="btnBackup" Content="Backup starten" Style="{StaticResource BtnGreen}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
+                                    <Button x:Name="btnCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed"/>
+                                </Grid>
                                 <Button x:Name="btnBackupSchedule" Content="Zeitplan ..." Style="{StaticResource BtnBlue}" Margin="0,10,0,2" ToolTip="Links: dieses Backup (angehakte Module, Optionen, Zusaetzliche Ordner, Backup-Ordner) automatisch ausfuehren - taeglich, woechentlich oder bei Anmeldung. Nur eigenes Profil an diesem PC, HUMig muss dafuer nicht offen sein. | Rechts: Zeitplaene verwalten (jetzt starten, Protokoll, Bericht, loeschen)"/>
                                 <TextBlock x:Name="lblBackupSchedule" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,4"/>
                             </StackPanel>
@@ -449,8 +451,10 @@
                                 <Button x:Name="btnReinstall" Content="Fehlende Programme installieren ..." Style="{StaticResource BtnMauve}" Margin="0,0,0,4" ToolTip="Programme aus dem markierten Backup mit dem Ziel-PC vergleichen - fehlende aus der Softwareverteilung nachinstallieren (nacheinander)"/>
                                 <Button x:Name="btnChecklist" Content="Checkliste" Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Checkliste nach dem Restore abhaken - landet im Restore-Protokoll"/>
                                 <Button x:Name="btnFeedbackR" Content="Rueckmeldung zu Programmen" Style="{StaticResource BtnYellow}" Margin="0,0,0,4" ToolTip="Nach dem Umzug: Rueckmeldung zu den Programmen des markierten Backups, deren Katalog-Eintrag ungeprueft ist (passt / was fehlte) - GitHub-Issue oder E-Mail. Es wird nichts automatisch gesendet."/>
-                                <Button x:Name="btnRestore" Content="Restore starten" Style="{StaticResource BtnGreen}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
-                                <Button x:Name="btnCancelRestore" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False"/>
+                                <Grid>
+                                    <Button x:Name="btnRestore" Content="Restore starten" Style="{StaticResource BtnGreen}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
+                                    <Button x:Name="btnCancelRestore" Content="Abbrechen" Style="{StaticResource BtnRed}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed"/>
+                                </Grid>
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>
@@ -530,9 +534,11 @@
                             <StackPanel>
                                 <WrapPanel>
                                     <Button x:Name="btnAuSearch" Content="Updates suchen" Style="{StaticResource BtnBlue}" Padding="12,6" ToolTip="Verfuegbare Updates der installierten Programme lesen (WinGet, angehakte Quellen)"/>
-                                    <Button x:Name="btnAuUpdateSel" Content="Angehakte aktualisieren" Style="{StaticResource BtnGreen}" FontWeight="SemiBold" Padding="14,6" ToolTip="Angehakte Programme still aktualisieren - Ausnahmen werden nie aktualisiert"/>
+                                    <Grid>
+                                        <Button x:Name="btnAuUpdateSel" Content="Angehakte aktualisieren" Style="{StaticResource BtnGreen}" FontWeight="SemiBold" Padding="14,6" ToolTip="Angehakte Programme still aktualisieren - Ausnahmen werden nie aktualisiert"/>
+                                        <Button x:Name="btnAuCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" Padding="14,6" ToolTip="Nach dem laufenden Programm abbrechen" FontWeight="SemiBold" Visibility="Collapsed"/>
+                                    </Grid>
                                     <Button x:Name="btnAuUpdateAll" Content="Alle aktualisieren" Style="{StaticResource BtnTeal}" Padding="12,6" ToolTip="Alle gefundenen Updates ausser den Ausnahmen"/>
-                                    <Button x:Name="btnAuCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False" Padding="12,6" ToolTip="Nach dem laufenden Programm abbrechen"/>
                                     <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkAuUnknown" Content="Programme ohne bekannte Version zeigen" VerticalAlignment="Center" Margin="10,0,0,4" ToolTip="WinGet kennt die installierte Version nicht - die Zuordnung zum Paket ist dann unsicher (Variante, Sprache, x86/x64). Nur gezielt verwenden."/>
                                     <Button x:Name="btnAuSetup" Content="WinGet einrichten" Style="{StaticResource BtnYellow}" Padding="12,6" Margin="10,0,4,4" Visibility="Collapsed" ToolTip="Modul Microsoft.WinGet.Client aus der PowerShell Gallery installieren (alle Benutzer) und WinGet fuer dieses Konto registrieren/reparieren - Internet noetig"/>
                                     <Ellipse x:Name="dotAuBusy" Width="11" Height="11" Fill="{StaticResource CatGreen}" Margin="10,0,6,4" VerticalAlignment="Center" Visibility="Collapsed"/>
@@ -687,8 +693,10 @@
                         </Grid>
                         <Border Grid.Row="2" Style="{StaticResource SectionBorder}">
                             <WrapPanel>
-                                <Button x:Name="btnSbBackup" Content="Server-Backup starten" Style="{StaticResource BtnGreen}" FontWeight="SemiBold" Padding="18,6" ToolTip="Angehakte VMs online (VSS) auf die Ziel-Platte sichern - Windows Server-Sicherung (wbadmin)"/>
-                                <Button x:Name="btnSbCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False" Padding="14,6"/>
+                                <Grid>
+                                    <Button x:Name="btnSbBackup" Content="Server-Backup starten" Style="{StaticResource BtnGreen}" FontWeight="SemiBold" Padding="18,6" ToolTip="Angehakte VMs online (VSS) auf die Ziel-Platte sichern - Windows Server-Sicherung (wbadmin)"/>
+                                    <Button x:Name="btnSbCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" Padding="18,6" FontWeight="SemiBold" Visibility="Collapsed"/>
+                                </Grid>
                                 <Button x:Name="btnSbHostOnly" Content="Nur Host-Konfiguration" Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Switches, VLANs, Netzwerk, VM-Einstellungen sofort exportieren (Ziel-Platte oder Tool-Ordner\Logs\ServerBackup)"/>
                                 <Button x:Name="btnSbExport" Content="VMs exportieren ..." Style="{StaticResource BtnTeal}" Padding="10,6" ToolTip="Ausgewaehlte VMs mit Hyper-V exportieren (vollstaendige Kopie, mit 'VM importieren' an jedem Hyper-V-Host wiederherstellbar) - auf die Platte oder in einen Ordner. Im Profil auch automatisch nach jeder Sicherung (Zeitplan)."/>
                                 <Button x:Name="btnSbSchedule" Content="Zeitplan ..." Style="{StaticResource BtnMauve}" Padding="10,6" ToolTip="Links: Server-Backup planen (einmalig, taeglich, woechentlich - als SYSTEM ohne Anmeldung, angehakte VMs) | Rechts: geplante Server-Backups anzeigen, starten, loeschen"/>
