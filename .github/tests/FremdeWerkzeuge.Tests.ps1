@@ -735,7 +735,7 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
     BeforeAll {
         Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad',
             'Get-TModOtherDir', 'Test-TModRetryDue', 'Set-TModRetryMarker', 'Clear-TModRetryMarker', 'Get-TModSigState', 'Get-TModBlockedText',
-            'Get-TModOther', 'Test-TRetryDue', 'Set-TRetryMarker', 'Clear-TRetryMarker', 'Repair-TModuleFixed', 'Move-TDir', 'Remove-TDir')
+            'Get-TModOther', 'Test-TRetryDue', 'Set-TRetryMarker', 'Clear-TRetryMarker', 'Repair-TModuleFixed', 'Move-TDir', 'Remove-TDir', 'Get-TModRepairText')
         function global:Get-TNow { $global:T_Now }
         # Ersatz fuer Save-Module (kein Netz): legt die Fassung so ab wie Save-Module (<Pfad>\<Name>\<Version>\<Name>.psd1);
         # T_SaveGood: die geladene Fassung ist gueltig (Datei gut.txt, die Signatur-Ersatzfunktion wertet sie aus)
@@ -775,6 +775,7 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
             $global:T_UnkSig = $UnkSig; $global:T_RepairFixes = $RepairFixes; $global:T_SaveGood = $RepairFixes; $global:T_SaveFlat = $false; $global:T_MarkerAtSave = $null
             $global:T_SigCalls = 0; $global:T_SigThrow = $false; $global:T_Now = [datetime]'2026-11-26T03:00:00'
             $global:TModSig = $null; $script:TModSig = $null
+            $global:TModRepair = @{ Tried = $false; Fetched = $false; StagedInvalid = $false; Skipped = $false; Lost = $false; Error = '' }; $script:TModRepair = $global:TModRepair
             $pf = Join-Path $TestDrive ('mod_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
             $global:ModName = 'Microsoft.WinGet.Client'; $global:ModRoot = Join-Path $pf 'WindowsPowerShell\Modules\Microsoft.WinGet.Client'
             $global:TModRepRoot = Join-Path $pf 'WindowsPowerShell\HUMig-Modulreparatur'
@@ -789,7 +790,7 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
     AfterAll {
         $env:ProgramFiles = $script:PF0
         foreach ($n in @('Out-L', 'Get-TNow', 'Get-PackageProvider', 'Install-PackageProvider', 'Install-Module', 'Find-Module', 'Test-TModule', 'Get-TModFixed', 'Install-TModule', 'Get-TModuleSigFiles', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Get-TModOtherDir', 'Test-TModRetryDue', 'Set-TModRetryMarker', 'Clear-TModRetryMarker', 'Get-TModSigState', 'Get-TModBlockedText',
-                'Get-TModOther', 'Test-TRetryDue', 'Set-TRetryMarker', 'Clear-TRetryMarker', 'Repair-TModuleFixed', 'Move-TDir', 'Remove-TDir', 'Save-TModuleTo')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
+                'Get-TModOther', 'Test-TRetryDue', 'Set-TRetryMarker', 'Clear-TRetryMarker', 'Repair-TModuleFixed', 'Move-TDir', 'Remove-TDir', 'Save-TModuleTo', 'Get-TModRepairText')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
     }
     AfterEach { $env:ProgramFiles = $script:PF0 }
     It 'feste Version fehlt, keine andere da: Install-Module nur mit -RequiredVersion 1.29.380, nie Find-Module' {
@@ -966,6 +967,55 @@ Describe 'WinGet-Modul: nur die feste Version installieren und laden, Signatur g
         ($global:T_Log -join "`n") | Should -Match 'Ersetzen ohne Erfolg \(Modulbeschreibung nach dem Laden nicht gefunden'
         [IO.File]::ReadAllText((Join-Path $global:ModRoot '1.29.380\Microsoft.WinGet.Client.psd1')) | Should -Be '@{}'
         Test-Path -LiteralPath (Join-Path $global:TModRepRoot 'alt') | Should -BeFalse
+    }
+    It 'Tausch: Einsetzen UND Zurueckbenennen scheitern - Text nennt fehlende feste Version und Ablage, frische Fassung bleibt in neu, gesperrt (nie nach Namen)' {
+        & $script:Setup @('1.29.380') -BadSig @('1.29.380') -RepairFixes $true
+        $global:T_Moves = 0
+        function global:Move-TDir([string]$From, [string]$To) { $global:T_Moves++; if ($global:T_Moves -ge 2) { throw "gesperrt $global:T_Moves (Ersatz)" }; Move-Item -LiteralPath $From -Destination $To -ErrorAction Stop }
+        try { Install-TModule } finally { Import-TargetFunction @('Move-TDir') }
+        $alt = @(Get-ChildItem -LiteralPath (Join-Path $global:TModRepRoot 'alt') -Directory)[0].FullName
+        $src = Join-Path $global:TModRepRoot 'neu\Microsoft.WinGet.Client\1.29.380'
+        $log = $global:T_Log -join "`n"
+        $log | Should -Match ([regex]::Escape("Tausch fehlgeschlagen (gesperrt 2 (Ersatz)), Zurueckbenennen ebenfalls (gesperrt 3 (Ersatz)): die feste Version 1.29.380 fehlt in $global:ModRoot, die bisherige Fassung liegt in $alt, die frisch geladene, gepruefte Fassung in $src"))
+        Test-Path -LiteralPath (Join-Path $src 'Microsoft.WinGet.Client.psd1') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $alt 'Microsoft.WinGet.Client.psd1') | Should -BeTrue
+        $ld = Get-TModuleLoad
+        $ld.Blocked | Should -BeTrue
+        $ld.Path | Should -Be ''
+        Get-TModBlockedText | Should -Match '^WinGet-Modul nicht nutzbar: Tausch fehlgeschlagen .*fehlt in .*Abhilfe: die bisherige Fassung nicht zurueckholen'
+    }
+    It 'Text bei gesperrtem Modul: "Neuinstallation" nur, wenn frisch geholt wurde; scheiterte das Holen, steht das da' {
+        & $script:Setup @('1.29.380') -BadSig @('1.29.380') -Net $false
+        Install-TModule
+        $txt = Get-TModBlockedText
+        $txt | Should -Match 'eine frische Fassung liess sich nicht holen \(kein Netz \(Ersatz\)\)'
+        $txt | Should -Not -Match 'Neuinstallation'
+        & $script:Setup @('1.29.380') -BadSig @('1.29.380')
+        Install-TModule
+        Get-TModBlockedText | Should -Match 'auch nach einer Neuinstallation \(frisch geladene Fassung ebenfalls ungueltig\)'
+    }
+    It 'Merker ohne andere Version: nach gelungenem Ersetzen wird die wieder veraenderte feste Version erst nach 24 Stunden erneut ersetzt (hoechstens eine Ablage je Tag), nichts geloescht' {
+        & $script:Setup @('1.29.380') -BadSig @('1.29.380') -RepairFixes $true
+        Install-TModule
+        Test-Path -LiteralPath $global:TModMarker | Should -BeTrue
+        # wieder veraendert (die gute Fassung verliert ihre Kennung)
+        Remove-Item -LiteralPath (Join-Path $global:ModRoot '1.29.380\gut.txt')
+        foreach ($h in @(1, 23)) {
+            $global:TModSig = $null; $script:TModSig = $null; $global:T_Calls = @(); $global:T_Log = @(); $global:T_Now = ([datetime]'2026-11-26T03:00:00').AddHours($h)
+            $global:TModRepair = @{ Tried = $false; Fetched = $false; StagedInvalid = $false; Skipped = $false; Lost = $false; Error = '' }; $script:TModRepair = $global:TModRepair
+            Install-TModule
+            @($global:T_Calls).Count | Should -Be 0
+            ($global:T_Log -join "`n") | Should -Match 'vor weniger als 24 Stunden schon einmal ersetzt'
+            (Get-TModuleLoad).Blocked | Should -BeTrue
+            Get-TModBlockedText | Should -Match 'vor weniger als 24 Stunden schon einmal ersetzt'
+        }
+        @(Get-ChildItem -LiteralPath (Join-Path $global:TModRepRoot 'alt') -Directory).Count | Should -Be 1
+        $global:TModSig = $null; $script:TModSig = $null; $global:T_Calls = @(); $global:T_Now = ([datetime]'2026-11-26T03:00:00').AddHours(25)
+        $global:TModRepair = @{ Tried = $false; Fetched = $false; StagedInvalid = $false; Skipped = $false; Lost = $false; Error = '' }; $script:TModRepair = $global:TModRepair
+        Install-TModule
+        @($global:T_Calls) | Should -Be @('Save 1.29.380')
+        @(Get-ChildItem -LiteralPath (Join-Path $global:TModRepRoot 'alt') -Directory).Count | Should -Be 2
+        (Get-TModuleLoad).Blocked | Should -BeFalse
     }
     It 'Ablage ohne Versionsordner (Modulbeschreibung direkt im Modulordner) gilt ueberall als andere Version: wird geladen, nie gesperrt' {
         # feste Version fehlt, kein Netz: Merker, Hinweis, Laden der vorhandenen
@@ -1326,7 +1376,7 @@ Describe 'WinGet-Modul gesperrt (ungueltige Signatur, keine andere Version): nie
 
 Describe 'WinGet einrichten am Ziel-PC (Install-TWinGet): feste Modulversion vor der Reparatur, gesperrt keine Reparatur' {
     BeforeAll {
-        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther')
+        Import-TargetFunction @('Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther', 'Get-TModRepairText')
         function global:Out-L([string]$t) { $global:T_Log += $t }
         function global:Get-TModuleSigFiles([string]$Dir) { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = $(if ($global:T_Bad) { 'HashMismatch' } else { 'Valid' }); Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }) }
         # Ersatz fuer den eigenen Prozess: merkt den Befehl, startet nichts
@@ -1339,12 +1389,13 @@ Describe 'WinGet einrichten am Ziel-PC (Install-TWinGet): feste Modulversion vor
             $d = Join-Path $global:ModRoot '1.29.380'; New-Item -ItemType Directory -Path $d -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $d 'Microsoft.WinGet.Client.psd1'), '@{}')
             $global:T_Bad = $Bad; $global:T_Cmd = $null; $global:T_Log = @(); $script:TErr = @(); $global:TErr = @(); $script:TModLoad = $null; $global:TModLoad = $null
             $global:TModSig = $null; $script:TModSig = $null
+            $global:TModRepair = @{ Tried = $false; Fetched = $false; StagedInvalid = $false; Skipped = $false; Lost = $false; Error = '' }; $script:TModRepair = $global:TModRepair
             $global:Payload = @{ Tools = @{ WinGet = @{ Version = '1.29.380'; Name = 'Microsoft.WinGet.Client'; Herausgeber = ', O=Microsoft Corporation, L=Redmond, S=Washington, C=US' } } }
         }
     }
     AfterAll {
         $env:ProgramFiles = $script:PF0
-        foreach ($n in @('Out-L', 'Get-TModuleSigFiles', 'Invoke-TPsEncoded', 'Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
+        foreach ($n in @('Out-L', 'Get-TModuleSigFiles', 'Invoke-TPsEncoded', 'Test-TModule', 'Get-TModFixed', 'Test-TModuleSignature', 'Get-TModuleLoad', 'Resolve-TModuleLoad', 'Test-TWinGet', 'Test-TOsOk', 'Test-TOsExperimental', 'Install-TWinGet', 'Get-TModSigState', 'Get-TModOtherDir', 'Get-TModBlockedText', 'Get-TModOther', 'Get-TModRepairText')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue }
     }
     AfterEach { $env:ProgramFiles = $script:PF0 }
     It 'WinGet fehlt: der eigene Prozess laedt die feste Modulversion ueber ihren Pfad und repariert' -Skip:([Environment]::OSVersion.Version.Build -lt 17763) {
@@ -1429,10 +1480,36 @@ Describe 'Nachbesserung: Engine pruefbar/nicht pruefbar, einmal je Lauf, Hinweis
         $log | Should -Not -Match 'Proxy'
         [IO.File]::ReadAllText((Join-Path $script:Fix 'Microsoft.WinGet.Client.psd1')) | Should -Be '@{}'
     }
+    It 'Engine: Einsetzen UND Zurueckbenennen scheitern - Fehler nennt fehlende feste Version und Ablage, frische Fassung bleibt in neu, nicht nach Namen geladen' {
+        Mock Get-HMAuModuleSigFiles { & $script:SigByFile $Dir }
+        Mock Save-HMAuModuleTo { $d = Join-Path $Path "Microsoft.WinGet.Client\$Version"; New-Item -ItemType Directory -Path $d -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $d 'Microsoft.WinGet.Client.psd1'), '@{} # neu'); [IO.File]::WriteAllText((Join-Path $d 'gut.txt'), 'x') }
+        $script:MV = @{ N = 0 }
+        Mock Move-HMAuDir { $script:MV.N++; if ($script:MV.N -ge 2) { throw "gesperrt $($script:MV.N) (Ersatz)" }; Move-Item -LiteralPath $From -Destination $To -ErrorAction Stop }
+        Install-HMAuWinGet $script:Job | Should -BeFalse
+        $rep = Join-Path $env:ProgramFiles 'WindowsPowerShell\HUMig-Modulreparatur'
+        $alt = @(Get-ChildItem -LiteralPath (Join-Path $rep 'alt') -Directory)[0].FullName
+        $src = Join-Path $rep 'neu\Microsoft.WinGet.Client\1.29.380'
+        $log = @($script:Job.Log.ToArray() | ForEach-Object { "$($_.Lvl)|$($_.Msg)" }) -join "`n"
+        $log | Should -Match ([regex]::Escape("Error|WinGet-Modul nicht nutzbar: Tausch fehlgeschlagen (gesperrt 2 (Ersatz)), Zurueckbenennen ebenfalls (gesperrt 3 (Ersatz)): die feste Version 1.29.380 fehlt in $(Split-Path $script:Fix -Parent), die bisherige Fassung liegt in $alt, die frisch geladene, gepruefte Fassung in $src"))
+        Test-Path -LiteralPath (Join-Path $src 'Microsoft.WinGet.Client.psd1') | Should -BeTrue
+        Should -Invoke Invoke-HMAuIsolated -Times 0
+    }
+    It 'Engine: Umbenennen mit drei Versuchen wie am Ziel-PC (Move-HMAuDir)' {
+        Mock Start-Sleep { }
+        $script:MV = @{ N = 0 }
+        Mock Move-Item { $script:MV.N++; if ($script:MV.N -lt 3) { throw 'gesperrt (Ersatz)' } }
+        { Move-HMAuDir 'a' 'b' } | Should -Not -Throw
+        Should -Invoke Move-Item -Times 3 -Exactly
+        $script:MV.N = -10
+        { Move-HMAuDir 'a' 'b' } | Should -Throw 'gesperrt (Ersatz)'
+        Should -Invoke Move-Item -Times 6 -Exactly
+    }
     It 'Engine, W2: Ersetzen wirft (kein Netz), keine andere Version - Abhilfe mit Ordner, kein Hinweis auf Internet/Proxy' {
         Mock Get-HMAuModuleSigFiles { & $script:SigByFile $Dir }
         Install-HMAuWinGet $script:Job | Should -BeFalse
         $log = @($script:Job.Log.ToArray() | ForEach-Object { "$($_.Lvl)|$($_.Msg)" }) -join "`n"
+        $log | Should -Match 'Error\|WinGet-Modul nicht nutzbar: ungueltig, eine frische Fassung liess sich nicht holen \(kein Netz \(Ersatz\)\)'
+        $log | Should -Not -Match 'Neuinstallation'
         $log | Should -Match 'Warning\|Modul 1\.29\.380: Ersetzen ohne Erfolg \(kein Netz \(Ersatz\)\)'
         $log | Should -Match ([regex]::Escape("Abhilfe: den Ordner $script:Fix als Administrator loeschen"))
         $log | Should -Not -Match 'Proxy'

@@ -169,11 +169,24 @@ function Get-TModSigState {
     $script:TModSig = $r
     return $r
 }
-# Text bei gesperrtem Modul (feste Version eindeutig ungueltig, auch nach Neuinstallation, keine andere Version)
+# Was das Ersetzen in diesem Lauf ergab (fuer den Text bei gesperrtem Modul): Tried, Fetched (frische Fassung geholt),
+# StagedInvalid (frische Fassung ebenfalls ungueltig), Skipped (wegen des 24-Stunden-Merkers nicht versucht), Error
+# Lost: Tausch und Zurueckbenennen gescheitert, die feste Version fehlt - gesperrt wie bei ungueltiger Signatur
+$script:TModRepair = @{ Tried = $false; Fetched = $false; StagedInvalid = $false; Skipped = $false; Lost = $false; Error = '' }
+function Get-TModRepairText {
+    $r = $script:TModRepair
+    if ($r.Skipped) { return ', vor weniger als 24 Stunden schon einmal ersetzt (naechstes Ersetzen fruehestens 24 Stunden danach)' }
+    if (-not $r.Tried) { return '' }
+    if (-not $r.Fetched) { return ", eine frische Fassung liess sich nicht holen ($($r.Error))" }
+    if ($r.StagedInvalid) { return ', auch nach einer Neuinstallation (frisch geladene Fassung ebenfalls ungueltig)' }
+    return ", Ersetzen gescheitert ($($r.Error))"
+}
+# Text bei gesperrtem Modul (feste Version eindeutig ungueltig, Ersetzen ohne Erfolg, keine andere Version)
 function Get-TModBlockedText {
     $fx = Get-TModFixed
     $d = Join-Path $ModRoot "$($fx.Version)"
-    return "WinGet-Modul nicht nutzbar: die feste Version $($fx.Version) in $d hat eine ungueltige Signatur ($((Get-TModSigState).Reason)), auch nach einer Neuinstallation, und eine andere Version ist nicht vorhanden. Abhilfe: den Ordner $d als Administrator loeschen und 'Updates suchen' erneut starten - HUMig installiert die feste Version dann neu"
+    if ($script:TModRepair.Lost) { return "WinGet-Modul nicht nutzbar: $($script:TModRepair.Error). Abhilfe: die bisherige Fassung nicht zurueckholen (sie ist veraendert), 'Updates suchen' erneut starten - HUMig installiert die feste Version dann neu" }
+    return "WinGet-Modul nicht nutzbar: die feste Version $($fx.Version) in $d hat eine ungueltige Signatur ($((Get-TModSigState).Reason))$(Get-TModRepairText), und eine andere Version ist nicht vorhanden. Abhilfe: den Ordner $d als Administrator loeschen und 'Updates suchen' erneut starten - HUMig installiert die feste Version dann neu"
 }
 # Reparatur der festen Version: Nachbarordner ausserhalb der Modulsuche (nicht in PSModulePath), auf demselben Laufwerk wie
 # der Modulordner, weil getauscht wird, indem Ordner umbenannt werden
@@ -183,31 +196,46 @@ $script:TModAltDir = ''
 function Save-TModuleTo([string]$Version, [string]$Path) { Save-Module -Name $ModName -RequiredVersion $Version -Repository PSGallery -Path $Path -Force -ErrorAction Stop }
 # eindeutig ungueltige feste Version ersetzen wie bei PowerShell7.neu/.alt: in einen Nachbarordner laden, dort die Signatur
 # pruefen, dann den Versionsordner per Umbenennen tauschen. Die bisherige Fassung wird nicht geloescht, sondern bleibt unter
-# HUMig-Modulreparatur\alt\<Version>_<Zeit> liegen ($script:TModAltDir); bei jedem Fehler bleibt der alte Zustand.
+# HUMig-Modulreparatur\alt\<Version>_<Zeit> liegen ($script:TModAltDir). Scheitert ein Schritt, bleibt der alte Zustand -
+# mit einer Ausnahme: scheitern nach dem ersten Umbenennen sowohl das Einsetzen als auch das Zurueckbenennen, fehlt die feste
+# Version; dann nennt der Fehlertext die Ablage der bisherigen Fassung, und die frisch geladene bleibt in "neu" liegen.
 # Nie aus einem alten Lauf zurueckholen (sonst kaeme eine absichtlich geloeschte Fassung wieder). Rueckgabe '' = fertig,
-# sonst Fehlertext (nichts ausgeben: das Ergebnis ist der Rueckgabewert).
+# sonst Fehlertext (nichts ausgeben: das Ergebnis ist der Rueckgabewert). Ablauf in $script:TModRepair.
 function Repair-TModuleFixed($Fx) {
     $dst = Join-Path $ModRoot "$($Fx.Version)"
     $neu = Join-Path $TModRepRoot 'neu'
     $alt = Join-Path $TModRepRoot ("alt\$($Fx.Version)_" + (Get-TNow).ToString('yyyyMMdd-HHmmss'))
     $script:TModAltDir = ''
+    $script:TModRepair.Tried = $true
+    $keepNeu = $false
     try {
         Remove-TDir $neu
         New-Item -ItemType Directory -Path $neu -Force | Out-Null
         Save-TModuleTo $Fx.Version $neu
+        $script:TModRepair.Fetched = $true
         $src = Join-Path $neu "$ModName\$($Fx.Version)"
         if (-not (Test-Path -LiteralPath (Join-Path $src "$ModName.psd1"))) { throw "Modulbeschreibung nach dem Laden nicht gefunden ($src)" }
         $sg = Test-TModuleSignature (Get-TModuleSigFiles $src) $Fx.Herausgeber
-        if ($sg.State -eq 'Ungueltig') { throw "auch die geladene Fassung ist ungueltig ($($sg.Reason))" }
+        if ($sg.State -eq 'Ungueltig') { $script:TModRepair.StagedInvalid = $true; throw "auch die geladene Fassung ist ungueltig ($($sg.Reason))" }
         if (Test-Path -LiteralPath $alt) { throw "Ablage $alt gibt es schon" }
         New-Item -ItemType Directory -Path (Split-Path $alt -Parent) -Force | Out-Null
         Move-TDir $dst $alt
         try { Move-TDir $src $dst }
-        catch { $e = $_.Exception.Message; try { Move-TDir $alt $dst } catch { }; throw "Tausch fehlgeschlagen ($e)" }
+        catch {
+            $e = $_.Exception.Message
+            try { Move-TDir $alt $dst }
+            catch {
+                $keepNeu = Test-Path -LiteralPath (Join-Path $src "$ModName.psd1")
+                $script:TModAltDir = $alt
+                $script:TModRepair.Lost = $true
+                throw "Tausch fehlgeschlagen ($e), Zurueckbenennen ebenfalls ($($_.Exception.Message)): die feste Version $($Fx.Version) fehlt in $ModRoot, die bisherige Fassung liegt in $alt$(if ($keepNeu) { ", die frisch geladene, gepruefte Fassung in $src" })"
+            }
+            throw "Tausch fehlgeschlagen ($e)"
+        }
         $script:TModAltDir = $alt
         return ''
-    } catch { return "$($_.Exception.Message)" }
-    finally { try { Remove-TDir $neu } catch { } }
+    } catch { $script:TModRepair.Error = "$($_.Exception.Message)"; return "$($_.Exception.Message)" }
+    finally { if (-not $keepNeu) { try { Remove-TDir $neu } catch { } } }
 }
 # Modul fuer alle Benutzer (SYSTEM und andere Benutzer finden es nur dort), nur in der festen Version: neben einer vorhandenen
 # anderen Version installiert (Install-Module -RequiredVersion), nie eine neuere aus der Galerie. Ist die feste da und gueltig
@@ -228,7 +256,14 @@ function Install-TModule {
     }
     $other = ($null -ne (Get-TModOther $fx))
     if ($other -and -not (Test-TModRetryDue $fx.Version)) {
-        Out-L "WinGet-Modul $($fx.Version): der letzte Installationsversuch ist gescheitert, der naechste folgt fruehestens 24 Stunden danach - die vorhandene Version wird verwendet"
+        Out-L "WinGet-Modul $($fx.Version): der letzte Installationsversuch ist gescheitert oder liegt keine 24 Stunden zurueck, der naechste folgt fruehestens 24 Stunden danach - die vorhandene Version wird verwendet"
+        return
+    }
+    # ohne andere Version: ein gelungenes Ersetzen setzt den Merker - ist die feste Version danach innerhalb von 24 Stunden
+    # wieder ungueltig, nicht erneut ersetzen (hoechstens eine Ablage je Tag); ein gescheitertes Ersetzen setzt keinen
+    if ($repair -and -not (Test-TModRetryDue $fx.Version)) {
+        $script:TModRepair.Skipped = $true
+        Out-L "Warnung: WinGet-Modul $($fx.Version): wurde vor weniger als 24 Stunden schon einmal ersetzt und ist wieder ungueltig ($((Get-TModSigState).Reason)) - naechstes Ersetzen fruehestens 24 Stunden danach"
         return
     }
     if ($repair) { Out-L "WinGet-Modul $($fx.Version): Signatur ungueltig ($((Get-TModSigState).Reason)) - wird ersetzt (PowerShell Gallery, feste Version, in einen Nachbarordner laden, pruefen, tauschen) ..." }
@@ -243,15 +278,20 @@ function Install-TModule {
         if ($repair) { $re = Repair-TModuleFixed $fx; if ($re) { throw $re } }
         else { Install-Module -Name $ModName -RequiredVersion $fx.Version -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop }
     } catch { $err = "$($_.Exception.Message)" }
+    # vor dem Ersetzen gescheitert (z. B. NuGet-Anbieter): gilt als "frische Fassung nicht geholt"
+    if ($repair -and $err -and -not $script:TModRepair.Tried) { $script:TModRepair.Tried = $true; $script:TModRepair.Error = $err }
     $script:TModSig = $null; $script:TModLoad = $null
-    if (-not $err -and (Get-TModSigState).State -eq 'Ungueltig') { $err = "Signatur weiter ungueltig ($((Get-TModSigState).Reason))" }
+    if (-not $err -and (Get-TModSigState).State -eq 'Ungueltig') { $err = "Signatur weiter ungueltig ($((Get-TModSigState).Reason))"; $script:TModRepair.Error = $err }
     if (-not $err) {
-        Clear-TModRetryMarker
-        if ($repair) { Out-L "WinGet-Modul $($fx.Version) ersetzt, die bisherige Fassung liegt unveraendert in $($script:TModAltDir)" } else { Out-L "WinGet-Modul $($fx.Version) installiert" }
+        if ($repair) { Set-TModRetryMarker $fx.Version; Out-L "WinGet-Modul $($fx.Version) ersetzt, die bisherige Fassung liegt unveraendert in $($script:TModAltDir)" }
+        else { Clear-TModRetryMarker; Out-L "WinGet-Modul $($fx.Version) installiert" }
         return
     }
     if ($other) { Out-L "Warnung: WinGet-Modul $($fx.Version) nicht installierbar ($err) - die vorhandene Version wird verwendet"; return }
-    if ($repair) { Out-L "Warnung: WinGet-Modul $($fx.Version): Ersetzen ohne Erfolg ($err)"; return }
+    if ($repair) {
+        Out-L "Warnung: WinGet-Modul $($fx.Version): Ersetzen ohne Erfolg ($err)"
+        return
+    }
     $script:TErr += "WinGet-Modul nicht installierbar (Internet/Proxy?): $err"
 }
 # welches Modul laden? Rueckgabe @{ Path; Note; Blocked } - gibt selbst nichts aus, nichts wird geloescht.
@@ -270,6 +310,10 @@ function Get-TModuleLoad {
             if ($sg.State -eq 'NichtPruefbar') { return @{ Path = $psd; Note = "Warnung: WinGet-Modul $($fx.Version): Signatur nicht pruefbar ($($sg.Reason)) - wird wie bisher geladen"; Blocked = $false } }
             $invalid = $true
             $note = "Warnung: WinGet-Modul $($fx.Version) wird nicht geladen, Signatur ungueltig ($($sg.Reason))"
+        } elseif ($script:TModRepair.Lost) {
+            # in diesem Lauf beim Tausch verloren gegangen: nie nach Namen laden
+            $invalid = $true
+            $note = "Warnung: WinGet-Modul $($fx.Version) fehlt nach einem gescheiterten Tausch"
         }
     }
     $oth = Get-TModOther $fx

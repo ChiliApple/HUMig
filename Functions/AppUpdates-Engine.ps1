@@ -148,29 +148,49 @@ function Save-HMAuModuleTo([string]$Version, [string]$Path) { Save-Module -Name 
 # eindeutig ungueltige feste Version ersetzen (gleiches Vorgehen wie Repair-TModuleFixed am Ziel-PC): in einen Nachbarordner
 # ausserhalb der Modulsuche laden (Programme\WindowsPowerShell\HUMig-Modulreparatur, gleiches Laufwerk), Signatur pruefen,
 # Versionsordner per Umbenennen tauschen. Die bisherige Fassung bleibt unter ...\alt\<Version>_<Zeit> liegen, nichts wird
-# geloescht, bei jedem Fehler bleibt der alte Zustand. Rueckgabe @{ Error = '' oder Fehlertext; Alt = Ablage }
+# geloescht. Scheitert ein Schritt, bleibt der alte Zustand - ausser Einsetzen und Zurueckbenennen scheitern beide: dann fehlt
+# die feste Version, der Fehlertext nennt die Ablage, und die frisch geladene Fassung bleibt in "neu" liegen.
+# Rueckgabe @{ Error = '' oder Fehlertext; Alt = Ablage; Fetched = frische Fassung geholt; StagedInvalid; Lost = feste fehlt }
 function Repair-HMAuModuleFixed($Fixed) {
     $root = Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$($script:HMAuModule)"
     $rep = Join-Path $env:ProgramFiles 'WindowsPowerShell\HUMig-Modulreparatur'
     $dst = Join-Path $root "$($Fixed.Version)"
     $neu = Join-Path $rep 'neu'
     $alt = Join-Path $rep ("alt\$($Fixed.Version)_" + (Get-Date).ToString('yyyyMMdd-HHmmss'))
+    $r = @{ Error = ''; Alt = ''; Fetched = $false; StagedInvalid = $false; Lost = $false }
+    $keepNeu = $false
     try {
         if (Test-Path -LiteralPath $neu) { Remove-Item -LiteralPath $neu -Recurse -Force -ErrorAction Stop }
         New-Item -ItemType Directory -Path $neu -Force | Out-Null
         Save-HMAuModuleTo "$($Fixed.Version)" $neu
+        $r.Fetched = $true
         $src = Join-Path $neu "$($script:HMAuModule)\$($Fixed.Version)"
         if (-not (Test-Path -LiteralPath (Join-Path $src "$($script:HMAuModule).psd1"))) { throw "Modulbeschreibung nach dem Laden nicht gefunden ($src)" }
         $sg = Test-HMAuModuleSignature (Get-HMAuModuleSigFiles $src) "$($Fixed.Herausgeber)"
-        if ($sg.State -eq 'Ungueltig') { throw "auch die geladene Fassung ist ungueltig ($($sg.Reason))" }
+        if ($sg.State -eq 'Ungueltig') { $r.StagedInvalid = $true; throw "auch die geladene Fassung ist ungueltig ($($sg.Reason))" }
         if (Test-Path -LiteralPath $alt) { throw "Ablage $alt gibt es schon" }
         New-Item -ItemType Directory -Path (Split-Path $alt -Parent) -Force | Out-Null
-        Move-Item -LiteralPath $dst -Destination $alt -ErrorAction Stop
-        try { Move-Item -LiteralPath $src -Destination $dst -ErrorAction Stop }
-        catch { $e = $_.Exception.Message; try { Move-Item -LiteralPath $alt -Destination $dst -ErrorAction Stop } catch { }; throw "Tausch fehlgeschlagen ($e)" }
-        return @{ Error = ''; Alt = $alt }
-    } catch { return @{ Error = "$($_.Exception.Message)"; Alt = '' } }
-    finally { try { if (Test-Path -LiteralPath $neu) { Remove-Item -LiteralPath $neu -Recurse -Force -ErrorAction Stop } } catch { } }
+        Move-HMAuDir $dst $alt
+        try { Move-HMAuDir $src $dst }
+        catch {
+            $e = $_.Exception.Message
+            try { Move-HMAuDir $alt $dst }
+            catch {
+                $keepNeu = Test-Path -LiteralPath (Join-Path $src "$($script:HMAuModule).psd1")
+                $r.Lost = $true; $r.Alt = $alt
+                throw "Tausch fehlgeschlagen ($e), Zurueckbenennen ebenfalls ($($_.Exception.Message)): die feste Version $($Fixed.Version) fehlt in $root, die bisherige Fassung liegt in $alt$(if ($keepNeu) { ", die frisch geladene, gepruefte Fassung in $src" })"
+            }
+            throw "Tausch fehlgeschlagen ($e)"
+        }
+        $r.Alt = $alt
+        return $r
+    } catch { $r.Error = "$($_.Exception.Message)"; return $r }
+    finally { if (-not $keepNeu) { try { if (Test-Path -LiteralPath $neu) { Remove-Item -LiteralPath $neu -Recurse -Force -ErrorAction Stop } } catch { } } }
+}
+# Ordner umbenennen mit kurzer Wiederholung (ein Virenscanner haelt frische Dateien oft einen Moment offen), wie Move-TDir
+# am Ziel-PC: drei Versuche, 0,7 s Pause (ersetzbar in den Tests)
+function Move-HMAuDir([string]$From, [string]$To) {
+    for ($i = 1; ; $i++) { try { Move-Item -LiteralPath $From -Destination $To -ErrorAction Stop; return } catch { if ($i -ge 3) { throw }; Start-Sleep -Milliseconds 700 } }
 }
 # Ergebnis einer Quellen-Aktion (Rueckgabe von Invoke-AsyncCommand) fuer die Oberflaeche: @{ Ok; Text; Notes }.
 # Erfolg ist nur ein Objekt mit Status 'OK'; alles andere (Fehlertext, Zeitlimit) ist ein Fehler mit diesem Text.
@@ -392,7 +412,7 @@ function Get-HMAuState {
     else {
         $s.Note = "$($ld.Note)"
         # Modul nur im eigenen Prozess laden (Absturz auf nicht unterstuetzten Systemen beendet sonst HUMig)
-        $iso =Invoke-HMAuIsolated "Import-Module $(Get-HMAuImportArg $ld); [Console]::Out.WriteLine('R|' + (Get-WinGetVersion))" 60
+        $iso = Invoke-HMAuIsolated "Import-Module $(Get-HMAuImportArg $ld); [Console]::Out.WriteLine('R|' + (Get-WinGetVersion))" 60
         if ($iso.Ok -and "$($iso.Result)".Trim()) { $s.WinGet = "$($iso.Result)".Trim(); $s.Ready = $true }
         elseif ($iso.Crashed) { $s.Crashed = $true; $s.Problem = "$(Format-HMAuCrash $iso)." }
         elseif ($iso.TimedOut) { $s.Problem = "WinGet antwortet nicht (Zeitlimit) - 'WinGet einrichten'." }
@@ -422,6 +442,7 @@ function Install-HMAuWinGet($Job) {
     #    scheitert an der Katalog-Signaturpruefung); ist sie eindeutig ungueltig, wird sie ersetzt (Repair-HMAuModuleFixed:
     #    laden, pruefen, tauschen). Scheitert die Installation, wird ein vorhandenes Modul verwendet.
     $fx = (Get-HMAuTools).WinGet
+    $repair = $false; $rp = $null; $repErr = ''
     try {
         # vorhandene andere Version (die feste selbst zaehlt nicht: ist sie ungueltig, hilft sie nicht weiter)
         $have = Get-HMAuModuleOther $fx
@@ -454,7 +475,7 @@ function Install-HMAuWinGet($Job) {
                 Reset-HMAuModuleCheck
                 # Ersetzen gescheitert: kein Hinweis auf Internet/Proxy, Schritt 3 waehlt eine andere Version oder meldet
                 # die Abhilfe mit dem Ordner
-                if ($repair) { & $log "Modul $($fx.Version): Ersetzen ohne Erfolg ($($_.Exception.Message))" 'Warning' }
+                if ($repair) { $repErr = "$($_.Exception.Message)"; & $log "Modul $($fx.Version): Ersetzen ohne Erfolg ($repErr)" 'Warning' }
                 elseif (-not $have) { throw }
                 else { & $log "Modul $($fx.Version) nicht installierbar ($($_.Exception.Message)) - vorhandenes Modul $($have.Name) wird verwendet" 'Warning' }
             }
@@ -471,9 +492,20 @@ function Install-HMAuWinGet($Job) {
         $ld = Get-HMAuModuleLoad $fx
         if ($ld.Note) { & $log $ld.Note 'Warning' }
     }
+    # feste Version beim Tausch verloren (Einsetzen und Zurueckbenennen gescheitert) und keine andere: nie nach Namen laden
+    if ($ok -and $rp -and $rp.Lost -and -not (Get-HMAuModuleOther $fx)) {
+        $ok = $false
+        & $log "WinGet-Modul nicht nutzbar: $($rp.Error) - WinGet nicht eingerichtet" 'Error'
+        & $log "Abhilfe: die bisherige Fassung nicht zurueckholen (sie ist veraendert), 'WinGet einrichten' erneut starten - HUMig installiert die feste Version dann neu." 'Warning'
+    }
     if ($ok -and $ld.Blocked) {
         $ok = $false
-        & $log 'WinGet-Modul nicht nutzbar: auch nach einer Neuinstallation ungueltig und keine andere Version vorhanden - WinGet nicht eingerichtet' 'Error'
+        # was das Ersetzen in diesem Lauf ergab: "Neuinstallation" nur, wenn wirklich frisch geholt wurde
+        $why = if (-not $repair) { 'ungueltig' }
+        elseif (-not $rp -or -not $rp.Fetched) { "ungueltig, eine frische Fassung liess sich nicht holen ($repErr)" }
+        elseif ($rp.StagedInvalid) { 'auch nach einer Neuinstallation ungueltig (frisch geladene Fassung ebenfalls ungueltig)' }
+        else { "ungueltig, Ersetzen gescheitert ($repErr)" }
+        & $log "WinGet-Modul nicht nutzbar: $why und keine andere Version vorhanden - WinGet nicht eingerichtet" 'Error'
         & $log "Abhilfe: den Ordner $(Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$($script:HMAuModule)\$($fx.Version)") als Administrator loeschen und 'WinGet einrichten' erneut starten." 'Warning'
     }
     if ($ok) {
