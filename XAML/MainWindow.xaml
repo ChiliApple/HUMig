@@ -632,9 +632,9 @@
                                 <ComboBox x:Name="cmbSbDrive" Grid.Row="1" Grid.Column="1" Margin="0,0,4,4" ToolTip="Angesteckte Platte (USB). Platten des Profils werden an der Bezeichnung erkannt."/>
                                 <WrapPanel Grid.Row="1" Grid.Column="2">
                                     <Button x:Name="btnSbDrives" Content="Aktualisieren" Style="{StaticResource BtnDefault}" ToolTip="Laufwerke und VMs neu einlesen (offline geschaltete USB-Platten werden online geschaltet)"/>
-                                    <Button x:Name="btnSbDiskSetup" Content="Platte einrichten ..." Style="{StaticResource BtnPeach}" ToolTip="USB-Platte vorbereiten: Einrichten = ALLE Daten loeschen, GPT, NTFS (64K), Bezeichnung nach Profil (z.B. HUMIG-SCHULE1-2) - oder Uebernehmen = schon genutzte Platte nur umbenennen, Daten bleiben"/>
                                     <Button x:Name="btnSbOpenDrive" Content="Oeffnen" Style="{StaticResource BtnDefault}" ToolTip="Berichtsordner HUMig-ServerBackup auf der Platte oeffnen"/>
                                     <Button x:Name="btnSbEject" Content="Auswerfen" Style="{StaticResource BtnTeal}" ToolTip="Schreibcache leeren und Platte sicher entfernen"/>
+                                    <Button x:Name="btnSbDiskSetup" Content="Platte einrichten ..." Style="{StaticResource BtnPeach}" ToolTip="USB-Platte vorbereiten: Einrichten = ALLE Daten loeschen, GPT, NTFS (64K), Bezeichnung nach Profil (z.B. HUMIG-SCHULE1-2) - oder Uebernehmen = schon genutzte Platte nur umbenennen, Daten bleiben"/>
                                     <TextBlock Text="Nach Sicherung:" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="8,0,4,4"/>
                                     <ComboBox x:Name="cmbSbAfter" Width="130" Margin="0,0,0,4" VerticalAlignment="Center" ToolTip="Gilt fuer die gewaehlte Platte des Profils (auch im Zeitplan). Auswerfen: bis zum Ab- und Anstecken weg. Offline schalten: kein Laufwerksbuchstabe mehr, der naechste geplante Lauf oder 'Aktualisieren' schaltet sie wieder online.">
                                         <ComboBoxItem Content="nichts tun"/>
@@ -689,16 +689,24 @@
                             <WrapPanel>
                                 <Button x:Name="btnSbBackup" Content="Server-Backup starten" Style="{StaticResource BtnGreen}" FontWeight="SemiBold" Padding="18,6" ToolTip="Angehakte VMs online (VSS) auf die Ziel-Platte sichern - Windows Server-Sicherung (wbadmin)"/>
                                 <Button x:Name="btnSbCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" IsEnabled="False" Padding="14,6"/>
-                                <Button x:Name="btnSbOverview" Content="Statistik / Uebersicht" Style="{StaticResource BtnMauve}" Padding="12,6" ToolTip="Alle Profile und Platten: letzte Sicherung, Alter, Anzahl, Status - Rechts: alle Laeufe"/>
-                                <Button x:Name="btnSbVersions" Content="Versionen auf der Platte" Style="{StaticResource BtnBlue}" Padding="12,6" ToolTip="wbadmin get versions der Ziel-Platte"/>
-                                <Button x:Name="btnSbShadow" Content="Speicher fuer Versionen ..." Style="{StaticResource BtnDefault}" Padding="12,6" ToolTip="Speicher fuer aeltere Versionen (Schattenkopien) auf der Ziel-Platte auf 50 % erhoehen - mit Rueckfrage, nur erhoehen, nie verkleinern"/>
-                                <Button x:Name="btnSbLogs" Content="Protokolle ..." Style="{StaticResource BtnBlue}" Padding="12,6" ToolTip="Protokolle der Laeufe lesen (Zeitplan/Hintergrund als SYSTEM, VM-Export, wbadmin-Ausgaben) - ohne Ordner zu oeffnen"/>
-                                <Button x:Name="btnSbSchedule" Content="Zeitplan ..." Style="{StaticResource BtnMauve}" Padding="12,6" ToolTip="Links: Server-Backup planen (einmalig, taeglich, woechentlich - als SYSTEM ohne Anmeldung, angehakte VMs) | Rechts: geplante Server-Backups anzeigen, starten, loeschen"/>
-                                <Button x:Name="btnSbConflicts" Content="Zeitplan-Pruefung" Style="{StaticResource BtnDefault}" Padding="12,6" ToolTip="Alle geplanten Sicherungsaufgaben am Host anzeigen (andere Programme, alte Aufgaben, Zeitplaene aller HUMig-Profile) - Suchwoerter frei aenderbar"/>
-                                <Button x:Name="btnSbExport" Content="VMs exportieren ..." Style="{StaticResource BtnTeal}" Padding="12,6" ToolTip="Ausgewaehlte VMs mit Hyper-V exportieren (vollstaendige Kopie, mit 'VM importieren' an jedem Hyper-V-Host wiederherstellbar) - auf die Platte oder in einen Ordner. Im Profil auch automatisch nach jeder Sicherung (Zeitplan)."/>
-                                <Button x:Name="btnSbHostOnly" Content="Nur Host-Konfiguration" Style="{StaticResource BtnDefault}" Padding="12,6" ToolTip="Switches, VLANs, Netzwerk, VM-Einstellungen sofort exportieren (Ziel-Platte oder Tool-Ordner\Logs\ServerBackup)"/>
-                                <Button x:Name="btnSbRestore" Content="Wiederherstellen ..." Style="{StaticResource BtnPeach}" Padding="12,6" ToolTip="Windows Server-Sicherung oeffnen (Wiederherstellen > Anwendungen > Hyper-V) mit Anleitung"/>
-                                <Button x:Name="btnSbFeature" Content="Windows Server-Sicherung installieren" Style="{StaticResource BtnYellow}" Padding="12,6" Visibility="Collapsed" ToolTip="Install-WindowsFeature Windows-Server-Backup (kein Neustart noetig)"/>
+                                <Button x:Name="btnSbHostOnly" Content="Nur Host-Konfiguration" Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Switches, VLANs, Netzwerk, VM-Einstellungen sofort exportieren (Ziel-Platte oder Tool-Ordner\Logs\ServerBackup)"/>
+                                <Button x:Name="btnSbExport" Content="VMs exportieren ..." Style="{StaticResource BtnTeal}" Padding="10,6" ToolTip="Ausgewaehlte VMs mit Hyper-V exportieren (vollstaendige Kopie, mit 'VM importieren' an jedem Hyper-V-Host wiederherstellbar) - auf die Platte oder in einen Ordner. Im Profil auch automatisch nach jeder Sicherung (Zeitplan)."/>
+                                <Button x:Name="btnSbSchedule" Content="Zeitplan ..." Style="{StaticResource BtnMauve}" Padding="10,6" ToolTip="Links: Server-Backup planen (einmalig, taeglich, woechentlich - als SYSTEM ohne Anmeldung, angehakte VMs) | Rechts: geplante Server-Backups anzeigen, starten, loeschen"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Style="{StaticResource GroupSep}"/>
+                                    <TextBlock Text="Platte:" Style="{StaticResource GroupCaption}"/>
+                                    <Button x:Name="btnSbVersions" Content="Versionen auf der Platte" Style="{StaticResource BtnBlue}" Padding="10,6" ToolTip="wbadmin get versions der Ziel-Platte"/>
+                                </StackPanel>
+                                <Button x:Name="btnSbShadow" Content="Speicher fuer Versionen ..." Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Speicher fuer aeltere Versionen (Schattenkopien) auf der Ziel-Platte auf 50 % erhoehen - mit Rueckfrage, nur erhoehen, nie verkleinern"/>
+                                <Button x:Name="btnSbRestore" Content="Wiederherstellen ..." Style="{StaticResource BtnPeach}" Padding="10,6" ToolTip="Windows Server-Sicherung oeffnen (Wiederherstellen > Anwendungen > Hyper-V) mit Anleitung"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Style="{StaticResource GroupSep}"/>
+                                    <TextBlock Text="Ohne Auswahl:" Style="{StaticResource GroupCaption}"/>
+                                    <Button x:Name="btnSbOverview" Content="Statistik / Uebersicht" Style="{StaticResource BtnMauve}" Padding="10,6" ToolTip="Alle Profile und Platten: letzte Sicherung, Alter, Anzahl, Status - Rechts: alle Laeufe"/>
+                                </StackPanel>
+                                <Button x:Name="btnSbLogs" Content="Protokolle ..." Style="{StaticResource BtnBlue}" Padding="10,6" ToolTip="Protokolle der Laeufe lesen (Zeitplan/Hintergrund als SYSTEM, VM-Export, wbadmin-Ausgaben) - ohne Ordner zu oeffnen"/>
+                                <Button x:Name="btnSbConflicts" Content="Zeitplan-Pruefung" Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Alle geplanten Sicherungsaufgaben am Host anzeigen (andere Programme, alte Aufgaben, Zeitplaene aller HUMig-Profile) - Suchwoerter frei aenderbar"/>
+                                <Button x:Name="btnSbFeature" Content="Windows Server-Sicherung installieren" Style="{StaticResource BtnYellow}" Padding="10,6" Visibility="Collapsed" ToolTip="Install-WindowsFeature Windows-Server-Backup (kein Neustart noetig)"/>
                             </WrapPanel>
                         </Border>
                     </Grid>
