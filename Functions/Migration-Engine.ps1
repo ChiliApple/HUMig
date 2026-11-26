@@ -1640,11 +1640,13 @@ function Get-HMDirFileState([string]$Dir, [int]$TimeoutMs = 2000) {
 function Get-HMDirEntries([string]$Dir) { return , ([System.IO.DirectoryInfo]::new($Dir).EnumerateFileSystemInfos()) }
 function Test-HMDirHasFile([string]$Dir, [int]$TimeoutMs = 2000) { return [bool](Get-HMDirFileState $Dir $TimeoutMs).HasFile }
 # Zwischenspeicher fuer die waehlbaren Module je Backup (Laufzeit der App): Schluessel Pfad, Groesse und Aenderungszeit der
-# manifest.json. Nur sichere Ergebnisse (keine Zeitgrenze, kein unlesbarer Ordner). Geleert mit "Neu laden" im Reiter Restore.
+# manifest.json. Auch unsichere Ergebnisse (Zeitgrenze, nicht lesbarer Ordner: "waehlbar und markiert") werden gespeichert,
+# damit das Fenster bei einer langsamen Freigabe nicht bei jedem Laden der Liste erneut wartet. Geleert nur mit "Neu laden"
+# im Reiter Restore, dann wird neu geprueft.
 $script:HMBackupModuleSetCache = @{}
 function Clear-HMBackupModuleSetCache { $script:HMBackupModuleSetCache = @{} }
 # Module eines Manifests fuer den Restore: Modules = waehlbar, ErrorModules = davon mit Fehlern gesichert (Markierung, Rueckfrage),
-# Certain = alle Ordnerpruefungen sicher (nur dann in den Zwischenspeicher)
+# Certain = alle Ordnerpruefungen sicher (fuer Tests und eine spaetere Anzeige; gespeichert wird beides)
 function Get-HMBackupModuleSets($Manifest, [string]$BackupPath = '') {
     $ids = @(); $err = @(); $sure = $true
     foreach ($m in @($Manifest.Modules)) {
@@ -1694,7 +1696,7 @@ function Read-HMBackupInfo {
                 try { $fi = Get-Item -LiteralPath $mf -Force -ErrorAction Stop; $ck = '{0}|{1}|{2}' -f $Path.ToUpperInvariant(), $fi.Length, $fi.LastWriteTimeUtc.Ticks } catch { $ck = '' }
                 if ($null -eq $script:HMBackupModuleSetCache) { $script:HMBackupModuleSetCache = @{} }
                 if ($ck -and $script:HMBackupModuleSetCache.ContainsKey($ck)) { $set = $script:HMBackupModuleSetCache[$ck] }
-                else { $set = Get-HMBackupModuleSets $m $Path; if ($ck -and $set.Certain) { $script:HMBackupModuleSetCache[$ck] = $set } }
+                else { $set = Get-HMBackupModuleSets $m $Path; if ($ck) { $script:HMBackupModuleSetCache[$ck] = $set } }
             }
             return [pscustomobject]@{ Path = $Path; Name = (Split-Path $Path -Leaf); Legacy = $false; Created = $m.Created
                 Computer = $m.SourceComputer; User = $m.UserName; Account = $m.Account; Sid = $m.UserSid; ProfilePath = $m.ProfilePath

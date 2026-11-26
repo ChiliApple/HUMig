@@ -229,21 +229,30 @@ public class HMTWirftNach : System.Collections.IEnumerable {
         $e -is [System.Collections.IList] | Should -BeFalse
         $e.GetType().GetInterfaces().Name | Should -Contain 'IEnumerable'
     }
-    It 'Zwischenspeicher: unsichere Ergebnisse (Zeitgrenze, nicht lesbarer Ordner) werden nicht gespeichert; Neu laden leert ihn' {
+    It 'Zwischenspeicher: auch unsichere Ergebnisse (Zeitgrenze, nicht lesbarer Ordner) werden gespeichert, kein erneutes Warten; Neu laden rechnet neu' {
         $p = New-TBackup 'Error' @(New-TModRes 'Daten' 'Error' @(New-TItem 'A' 'Error' 300 'alle gescheitert'))
         New-Item -ItemType Directory -Path (Join-Path $p 'Daten\A') -Force | Out-Null
         Clear-HMBackupModuleSetCache
+        # unsicher: waehlbar, gespeichert; weitere Aufrufe pruefen den Ordner nicht noch einmal
         Mock Get-HMDirFileState { [pscustomobject]@{ HasFile = $true; Certain = $false } }
         $ri = Read-HMBackupInfo -Path $p -Modules @()
         @($ri.Modules) | Should -Be @('Daten')
+        $script:HMBackupModuleSetCache.Count | Should -Be 1
+        @($script:HMBackupModuleSetCache.Values)[0].Certain | Should -BeFalse
+        @((Read-HMBackupInfo -Path $p -Modules @()).Modules) | Should -Be @('Daten')
+        @((Read-HMBackupInfo -Path $p -Modules @()).Modules) | Should -Be @('Daten')
+        Should -Invoke Get-HMDirFileState -Times 1 -Exactly
+        # Neu laden: geleert, naechstes Lesen prueft die Ordner neu (jetzt sicher leer) und speichert das
+        Clear-HMBackupModuleSetCache
         $script:HMBackupModuleSetCache.Count | Should -Be 0
-        # sicheres Ergebnis: gespeichert
         Mock Get-HMDirFileState { [pscustomobject]@{ HasFile = $false; Certain = $true } }
         @((Read-HMBackupInfo -Path $p -Modules @()).Modules).Count | Should -Be 0
         $script:HMBackupModuleSetCache.Count | Should -Be 1
-        # Neu laden: geleert, naechstes Lesen prueft die Ordner neu
+        @($script:HMBackupModuleSetCache.Values)[0].Certain | Should -BeTrue
+        # sicheres Ergebnis wie bisher: gespeichert, bis Neu laden
+        @((Read-HMBackupInfo -Path $p -Modules @()).Modules).Count | Should -Be 0
+        Should -Invoke Get-HMDirFileState -Times 2 -Exactly   # zusammen im Test: einmal vor und einmal nach Neu laden
         Clear-HMBackupModuleSetCache
-        $script:HMBackupModuleSetCache.Count | Should -Be 0
         Mock Get-HMDirFileState { [pscustomobject]@{ HasFile = $true; Certain = $true } }
         @((Read-HMBackupInfo -Path $p -Modules @()).Modules) | Should -Be @('Daten')
         # nur der Knopf "Neu laden" leert ihn, nicht das automatische Auffrischen der Liste
