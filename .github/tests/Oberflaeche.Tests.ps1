@@ -42,6 +42,8 @@ BeforeAll {
     $script:TipDupOk = @('Live-Anzeige waehrend Backup/Restore - CPU und Arbeitsspeicher des PCs, auf dem HUMig laeuft')
     # Knoepfe ohne einen der vier Farbstile (Hauptvorgang, veraendernd, loeschend/Abbruch, neutral)
     $script:StyleOk = @()
+    # Mitglieder der Hashtabellen selbst, keine Steuerelemente
+    $script:NotControls = @('Keys', 'Values', 'Count', 'ContainsKey', 'ContainsValue', 'Contains', 'Add', 'Remove', 'Clear', 'GetEnumerator', 'Item', 'FullName', 'Name')
     $script:Pairs = @(@('btnBackup', 'btnCancel'), @('btnRestore', 'btnCancelRestore'), @('btnSbBackup', 'btnSbCancel'), @('btnAuUpdateSel', 'btnAuCancel'))
     $script:Sta = ([System.Threading.Thread]::CurrentThread.GetApartmentState() -eq 'STA')
 }
@@ -85,13 +87,13 @@ Describe 'Oberflaeche: Namen und Aufbau' {
         $names = @($script:MainXml.SelectNodes('//*') | ForEach-Object { Get-UiName $_ } | Where-Object { $_ })
         $refs = @([regex]::Matches($script:Code, '\$ui\.([A-Za-z_][A-Za-z0-9_]*)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
         $made = @([regex]::Matches($script:Code, '\$ui(?:\.([A-Za-z0-9_]+)|\[''([A-Za-z0-9_]+)''\])\s*=(?!=)') | ForEach-Object { $_.Groups[1].Value + $_.Groups[2].Value })
-        @($refs | Where-Object { $names -notcontains $_ -and $made -notcontains $_ }) | Should -BeNullOrEmpty
+        @($refs | Where-Object { $names -notcontains $_ -and $made -notcontains $_ -and $script:NotControls -notcontains $_ }) | Should -BeNullOrEmpty
     }
     It 'jeder in UI-Settings.ps1 verwendete Name steht im Einstellungsfenster' {
         $names = @($script:SetXml.SelectNodes('//*') | ForEach-Object { Get-UiName $_ } | Where-Object { $_ })
         $src = Get-Content -LiteralPath (Join-Path $script:Root 'Functions\UI-Settings.ps1') -Raw -Encoding UTF8
         $refs = @([regex]::Matches($src, '\$(?:f|F|F2|script:SetDlg\.F)\.([A-Za-z_][A-Za-z0-9_]*)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
-        @($refs | Where-Object { $names -notcontains $_ }) | Should -BeNullOrEmpty
+        @($refs | Where-Object { $names -notcontains $_ -and $script:NotControls -notcontains $_ }) | Should -BeNullOrEmpty
     }
     It 'beide Fenster haben den Anfasser rechts unten' {
         $script:MainXml.DocumentElement.GetAttribute('ResizeMode') | Should -Be 'CanResizeWithGrip'

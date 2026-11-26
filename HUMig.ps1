@@ -2537,6 +2537,7 @@ foreach ($t in $sysTools) {
 }
 $bx = New-Object System.Windows.Controls.Button
 $bx.Content = '.exe als Admin starten'; $bx.Style = $script:Window.FindResource('BtnMauve')
+$bx.ToolTip = 'Programm, Installer oder Skript (.exe, .msi, .cmd, .bat) waehlen und an diesem PC als Administrator starten'
 $bx.Add_Click({ $d = New-Object Microsoft.Win32.OpenFileDialog; $d.Filter = 'Programme (*.exe;*.msi;*.cmd;*.bat)|*.exe;*.msi;*.cmd;*.bat'; if ($d.ShowDialog() -eq $true) { Start-Process -FilePath $d.FileName -Verb RunAs } })
 [void]$ui.pnlSysTools.Children.Add($bx)
 $bc = New-Object System.Windows.Controls.Button

@@ -341,7 +341,7 @@
                                     <TextBlock Text="ZUSAETZLICHE ORDNER" Style="{StaticResource SectionLabel}"/>
                                     <ListBox x:Name="lstExtra" Height="70" ToolTip="Werden im Modul 'Zusaetzliche Ordner' gesichert - Pfad bleibt erhalten"/>
                                     <WrapPanel Margin="0,4,0,6">
-                                        <Button x:Name="btnExtraAdd" Content="+ Ordner" Style="{StaticResource BtnDefault}" ToolTip="Rechtsklick: Pfad eintippen statt waehlen (z.B. D:\Messdaten)&#10;Ordner am Quell-PC waehlen, der im Modul 'Zusaetzliche Ordner' mitgesichert wird"/>
+                                        <Button x:Name="btnExtraAdd" Content="+ Ordner" Style="{StaticResource BtnDefault}" ToolTip="Links: Ordner am Quell-PC waehlen, er wird im Modul 'Zusaetzliche Ordner' mitgesichert | Rechts: Pfad eintippen (z.B. D:\Messdaten)"/>
                                         <Button x:Name="btnExtraDel" Content="- Entfernen" Style="{StaticResource BtnDefault}" ToolTip="Markierten Ordner aus der Liste 'Zusaetzliche Ordner' nehmen"/>
                                         <Button x:Name="btnFileSearch" Content="Wichtige Dateien suchen ..." Style="{StaticResource BtnDefault}" ToolTip="PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche am gewaehlten Computer finden und als Zusaetzliche Ordner aufnehmen (auch unter Werkzeuge)"/>
                                     </WrapPanel>
