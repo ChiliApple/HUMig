@@ -95,7 +95,7 @@ function Save-HMSbConfig($Cfg) {
     # $script:SbLastSaveOk: Aufrufer melden "gespeichert" nur, wenn hier nicht abgebrochen wurde
     $script:SbLastSaveOk = $false
     # beim Lesen nicht lesbar: der Stand im Speicher ist leer und wuerde alle Profile ersetzen - nie speichern
-    if ($Cfg.PSObject.Properties['ReadState'] -and "$($Cfg.ReadState)" -eq 'Unreadable') { Out-Console 'Server-Backup: Profile NICHT gespeichert - Config\serverbackup.json war beim Lesen gesperrt. Reiter neu laden ("Aktualisieren") und erneut versuchen.' 'Error'; return }
+    if ($Cfg.PSObject.Properties['ReadState'] -and "$($Cfg.ReadState)" -eq 'Unreadable') { Out-Console 'Server-Backup: Profile NICHT gespeichert - Config\serverbackup.json war beim Lesen gesperrt. Reiter neu laden ("Neu laden") und erneut versuchen.' 'Error'; return }
     try { [void](Read-HMSbJsonForWrite $script:SbCfgFile) }
     catch { Out-Console "Server-Backup: Profile NICHT gespeichert - $($_.Exception.Message)" 'Error'; return }
     Show-HMSbStateNotes
@@ -133,7 +133,7 @@ function Get-HMSbListState([string]$VmState = $script:SbVmsState, [string]$VolSt
     if ($VmState -eq 'Error' -or $VolState -eq 'Error') { return 'Error' }
     return 'Ok'
 }
-$script:SbListWaitText = 'VMs und Laufwerke werden noch gelesen - bitte kurz warten (oder "Aktualisieren") und dann erneut versuchen.'
+$script:SbListWaitText = 'VMs und Laufwerke werden noch gelesen - bitte kurz warten (oder "Neu laden") und dann erneut versuchen.'
 # Text fuer Rueckfragen: welche Liste nicht lesbar ist und was dann gilt
 function Get-HMSbListErrorText($p, [string]$Action) {
     $t = @()
@@ -197,7 +197,7 @@ function New-HMSbProfile {
     $ls = Get-HMSbListState
     if ($ls -eq 'Loading') { Out-Console "Neues Profil: $($script:SbListWaitText)" 'Warning'; return }
     # nicht lesbare Liste: ohne Rueckfrage anlegen, Hinweis in der Konsole
-    if ($ls -eq 'Error') { Out-Console ("Neues Profil: " + ((Get-HMSbListErrorText $null '') -replace "`n", ' ') + " Das Profil uebernimmt daraus nichts - nach ""Aktualisieren"" anhaken und ""Profil speichern"".") 'Warning' }
+    if ($ls -eq 'Error') { Out-Console ("Neues Profil: " + ((Get-HMSbListErrorText $null '') -replace "`n", ' ') + " Das Profil uebernimmt daraus nichts - nach ""Neu laden"" anhaken und ""Profil speichern"".") 'Warning' }
     $n = Show-TextInputDialog -Title 'Neues Sicherungs-Profil' -Label 'Name des Profils (z.B. Schule oder Standort):'
     if (-not "$n".Trim()) { return }
     $n = "$n".Trim()
@@ -453,7 +453,7 @@ function Start-HMSbHealthRead([switch]$Manual) {
         if ([int]$d.DiskNumber -lt 0 -or -not "$($d.Label)".Trim() -or "$($d.Bus)" -notmatch '^(USB|7)$' -or $seen.ContainsKey([int]$d.DiskNumber)) { continue }
         $seen[[int]$d.DiskNumber] = $true; $d
     })
-    if (-not $ds.Count) { if ($Manual) { Out-Console 'Plattenzustand: keine USB-Platte angesteckt - Platte anstecken und "Aktualisieren" druecken.' 'Info' }; return }
+    if (-not $ds.Count) { if ($Manual) { Out-Console 'Plattenzustand: keine USB-Platte angesteckt - Platte anstecken und "Neu laden" druecken.' 'Info' }; return }
     $arg = (@($ds | ForEach-Object { "$([int]$_.DiskNumber)|$($_.Label)" }) -join ';')
     Invoke-AsyncCommand -ScriptBlock {
         param($eng, $list)
@@ -557,7 +557,7 @@ function Update-HMSbDiskInfo {
     $after = Update-HMSbAfterUi
     $d = Get-HMSbDrive
     $p = Get-HMSbProfile
-    if (-not $d) { $ui.lblSbDiskInfo.Text = 'Keine Ziel-Platte - USB-Platte anstecken und "Aktualisieren" druecken.'; $ui.lblSbDiskInfo.Foreground = New-Brush '#FFF9E2AF'; return }
+    if (-not $d) { $ui.lblSbDiskInfo.Text = 'Keine Ziel-Platte - USB-Platte anstecken und "Neu laden" druecken.'; $ui.lblSbDiskInfo.Foreground = New-Brush '#FFF9E2AF'; return }
     $t = ''; $col = '#FFA6ADC8'
     if (-not $p) { $t = "Platte $($d.Label) - kein Profil gewaehlt (mit ""Neu ..."" anlegen)"; $col = '#FFF9E2AF' }
     elseif (Test-HMSbLabelMatch $d.Label $p.DiskPrefix) {
@@ -931,7 +931,7 @@ function Start-HMSbBackup {
         if ($pi.Count) { $msg += "`n`nHinweis:`n" + (@($pi | ForEach-Object { "  - $($_.Text)" }) -join "`n") }
         foreach ($x in $pf) { Out-Console "Server-Backup Vorab-Pruefung: $($x.Text)" $(if ($x.Lvl -eq 'Info') { 'Info' } else { 'Warning' }) }
     } catch { Out-Console "Server-Backup Vorab-Pruefung nicht moeglich: $($_.Exception.Message)" 'Warning' }
-    if ((Get-HMSbListState) -eq 'Error') { $msg += "`n`nACHTUNG - " + (Get-HMSbListErrorText $p 'Was in dieser Liste nicht lesbar ist, wird in diesem Lauf NICHT gesichert (es zaehlt nur, was oben aufgefuehrt ist). Vorher "Aktualisieren" versuchen.') }
+    if ((Get-HMSbListState) -eq 'Error') { $msg += "`n`nACHTUNG - " + (Get-HMSbListErrorText $p 'Was in dieser Liste nicht lesbar ist, wird in diesem Lauf NICHT gesichert (es zaehlt nur, was oben aufgefuehrt ist). Vorher "Neu laden" versuchen.') }
     if (-not $p) { $msg += "`n`nHinweis: kein Profil gewaehlt - Verlauf unter '(ohne Profil)'." }
     elseif (-not (Test-HMSbLabelMatch $d.Label $p.DiskPrefix)) { $msg += "`n`nACHTUNG: Die Platte '$($d.Label)' gehoert laut Bezeichnung NICHT zum Profil ($($p.DiskPrefix)-...)." }
     if ($p) {
@@ -973,7 +973,7 @@ function Start-HMSbBackup {
     $mm = ''; try { $mm = Get-HMSbDriveMismatch "$($d.Letter)" "$($d.Label)" "$($d.Serial)" } catch { }
     $ans = ''; $now = $null
     if ($mm) {
-        $mq = "Die gewaehlte Ziel-Platte hat sich geaendert:`n$mm`n`nJa = trotzdem auf $($d.Letter): sichern (Warnung im Bericht)`nNein = nicht starten (danach ""Aktualisieren"" und Platte neu waehlen)"
+        $mq = "Die gewaehlte Ziel-Platte hat sich geaendert:`n$mm`n`nJa = trotzdem auf $($d.Letter): sichern (Warnung im Bericht)`nNein = nicht starten (danach ""Neu laden"" und Platte neu waehlen)"
         $ans = "$((Show-HMDialogBox -Owner $script:Window -Text $mq -Title 'Server-Backup' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))"
         if ($ans -eq 'Yes') { $now = Get-HMSbDriveNow "$($d.Letter)" }
     }
@@ -1469,7 +1469,7 @@ function Invoke-HMSbEject {
         }
         Out-Console "Platte $($d.Label) wurde von Windows NICHT ausgeworfen: $($r.Result)" 'Warning'
         # zwischen Auswerfen und dieser Frage kann eine Sicherung angelaufen sein: vor dem Offline-Schalten erneut pruefen
-        if ((Confirm-Action "Die Platte $($d.Letter): $($d.Label) laesst sich nicht auswerfen:`n$($r.Result)`n`nStattdessen OFFLINE schalten? (Windows trennt das Volume sofort, die Platte kann danach abgezogen werden.`nWieder online: ""Aktualisieren"" oder der naechste geplante Lauf.)" 'Auswerfen') -and
+        if ((Confirm-Action "Die Platte $($d.Letter): $($d.Label) laesst sich nicht auswerfen:`n$($r.Result)`n`nStattdessen OFFLINE schalten? (Windows trennt das Volume sofort, die Platte kann danach abgezogen werden.`nWieder online: ""Neu laden"" oder der naechste geplante Lauf.)" 'Auswerfen') -and
             (Confirm-HMSbNoRunOnDisk @("$($d.Label)") 'offline schalten' "Offline schalten bricht eine Sicherung auf $($d.Letter): $($d.Label) ab." -Letters @("$($d.Letter)"))) {
             Invoke-AsyncCommand -ScriptBlock { param($eng, $n, $lb) . $eng; Set-HMSbDiskOffline -Number $n -Label $lb; 'OK' } -ArgumentList @($script:SbEngine, $r.Number, "$($d.Label)") -TimeoutSec 60 -State $d -BusyTag 'Sb' -BusyText 'Platte wird offline geschaltet ...' -OnComplete {
                 param($x, $d)
@@ -1856,7 +1856,7 @@ function New-HMSbSchedule {
     foreach ($x in $vms) { if ("$x" -match '["|]') { Out-Console "Zeitplan: Name '$x' enthaelt ein nicht erlaubtes Zeichen (Anfuehrungszeichen oder |)." 'Error'; return } }
     $info = "Profil: $($p.Name)   (Platten $($p.DiskPrefix)-...)`nVMs ($($vms.Count)): $(if ($vms.Count) { $vms -join ', ' } else { '-' })`nLaufwerke: $(if ($vols.Count) { $vols -join ', ' } else { '-' })`nHost-Konfiguration: $(if ($hc) { 'ja' } else { 'nein' })   Pruefen: $(if ($vf) { 'ja' } else { 'nein' })   Host-System: $(if ($hs) { 'ja' } else { 'nein' })`n`nEs gelten die aktuell angehakten VMs und Optionen.$(if (Get-HMSbExportOptions $p) { "`nNach der Sicherung: VM-Export $(@($p.ExportVMs) -join ', ') (Einstellung im Profil - gilt beim Lauf, Button 'VMs exportieren ...')" })"
     if ($hs) { $sv = Format-HMSbSysDriveVms (Get-HMSbSysDriveVms $script:SbVms); if ($sv) { $info += "`n`n$sv" } }
-    if ($ls -eq 'Error') { $info += "`n`nACHTUNG - " + (Get-HMSbListErrorText $p 'Der Zeitplan sichert aus dieser Liste nichts (er nimmt nur, was jetzt angehakt ist). Besser abbrechen und vorher "Aktualisieren".') }
+    if ($ls -eq 'Error') { $info += "`n`nACHTUNG - " + (Get-HMSbListErrorText $p 'Der Zeitplan sichert aus dieser Liste nichts (er nimmt nur, was jetzt angehakt ist). Besser abbrechen und vorher "Neu laden".') }
     $r = Show-HMSbScheduleDialog $info
     if (-not $r) { return }
     # andere Sicherungsaufgaben, die sich ueberschneiden (naechste 14 Tage)

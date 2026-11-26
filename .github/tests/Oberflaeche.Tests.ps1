@@ -288,3 +288,23 @@ Describe 'Oberflaeche: Rueckfragen mit eigenen Knopftexten' {
         @($script:Seen) | Should -Be @('Ja', 'Nein', 'Abbrechen')
     }
 }
+
+Describe 'Oberflaeche: drei Begriffe einheitlich' {
+    BeforeAll {
+        $script:AllXamlText = (@($script:MainXml, $script:SetXml) | ForEach-Object { $_.OuterXml }) -join "`n"
+        function Get-Content2([string]$n) { "$((@($script:MainXml.SelectNodes('//*') | Where-Object { (Get-UiName $_) -eq $n })[0]).GetAttribute('Content'))" }
+    }
+    It 'Listen neu lesen heisst "Neu laden"' {
+        foreach ($n in 'btnStatusRefresh', 'btnRefreshBackups', 'btnSbDrives') { Get-Content2 $n | Should -Be 'Neu laden' }
+        $script:AllXamlText | Should -Not -Match "'Aktualisieren'|beim Aktualisieren"
+    }
+    It 'das Weiterfuehren heisst "Fortlaufendes Backup"' {
+        Get-Content2 'chkIncremental' | Should -Match '^Fortlaufendes Backup'
+        $script:AllXamlText | Should -Not -Match 'Vorhandenes Backup aktualisieren|weitergefuehrt'
+        (Get-Content -LiteralPath (Join-Path $script:Root 'Functions\UI-BackupSchedule.ps1') -Raw -Encoding UTF8) | Should -Not -Match 'vorhandenes Backup aktualisieren'
+    }
+    It 'der Bericht eines Laufs heisst "Bericht"' {
+        Get-Content2 'btnReport' | Should -Be 'Bericht'
+        $script:AllXamlText | Should -Not -Match 'Restore-Protokoll|Backup-/Restore-Protokoll|im Protokoll\)'
+    }
+}

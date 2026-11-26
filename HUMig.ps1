@@ -2407,7 +2407,7 @@ $ui.btnRestore.Add_Click({
 function Start-RestoreJob([hashtable]$Ctx) {
     Start-EngineJob -Command 'Start-HMRestore -Ctx $Ctx -Job $Job' -Ctx $Ctx -Title 'Restore' -OnFinished {
         param($j)
-        if ($j.Result -and $j.Result.Report) { Out-Console "Protokoll: $($j.Result.Report)  (Knopf 'Protokoll')" 'Info' }
+        if ($j.Result -and $j.Result.Report) { Out-Console "Protokoll: $($j.Result.Report)  (Knopf 'Bericht')" 'Info' }
         Connect-Target
         if ($script:Settings.OverviewAuto -ne $false) { Update-HMBackupOverview -Quiet }
         if ($j.Result -and [int]$j.Result.MissingFiles -gt 0) { Out-Console "Kontrolle nach dem Restore: $([int]$j.Result.MissingFiles) Datei(en) aus dem Backup fehlen am Ziel - Liste: $($j.Result.MissingList)" 'Warning' }

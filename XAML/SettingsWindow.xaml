@@ -142,13 +142,13 @@
                         <CheckBox x:Name="chkRFast" Content="Schnellstart (Fast Boot) aus" ToolTip="Vorauswahl fuer den Haken 'Schnellstart aus' im Reiter Restore"/>
                         <TextBlock Text="Vor und nach dem Restore:" Style="{DynamicResource Lbl}" Margin="0,10,0,4"/>
                         <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkROfferApps" Content="Fehlende Programme vor dem Restore anbieten (zuerst installieren, dann zurueckspielen - Empfehlung von Microsoft)" ToolTip="Gilt fuer jedes Restore, die Programme kommen aus der Softwareverteilung"/>
-                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRVerify" Content="Nach dem Restore Backup und Ziel vergleichen (fehlende Dateien im Protokoll)" ToolTip="Der Vergleich laeuft automatisch nach jedem Restore, das Ergebnis steht im Restore-Protokoll"/>
+                        <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRVerify" Content="Nach dem Restore Backup und Ziel vergleichen (fehlende Dateien im Bericht)" ToolTip="Der Vergleich laeuft automatisch nach jedem Restore, das Ergebnis steht im Restore-Bericht"/>
                         <TextBlock Text="Nach-Skript (.ps1, wird am Ziel-PC als Administrator ausgefuehrt):" Style="{DynamicResource Lbl}" Margin="0,10,0,4" TextWrapping="Wrap"/>
                         <DockPanel>
                             <Button x:Name="btnRScript" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0" ToolTip="Vorgabe-Nach-Skript (.ps1) waehlen"/>
                             <TextBox x:Name="txtRScript" Style="{DynamicResource DarkTextBox}" ToolTip="Vorgabe fuer das Feld Nach-Skript im Reiter Restore, leer = kein Skript"/>
                         </DockPanel>
-                        <TextBlock Text="Checkliste nach dem Restore (ein Punkt je Zeile, wird im Restore-Protokoll abgehakt):" Style="{DynamicResource Lbl}" Margin="0,14,0,4" TextWrapping="Wrap"/>
+                        <TextBlock Text="Checkliste nach dem Restore (ein Punkt je Zeile, wird im Restore-Bericht abgehakt):" Style="{DynamicResource Lbl}" Margin="0,14,0,4" TextWrapping="Wrap"/>
                         <TextBox x:Name="txtChecklist" Style="{DynamicResource DarkTextBox}" Height="170" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" ToolTip="Punkte der Checkliste, die nach dem Restore zum Abhaken erscheinen"/>
                         <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkChecklistAuto" Content="Checkliste nach jedem Restore automatisch anzeigen (Programm-Nacharbeiten aus dem Programm-Katalog kommen dazu)" Margin="0,6,0,0" ToolTip="Ohne Haken oeffnet sich die Checkliste nur ueber den Knopf 'Checkliste' im Reiter Restore"/>
                     </StackPanel>

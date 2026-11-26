@@ -300,7 +300,7 @@
                 <TabItem x:Name="tabStatus" Header="Status">
                     <DockPanel>
                         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,2">
-                            <Button x:Name="btnStatusRefresh" Content="Aktualisieren" Style="{StaticResource BtnDefault}" ToolTip="Zeitplaene, letzte Backups, Server-Backup und App-Updates neu einlesen"/>
+                            <Button x:Name="btnStatusRefresh" Content="Neu laden" Style="{StaticResource BtnDefault}" ToolTip="Zeitplaene, letzte Backups, Server-Backup und App-Updates neu einlesen"/>
                             <TextBlock x:Name="lblStatusTime" Text="" Foreground="{StaticResource CatSubtext}" VerticalAlignment="Center" Margin="10,0,0,4"/>
                             <TextBlock x:Name="lblScopeStatus" Text="Computer und Benutzer oben wirken hier nicht." Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="16,0,0,4" TextWrapping="Wrap" ToolTip="Der Status gilt fuer den Backup-Ordner und diesen PC: Zeitplaene, Server-Backup und App-Updates, die von hier aus laufen"/>
                         </WrapPanel>
@@ -362,7 +362,7 @@
                                     <CheckBox x:Name="chkNoSystemFileExc" Content="C:\ keine Datei-Ausnahmen" ToolTip="Dateitypen-Ausnahmen fuer C:\ deaktivieren, alle Dateitypen werden gesichert"/>
                                     <Button x:Name="btnEditExceptions" Content="Ausnahmelisten bearbeiten" Style="{StaticResource BtnDefault}" HorizontalAlignment="Left" Margin="0,4,0,8" ToolTip="Einstellungen im Reiter Ausnahmen oeffnen (Ordner- und Dateitypen-Listen fuer Profil und C:\)"/>
                                     <TextBlock Text="OPTIONEN" Style="{StaticResource SectionLabel}"/>
-                                    <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkIncremental" Content="Vorhandenes Backup aktualisieren" ToolTip="Gibt es fuer diesen PC und Benutzer schon ein Backup im Backup-Ordner, wird es weitergefuehrt: nur neue/geaenderte Dateien werden kopiert (viel schneller). Geloeschte Dateien bleiben im Backup."/>
+                                    <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkIncremental" Content="Fortlaufendes Backup (nur Neues und Geaendertes)" ToolTip="Gibt es fuer diesen PC und Benutzer schon ein Backup im Backup-Ordner, wird es als fortlaufendes Backup ergaenzt: nur neue/geaenderte Dateien werden kopiert (viel schneller). Geloeschte Dateien bleiben im Backup."/>
                                     <TextBlock x:Name="lblIncremental" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="20,0,0,4"/>
                                     <CheckBox x:Name="chkSpaceCheck" Content="Platz vor dem Start pruefen" ToolTip="Simuliert das Backup vor dem Start (zaehlt nur, was wirklich kopiert wird) und bricht ab, wenn das Ziel zu wenig Platz hat."/>
                                     <CheckBox x:Name="chkVerify" Content="Backup danach pruefen" ToolTip="Vergleicht Quelle und Backup (fehlende Dateien) und prueft eine Stichprobe per Pruefsumme (SHA-256)."/>
@@ -394,14 +394,14 @@
                         <DockPanel Grid.Row="0" Grid.Column="0">
                             <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                                 <TextBlock Text="BACKUPS" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                <Button x:Name="btnRefreshBackups" Content="Aktualisieren" Style="{StaticResource BtnDefault}" ToolTip="Backup-Liste aus dem Backup-Ordner neu einlesen"/>
+                                <Button x:Name="btnRefreshBackups" Content="Neu laden" Style="{StaticResource BtnDefault}" ToolTip="Backup-Liste aus dem Backup-Ordner neu einlesen"/>
                                 <Button x:Name="btnOverview" Content="Uebersicht (HTML)" Style="{StaticResource BtnDefault}" ToolTip="HTML-Uebersicht aller Backups im Backup-Ordner erstellen und oeffnen (Backups.html)"/>
                                 <StackPanel Orientation="Horizontal">
                                     <Border Style="{StaticResource GroupSep}"/>
                                     <TextBlock Text="Markiertes Backup:" Style="{StaticResource GroupCaption}"/>
                                     <Button x:Name="btnOpenBackup" Content="Ordner oeffnen" Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup im Explorer oeffnen - ohne Auswahl den Backup-Ordner"/>
                                 </StackPanel>
-                                <Button x:Name="btnReport" Content="Protokoll" Style="{StaticResource BtnDefault}" ToolTip="Backup-/Restore-Protokoll (HTML) des markierten Backups oeffnen - druckbar, auch als PDF"/>
+                                <Button x:Name="btnReport" Content="Bericht" Style="{StaticResource BtnDefault}" ToolTip="Backup-/Restore-Bericht (HTML) des markierten Backups oeffnen - druckbar, auch als PDF"/>
                                 <Button x:Name="btnVerifyBackup" Content="Backup pruefen" Style="{StaticResource BtnDefault}" ToolTip="Alle Dateien des markierten Backups gegen den Pruefsummen-Katalog pruefen (beschaedigt? fehlt etwas?). Ohne Katalog: Rechtsklick = Katalog jetzt erstellen"/>
                                 <Button x:Name="btnCompare" Content="Vergleichen ..." Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup mit einem anderen vergleichen: was ist neu, was fehlt, was hat sich geaendert"/>
                                 <Button x:Name="btnBackupSearch" Content="Im Backup suchen ..." Style="{StaticResource BtnDefault}" ToolTip="Dateien im markierten Backup suchen und einzeln herauskopieren (auch unter Werkzeuge)"/>
@@ -463,7 +463,7 @@
                                     <TextBlock x:Name="lblExtraTargets" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="2,0,0,6" Visibility="Collapsed"/>
                                     <Button x:Name="btnRestorePreview" Content="Vorschau: was wird ueberschrieben?" Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Zeigt fuer die gewaehlten Module, welche Dateien am Ziel neu angelegt, ueberschrieben oder uebersprungen wuerden - auch nach dem Restore zur Kontrolle (alles gleich = vollstaendig)"/>
                                     <Button x:Name="btnReinstall" Content="Fehlende Programme installieren ..." Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Programme aus dem markierten Backup mit dem Ziel-PC vergleichen - fehlende aus der Softwareverteilung nachinstallieren (nacheinander)"/>
-                                    <Button x:Name="btnChecklist" Content="Checkliste" Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Checkliste nach dem Restore abhaken - landet im Restore-Protokoll"/>
+                                    <Button x:Name="btnChecklist" Content="Checkliste" Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Checkliste nach dem Restore abhaken - landet im Restore-Bericht"/>
                                     <Button x:Name="btnFeedbackR" Content="Rueckmeldung zu Programmen" Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Nach dem Umzug: Rueckmeldung zu den Programmen des markierten Backups, deren Katalog-Eintrag ungeprueft ist (passt / was fehlte) - GitHub-Issue oder E-Mail. Es wird nichts automatisch gesendet."/>
                                 </StackPanel>
                             </ScrollViewer>
@@ -686,12 +686,12 @@
                                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Ziel-Platte:" Style="{StaticResource Lbl}"/>
                                         <ComboBox x:Name="cmbSbDrive" Grid.Row="1" Grid.Column="1" Margin="0,0,4,4" ToolTip="Angesteckte Platte (USB). Platten des Profils werden an der Bezeichnung erkannt."/>
                                         <WrapPanel Grid.Row="1" Grid.Column="2">
-                                            <Button x:Name="btnSbDrives" Content="Aktualisieren" Style="{StaticResource BtnDefault}" ToolTip="Laufwerke und VMs neu einlesen (offline geschaltete USB-Platten werden online geschaltet)"/>
+                                            <Button x:Name="btnSbDrives" Content="Neu laden" Style="{StaticResource BtnDefault}" ToolTip="Laufwerke und VMs neu einlesen (offline geschaltete USB-Platten werden online geschaltet)"/>
                                             <Button x:Name="btnSbOpenDrive" Content="Oeffnen" Style="{StaticResource BtnDefault}" ToolTip="Berichtsordner HUMig-ServerBackup auf der Platte oeffnen"/>
                                             <Button x:Name="btnSbEject" Content="Auswerfen" Style="{StaticResource BtnDefault}" ToolTip="Schreibcache leeren und Platte sicher entfernen"/>
                                             <Button x:Name="btnSbDiskSetup" Content="Platte einrichten ..." Style="{StaticResource BtnDanger}" ToolTip="USB-Platte vorbereiten: Einrichten = ALLE Daten loeschen, GPT, NTFS (64K), Bezeichnung nach Profil (z.B. HUMIG-SCHULE1-2) - oder Uebernehmen = schon genutzte Platte nur umbenennen, Daten bleiben"/>
                                             <TextBlock Text="Nach Sicherung:" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="8,0,4,4"/>
-                                            <ComboBox x:Name="cmbSbAfter" Width="130" Margin="0,0,0,4" VerticalAlignment="Center" ToolTip="Gilt fuer die gewaehlte Platte des Profils (auch im Zeitplan). Auswerfen: bis zum Ab- und Anstecken weg. Offline schalten: kein Laufwerksbuchstabe mehr, der naechste geplante Lauf oder 'Aktualisieren' schaltet sie wieder online.">
+                                            <ComboBox x:Name="cmbSbAfter" Width="130" Margin="0,0,0,4" VerticalAlignment="Center" ToolTip="Gilt fuer die gewaehlte Platte des Profils (auch im Zeitplan). Auswerfen: bis zum Ab- und Anstecken weg. Offline schalten: kein Laufwerksbuchstabe mehr, der naechste geplante Lauf oder 'Neu laden' schaltet sie wieder online.">
                                                 <ComboBoxItem Content="nichts tun"/>
                                                 <ComboBoxItem Content="auswerfen"/>
                                                 <ComboBoxItem Content="offline schalten"/>
@@ -722,7 +722,7 @@
                                         <DockPanel>
                                             <DockPanel DockPanel.Dock="Top" LastChildFill="False">
                                                 <TextBlock Text="PLATTEN / VERLAUF DES PROFILS" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
-                                                <Button x:Name="btnSbHealth" DockPanel.Dock="Right" Content="Plattenzustand pruefen" Style="{StaticResource BtnDefault}" Padding="8,2" FontSize="11" ToolTip="Gesundheitsstatus (SMART) der angesteckten USB-Platten lesen - Windows-Status und, wenn das Gehaeuse sie durchreicht, Temperatur, Betriebsstunden, Lesefehler. Wird beim Aktualisieren und nach jeder Sicherung automatisch gelesen."/>
+                                                <Button x:Name="btnSbHealth" DockPanel.Dock="Right" Content="Plattenzustand pruefen" Style="{StaticResource BtnDefault}" Padding="8,2" FontSize="11" ToolTip="Gesundheitsstatus (SMART) der angesteckten USB-Platten lesen - Windows-Status und, wenn das Gehaeuse sie durchreicht, Temperatur, Betriebsstunden, Lesefehler. Wird beim Neu laden und nach jeder Sicherung automatisch gelesen."/>
                                             </DockPanel>
                                             <StackPanel x:Name="pnlSbDisks" DockPanel.Dock="Top" Margin="0,0,0,2"/>
                                             <TextBlock x:Name="lblSbSchedule" DockPanel.Dock="Top" Text="" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource CatMauve}" Margin="2,2,0,8"/>
