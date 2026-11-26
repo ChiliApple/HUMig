@@ -1619,6 +1619,7 @@ function Test-HMDirHasFile([string]$Dir, [int]$TimeoutMs = 2000) {
         try {
             # eine Aufzaehlung je Ordner (Dateien und Unterordner zusammen)
             foreach ($e in [System.IO.DirectoryInfo]::new($d).EnumerateFileSystemInfos()) {
+                if ($sw.ElapsedMilliseconds -ge $TimeoutMs) { return $true }
                 $a = $e.Attributes
                 if (($a -band [System.IO.FileAttributes]::Directory) -eq 0) { return $true }
                 if (($a -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) { $todo.Push($e.FullName) }
@@ -1673,6 +1674,7 @@ function Read-HMBackupInfo {
             else {
                 $fi = Get-Item -LiteralPath $mf -Force
                 $ck = '{0}|{1}|{2}' -f $Path.ToUpperInvariant(), $fi.Length, $fi.LastWriteTimeUtc.Ticks
+                if ($null -eq $script:HMBackupModuleSetCache) { $script:HMBackupModuleSetCache = @{} }
                 if ($script:HMBackupModuleSetCache.ContainsKey($ck)) { $set = $script:HMBackupModuleSetCache[$ck] }
                 else { $set = Get-HMBackupModuleSets $m $Path; $script:HMBackupModuleSetCache[$ck] = $set }
             }

@@ -183,6 +183,12 @@ Describe 'Restore mit Fehler-Modulen: Backup aus Start-HMBackup (Robocopy ersetz
         @((Read-HMBackupInfo -Path $p -Modules @()).Modules) | Should -Be @('Daten')
         $q = New-TBackup 'Error' @(New-TModRes 'Daten' 'Error' @(New-TItem 'A' 'Error' 300 'alle gescheitert'))
         @((Read-HMBackupInfo -Path $q -Modules @() -NoFileCheck).Modules) | Should -Be @('Daten')
+        # Zwischenspeicher fehlt (z. B. Funktion einzeln geladen): wird angelegt, das Backup verschwindet nicht aus der Liste
+        $script:HMBackupModuleSetCache = $null
+        $ri = Read-HMBackupInfo -Path $q -Modules @()
+        $ri | Should -Not -BeNullOrEmpty
+        $ri.Legacy | Should -BeFalse
+        @($ri.Modules).Count | Should -Be 0
         $bt = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'Functions\Backup-Task.ps1')
         ([regex]::Matches($bt, 'Get-HMBackupList -Root \$targetRoot -Modules \$script:Modules -NoFileCheck')).Count | Should -Be 2
         ([regex]::Matches($bt, 'Get-HMBackupList ')).Count | Should -Be 2
