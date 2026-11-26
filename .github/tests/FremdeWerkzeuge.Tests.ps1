@@ -1515,10 +1515,39 @@ Describe 'Nachbesserung: Engine pruefbar/nicht pruefbar, einmal je Lauf, Hinweis
         $rr.Text | Should -Be 'FEHLER: Zugriff verweigert'
         (Read-HMAuSourceResult $null).Ok | Should -BeFalse
         (Read-HMAuSourceResult 'OK').Ok | Should -BeFalse
-        # die Oberflaeche nutzt genau diese Auswertung und gibt die Hinweise als Information aus
-        $ui = [IO.File]::ReadAllText((Join-Path $script:Root 'Functions\UI-AppUpdates.ps1'))
-        ([regex]::Matches($ui, 'Read-HMAuSourceResult \$r')).Count | Should -Be 2
-        ([regex]::Matches($ui, "foreach \(\`$nt in \`$rr\.Notes\) \{ Out-Console `"App-Updates: \`$nt`" 'Info' \}")).Count | Should -Be 2
+    }
+    It 'Oberflaeche, W4: Abschluss von Quelle hinzufuegen/entfernen (echte OnComplete-Bloecke) - Erfolg mit Hinweisen als Info, Fehler bleibt Fehler' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root 'Functions\UI-AppUpdates.ps1'), [ref]$null, [ref]$null)
+        $oc = @{}
+        foreach ($fnName in @('Add-HMAuSourceUi', 'Remove-HMAuSourceUi')) {
+            $fn = @($ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $fnName }, $true))[0]
+            $cmd = @($fn.FindAll({ param($x) $x -is [System.Management.Automation.Language.CommandAst] -and $x.GetCommandName() -eq 'Invoke-AsyncCommand' }, $true))[0]
+            $els = @($cmd.CommandElements)
+            for ($i = 0; $i -lt $els.Count; $i++) { if ($els[$i] -is [System.Management.Automation.Language.CommandParameterAst] -and $els[$i].ParameterName -eq 'OnComplete') { $oc[$fnName] = $els[$i + 1].ScriptBlock.GetScriptBlock() } }
+        }
+        $oc.Count | Should -Be 2
+        # Ersatz fuer die Oberflaeche: Konsole, Einstellungen, Suche
+        function global:Out-Console([string]$m, [string]$l = 'Info') { $global:T_Con += "$l|$m" }
+        function global:Get-HMAuConfig { [pscustomobject]@{ Sources = @('winget'); Exclude = @(); Location = 'Test' } }
+        function global:Save-HMAuConfig($Sources, $Exclude) { $global:T_Saved = @($Sources) }
+        function global:Start-HMAuSearch { $global:T_Search++ }
+        try {
+            foreach ($fnName in $oc.Keys) {
+                foreach ($c in @(@(), @('eins'), @('eins', 'zwei'))) {
+                    $global:T_Con = @(); $global:T_Saved = $null; $global:T_Search = 0
+                    & $oc[$fnName] ([pscustomobject]@{ Status = 'OK'; Notes = @($c) }) @{ Name = 'Q1' }
+                    @($global:T_Con | Where-Object { $_ -like 'Error|*' }).Count | Should -Be 0 -Because "$fnName, $($c.Count) Hinweise"
+                    (@($global:T_Con | Where-Object { $_ -like 'Info|App-Updates: *' }) -join "`n") | Should -Be (@($c | ForEach-Object { "Info|App-Updates: $_" }) -join "`n")
+                    $global:T_Search | Should -Be 1
+                    if ($fnName -eq 'Add-HMAuSourceUi') { $global:T_Saved | Should -Be @('winget', 'Q1') }
+                }
+                $global:T_Con = @(); $global:T_Saved = $null; $global:T_Search = 0
+                & $oc[$fnName] 'FEHLER: Zugriff verweigert' @{ Name = 'Q1' }
+                @($global:T_Con | Where-Object { $_ -like 'Error|Quelle Q1 nicht *: FEHLER: Zugriff verweigert' }).Count | Should -Be 1
+                $global:T_Search | Should -Be 0
+                $global:T_Saved | Should -BeNullOrEmpty
+            }
+        } finally { foreach ($n in @('Out-Console', 'Get-HMAuConfig', 'Save-HMAuConfig', 'Start-HMAuSearch')) { Remove-Item "Function:\global:$n" -ErrorAction SilentlyContinue } }
     }
     It 'Hilfsaufgabe: Hinweis zur Modulwahl und Hinweise des Workers kommen im Ergebnis an (Notes)' {
         $d = Join-Path $TestDrive ('h_' + [guid]::NewGuid().ToString('N').Substring(0, 6)); New-Item -ItemType Directory -Path $d -Force | Out-Null
