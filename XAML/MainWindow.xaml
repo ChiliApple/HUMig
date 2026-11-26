@@ -386,14 +386,21 @@
                             <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                                 <TextBlock Text="BACKUPS" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                 <Button x:Name="btnRefreshBackups" Content="Aktualisieren" Style="{StaticResource BtnDefault}"/>
-                                <Button x:Name="btnOpenBackup" Content="Ordner oeffnen" Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup im Explorer oeffnen - ohne Auswahl den Backup-Ordner"/>
+                                <Button x:Name="btnOverview" Content="Uebersicht (HTML)" Style="{StaticResource BtnDefault}" ToolTip="HTML-Uebersicht aller Backups im Backup-Ordner erstellen und oeffnen (Backups.html)"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Style="{StaticResource GroupSep}"/>
+                                    <TextBlock Text="Markiertes Backup:" Style="{StaticResource GroupCaption}"/>
+                                    <Button x:Name="btnOpenBackup" Content="Ordner oeffnen" Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup im Explorer oeffnen - ohne Auswahl den Backup-Ordner"/>
+                                </StackPanel>
                                 <Button x:Name="btnReport" Content="Protokoll" Style="{StaticResource BtnTeal}" ToolTip="Backup-/Restore-Protokoll (HTML) des markierten Backups oeffnen - druckbar, auch als PDF"/>
                                 <Button x:Name="btnVerifyBackup" Content="Backup pruefen" Style="{StaticResource BtnBlue}" ToolTip="Alle Dateien des markierten Backups gegen den Pruefsummen-Katalog pruefen (beschaedigt? fehlt etwas?). Ohne Katalog: Rechtsklick = Katalog jetzt erstellen"/>
                                 <Button x:Name="btnCompare" Content="Vergleichen ..." Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup mit einem anderen vergleichen: was ist neu, was fehlt, was hat sich geaendert"/>
                                 <Button x:Name="btnBackupSearch" Content="Im Backup suchen ..." Style="{StaticResource BtnTeal}" ToolTip="Dateien im markierten Backup suchen und einzeln herauskopieren (auch unter Werkzeuge)"/>
-                                <Button x:Name="btnOverview" Content="Uebersicht (HTML)" Style="{StaticResource BtnDefault}" ToolTip="HTML-Uebersicht aller Backups im Backup-Ordner erstellen und oeffnen (Backups.html)"/>
                                 <Button x:Name="btnArchiveBackup" Content="Als Archiv" Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup einfrieren: kein fortlaufendes Backup schreibt mehr hinein (der naechste Lauf legt ein neues an), Aufbewahrung und Loeschen lassen es in Ruhe, _GELOESCHT bleibt erhalten. Nochmals klicken = Markierung aufheben"/>
-                                <Button x:Name="btnDeleteBackup" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Markierte Backups loeschen (mit Bestaetigung; mehrere mit Strg/Umschalt markieren) - Archive werden ausgelassen, erst nach &apos;Archiv aufheben&apos;"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Style="{StaticResource GroupSep}" Visibility="{Binding Visibility, ElementName=btnDeleteBackup}"/>
+                                    <Button x:Name="btnDeleteBackup" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Markierte Backups loeschen (mit Bestaetigung; mehrere mit Strg/Umschalt markieren) - Archive werden ausgelassen, erst nach &apos;Archiv aufheben&apos;"/>
+                                </StackPanel>
                                 <Button x:Name="btnCleanupBackups" Content="Alte loeschen" Style="{StaticResource BtnPeach}" ToolTip="Backups aelter als die Aufbewahrungsdauer (Einstellungen) anzeigen und loeschen"/>
                                 <Button x:Name="btnEmptyDeleted" Content="Geloeschte leeren" Style="{StaticResource BtnPeach}" ToolTip="Im markierten (fortlaufenden) Backup die beiseitegelegten, an der Quelle geloeschten Dateien (_GELOESCHT) endgueltig loeschen - mit Rueckfrage"/>
                             </WrapPanel>
