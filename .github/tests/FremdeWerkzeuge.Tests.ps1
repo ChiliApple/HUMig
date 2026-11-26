@@ -1040,7 +1040,7 @@ Describe 'WinGet einrichten am Ziel-PC (Install-TWinGet): feste Modulversion vor
         function global:Out-L([string]$t) { $global:T_Log += $t }
         function global:Get-TModuleSigFiles([string]$Dir) { @(@{ Path = (Join-Path $Dir 'Microsoft.WinGet.Client.psd1'); Status = $(if ($global:T_Bad) { 'HashMismatch' } else { 'Valid' }); Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US' }) }
         # Ersatz fuer den eigenen Prozess: merkt den Befehl, startet nichts
-        function global:Invoke-TPsEncoded([string]$Enc) { $global:T_Cmd = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Enc)); return @{ Out = ''; Code = 0 } }
+        function global:Invoke-TPsEncoded([string]$EncodedCommand) { $global:T_Cmd = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($EncodedCommand)); return @{ Out = ''; Code = 0 } }
         $script:PF0 = $env:ProgramFiles
         $script:Setup = {
             param([bool]$Bad = $false)

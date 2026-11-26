@@ -172,8 +172,8 @@ function Test-TOsExperimental {
     return ($srv -and [Environment]::OSVersion.Version.Build -lt 20348)
 }
 # Windows PowerShell mit einem Befehl (Base64) in eigenem Prozess; Rueckgabe @{ Out; Code } (ersetzbar in den Tests)
-function Invoke-TPsEncoded([string]$Enc) {
-    $o = (@(& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $Enc 2>&1) | ForEach-Object { "$_" }) -join ' '
+function Invoke-TPsEncoded([string]$EncodedCommand) {
+    $o = (@(& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $EncodedCommand 2>&1) | ForEach-Object { "$_" }) -join ' '
     return @{ Out = $o; Code = $LASTEXITCODE }
 }
 # Fehlt WinGet (z.B. Windows Server 2022 - dort nicht mitgeliefert), fuer alle Benutzer einrichten: Repair-WinGetPackageManager -AllUsers
@@ -204,7 +204,7 @@ function Install-TWinGet {
     try {
         # stderr des Unterprozesses darf unter Windows PowerShell 5.1 (2>&1 bei EAP=Stop) nicht als Abbruch zaehlen - es zaehlt der Exitcode
         $ErrorActionPreference = 'Continue'
-        $rr = Invoke-TPsEncoded $enc
+        $rr = Invoke-TPsEncoded -EncodedCommand $enc
         $out = $rr.Out; $code = $rr.Code
     } catch { $out = $_.Exception.Message; $code = 1 }
     finally { $ErrorActionPreference = $eap; if ($null -ne $old) { try { [void][HMAuT.ErrMode]::SetErrorMode($old) } catch { } } }
