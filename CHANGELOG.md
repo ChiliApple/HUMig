@@ -35,7 +35,7 @@
 ### ⚠️ Nach dem Update
 - **Zeitlimit je Programm bei App-Updates:** Neu wartet ein Lauf höchstens 120 Minuten auf ein einzelnes Programm (vorher nur 3 Stunden für den ganzen Lauf bzw. 4 Stunden im Zeitplan). In der App gibt es dafür keine Einstellung; im Zeitplan liest das Skript den Wert ItemTimeoutMin aus config.json im Zeitplan-Ordner, die Datei wird beim erneuten Anlegen des Zeitplans neu geschrieben.
 ### ✅ Qualität
-- **Tests:** 85 neue Tests für Werkzeuge, Software, Treiber und App-Updates.
+- **Tests:** 102 neue Tests für Werkzeuge, Software, Treiber und App-Updates.
 
 ## v2.1.24 - 2026-11-26
 ### 🪟 Hauptfenster
