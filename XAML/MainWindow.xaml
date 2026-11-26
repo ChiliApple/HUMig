@@ -327,47 +327,8 @@
                                 <StackPanel x:Name="pnlBackupModules"/>
                             </ScrollViewer>
                         </DockPanel>
-                        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="8,0,0,0">
-                            <StackPanel>
-                                <TextBlock Text="ZUSAETZLICHE ORDNER" Style="{StaticResource SectionLabel}"/>
-                                <ListBox x:Name="lstExtra" Height="70" ToolTip="Werden im Modul 'Zusaetzliche Ordner' gesichert - Pfad bleibt erhalten"/>
-                                <WrapPanel Margin="0,4,0,6">
-                                    <Button x:Name="btnExtraAdd" Content="+ Ordner" Style="{StaticResource BtnDefault}"/>
-                                    <Button x:Name="btnExtraDel" Content="- Entfernen" Style="{StaticResource BtnDefault}"/>
-                                    <Button x:Name="btnFileSearch" Content="Wichtige Dateien suchen ..." Style="{StaticResource BtnPeach}" ToolTip="PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche am gewaehlten Computer finden und als Zusaetzliche Ordner aufnehmen (auch unter Werkzeuge)"/>
-                                </WrapPanel>
-                                <TextBlock Text="PFADE AUSSCHLIESSEN" Style="{StaticResource SectionLabel}"/>
-                                <ListBox x:Name="lstExclude" Height="60" ToolTip="Diese Ordner/Dateien werden nicht gesichert (Pfad am Quell-PC). Gilt fuer diese Sitzung."/>
-                                <WrapPanel Margin="0,4,0,6">
-                                    <Button x:Name="btnExclAdd" Content="+ Ordner" Style="{StaticResource BtnDefault}" ToolTip="Links: Ordner waehlen | Rechts: Pfad eintippen (Datei oder Ordner am Quell-PC)"/>
-                                    <Button x:Name="btnExclDel" Content="- Entfernen" Style="{StaticResource BtnDefault}"/>
-                                    <Button x:Name="btnBigFiles" Content="Grosse Dateien ..." Style="{StaticResource BtnPeach}" IsEnabled="False" ToolTip="Groesste Ordner und Dateien der letzten Groessenermittlung - markierte ausschliessen"/>
-                                </WrapPanel>
-                                <TextBlock Text="AUSNAHMEN" Style="{StaticResource SectionLabel}"/>
-                                <CheckBox x:Name="chkMinProfileExc" Content="Profil: nur AppData ausnehmen" ToolTip="Statt der Ausnahmeliste nur AppData und Intel* ausnehmen"/>
-                                <CheckBox x:Name="chkNoProfileFileExc" Content="Profil: keine Datei-Ausnahmen" ToolTip="Dateitypen-Ausnahmen (*.log, *.dat, ...) im Profil deaktivieren"/>
-                                <CheckBox x:Name="chkMinSystemExc" Content="C:\ nur Systemordner ausnehmen"/>
-                                <CheckBox x:Name="chkNoSystemFileExc" Content="C:\ keine Datei-Ausnahmen"/>
-                                <Button x:Name="btnEditExceptions" Content="Ausnahmelisten bearbeiten" Style="{StaticResource BtnDefault}" HorizontalAlignment="Left" Margin="0,4,0,8"/>
-                                <TextBlock Text="OPTIONEN" Style="{StaticResource SectionLabel}"/>
-                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkIncremental" Content="Vorhandenes Backup aktualisieren" ToolTip="Gibt es fuer diesen PC und Benutzer schon ein Backup im Backup-Ordner, wird es weitergefuehrt: nur neue/geaenderte Dateien werden kopiert (viel schneller). Geloeschte Dateien bleiben im Backup."/>
-                                <TextBlock x:Name="lblIncremental" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="20,0,0,4"/>
-                                <CheckBox x:Name="chkSpaceCheck" Content="Platz vor dem Start pruefen" ToolTip="Simuliert das Backup vor dem Start (zaehlt nur, was wirklich kopiert wird) und bricht ab, wenn das Ziel zu wenig Platz hat."/>
-                                <CheckBox x:Name="chkVerify" Content="Backup danach pruefen" ToolTip="Vergleicht Quelle und Backup (fehlende Dateien) und prueft eine Stichprobe per Pruefsumme (SHA-256)."/>
-                                <CheckBox x:Name="chkCatalog" Content="Pruefsummen-Katalog erstellen" ToolTip="SHA-256 jeder Datei im Backup (Pruefsummen.tsv). Damit laesst sich spaeter jederzeit pruefen, ob das Backup (z.B. am USB-Laufwerk) unbeschaedigt ist: Reiter Restore > Backup pruefen. Bei Aktualisierung werden nur neue/geaenderte Dateien berechnet."/>
-                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkOneDriveLocal" Content="OneDrive/SharePoint: lokale Dateien mitsichern" ToolTip="Aus: Cloud-Ordner werden ausgelassen (Inhalt liegt in der Cloud). Ein: nur Dateien, die am PC vorhanden sind, werden gesichert - Nur-Cloud-Dateien werden NIE heruntergeladen."/>
-                                <TextBlock Text="KOPIEREN" Style="{StaticResource SectionLabel}" Margin="0,8,0,4"/>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                    <TextBlock Text="Threads (Robocopy /MT):" Style="{StaticResource Lbl}"/>
-                                    <ComboBox x:Name="cmbThreads" Width="70" ToolTip="1 = langsam/schonend (HDD, Netzwerk), 32 = Standard, 128 = maximal (NVMe)"/>
-                                </StackPanel>
-                                <WrapPanel Margin="0,0,0,8">
-                                    <Button x:Name="btnPrecheck" Content="Vorab-Pruefung" Style="{StaticResource BtnTeal}" ToolTip="Verbindung, Anmeldestatus, OneDrive, USMT, freier Platz"/>
-                                    <Button x:Name="btnProfileSize" Content="Groesse ermitteln" Style="{StaticResource BtnDefault}" ToolTip="Groesse der gewaehlten Module mit Ausnahmen (Robocopy-Simulation, ohne zu kopieren)"/>
-                                    <Button x:Name="btnApps" Content="Programme" Style="{StaticResource BtnMauve}" ToolTip="Links: installierte Programme erkennen - Einstellungen erkannter Programme werden als Module eingeblendet und angehakt; Uebersicht was uebertragbar ist (Einstellungen, Lizenzen, Nacharbeiten) | Rechts: nur Uebersicht"/>
-                                    <Button x:Name="btnFeedback" Content="Rueckmeldung" Style="{StaticResource BtnYellow}" ToolTip="Rueckmeldung zu den erkannten Programmen mit Katalog-Eintrag 'ungeprueft' (nur testweise): GitHub-Issue im Browser oder E-Mail (Adresse in Einstellungen > Allgemein). Es wird nichts automatisch gesendet."/>
-                                    <Button x:Name="btnWizard" Content="Umzug ..." Style="{StaticResource BtnMauve}" ToolTip="Umzugs-Assistent: Schritt fuer Schritt alter PC - Vorab-Pruefung - Backup - neuer PC - Restore (fehlende Programme zuerst) - Checkliste. Fortsetzbar nach Abbruch."/>
-                                </WrapPanel>
+                        <DockPanel Grid.Column="1" Margin="8,0,0,0">
+                            <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
                                 <Grid>
                                     <Button x:Name="btnBackup" Content="Backup starten" Style="{StaticResource BtnGreen}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
                                     <Button x:Name="btnCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed"/>
@@ -375,7 +336,50 @@
                                 <Button x:Name="btnBackupSchedule" Content="Zeitplan ..." Style="{StaticResource BtnBlue}" Margin="0,10,0,2" ToolTip="Links: dieses Backup (angehakte Module, Optionen, Zusaetzliche Ordner, Backup-Ordner) automatisch ausfuehren - taeglich, woechentlich oder bei Anmeldung. Nur eigenes Profil an diesem PC, HUMig muss dafuer nicht offen sein. | Rechts: Zeitplaene verwalten (jetzt starten, Protokoll, Bericht, loeschen)"/>
                                 <TextBlock x:Name="lblBackupSchedule" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,4"/>
                             </StackPanel>
-                        </ScrollViewer>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel>
+                                    <TextBlock Text="ZUSAETZLICHE ORDNER" Style="{StaticResource SectionLabel}"/>
+                                    <ListBox x:Name="lstExtra" Height="70" ToolTip="Werden im Modul 'Zusaetzliche Ordner' gesichert - Pfad bleibt erhalten"/>
+                                    <WrapPanel Margin="0,4,0,6">
+                                        <Button x:Name="btnExtraAdd" Content="+ Ordner" Style="{StaticResource BtnDefault}"/>
+                                        <Button x:Name="btnExtraDel" Content="- Entfernen" Style="{StaticResource BtnDefault}"/>
+                                        <Button x:Name="btnFileSearch" Content="Wichtige Dateien suchen ..." Style="{StaticResource BtnPeach}" ToolTip="PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche am gewaehlten Computer finden und als Zusaetzliche Ordner aufnehmen (auch unter Werkzeuge)"/>
+                                    </WrapPanel>
+                                    <TextBlock Text="PFADE AUSSCHLIESSEN" Style="{StaticResource SectionLabel}"/>
+                                    <ListBox x:Name="lstExclude" Height="60" ToolTip="Diese Ordner/Dateien werden nicht gesichert (Pfad am Quell-PC). Gilt fuer diese Sitzung."/>
+                                    <WrapPanel Margin="0,4,0,6">
+                                        <Button x:Name="btnExclAdd" Content="+ Ordner" Style="{StaticResource BtnDefault}" ToolTip="Links: Ordner waehlen | Rechts: Pfad eintippen (Datei oder Ordner am Quell-PC)"/>
+                                        <Button x:Name="btnExclDel" Content="- Entfernen" Style="{StaticResource BtnDefault}"/>
+                                        <Button x:Name="btnBigFiles" Content="Grosse Dateien ..." Style="{StaticResource BtnPeach}" IsEnabled="False" ToolTip="Groesste Ordner und Dateien der letzten Groessenermittlung - markierte ausschliessen"/>
+                                    </WrapPanel>
+                                    <TextBlock Text="AUSNAHMEN" Style="{StaticResource SectionLabel}"/>
+                                    <CheckBox x:Name="chkMinProfileExc" Content="Profil: nur AppData ausnehmen" ToolTip="Statt der Ausnahmeliste nur AppData und Intel* ausnehmen"/>
+                                    <CheckBox x:Name="chkNoProfileFileExc" Content="Profil: keine Datei-Ausnahmen" ToolTip="Dateitypen-Ausnahmen (*.log, *.dat, ...) im Profil deaktivieren"/>
+                                    <CheckBox x:Name="chkMinSystemExc" Content="C:\ nur Systemordner ausnehmen"/>
+                                    <CheckBox x:Name="chkNoSystemFileExc" Content="C:\ keine Datei-Ausnahmen"/>
+                                    <Button x:Name="btnEditExceptions" Content="Ausnahmelisten bearbeiten" Style="{StaticResource BtnDefault}" HorizontalAlignment="Left" Margin="0,4,0,8"/>
+                                    <TextBlock Text="OPTIONEN" Style="{StaticResource SectionLabel}"/>
+                                    <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkIncremental" Content="Vorhandenes Backup aktualisieren" ToolTip="Gibt es fuer diesen PC und Benutzer schon ein Backup im Backup-Ordner, wird es weitergefuehrt: nur neue/geaenderte Dateien werden kopiert (viel schneller). Geloeschte Dateien bleiben im Backup."/>
+                                    <TextBlock x:Name="lblIncremental" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="20,0,0,4"/>
+                                    <CheckBox x:Name="chkSpaceCheck" Content="Platz vor dem Start pruefen" ToolTip="Simuliert das Backup vor dem Start (zaehlt nur, was wirklich kopiert wird) und bricht ab, wenn das Ziel zu wenig Platz hat."/>
+                                    <CheckBox x:Name="chkVerify" Content="Backup danach pruefen" ToolTip="Vergleicht Quelle und Backup (fehlende Dateien) und prueft eine Stichprobe per Pruefsumme (SHA-256)."/>
+                                    <CheckBox x:Name="chkCatalog" Content="Pruefsummen-Katalog erstellen" ToolTip="SHA-256 jeder Datei im Backup (Pruefsummen.tsv). Damit laesst sich spaeter jederzeit pruefen, ob das Backup (z.B. am USB-Laufwerk) unbeschaedigt ist: Reiter Restore > Backup pruefen. Bei Aktualisierung werden nur neue/geaenderte Dateien berechnet."/>
+                                    <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkOneDriveLocal" Content="OneDrive/SharePoint: lokale Dateien mitsichern" ToolTip="Aus: Cloud-Ordner werden ausgelassen (Inhalt liegt in der Cloud). Ein: nur Dateien, die am PC vorhanden sind, werden gesichert - Nur-Cloud-Dateien werden NIE heruntergeladen."/>
+                                    <TextBlock Text="KOPIEREN" Style="{StaticResource SectionLabel}" Margin="0,8,0,4"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <TextBlock Text="Threads (Robocopy /MT):" Style="{StaticResource Lbl}"/>
+                                        <ComboBox x:Name="cmbThreads" Width="70" ToolTip="1 = langsam/schonend (HDD, Netzwerk), 32 = Standard, 128 = maximal (NVMe)"/>
+                                    </StackPanel>
+                                    <WrapPanel Margin="0,0,0,8">
+                                        <Button x:Name="btnPrecheck" Content="Vorab-Pruefung" Style="{StaticResource BtnTeal}" ToolTip="Verbindung, Anmeldestatus, OneDrive, USMT, freier Platz"/>
+                                        <Button x:Name="btnProfileSize" Content="Groesse ermitteln" Style="{StaticResource BtnDefault}" ToolTip="Groesse der gewaehlten Module mit Ausnahmen (Robocopy-Simulation, ohne zu kopieren)"/>
+                                        <Button x:Name="btnApps" Content="Programme" Style="{StaticResource BtnMauve}" ToolTip="Links: installierte Programme erkennen - Einstellungen erkannter Programme werden als Module eingeblendet und angehakt; Uebersicht was uebertragbar ist (Einstellungen, Lizenzen, Nacharbeiten) | Rechts: nur Uebersicht"/>
+                                        <Button x:Name="btnFeedback" Content="Rueckmeldung" Style="{StaticResource BtnYellow}" ToolTip="Rueckmeldung zu den erkannten Programmen mit Katalog-Eintrag 'ungeprueft' (nur testweise): GitHub-Issue im Browser oder E-Mail (Adresse in Einstellungen > Allgemein). Es wird nichts automatisch gesendet."/>
+                                        <Button x:Name="btnWizard" Content="Umzug ..." Style="{StaticResource BtnMauve}" ToolTip="Umzugs-Assistent: Schritt fuer Schritt alter PC - Vorab-Pruefung - Backup - neuer PC - Restore (fehlende Programme zuerst) - Checkliste. Fortsetzbar nach Abbruch."/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </DockPanel>
                     </Grid>
                 </TabItem>
 
@@ -427,36 +431,40 @@
                                 <StackPanel x:Name="pnlRestoreModules"/>
                             </ScrollViewer>
                         </DockPanel>
-                        <ScrollViewer Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="8,0,0,0">
-                            <StackPanel>
-                                <TextBlock Text="ZIEL" Style="{StaticResource SectionLabel}"/>
-                                <TextBlock x:Name="lblRestoreTarget" Text="" Foreground="{StaticResource CatText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                                <TextBlock Text="OPTIONEN" Style="{StaticResource SectionLabel}"/>
-                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkKeepNewer" Content="Neuere Dateien am Ziel nicht ueberschreiben" ToolTip="Robocopy /XO: ist eine Datei am Ziel-PC neuer als im Backup, bleibt sie erhalten"/>
-                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkRestoreOneDrive" Content="OneDrive-Dateien in eigenen Ordner" Margin="0,0,0,8" ToolTip="Mitgesicherte OneDrive/SharePoint-Dateien nach Profil\OneDrive-Wiederherstellung kopieren (nie direkt in den Sync-Ordner - dort koennten neuere Cloud-Versionen ueberschrieben werden)."/>
-                                <TextBlock Text="NACHARBEITEN" Style="{StaticResource SectionLabel}"/>
-                                <CheckBox x:Name="chkGpUpdate" Content="gpupdate /force"/>
-                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkWUDrivers" Content="Treiber ueber Windows Update aus"/>
-                                <CheckBox x:Name="chkNumLock" Content="NumLock beim Start an"/>
-                                <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkFavorites" Content="Explorer: alte 'Favoriten' einblenden"/>
-                                <CheckBox x:Name="chkFastBoot" Content="Schnellstart (Fast Boot) aus"/>
-                                <TextBlock Text="Nach-Skript (optional, .ps1):" Style="{StaticResource Lbl}" Margin="0,6,0,2"/>
-                                <DockPanel Margin="0,0,0,10">
-                                    <Button x:Name="btnPostScript" DockPanel.Dock="Right" Content="..." Style="{StaticResource BtnDefault}" Width="30" Margin="4,0,0,0"/>
-                                    <TextBox x:Name="txtPostScript" Style="{StaticResource DarkTextBox}"/>
-                                </DockPanel>
-                                <Button x:Name="btnExtraTargets" Content="Ziele der Zusaetzlichen Ordner ..." Style="{StaticResource BtnBlue}" Margin="0,0,0,2" Visibility="Collapsed" ToolTip="Zusaetzliche Ordner aus dem Backup an einen anderen Ort zurueckspielen (z.B. D:\Projekte nach E:\Daten\Projekte) oder einzelne auslassen - kopiert wie das Backup (Robocopy, Threads, Protokoll, Pruefung)"/>
-                                <TextBlock x:Name="lblExtraTargets" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="2,0,0,6" Visibility="Collapsed"/>
-                                <Button x:Name="btnRestorePreview" Content="Vorschau: was wird ueberschrieben?" Style="{StaticResource BtnTeal}" Margin="0,0,0,4" ToolTip="Zeigt fuer die gewaehlten Module, welche Dateien am Ziel neu angelegt, ueberschrieben oder uebersprungen wuerden - auch nach dem Restore zur Kontrolle (alles gleich = vollstaendig)"/>
-                                <Button x:Name="btnReinstall" Content="Fehlende Programme installieren ..." Style="{StaticResource BtnMauve}" Margin="0,0,0,4" ToolTip="Programme aus dem markierten Backup mit dem Ziel-PC vergleichen - fehlende aus der Softwareverteilung nachinstallieren (nacheinander)"/>
-                                <Button x:Name="btnChecklist" Content="Checkliste" Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Checkliste nach dem Restore abhaken - landet im Restore-Protokoll"/>
-                                <Button x:Name="btnFeedbackR" Content="Rueckmeldung zu Programmen" Style="{StaticResource BtnYellow}" Margin="0,0,0,4" ToolTip="Nach dem Umzug: Rueckmeldung zu den Programmen des markierten Backups, deren Katalog-Eintrag ungeprueft ist (passt / was fehlte) - GitHub-Issue oder E-Mail. Es wird nichts automatisch gesendet."/>
+                        <DockPanel Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Margin="8,0,0,0">
+                            <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
                                 <Grid>
                                     <Button x:Name="btnRestore" Content="Restore starten" Style="{StaticResource BtnGreen}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
                                     <Button x:Name="btnCancelRestore" Content="Abbrechen" Style="{StaticResource BtnRed}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed"/>
                                 </Grid>
                             </StackPanel>
-                        </ScrollViewer>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel>
+                                    <TextBlock Text="ZIEL" Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock x:Name="lblRestoreTarget" Text="" Foreground="{StaticResource CatText}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                    <TextBlock Text="OPTIONEN" Style="{StaticResource SectionLabel}"/>
+                                    <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkKeepNewer" Content="Neuere Dateien am Ziel nicht ueberschreiben" ToolTip="Robocopy /XO: ist eine Datei am Ziel-PC neuer als im Backup, bleibt sie erhalten"/>
+                                    <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkRestoreOneDrive" Content="OneDrive-Dateien in eigenen Ordner" Margin="0,0,0,8" ToolTip="Mitgesicherte OneDrive/SharePoint-Dateien nach Profil\OneDrive-Wiederherstellung kopieren (nie direkt in den Sync-Ordner - dort koennten neuere Cloud-Versionen ueberschrieben werden)."/>
+                                    <TextBlock Text="NACHARBEITEN" Style="{StaticResource SectionLabel}"/>
+                                    <CheckBox x:Name="chkGpUpdate" Content="gpupdate /force"/>
+                                    <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkWUDrivers" Content="Treiber ueber Windows Update aus"/>
+                                    <CheckBox x:Name="chkNumLock" Content="NumLock beim Start an"/>
+                                    <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkFavorites" Content="Explorer: alte 'Favoriten' einblenden"/>
+                                    <CheckBox x:Name="chkFastBoot" Content="Schnellstart (Fast Boot) aus"/>
+                                    <TextBlock Text="Nach-Skript (optional, .ps1):" Style="{StaticResource Lbl}" Margin="0,6,0,2"/>
+                                    <DockPanel Margin="0,0,0,10">
+                                        <Button x:Name="btnPostScript" DockPanel.Dock="Right" Content="..." Style="{StaticResource BtnDefault}" Width="30" Margin="4,0,0,0"/>
+                                        <TextBox x:Name="txtPostScript" Style="{StaticResource DarkTextBox}"/>
+                                    </DockPanel>
+                                    <Button x:Name="btnExtraTargets" Content="Ziele der Zusaetzlichen Ordner ..." Style="{StaticResource BtnBlue}" Margin="0,0,0,2" Visibility="Collapsed" ToolTip="Zusaetzliche Ordner aus dem Backup an einen anderen Ort zurueckspielen (z.B. D:\Projekte nach E:\Daten\Projekte) oder einzelne auslassen - kopiert wie das Backup (Robocopy, Threads, Protokoll, Pruefung)"/>
+                                    <TextBlock x:Name="lblExtraTargets" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="2,0,0,6" Visibility="Collapsed"/>
+                                    <Button x:Name="btnRestorePreview" Content="Vorschau: was wird ueberschrieben?" Style="{StaticResource BtnTeal}" Margin="0,0,0,4" ToolTip="Zeigt fuer die gewaehlten Module, welche Dateien am Ziel neu angelegt, ueberschrieben oder uebersprungen wuerden - auch nach dem Restore zur Kontrolle (alles gleich = vollstaendig)"/>
+                                    <Button x:Name="btnReinstall" Content="Fehlende Programme installieren ..." Style="{StaticResource BtnMauve}" Margin="0,0,0,4" ToolTip="Programme aus dem markierten Backup mit dem Ziel-PC vergleichen - fehlende aus der Softwareverteilung nachinstallieren (nacheinander)"/>
+                                    <Button x:Name="btnChecklist" Content="Checkliste" Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Checkliste nach dem Restore abhaken - landet im Restore-Protokoll"/>
+                                    <Button x:Name="btnFeedbackR" Content="Rueckmeldung zu Programmen" Style="{StaticResource BtnYellow}" Margin="0,0,0,4" ToolTip="Nach dem Umzug: Rueckmeldung zu den Programmen des markierten Backups, deren Katalog-Eintrag ungeprueft ist (passt / was fehlte) - GitHub-Issue oder E-Mail. Es wird nichts automatisch gesendet."/>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </DockPanel>
                     </Grid>
                 </TabItem>
 
