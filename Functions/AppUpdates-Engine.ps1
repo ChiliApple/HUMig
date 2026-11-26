@@ -68,6 +68,50 @@ function Get-HMAuTools([string]$Path = $script:HMAuToolsFile) {
     catch { return @{ Ok = $false; Errors = @("Config\tools.json nicht lesbar: $($_.Exception.Message)"); Pwsh = $null; WinGet = $null } }
     return (ConvertTo-HMAuTools $d)
 }
+# WinGet-Modul auf diesem PC: Signaturen der Moduldateien (nur signierbare Dateitypen) und Pruefung (rein, gleiche Regel wie am
+# Ziel-PC in AppUpdates-Target.ps1: jede Datei gueltig, Zertifikat vom Herausgeber, .psd1 dabei). Rueckgabe '' = gueltig, sonst Grund
+function Get-HMAuModuleSigFiles([string]$Dir) {
+    return @(Get-ChildItem -LiteralPath $Dir -Recurse -File -ErrorAction Stop | Where-Object { @('.psd1', '.psm1', '.ps1', '.ps1xml', '.dll', '.winmd', '.cat') -contains $_.Extension.ToLowerInvariant() } |
+        ForEach-Object { $s = Get-AuthenticodeSignature -LiteralPath $_.FullName; @{ Path = $_.FullName; Status = "$($s.Status)"; Subject = "$($s.SignerCertificate.Subject)" } })
+}
+function Test-HMAuModuleSignature($Sigs, [string]$Publisher) {
+    $all = @($Sigs | Where-Object { $_ })
+    if (-not $all.Count) { return 'keine signierten Dateien' }
+    if (-not @($all | Where-Object { "$($_.Path)" -like '*.psd1' }).Count) { return 'Modulbeschreibung (.psd1) fehlt' }
+    foreach ($s in $all) {
+        if ("$($s.Status)" -ne 'Valid') { return "$(Split-Path "$($s.Path)" -Leaf): $($s.Status)" }
+        if (-not $Publisher -or -not "$($s.Subject)".EndsWith($Publisher, [StringComparison]::OrdinalIgnoreCase)) { return "$(Split-Path "$($s.Path)" -Leaf): anderer Herausgeber" }
+    }
+    return ''
+}
+# welches Modul laden (fuer alle Benutzer, Programme\WindowsPowerShell\Modules)? Feste Version mit gueltiger Signatur, sonst die
+# hoechste andere (mit Hinweis), sonst '' (dann wie bisher nach Namen). Rueckgabe @{ Path; Note }
+function Get-HMAuModuleLoad($Fixed = (Get-HMAuTools).WinGet) {
+    $root = Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$($script:HMAuModule)"
+    $note = ''
+    if ($Fixed) {
+        $psd = Join-Path $root "$($Fixed.Version)\$($script:HMAuModule).psd1"
+        if (Test-Path -LiteralPath $psd) {
+            $why = 'nicht pruefbar'
+            try { $why = Test-HMAuModuleSignature (Get-HMAuModuleSigFiles (Split-Path $psd -Parent)) "$($Fixed.Herausgeber)" } catch { $why = "nicht pruefbar ($($_.Exception.Message))" }
+            if (-not $why) { return @{ Path = $psd; Note = '' } }
+            $note = "WinGet-Modul $($Fixed.Version) wird nicht geladen, Signatur ungueltig ($why)"
+        }
+    }
+    $oth = @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -match '^\d+(\.\d+){1,3}$' -and (-not $Fixed -or $_.Name -ne "$($Fixed.Version)") -and (Test-Path -LiteralPath (Join-Path $_.FullName "$($script:HMAuModule).psd1")) } |
+        Sort-Object { [version]$_.Name } -Descending)[0]
+    if ($oth) {
+        $why = if ($note) { $note } elseif ($Fixed) { "WinGet-Modul: feste Version $($Fixed.Version) fehlt" } else { 'WinGet-Modul: keine gueltige feste Version' }
+        return @{ Path = (Join-Path $oth.FullName "$($script:HMAuModule).psd1"); Note = "$why - die vorhandene Version $($oth.Name) wird verwendet" }
+    }
+    return @{ Path = ''; Note = $note }
+}
+# Argument fuer Import-Module in den Skripten fuer den eigenen Prozess: Pfad der festen Version, sonst der Modulname (wie bisher)
+function Get-HMAuImportArg($Load) {
+    $x = if ($Load -and "$($Load.Path)") { "$($Load.Path)" } else { $script:HMAuModule }
+    return "'" + ($x -replace "'", "''") + "'"
+}
 
 # ----------------------------------------------------------------------------
 # Reine Hilfsfunktionen (auch fuer die automatischen Tests)
@@ -271,7 +315,7 @@ function Get-HMAuState {
     elseif (-not $s.ModuleAllUsers) { $s.Problem = "PowerShell-Modul $($script:HMAuModule) ist nur fuer einzelne Benutzer installiert - SYSTEM und andere Benutzer finden es nicht. 'WinGet einrichten' installiert es fuer alle Benutzer." }
     else {
         # Modul nur im eigenen Prozess laden (Absturz auf nicht unterstuetzten Systemen beendet sonst HUMig)
-        $iso = Invoke-HMAuIsolated "Import-Module '$($script:HMAuModule)'; [Console]::Out.WriteLine('R|' + (Get-WinGetVersion))" 60
+        $iso = Invoke-HMAuIsolated "Import-Module $(Get-HMAuImportArg (Get-HMAuModuleLoad)); [Console]::Out.WriteLine('R|' + (Get-WinGetVersion))" 60
         if ($iso.Ok -and "$($iso.Result)".Trim()) { $s.WinGet = "$($iso.Result)".Trim(); $s.Ready = $true }
         elseif ($iso.Crashed) { $s.Crashed = $true; $s.Problem = "$(Format-HMAuCrash $iso)." }
         elseif ($iso.TimedOut) { $s.Problem = "WinGet antwortet nicht (Zeitlimit) - 'WinGet einrichten'." }
@@ -295,26 +339,32 @@ function Install-HMAuWinGet($Job) {
         if ("$($_.Exception.Message)" -match '80073CF1') { & $log 'App Installer ist auf diesem PC nicht vorhanden - wird unten von GitHub geladen.' 'Info' }
         else { & $log "App Installer nicht registrierbar: $($_.Exception.Message)" 'Warning' }
     }
-    # 2. NuGet-Anbieter + Modul (alle Benutzer)
+    # 2. Modul (alle Benutzer) nur in der festen Version aus Config\tools.json: neben einer vorhandenen anderen Version installiert,
+    #    nie eine neuere aus der Galerie. Ist die feste schon da, kein erneutes Install-Module (dieselbe Version mit -Force
+    #    scheitert an der Katalog-Signaturpruefung). Scheitert die Installation, wird ein vorhandenes Modul verwendet.
+    $fx = (Get-HMAuTools).WinGet
     try {
-        $nu = @(Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' })
-        if (-not $nu.Count) {
-            & $log 'NuGet-Anbieter installieren (PowerShell Gallery) ...' 'Info'
-            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers -ErrorAction Stop | Out-Null
-        }
-        # schon fuer alle Benutzer installiert: nur aktualisieren, wenn die Galerie eine neuere Version hat
-        # (Install-Module -Force derselben Version scheitert sonst an der Katalog-Signaturpruefung)
         $have = @(Get-Module -ListAvailable -Name $script:HMAuModule | Where-Object { "$($_.ModuleBase)".StartsWith((Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules'), [StringComparison]::OrdinalIgnoreCase) } | Sort-Object Version -Descending)[0]
-        $new = $null
-        if ($have) { try { $new = Find-Module -Name $script:HMAuModule -Repository PSGallery -ErrorAction Stop } catch { & $log "Neue Version nicht pruefbar ($($_.Exception.Message)) - vorhandenes Modul $($have.Version) wird verwendet" 'Warning' } }
-        if (-not $have) {
-            & $log "Modul $($script:HMAuModule) installieren (fuer alle Benutzer) ..." 'Info'
-            Install-Module -Name $script:HMAuModule -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop
-        } elseif ($new -and [version]"$($new.Version)" -gt $have.Version) {
-            & $log "Modul $($script:HMAuModule) aktualisieren ($($have.Version) -> $($new.Version), fuer alle Benutzer) ..." 'Info'
-            try { Install-Module -Name $script:HMAuModule -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop }
-            catch { & $log "Modul nicht aktualisierbar ($($_.Exception.Message)) - vorhandenes Modul $($have.Version) wird verwendet" 'Warning' }
-        } else { & $log "Modul $($script:HMAuModule) $($have.Version) ist aktuell (fuer alle Benutzer)" 'Info' }
+        $root = Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$($script:HMAuModule)"
+        if (-not $fx) {
+            if (-not $have) { throw 'keine gueltige feste Version (Config\tools.json)' }
+            & $log "Keine gueltige feste Version fuer das Modul (Config\tools.json) - vorhandenes Modul $($have.Version) wird verwendet" 'Warning'
+        } elseif (Test-Path -LiteralPath (Join-Path $root "$($fx.Version)\$($script:HMAuModule).psd1")) {
+            & $log "Modul $($script:HMAuModule) $($fx.Version) ist installiert (feste Version, fuer alle Benutzer)" 'Info'
+        } else {
+            try {
+                $nu = @(Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' })
+                if (-not $nu.Count) {
+                    & $log 'NuGet-Anbieter installieren (PowerShell Gallery) ...' 'Info'
+                    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers -ErrorAction Stop | Out-Null
+                }
+                & $log "Modul $($script:HMAuModule) $($fx.Version) installieren (feste Version, fuer alle Benutzer) ..." 'Info'
+                Install-Module -Name $script:HMAuModule -RequiredVersion $fx.Version -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop
+            } catch {
+                if (-not $have) { throw }
+                & $log "Modul $($fx.Version) nicht installierbar ($($_.Exception.Message)) - vorhandenes Modul $($have.Version) wird verwendet" 'Warning'
+            }
+        }
     } catch {
         $ok = $false
         & $log "Modul nicht installierbar: $($_.Exception.Message)" 'Error'
@@ -324,9 +374,15 @@ function Install-HMAuWinGet($Job) {
     #    damit ein Absturz des Moduls (z.B. Windows Server 2019) HUMig nicht mitreisst
     if ($ok) {
         $isAdm = $false; try { $isAdm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
+        $ld = Get-HMAuModuleLoad $fx
+        if ($ld.Note) { & $log $ld.Note 'Warning' }
+        $imp = Get-HMAuImportArg $ld
+        # Ausnahme von den festen Versionen: Repair-WinGetPackageManager -Latest laedt den App Installer (WinGet) in der neuesten
+        # Fassung von Microsoft. Der App Installer ist ein Windows-Bestandteil, den Microsoft selbst aktuell haelt; eine feste aeltere
+        # Fassung passt oft nicht zum Windows-Stand. Laeuft nur, wenn WinGet fehlt oder nicht funktioniert.
         $scr = @"
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-Import-Module '$($script:HMAuModule)' -Force
+Import-Module $imp -Force
 L 'Success' ('Modul $($script:HMAuModule) ' + (@(Get-Module '$($script:HMAuModule)')[0].Version) + ' bereit')
 `$ready = `$false
 try { Assert-WinGetPackageManager; `$ready = `$true } catch { L 'Warning' ('WinGet nicht bereit: ' + `$_.Exception.Message + ' - wird repariert ...') }
@@ -344,7 +400,7 @@ try { L 'Success' ('WinGet ' + (Get-WinGetVersion) + ' bereit') } catch { }
         if ($iso.Crashed -and -not (Test-HMAuOsExperimental)) {
             & $log "$(Format-HMAuCrash $iso) - direkte Reparatur ..." 'Warning'
             $rep = if ($isAdm) { 'Repair-WinGetPackageManager -AllUsers -Latest -Force' } else { 'Repair-WinGetPackageManager -Latest -Force' }
-            $scr2 = "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12`nImport-Module '$($script:HMAuModule)' -Force`nL 'Info' 'WinGet reparieren ($rep, Download von GitHub) ...'`n$rep | Out-Null`nL 'Success' 'WinGet repariert'`n[Console]::Out.WriteLine('R|OK')"
+            $scr2 = "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12`nImport-Module $imp -Force`nL 'Info' 'WinGet reparieren ($rep, Download von GitHub) ...'`n$rep | Out-Null`nL 'Success' 'WinGet repariert'`n[Console]::Out.WriteLine('R|OK')"
             $iso = Invoke-HMAuIsolated $scr2 1200 { param($m, $l) & $log $m $l } $Job
         }
         if (-not $iso.Ok) {
@@ -395,6 +451,8 @@ function Start-HMAuTask([string]$Account, [string]$Sid, $Request) {
     $dir = Join-Path $env:ProgramData "HUMig\AppUpdates\run_$id"
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     Copy-Item -LiteralPath $script:HMAuWorker -Destination (Join-Path $dir 'worker.ps1') -Force
+    # Modul in der festen Version laden (Pfad), sonst wie bisher nach Namen
+    if ($Request -is [hashtable] -and -not $Request.ContainsKey('ModulePath')) { $Request = $Request.Clone(); $Request.ModulePath = "$((Get-HMAuModuleLoad).Path)" }
     $Request | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $dir 'request.json') -Encoding UTF8
     $sys = ($Account -eq 'SYSTEM')
     if (-not $sys) {

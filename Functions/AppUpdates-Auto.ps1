@@ -138,7 +138,12 @@ try {
     $cfg = Get-Content -LiteralPath (Join-Path $Dir 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     # Zeitlimit je Programm (Minuten), ueberschreibbar in config.json (ItemTimeoutMin)
     $itemMin = 120; $im = 0; if ([int]::TryParse("$($cfg.ItemTimeoutMin)", [ref]$im) -and $im -gt 0) { $itemMin = $im }
-    try { Import-Module Microsoft.WinGet.Client -ErrorAction Stop } catch { Import-Module (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\Microsoft.WinGet.Client') -ErrorAction Stop }
+    # Modul in der festen Version: Pfad steht in config.json (beim Anlegen des Zeitplans von HUMig mitgegeben). Der Zeitplan laedt
+    # nie selbst etwas nach. Fehlt der Pfad (aeltere config.json) oder laedt das Modul nicht, wie bisher nach Namen.
+    $mp = "$($cfg.ModulePath)"; $mok = $false
+    if ($mp -and (Test-Path -LiteralPath $mp)) { try { Import-Module $mp -ErrorAction Stop; $mok = $true } catch { Write-ALog "WinGet-Modul $mp nicht ladbar ($($_.Exception.Message)) - die vorhandene Version wird verwendet" } }
+    elseif ($mp) { Write-ALog "WinGet-Modul $mp fehlt - die vorhandene Version wird verwendet" }
+    if (-not $mok) { try { Import-Module Microsoft.WinGet.Client -ErrorAction Stop } catch { Import-Module (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\Microsoft.WinGet.Client') -ErrorAction Stop } }
     $wg = Get-AWingetExe
     if (-not $wg) { throw 'winget.exe nicht gefunden' }
     # als SYSTEM fehlt sonst evtl. die Visual-C++-Laufzeit des App-Pakets (0xC0000135, z.B. Windows Server 2022)

@@ -77,18 +77,83 @@ function Get-TLoggedOnSids {
 function Get-TAccount([string]$Sid) { try { return (New-Object System.Security.Principal.SecurityIdentifier($Sid)).Translate([System.Security.Principal.NTAccount]).Value } catch { return $Sid } }
 function Test-TModule { return (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$ModName")) }
 
-# Modul fuer alle Benutzer (SYSTEM und andere Benutzer finden es nur dort)
+$ModRoot = Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$ModName"
+# feste Version des Moduls aus dem Auftrag (Payload.Tools, Config\tools.json von HUMig); $null = keine gueltige Angabe
+function Get-TModFixed {
+    $x = $null; if ($Payload -and $Payload.Tools) { $x = $Payload.Tools.WinGet }
+    if (-not $x -or "$($x.Version)" -notmatch '^\d+\.\d+\.\d+$' -or "$($x.Name)" -ne $ModName -or "$($x.Herausgeber)" -notmatch '^, O=.+') { return $null }
+    return @{ Version = "$($x.Version)"; Herausgeber = "$($x.Herausgeber)" }
+}
+# Modul fuer alle Benutzer (SYSTEM und andere Benutzer finden es nur dort), nur in der festen Version: neben einer vorhandenen
+# anderen Version installiert (Install-Module -RequiredVersion), nie eine neuere aus der Galerie. Ist die feste schon da, kein
+# erneutes Install-Module (dieselbe Version mit -Force scheitert an der Katalog-Signaturpruefung).
 function Install-TModule {
-    if (Test-TModule) { return }
-    Out-L 'WinGet-Modul fuer alle Benutzer installieren (PowerShell Gallery) ...'
+    $fx = Get-TModFixed
+    if ($fx -and (Test-Path -LiteralPath (Join-Path $ModRoot "$($fx.Version)\$ModName.psd1"))) { return }
+    $had = Test-TModule
+    if (-not $fx) {
+        if ($had) { return }
+        $script:TErr += 'WinGet-Modul nicht installierbar: keine gueltige feste Version (Config\tools.json von HUMig)'; return
+    }
+    Out-L "WinGet-Modul $($fx.Version) fuer alle Benutzer installieren (PowerShell Gallery, feste Version) ..."
     try {
         try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
         if (-not @(Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' }).Count) {
             Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers -ErrorAction Stop | Out-Null
         }
-        Install-Module -Name $ModName -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop
-        Out-L 'WinGet-Modul installiert'
-    } catch { $script:TErr += "WinGet-Modul nicht installierbar (Internet/Proxy?): $($_.Exception.Message)" }
+        Install-Module -Name $ModName -RequiredVersion $fx.Version -Repository PSGallery -Scope AllUsers -Force -AllowClobber -ErrorAction Stop
+        Out-L "WinGet-Modul $($fx.Version) installiert"
+    } catch {
+        if ($had) { Out-L "Warnung: WinGet-Modul $($fx.Version) nicht installierbar ($($_.Exception.Message)) - die vorhandene Version wird verwendet" }
+        else { $script:TErr += "WinGet-Modul nicht installierbar (Internet/Proxy?): $($_.Exception.Message)" }
+    }
+}
+# Signaturen der Moduldateien (nur signierbare Dateitypen; Hilfe-XML und Texte haben keine Signatur)
+function Get-TModuleSigFiles([string]$Dir) {
+    return @(Get-ChildItem -LiteralPath $Dir -Recurse -File -ErrorAction Stop | Where-Object { @('.psd1', '.psm1', '.ps1', '.ps1xml', '.dll', '.winmd', '.cat') -contains $_.Extension.ToLowerInvariant() } |
+        ForEach-Object { $s = Get-AuthenticodeSignature -LiteralPath $_.FullName; @{ Path = $_.FullName; Status = "$($s.Status)"; Subject = "$($s.SignerCertificate.Subject)" } })
+}
+# Signatur gueltig? (rein) $Sigs: @{ Path; Status; Subject } je Datei. Rueckgabe '' = gueltig, sonst Grund.
+# Jede Datei gueltig signiert und Zertifikat-Subject endet auf den Herausgeber; die Modulbeschreibung (.psd1) muss dabei sein.
+function Test-TModuleSignature($Sigs, [string]$Publisher) {
+    $all = @($Sigs | Where-Object { $_ })
+    if (-not $all.Count) { return 'keine signierten Dateien' }
+    if (-not @($all | Where-Object { "$($_.Path)" -like '*.psd1' }).Count) { return 'Modulbeschreibung (.psd1) fehlt' }
+    foreach ($s in $all) {
+        if ("$($s.Status)" -ne 'Valid') { return "$(Split-Path "$($s.Path)" -Leaf): $($s.Status)" }
+        if (-not $Publisher -or -not "$($s.Subject)".EndsWith($Publisher, [StringComparison]::OrdinalIgnoreCase)) { return "$(Split-Path "$($s.Path)" -Leaf): anderer Herausgeber" }
+    }
+    return ''
+}
+# welches Modul laden? Feste Version mit gueltiger Signatur, sonst die hoechste andere fuer alle Benutzer (mit Hinweis), sonst ''
+# (dann wie bisher nach Namen). Rueckgabe @{ Path; Note } - gibt selbst nichts aus. Ungueltige Signatur: nicht laden, nichts loeschen.
+function Get-TModuleLoad {
+    $fx = Get-TModFixed
+    $note = ''
+    if ($fx) {
+        $psd = Join-Path $ModRoot "$($fx.Version)\$ModName.psd1"
+        if (Test-Path -LiteralPath $psd) {
+            $why = 'nicht pruefbar'
+            try { $why = Test-TModuleSignature (Get-TModuleSigFiles (Split-Path $psd -Parent)) $fx.Herausgeber } catch { $why = "nicht pruefbar ($($_.Exception.Message))" }
+            if (-not $why) { return @{ Path = $psd; Note = '' } }
+            $note = "Warnung: WinGet-Modul $($fx.Version) wird nicht geladen, Signatur ungueltig ($why)"
+        }
+    }
+    $oth = @(Get-ChildItem -LiteralPath $ModRoot -Directory -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -match '^\d+(\.\d+){1,3}$' -and (-not $fx -or $_.Name -ne $fx.Version) -and (Test-Path -LiteralPath (Join-Path $_.FullName "$ModName.psd1")) } |
+        Sort-Object { [version]$_.Name } -Descending)[0]
+    if ($oth) {
+        $why = if ($note) { $note } elseif ($fx) { "WinGet-Modul: feste Version $($fx.Version) fehlt" } else { 'WinGet-Modul: keine gueltige feste Version' }
+        return @{ Path = (Join-Path $oth.FullName "$ModName.psd1"); Note = "$why - die vorhandene Version $($oth.Name) wird verwendet" }
+    }
+    return @{ Path = ''; Note = $note }
+}
+# einmal je Lauf bestimmen und den Hinweis ins Protokoll schreiben
+$script:TModLoad = $null
+function Resolve-TModuleLoad {
+    if ($null -ne $script:TModLoad) { return }
+    $script:TModLoad = Get-TModuleLoad
+    if ($script:TModLoad.Note) { Out-L $script:TModLoad.Note }
 }
 
 # WinGet (App Installer) fuer alle Benutzer vorhanden? winget.exe im Paketordner (Programme\WindowsApps)
@@ -112,7 +177,12 @@ function Install-TWinGet {
     Out-L 'WinGet (App Installer) fehlt - wird fuer alle Benutzer eingerichtet (Repair-WinGetPackageManager -AllUsers, Download von GitHub) ...'
     # im eigenen Prozess: das Modul kann auf nicht unterstuetzten Systemen (z.B. Windows Server 2019) abstuerzen und wuerde
     # sonst den aufrufenden Prozess (HUMig bzw. die Remote-Sitzung) mitreissen; keine Absturz-Dialoge (Fehlermodus wird vererbt)
-    $mp = (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$ModName") -replace "'", "''"
+    # Modul in der festen Version (Signatur geprueft), sonst wie bisher den Modulordner
+    Resolve-TModuleLoad
+    $mp = $(if ($script:TModLoad.Path) { $script:TModLoad.Path } else { Join-Path $env:ProgramFiles "WindowsPowerShell\Modules\$ModName" }) -replace "'", "''"
+    # Ausnahme von den festen Versionen: Repair-WinGetPackageManager -Latest laedt den App Installer (WinGet) in der neuesten Fassung
+    # von Microsoft. Der App Installer ist ein Windows-Bestandteil, den Microsoft selbst aktuell haelt; eine feste aeltere Fassung
+    # passt oft nicht zum Windows-Stand. Laeuft nur, wenn WinGet fehlt oder nicht funktioniert.
     $cmd = "`$ErrorActionPreference = 'Stop'; `$ProgressPreference = 'SilentlyContinue'; try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }; try { Import-Module '$mp'; Repair-WinGetPackageManager -AllUsers -Latest -Force | Out-Null; exit 0 } catch { [Console]::Out.WriteLine(`$_.Exception.Message); exit 1 }"
     $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
     $old = $null
@@ -153,6 +223,9 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec, 
     try {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $dir 'worker.ps1'), $WorkerText, (New-Object System.Text.UTF8Encoding($true)))
+        # Modul in der festen Version laden (Pfad), sonst wie bisher nach Namen
+        Resolve-TModuleLoad
+        if ($Request -is [hashtable] -and -not $Request.ContainsKey('ModulePath')) { $Request = $Request.Clone(); $Request.ModulePath = "$($script:TModLoad.Path)" }
         $Request | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $dir 'request.json') -Encoding UTF8
         if (-not $sys) { & icacls.exe "$dir" /grant "*${Who}:(OI)(CI)M" | Out-Null }
         $exe = if ($UsePwsh) { Get-TPwsh } else { $WinPs }
@@ -211,6 +284,7 @@ function Invoke-TTask([string]$Who, $Request, [bool]$UsePwsh, [int]$TimeoutSec, 
         Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
     }
     if ($script:TRes) { $script:TErr += @($script:TRes.Errors | Where-Object { $_ }) }
+    if ($script:TRes -and $script:TRes.PSObject.Properties['Notes']) { foreach ($n in @($script:TRes.Notes | Where-Object { $_ })) { Out-L "$n" } }
 }
 
 # PowerShell 7 (fuer das Lesen als SYSTEM und den Zeitplan): eigene Kopie von HUMig in Programme\HUMig\PowerShell7 (nur
@@ -673,7 +747,8 @@ try {
             $dir = Join-Path $Base 'auto'
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
             [System.IO.File]::WriteAllText((Join-Path $dir 'auto.ps1'), $AutoText, (New-Object System.Text.UTF8Encoding($true)))
-            [pscustomobject]@{ Sources = @($My.Sources); Exclude = @($My.Exclude); Location = "$($My.Location)"; Created = (Get-Date).ToString('yyyy-MM-dd HH:mm'); By = "$($My.By)" } |
+            Resolve-TModuleLoad
+            [pscustomobject]@{ Sources = @($My.Sources); Exclude = @($My.Exclude); Location = "$($My.Location)"; Created = (Get-Date).ToString('yyyy-MM-dd HH:mm'); By = "$($My.By)"; ModulePath = "$($script:TModLoad.Path)" } |
                 ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $dir 'config.json') -Encoding UTF8
             $at = [datetime]::ParseExact("$($My.Time)", 'HH:mm', [System.Globalization.CultureInfo]::InvariantCulture)
             $trg = if ("$($My.Mode)" -eq 'Weekly') { New-ScheduledTaskTrigger -Weekly -DaysOfWeek @($My.Days) -At $at } else { New-ScheduledTaskTrigger -Daily -At $at }
