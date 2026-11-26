@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## v2.1.29 - 2026-11-26
+### 🔐 Rechte
+- **Meldungen der Ordnerrechte-Prüfung erscheinen wieder:** Was die Prüfung des Programmordners beim Start feststellt, steht jetzt in der Konsole, zum Beispiel dass HUMig in einem Benutzerprofil liegt oder dass die Prüfung abgeschaltet ist.
+  - Bisher gingen diese Meldungen bei jedem Start verloren.
+  - An der Prüfung selbst und an ihren Rückfragen ändert sich nichts.
+### ✅ Qualität
+- **Tests:** PLATZHALTER
+
 ## v2.1.28 - 2026-11-26
 ### 🎨 Oberfläche
 - **Kopfzeile in drei Zeilen:** Computer und Benutzer, darunter Verbindung und SID, darunter Backup-Ordner und freier Platz. Lange Namen brechen um statt abgeschnitten zu werden, die Listen darunter sind dadurch höher.
