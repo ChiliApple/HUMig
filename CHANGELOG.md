@@ -8,6 +8,8 @@
 - **Hinweis im Restore-Bericht:** Was im Backup fehlt, fehlt auch nach dem Restore. Bericht, Protokoll und Konsole nennen die betroffenen Module, der Status des Restores ändert sich dadurch nicht.
 - **Ohne gesicherte Daten bleibt es ausgeblendet:** Module, von denen keine Datei im Backup liegt (z. B. Ordner nicht lesbar, Quelle nicht erreichbar, alle Dateien gesperrt), und Windows-Einstellungen (USMT) mit Fehler bleiben ausgeblendet.
 - **Rückfrage nennt die Module:** Die Rückfrage vor einem Restore aus einem Backup mit Fehlern oder einem abgebrochenen Backup nennt jetzt die gewählten Module mit Fehlern. Backups mit Status OK oder Warnung: keine Rückfrage, kein zusätzlicher Klick.
+### ✅ Qualität
+- **Tests:** 827 bestanden.
 
 ## v2.1.31 - 2026-11-26
 ### 🧰 Fremde Werkzeuge
