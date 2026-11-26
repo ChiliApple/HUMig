@@ -16,7 +16,7 @@
             <DockPanel>
                 <Button x:Name="btnOpenConfig" DockPanel.Dock="Left" Content="Config-Ordner oeffnen" Style="{DynamicResource BtnDefault}" Margin="0"/>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="btnSave" Content="Speichern" Style="{DynamicResource BtnGreen}" Width="110" Margin="0,0,6,0" FontWeight="Bold"/>
+                    <Button x:Name="btnSave" Content="Speichern" Style="{DynamicResource BtnMain}" Width="110" Margin="0,0,6,0" FontWeight="Bold"/>
                     <Button x:Name="btnCancel" Content="Abbrechen" Style="{DynamicResource BtnDefault}" Width="100" Margin="0"/>
                 </StackPanel>
                 <TextBlock x:Name="lblSaveScope" Text="Speichern gilt fuer Haken und Felder. Knoepfe in den Reitern wirken sofort." Foreground="#FFA6ADC8" FontSize="11" VerticalAlignment="Center" Margin="12,0,12,0" TextWrapping="Wrap"/>
@@ -60,7 +60,7 @@
                         </StackPanel>
                         <TextBlock Grid.Row="3" Text="USMT-Ordner (scanstate.exe):" Style="{DynamicResource Lbl}"/>
                         <DockPanel Grid.Row="3" Grid.Column="1" Margin="0,0,0,2">
-                            <Button x:Name="btnUsmtAdk" DockPanel.Dock="Right" Content="Aus ADK einrichten" Style="{DynamicResource BtnMauve}" Margin="4,0,0,0" ToolTip="USMT aus dem Windows ADK nach BIN\USMT kopieren (ohne ADK: nur USMT still installieren)"/>
+                            <Button x:Name="btnUsmtAdk" DockPanel.Dock="Right" Content="Aus ADK einrichten" Style="{DynamicResource BtnChange}" Margin="4,0,0,0" ToolTip="USMT aus dem Windows ADK nach BIN\USMT kopieren (ohne ADK: nur USMT still installieren)"/>
                             <Button x:Name="btnUsmt" DockPanel.Dock="Right" Content="..." Width="32" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0"/>
                             <TextBox x:Name="txtUsmt" Style="{DynamicResource DarkTextBox}" ToolTip="Leer = automatisch suchen (BIN\USMT\amd64, Windows ADK)"/>
                         </DockPanel>
@@ -96,7 +96,7 @@
                         </StackPanel>
                         <TextBlock Grid.Row="8" Text="Starter:" Style="{DynamicResource Lbl}"/>
                         <WrapPanel Grid.Row="8" Grid.Column="1">
-                            <Button x:Name="btnLauncher" Content="HUMig.exe neu erstellen" Style="{DynamicResource BtnMauve}" ToolTip="Starter mit Logo (startet HUMig ohne Konsolenfenster, kann an die Taskleiste angeheftet werden)"/>
+                            <Button x:Name="btnLauncher" Content="HUMig.exe neu erstellen" Style="{DynamicResource BtnDefault}" ToolTip="Starter mit Logo (startet HUMig ohne Konsolenfenster, kann an die Taskleiste angeheftet werden)"/>
                             <Button x:Name="btnShortcut" Content="Desktop-Verknuepfung" Style="{DynamicResource BtnDefault}"/>
                         </WrapPanel>
                         <TextBlock Grid.Row="13" Text="Rueckmeldung per E-Mail an:" Style="{DynamicResource Lbl}"/>
@@ -107,8 +107,8 @@
                         <TextBlock Grid.Row="14" Text="Teams-Benachrichtigung:" Style="{DynamicResource Lbl}" VerticalAlignment="Top" Margin="0,14,6,0"/>
                         <StackPanel Grid.Row="14" Grid.Column="1" Margin="0,12,0,0">
                             <DockPanel>
-                                <Button x:Name="btnTeamsDel" DockPanel.Dock="Right" Content="Entfernen" Style="{DynamicResource BtnRed}" Margin="4,0,0,0" ToolTip="Gewaehltes Ziel auf diesem PC loeschen (sofort). Danach in Teams den Workflow loeschen/ausschalten - sonst bleibt die Adresse gueltig"/>
-                                <Button x:Name="btnTeamsAdd" DockPanel.Dock="Right" Content="Neues Ziel" Style="{DynamicResource BtnBlue}" Margin="4,0,0,0" ToolTip="Weiteres Ziel (Chat oder Kanal) mit eigenen Kategorien anlegen"/>
+                                <Button x:Name="btnTeamsDel" DockPanel.Dock="Right" Content="Entfernen" Style="{DynamicResource BtnDanger}" Margin="4,0,0,0" ToolTip="Gewaehltes Ziel auf diesem PC loeschen (sofort). Danach in Teams den Workflow loeschen/ausschalten - sonst bleibt die Adresse gueltig"/>
+                                <Button x:Name="btnTeamsAdd" DockPanel.Dock="Right" Content="Neues Ziel" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0" ToolTip="Weiteres Ziel (Chat oder Kanal) mit eigenen Kategorien anlegen"/>
                                 <ComboBox x:Name="cmbTeams" ToolTip="Ziele (Webhook-Adressen) auf diesem PC - jedes mit eigenen Kategorien"/>
                             </DockPanel>
                             <DockPanel Margin="0,6,0,0">
@@ -117,7 +117,7 @@
                             </DockPanel>
                             <DockPanel Margin="0,4,0,0">
                                 <TextBlock Text="Adresse:" Width="62" Foreground="#FFCDD6F4" VerticalAlignment="Center"/>
-                                <Button x:Name="btnTeamsTest" DockPanel.Dock="Right" Content="Test senden" Style="{DynamicResource BtnMauve}" Margin="4,0,0,0" ToolTip="Testnachricht an dieses Ziel senden (eingetragene oder gespeicherte Adresse)"/>
+                                <Button x:Name="btnTeamsTest" DockPanel.Dock="Right" Content="Test senden" Style="{DynamicResource BtnDefault}" Margin="4,0,0,0" ToolTip="Testnachricht an dieses Ziel senden (eingetragene oder gespeicherte Adresse)"/>
                                 <PasswordBox x:Name="pwdTeams" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF45475A" Padding="4,3" ToolTip="Adresse aus der Teams-App Workflows: Vorlage 'Webhookbenachrichtigungen an einen Chat' bzw. '... an einen Kanal' (engl. 'Send webhook alerts to a chat/channel') > Speichern > Adresse kopieren. Leer lassen = gespeicherte Adresse behalten"/>
                             </DockPanel>
                             <TextBlock x:Name="lblTeams" Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,4,0,0"/>
@@ -159,8 +159,8 @@
                 <DockPanel Margin="4">
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                         <WrapPanel DockPanel.Dock="Right">
-                            <Button x:Name="btnSchoolAdd" Content="+ Standort" Style="{DynamicResource BtnGreen}"/>
-                            <Button x:Name="btnSchoolDel" Content="- Entfernen" Style="{DynamicResource BtnRed}" Margin="0"/>
+                            <Button x:Name="btnSchoolAdd" Content="+ Standort" Style="{DynamicResource BtnDefault}"/>
+                            <Button x:Name="btnSchoolDel" Content="- Entfernen" Style="{DynamicResource BtnDefault}" Margin="0"/>
                         </WrapPanel>
                         <TextBlock Text="Profile fuer mehrere Standorte (Schulen, Filialen, Abteilungen ...) - Namen frei waehlbar. Umschalten oben im Hauptfenster (Standort). Leere Felder = Wert aus 'Allgemein'. DNS: mehrere mit Komma trennen." Foreground="#FFA6ADC8" TextWrapping="Wrap" VerticalAlignment="Center"/>
                     </DockPanel>
@@ -183,7 +183,7 @@
             <TabItem Header="Ausnahmen" x:Name="tabExceptions">
                 <DockPanel Margin="4">
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
-                        <Button x:Name="btnExcDefault" DockPanel.Dock="Right" Content="Standard wiederherstellen" Style="{DynamicResource BtnPeach}" Margin="0"/>
+                        <Button x:Name="btnExcDefault" DockPanel.Dock="Right" Content="Standard wiederherstellen" Style="{DynamicResource BtnChange}" Margin="0"/>
                         <TextBlock Text="Ein Eintrag pro Zeile, * und ? erlaubt. Ordner ohne * gelten nur direkt im Quellordner, mit * in jeder Ebene." Foreground="#FFA6ADC8" TextWrapping="Wrap" VerticalAlignment="Center"/>
                     </DockPanel>
                     <UniformGrid Columns="3" Rows="2">
@@ -215,14 +215,14 @@
                                 <TextBox x:Name="txtNmFilter" Grid.Row="1" Grid.Column="3" Style="{DynamicResource DarkTextBox}" Margin="0,0,0,4" ToolTip="Nur bei 'Dateien': z.B. *.xml;*.ini"/>
                                 <TextBlock Grid.Row="2" Text="Pfad / Schluessel:" Style="{DynamicResource Lbl}"/>
                                 <TextBox x:Name="txtNmPath" Grid.Row="2" Grid.Column="1" Style="{DynamicResource DarkTextBox}" Margin="0,0,8,0" ToolTip="Ordner mit Platzhaltern {APPDATA}, {LOCALAPPDATA}, {PROFILE}, {PROGRAMFILES}, {PROGRAMFILESX86}, {PROGRAMDATA}, {SYSTEMDRIVE} - oder Registry: HKCU\Software\... / HKLM\Software\..."/>
-                                <Button x:Name="btnNmAdd" Grid.Row="2" Grid.Column="3" Content="Hinzufuegen" Style="{DynamicResource BtnGreen}" Margin="0"/>
+                                <Button x:Name="btnNmAdd" Grid.Row="2" Grid.Column="3" Content="Hinzufuegen" Style="{DynamicResource BtnDefault}" Margin="0"/>
                             </Grid>
                         </StackPanel>
                     </Border>
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                         <WrapPanel DockPanel.Dock="Right">
-                            <Button x:Name="btnAppEditor" Content="Programm-Katalog bearbeiten ..." Style="{DynamicResource BtnMauve}" ToolTip="Programme, deren Einstellungen, Plug-ins, Lizenzdateien und Datenbanken mitgesichert werden (Config\apps.json)"/>
-                            <Button x:Name="btnModDel" Content="Eigenes Modul loeschen" Style="{DynamicResource BtnRed}"/>
+                            <Button x:Name="btnAppEditor" Content="Programm-Katalog bearbeiten ..." Style="{DynamicResource BtnDefault}" ToolTip="Programme, deren Einstellungen, Plug-ins, Lizenzdateien und Datenbanken mitgesichert werden (Config\apps.json)"/>
+                            <Button x:Name="btnModDel" Content="Eigenes Modul loeschen" Style="{DynamicResource BtnDanger}"/>
                             <Button x:Name="btnModJson" Content="modules.json (Experten)" Style="{DynamicResource BtnDefault}" Margin="0"/>
                         </WrapPanel>
                         <TextBlock Text="Anzeigen = Checkbox im Tool sichtbar, Standard = beim Start angehakt." Foreground="#FFA6ADC8" VerticalAlignment="Center" TextWrapping="Wrap"/>
@@ -243,8 +243,8 @@
                 <DockPanel Margin="4">
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                         <WrapPanel DockPanel.Dock="Right">
-                            <Button x:Name="btnLinkAdd" Content="+ Link" Style="{DynamicResource BtnGreen}"/>
-                            <Button x:Name="btnLinkDel" Content="- Entfernen" Style="{DynamicResource BtnRed}" Margin="0"/>
+                            <Button x:Name="btnLinkAdd" Content="+ Link" Style="{DynamicResource BtnDefault}"/>
+                            <Button x:Name="btnLinkDel" Content="- Entfernen" Style="{DynamicResource BtnDefault}" Margin="0"/>
                         </WrapPanel>
                         <TextBlock Text="Platzhalter in der URL: {SERIAL} = Seriennummer, {COMPUTER} = PC-Name" Foreground="#FFA6ADC8" VerticalAlignment="Center" TextWrapping="Wrap"/>
                     </DockPanel>
@@ -293,8 +293,8 @@
                         <TextBlock Grid.Row="8" Text="Benutzerkonto:" Style="{DynamicResource Lbl}"/>
                         <WrapPanel Grid.Row="8" Grid.Column="1" Margin="0,0,0,6">
                             <TextBox x:Name="txtRemoteUser" Style="{DynamicResource DarkTextBox}" Width="220" ToolTip="Konto, das HUMig ohne Adminrechte startet (z.B. SCHULE\max)"/>
-                            <Button x:Name="btnRemoteSetup" Content="Fuer Benutzer-Modus einrichten" Style="{DynamicResource BtnBlue}" Margin="6,0,0,0"/>
-                            <Button x:Name="btnRemoteUnsetup" Content="Entfernen" Style="{DynamicResource BtnRed}" Margin="4,0,0,0"/>
+                            <Button x:Name="btnRemoteSetup" Content="Fuer Benutzer-Modus einrichten" Style="{DynamicResource BtnChange}" Margin="6,0,0,0"/>
+                            <Button x:Name="btnRemoteUnsetup" Content="Entfernen" Style="{DynamicResource BtnDanger}" Margin="4,0,0,0"/>
                         </WrapPanel>
                         <TextBlock x:Name="lblRemoteSetup" Grid.Row="9" Grid.Column="1" Foreground="#FFA6ADC8" TextWrapping="Wrap"/>
                     </Grid>
@@ -313,7 +313,7 @@
                     <TextBlock Grid.Row="1" Text="Version:" Style="{DynamicResource Lbl}"/>
                     <WrapPanel Grid.Row="1" Grid.Column="1" Margin="0,4,0,8">
                         <TextBlock x:Name="lblInstalled" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                        <Button x:Name="btnVersions" Content="Andere Version / Vorversion ..." Style="{DynamicResource BtnMauve}" ToolTip="Alle Versionen anzeigen und eine bestimmte (auch aeltere) installieren"/>
+                        <Button x:Name="btnVersions" Content="Andere Version / Vorversion ..." Style="{DynamicResource BtnChange}" ToolTip="Alle Versionen anzeigen und eine bestimmte (auch aeltere) installieren"/>
                     </WrapPanel>
                     <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="SIGNATUR" Style="{DynamicResource SectionLabel}" Margin="0,8,0,4"/>
                     <CheckBox Style="{DynamicResource WrapCheck}" x:Name="chkRequireSig" Grid.Row="3" Grid.Column="1" Content="Nur signierte Updates annehmen (empfohlen)" Margin="0,0,0,6"/>
@@ -335,8 +335,8 @@
                     <TextBlock Grid.Row="9" Text="Token (privates Repo):" Style="{DynamicResource Lbl}"/>
                     <WrapPanel Grid.Row="9" Grid.Column="1" Margin="0,0,0,6">
                         <TextBlock x:Name="lblToken" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                        <Button x:Name="btnTokenSet" Content="Token eingeben" Style="{DynamicResource BtnBlue}"/>
-                        <Button x:Name="btnTokenDel" Content="Token loeschen" Style="{DynamicResource BtnDefault}"/>
+                        <Button x:Name="btnTokenSet" Content="Token eingeben" Style="{DynamicResource BtnDefault}"/>
+                        <Button x:Name="btnTokenDel" Content="Token loeschen" Style="{DynamicResource BtnDanger}"/>
                     </WrapPanel>
                     <TextBlock Grid.Row="10" Grid.ColumnSpan="2" Text="Nur-Lese-Token genuegt (Fine-grained PAT, Repository-Zugriff nur auf dieses Repo, 'Contents: Read'). Er wird verschluesselt (DPAPI) nur fuer deinen Windows-Benutzer gespeichert." Foreground="#FFA6ADC8" TextWrapping="Wrap" Margin="0,8,0,0"/>
                 </Grid>

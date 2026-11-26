@@ -266,9 +266,9 @@
                         <TextBlock Grid.Column="0" Text="Computer:" Style="{StaticResource Lbl}"/>
                         <ComboBox Grid.Column="1" x:Name="cmbComputer" IsEditable="True" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Dieser PC (lokal) oder Name/IP eines anderen PCs (Remote-Backup/-Restore ueber C$ und WinRM). Enter = Verbinden"/>
                         <StackPanel Grid.Column="2" Orientation="Horizontal">
-                            <Button x:Name="btnConnect" Content="Verbinden" Style="{StaticResource BtnBlue}" ToolTip="Links: Benutzerprofile des PCs laden + Verbindung pruefen | Rechts: andere Anmeldedaten fuer diesen PC"/>
+                            <Button x:Name="btnConnect" Content="Verbinden" Style="{StaticResource BtnDefault}" ToolTip="Links: Benutzerprofile des PCs laden + Verbindung pruefen | Rechts: andere Anmeldedaten fuer diesen PC"/>
                             <Button x:Name="btnLocal" Content="Lokal" Style="{StaticResource BtnDefault}" ToolTip="Zurueck auf diesen PC"/>
-                            <Button x:Name="btnADDevices" Content="Geraete (AD) ..." Style="{StaticResource BtnMauve}" ToolTip="PCs aus dem Active Directory: einen waehlen (Doppelklick) oder mehrere anhaken und Aktionen parallel ausfuehren"/>
+                            <Button x:Name="btnADDevices" Content="Geraete (AD) ..." Style="{StaticResource BtnDefault}" ToolTip="PCs aus dem Active Directory: einen waehlen (Doppelklick) oder mehrere anhaken und Aktionen parallel ausfuehren"/>
                         </StackPanel>
                         <TextBlock Grid.Column="3" Text="Benutzer:" Style="{StaticResource Lbl}" Margin="12,0,6,0"/>
                         <ComboBox Grid.Column="4" x:Name="cmbUser" IsEditable="True" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Benutzerprofil am gewaehlten PC. Fuer Restore auf einen neuen PC ohne Profil: Konto als DOMAENE\Benutzer eintragen (dann USMT mitwaehlen)."/>
@@ -287,7 +287,7 @@
                             <TextBlock x:Name="lblFree" DockPanel.Dock="Right" Margin="8,0,0,0" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center"/>
                             <Button x:Name="btnBrowseRoot" DockPanel.Dock="Right" Content="..." Style="{StaticResource BtnDefault}" Width="34" Margin="4,0,0,0" ToolTip="Links: Ordner waehlen (USB-NVMe, Freigabe ...) | Rechts: Standard (Tool-Ordner\BACKUPS)"/>
                             <Button x:Name="btnOpenRoot" DockPanel.Dock="Right" Content="Oeffnen" Style="{StaticResource BtnDefault}" Margin="4,0,0,0"/>
-                            <Button x:Name="btnBitLocker" DockPanel.Dock="Right" Content="Verschluesseln ..." Style="{StaticResource BtnPeach}" Margin="4,0,0,0" Visibility="Collapsed" ToolTip="USB-Laufwerk mit BitLocker To Go verschluesseln (Kennwort + Wiederherstellungsschluessel)"/>
+                            <Button x:Name="btnBitLocker" DockPanel.Dock="Right" Content="Verschluesseln ..." Style="{StaticResource BtnChange}" Margin="4,0,0,0" Visibility="Collapsed" ToolTip="USB-Laufwerk mit BitLocker To Go verschluesseln (Kennwort + Wiederherstellungsschluessel)"/>
                             <TextBox x:Name="txtBackupRoot" Style="{StaticResource DarkTextBox}" IsReadOnly="True"/>
                         </DockPanel>
                     </Grid>
@@ -319,7 +319,7 @@
                                 <ComboBox x:Name="cmbPreset" Width="250" Margin="0,0,6,4" ToolTip="Rechtsklick: eigene Vorlage umbenennen, mit aktueller Auswahl ueberschreiben oder loeschen"/>
                                 <Button x:Name="btnAllOn" Content="Alle" Style="{StaticResource BtnDefault}"/>
                                 <Button x:Name="btnAllOff" Content="Keine" Style="{StaticResource BtnDefault}"/>
-                                <Button x:Name="btnPresetSave" Content="Als Vorlage speichern ..." Style="{StaticResource BtnBlue}" ToolTip="Angehakte Module unter einem eigenen Namen als Vorlage speichern (Rechtsklick auf die Vorlagen-Liste: verwalten)"/>
+                                <Button x:Name="btnPresetSave" Content="Als Vorlage speichern ..." Style="{StaticResource BtnDefault}" ToolTip="Angehakte Module unter einem eigenen Namen als Vorlage speichern (Rechtsklick auf die Vorlagen-Liste: verwalten)"/>
                                 <TextBlock x:Name="lblSizeTotal" Text="" Foreground="{StaticResource CatSubtext}" VerticalAlignment="Center" Margin="10,0,0,4" ToolTip="Summe der gemessenen, angehakten Module (Groesse ermitteln)"/>
                             </WrapPanel>
                             <Border x:Name="brdMonBackup" DockPanel.Dock="Bottom" Visibility="Collapsed" Background="{StaticResource CatMantle}" CornerRadius="4" Padding="10,6" Margin="0,6,0,0" ToolTip="Live-Anzeige waehrend Backup/Restore - CPU und Arbeitsspeicher des PCs, auf dem HUMig laeuft"/>
@@ -330,10 +330,10 @@
                         <DockPanel Grid.Column="1" Margin="8,0,0,0">
                             <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
                                 <Grid>
-                                    <Button x:Name="btnBackup" Content="Backup starten" Style="{StaticResource BtnGreen}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
-                                    <Button x:Name="btnCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed"/>
+                                    <Button x:Name="btnBackup" Content="Backup starten" Style="{StaticResource BtnMain}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
+                                    <Button x:Name="btnCancel" Content="Abbrechen" Style="{StaticResource BtnDanger}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed"/>
                                 </Grid>
-                                <Button x:Name="btnBackupSchedule" Content="Zeitplan ..." Style="{StaticResource BtnBlue}" Margin="0,10,0,2" ToolTip="Links: dieses Backup (angehakte Module, Optionen, Zusaetzliche Ordner, Backup-Ordner) automatisch ausfuehren - taeglich, woechentlich oder bei Anmeldung. Nur eigenes Profil an diesem PC, HUMig muss dafuer nicht offen sein. | Rechts: Zeitplaene verwalten (jetzt starten, Protokoll, Bericht, loeschen)"/>
+                                <Button x:Name="btnBackupSchedule" Content="Zeitplan ..." Style="{StaticResource BtnDefault}" Margin="0,10,0,2" ToolTip="Links: dieses Backup (angehakte Module, Optionen, Zusaetzliche Ordner, Backup-Ordner) automatisch ausfuehren - taeglich, woechentlich oder bei Anmeldung. Nur eigenes Profil an diesem PC, HUMig muss dafuer nicht offen sein. | Rechts: Zeitplaene verwalten (jetzt starten, Protokoll, Bericht, loeschen)"/>
                                 <TextBlock x:Name="lblBackupSchedule" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,4"/>
                             </StackPanel>
                             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -343,14 +343,14 @@
                                     <WrapPanel Margin="0,4,0,6">
                                         <Button x:Name="btnExtraAdd" Content="+ Ordner" Style="{StaticResource BtnDefault}"/>
                                         <Button x:Name="btnExtraDel" Content="- Entfernen" Style="{StaticResource BtnDefault}"/>
-                                        <Button x:Name="btnFileSearch" Content="Wichtige Dateien suchen ..." Style="{StaticResource BtnPeach}" ToolTip="PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche am gewaehlten Computer finden und als Zusaetzliche Ordner aufnehmen (auch unter Werkzeuge)"/>
+                                        <Button x:Name="btnFileSearch" Content="Wichtige Dateien suchen ..." Style="{StaticResource BtnDefault}" ToolTip="PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche am gewaehlten Computer finden und als Zusaetzliche Ordner aufnehmen (auch unter Werkzeuge)"/>
                                     </WrapPanel>
                                     <TextBlock Text="PFADE AUSSCHLIESSEN" Style="{StaticResource SectionLabel}"/>
                                     <ListBox x:Name="lstExclude" Height="60" ToolTip="Diese Ordner/Dateien werden nicht gesichert (Pfad am Quell-PC). Gilt fuer diese Sitzung."/>
                                     <WrapPanel Margin="0,4,0,6">
                                         <Button x:Name="btnExclAdd" Content="+ Ordner" Style="{StaticResource BtnDefault}" ToolTip="Links: Ordner waehlen | Rechts: Pfad eintippen (Datei oder Ordner am Quell-PC)"/>
                                         <Button x:Name="btnExclDel" Content="- Entfernen" Style="{StaticResource BtnDefault}"/>
-                                        <Button x:Name="btnBigFiles" Content="Grosse Dateien ..." Style="{StaticResource BtnPeach}" IsEnabled="False" ToolTip="Groesste Ordner und Dateien der letzten Groessenermittlung - markierte ausschliessen"/>
+                                        <Button x:Name="btnBigFiles" Content="Grosse Dateien ..." Style="{StaticResource BtnDefault}" IsEnabled="False" ToolTip="Groesste Ordner und Dateien der letzten Groessenermittlung - markierte ausschliessen"/>
                                     </WrapPanel>
                                     <TextBlock Text="AUSNAHMEN" Style="{StaticResource SectionLabel}"/>
                                     <CheckBox x:Name="chkMinProfileExc" Content="Profil: nur AppData ausnehmen" ToolTip="Statt der Ausnahmeliste nur AppData und Intel* ausnehmen"/>
@@ -371,11 +371,11 @@
                                         <ComboBox x:Name="cmbThreads" Width="70" ToolTip="1 = langsam/schonend (HDD, Netzwerk), 32 = Standard, 128 = maximal (NVMe)"/>
                                     </StackPanel>
                                     <WrapPanel Margin="0,0,0,8">
-                                        <Button x:Name="btnPrecheck" Content="Vorab-Pruefung" Style="{StaticResource BtnTeal}" ToolTip="Verbindung, Anmeldestatus, OneDrive, USMT, freier Platz"/>
+                                        <Button x:Name="btnPrecheck" Content="Vorab-Pruefung" Style="{StaticResource BtnDefault}" ToolTip="Verbindung, Anmeldestatus, OneDrive, USMT, freier Platz"/>
                                         <Button x:Name="btnProfileSize" Content="Groesse ermitteln" Style="{StaticResource BtnDefault}" ToolTip="Groesse der gewaehlten Module mit Ausnahmen (Robocopy-Simulation, ohne zu kopieren)"/>
-                                        <Button x:Name="btnApps" Content="Programme" Style="{StaticResource BtnMauve}" ToolTip="Links: installierte Programme erkennen - Einstellungen erkannter Programme werden als Module eingeblendet und angehakt; Uebersicht was uebertragbar ist (Einstellungen, Lizenzen, Nacharbeiten) | Rechts: nur Uebersicht"/>
-                                        <Button x:Name="btnFeedback" Content="Rueckmeldung" Style="{StaticResource BtnYellow}" ToolTip="Rueckmeldung zu den erkannten Programmen mit Katalog-Eintrag 'ungeprueft' (nur testweise): GitHub-Issue im Browser oder E-Mail (Adresse in Einstellungen > Allgemein). Es wird nichts automatisch gesendet."/>
-                                        <Button x:Name="btnWizard" Content="Umzug ..." Style="{StaticResource BtnMauve}" ToolTip="Umzugs-Assistent: Schritt fuer Schritt alter PC - Vorab-Pruefung - Backup - neuer PC - Restore (fehlende Programme zuerst) - Checkliste. Fortsetzbar nach Abbruch."/>
+                                        <Button x:Name="btnApps" Content="Programme" Style="{StaticResource BtnDefault}" ToolTip="Links: installierte Programme erkennen - Einstellungen erkannter Programme werden als Module eingeblendet und angehakt; Uebersicht was uebertragbar ist (Einstellungen, Lizenzen, Nacharbeiten) | Rechts: nur Uebersicht"/>
+                                        <Button x:Name="btnFeedback" Content="Rueckmeldung" Style="{StaticResource BtnDefault}" ToolTip="Rueckmeldung zu den erkannten Programmen mit Katalog-Eintrag 'ungeprueft' (nur testweise): GitHub-Issue im Browser oder E-Mail (Adresse in Einstellungen > Allgemein). Es wird nichts automatisch gesendet."/>
+                                        <Button x:Name="btnWizard" Content="Umzug ..." Style="{StaticResource BtnDefault}" ToolTip="Umzugs-Assistent: Schritt fuer Schritt alter PC - Vorab-Pruefung - Backup - neuer PC - Restore (fehlende Programme zuerst) - Checkliste. Fortsetzbar nach Abbruch."/>
                                     </WrapPanel>
                                 </StackPanel>
                             </ScrollViewer>
@@ -398,17 +398,17 @@
                                     <TextBlock Text="Markiertes Backup:" Style="{StaticResource GroupCaption}"/>
                                     <Button x:Name="btnOpenBackup" Content="Ordner oeffnen" Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup im Explorer oeffnen - ohne Auswahl den Backup-Ordner"/>
                                 </StackPanel>
-                                <Button x:Name="btnReport" Content="Protokoll" Style="{StaticResource BtnTeal}" ToolTip="Backup-/Restore-Protokoll (HTML) des markierten Backups oeffnen - druckbar, auch als PDF"/>
-                                <Button x:Name="btnVerifyBackup" Content="Backup pruefen" Style="{StaticResource BtnBlue}" ToolTip="Alle Dateien des markierten Backups gegen den Pruefsummen-Katalog pruefen (beschaedigt? fehlt etwas?). Ohne Katalog: Rechtsklick = Katalog jetzt erstellen"/>
+                                <Button x:Name="btnReport" Content="Protokoll" Style="{StaticResource BtnDefault}" ToolTip="Backup-/Restore-Protokoll (HTML) des markierten Backups oeffnen - druckbar, auch als PDF"/>
+                                <Button x:Name="btnVerifyBackup" Content="Backup pruefen" Style="{StaticResource BtnDefault}" ToolTip="Alle Dateien des markierten Backups gegen den Pruefsummen-Katalog pruefen (beschaedigt? fehlt etwas?). Ohne Katalog: Rechtsklick = Katalog jetzt erstellen"/>
                                 <Button x:Name="btnCompare" Content="Vergleichen ..." Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup mit einem anderen vergleichen: was ist neu, was fehlt, was hat sich geaendert"/>
-                                <Button x:Name="btnBackupSearch" Content="Im Backup suchen ..." Style="{StaticResource BtnTeal}" ToolTip="Dateien im markierten Backup suchen und einzeln herauskopieren (auch unter Werkzeuge)"/>
-                                <Button x:Name="btnArchiveBackup" Content="Als Archiv" Style="{StaticResource BtnDefault}" ToolTip="Markiertes Backup einfrieren: kein fortlaufendes Backup schreibt mehr hinein (der naechste Lauf legt ein neues an), Aufbewahrung und Loeschen lassen es in Ruhe, _GELOESCHT bleibt erhalten. Nochmals klicken = Markierung aufheben"/>
+                                <Button x:Name="btnBackupSearch" Content="Im Backup suchen ..." Style="{StaticResource BtnDefault}" ToolTip="Dateien im markierten Backup suchen und einzeln herauskopieren (auch unter Werkzeuge)"/>
+                                <Button x:Name="btnArchiveBackup" Content="Als Archiv" Style="{StaticResource BtnChange}" ToolTip="Markiertes Backup einfrieren: kein fortlaufendes Backup schreibt mehr hinein (der naechste Lauf legt ein neues an), Aufbewahrung und Loeschen lassen es in Ruhe, _GELOESCHT bleibt erhalten. Nochmals klicken = Markierung aufheben"/>
                                 <StackPanel Orientation="Horizontal">
                                     <Border Style="{StaticResource GroupSep}" Visibility="{Binding Visibility, ElementName=btnDeleteBackup}"/>
-                                    <Button x:Name="btnDeleteBackup" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Markierte Backups loeschen (mit Bestaetigung; mehrere mit Strg/Umschalt markieren) - Archive werden ausgelassen, erst nach &apos;Archiv aufheben&apos;"/>
+                                    <Button x:Name="btnDeleteBackup" Content="Loeschen" Style="{StaticResource BtnDanger}" ToolTip="Markierte Backups loeschen (mit Bestaetigung; mehrere mit Strg/Umschalt markieren) - Archive werden ausgelassen, erst nach &apos;Archiv aufheben&apos;"/>
                                 </StackPanel>
-                                <Button x:Name="btnCleanupBackups" Content="Alte loeschen" Style="{StaticResource BtnPeach}" ToolTip="Backups aelter als die Aufbewahrungsdauer (Einstellungen) anzeigen und loeschen"/>
-                                <Button x:Name="btnEmptyDeleted" Content="Geloeschte leeren" Style="{StaticResource BtnPeach}" ToolTip="Im markierten (fortlaufenden) Backup die beiseitegelegten, an der Quelle geloeschten Dateien (_GELOESCHT) endgueltig loeschen - mit Rueckfrage"/>
+                                <Button x:Name="btnCleanupBackups" Content="Alte loeschen" Style="{StaticResource BtnDanger}" ToolTip="Backups aelter als die Aufbewahrungsdauer (Einstellungen) anzeigen und loeschen"/>
+                                <Button x:Name="btnEmptyDeleted" Content="Geloeschte leeren" Style="{StaticResource BtnDanger}" ToolTip="Im markierten (fortlaufenden) Backup die beiseitegelegten, an der Quelle geloeschten Dateien (_GELOESCHT) endgueltig loeschen - mit Rueckfrage"/>
                             </WrapPanel>
                             <DataGrid x:Name="dgBackups" Style="{StaticResource DarkGrid}" SelectionMode="Extended">
                                 <DataGrid.Columns>
@@ -434,8 +434,8 @@
                         <DockPanel Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Margin="8,0,0,0">
                             <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
                                 <Grid>
-                                    <Button x:Name="btnRestore" Content="Restore starten" Style="{StaticResource BtnGreen}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
-                                    <Button x:Name="btnCancelRestore" Content="Abbrechen" Style="{StaticResource BtnRed}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed"/>
+                                    <Button x:Name="btnRestore" Content="Restore starten" Style="{StaticResource BtnMain}" FontSize="15" FontWeight="Bold" Padding="10,10" Margin="0,4,0,4"/>
+                                    <Button x:Name="btnCancelRestore" Content="Abbrechen" Style="{StaticResource BtnDanger}" Margin="0,4,0,4" Padding="10,10" FontSize="15" FontWeight="Bold" Visibility="Collapsed"/>
                                 </Grid>
                             </StackPanel>
                             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -456,12 +456,12 @@
                                         <Button x:Name="btnPostScript" DockPanel.Dock="Right" Content="..." Style="{StaticResource BtnDefault}" Width="30" Margin="4,0,0,0"/>
                                         <TextBox x:Name="txtPostScript" Style="{StaticResource DarkTextBox}"/>
                                     </DockPanel>
-                                    <Button x:Name="btnExtraTargets" Content="Ziele der Zusaetzlichen Ordner ..." Style="{StaticResource BtnBlue}" Margin="0,0,0,2" Visibility="Collapsed" ToolTip="Zusaetzliche Ordner aus dem Backup an einen anderen Ort zurueckspielen (z.B. D:\Projekte nach E:\Daten\Projekte) oder einzelne auslassen - kopiert wie das Backup (Robocopy, Threads, Protokoll, Pruefung)"/>
+                                    <Button x:Name="btnExtraTargets" Content="Ziele der Zusaetzlichen Ordner ..." Style="{StaticResource BtnDefault}" Margin="0,0,0,2" Visibility="Collapsed" ToolTip="Zusaetzliche Ordner aus dem Backup an einen anderen Ort zurueckspielen (z.B. D:\Projekte nach E:\Daten\Projekte) oder einzelne auslassen - kopiert wie das Backup (Robocopy, Threads, Protokoll, Pruefung)"/>
                                     <TextBlock x:Name="lblExtraTargets" Text="" Foreground="{StaticResource CatOverlay0}" FontSize="10" TextWrapping="Wrap" Margin="2,0,0,6" Visibility="Collapsed"/>
-                                    <Button x:Name="btnRestorePreview" Content="Vorschau: was wird ueberschrieben?" Style="{StaticResource BtnTeal}" Margin="0,0,0,4" ToolTip="Zeigt fuer die gewaehlten Module, welche Dateien am Ziel neu angelegt, ueberschrieben oder uebersprungen wuerden - auch nach dem Restore zur Kontrolle (alles gleich = vollstaendig)"/>
-                                    <Button x:Name="btnReinstall" Content="Fehlende Programme installieren ..." Style="{StaticResource BtnMauve}" Margin="0,0,0,4" ToolTip="Programme aus dem markierten Backup mit dem Ziel-PC vergleichen - fehlende aus der Softwareverteilung nachinstallieren (nacheinander)"/>
+                                    <Button x:Name="btnRestorePreview" Content="Vorschau: was wird ueberschrieben?" Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Zeigt fuer die gewaehlten Module, welche Dateien am Ziel neu angelegt, ueberschrieben oder uebersprungen wuerden - auch nach dem Restore zur Kontrolle (alles gleich = vollstaendig)"/>
+                                    <Button x:Name="btnReinstall" Content="Fehlende Programme installieren ..." Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Programme aus dem markierten Backup mit dem Ziel-PC vergleichen - fehlende aus der Softwareverteilung nachinstallieren (nacheinander)"/>
                                     <Button x:Name="btnChecklist" Content="Checkliste" Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Checkliste nach dem Restore abhaken - landet im Restore-Protokoll"/>
-                                    <Button x:Name="btnFeedbackR" Content="Rueckmeldung zu Programmen" Style="{StaticResource BtnYellow}" Margin="0,0,0,4" ToolTip="Nach dem Umzug: Rueckmeldung zu den Programmen des markierten Backups, deren Katalog-Eintrag ungeprueft ist (passt / was fehlte) - GitHub-Issue oder E-Mail. Es wird nichts automatisch gesendet."/>
+                                    <Button x:Name="btnFeedbackR" Content="Rueckmeldung zu Programmen" Style="{StaticResource BtnDefault}" Margin="0,0,0,4" ToolTip="Nach dem Umzug: Rueckmeldung zu den Programmen des markierten Backups, deren Katalog-Eintrag ungeprueft ist (passt / was fehlte) - GitHub-Issue oder E-Mail. Es wird nichts automatisch gesendet."/>
                                 </StackPanel>
                             </ScrollViewer>
                         </DockPanel>
@@ -494,7 +494,7 @@
                                 <StackPanel>
                                     <TextBlock Text="ANMELDEDATEN / ORDNER" Style="{StaticResource ToolSectionLabel}"/>
                                     <WrapPanel>
-                                        <Button x:Name="btnToolCredWiz" Content="Anmeldedaten sichern/wiederherstellen" Style="{StaticResource BtnMauve}" ToolTip="Windows-Assistent (credwiz) fuer die Anmeldeinformationsverwaltung des ANGEMELDETEN Benutzers. Datei am besten in den Backup-Ordner speichern."/>
+                                        <Button x:Name="btnToolCredWiz" Content="Anmeldedaten sichern/wiederherstellen" Style="{StaticResource BtnDefault}" ToolTip="Windows-Assistent (credwiz) fuer die Anmeldeinformationsverwaltung des ANGEMELDETEN Benutzers. Datei am besten in den Backup-Ordner speichern."/>
                                         <Button x:Name="btnToolCredList" Content="Gespeicherte Anmeldedaten (anzeigen/loeschen)" Style="{StaticResource BtnDefault}" ToolTip="Anmeldeinformationsverwaltung DIESES Kontos (das HUMig ausfuehrt): Liste ohne Kennwoerter, markierte loeschen"/>
                                         <Button x:Name="btnToolUserAppData" Content="AppData des Benutzers" Style="{StaticResource BtnDefault}"/>
                                         <Button x:Name="btnToolUserStartup" Content="Autostart des Benutzers" Style="{StaticResource BtnDefault}"/>
@@ -506,9 +506,9 @@
                                 <StackPanel>
                                     <TextBlock Text="SOFTWARE + TREIBER (GEWAEHLTER COMPUTER)" Style="{StaticResource ToolSectionLabel}"/>
                                     <WrapPanel>
-                                        <Button x:Name="btnToolSoftDeploy" Content="Software installieren (Softwareverteilung)" Style="{StaticResource BtnGreen}" ToolTip="Pakete (MSI/EXE/MSP oder Ordner) silent installieren - auf dem gewaehlten Computer oder mehreren PCs. Parameter werden aus dem Installer gelesen und vorgeschlagen, bereits installierte Software wird erkannt."/>
-                                        <Button x:Name="btnToolDrvDeploy" Content="Treiber installieren (Treiberverteilung)" Style="{StaticResource BtnGreen}" ToolTip="Treiber aus einem eigenen Ordner (INF-Ordner per pnputil oder Hersteller-Setup) auf den gewaehlten Computer oder mehrere PCs - mit Hardware-Pruefung und Versionsvergleich, auf Wunsch erzwungen (auch aeltere Version)."/>
-                                        <Button x:Name="btnToolSoftList" Content="Installierte Software anzeigen" Style="{StaticResource BtnTeal}" ToolTip="Programme des gewaehlten Computers als Tabelle (Filter, CSV, Drucken)"/>
+                                        <Button x:Name="btnToolSoftDeploy" Content="Software installieren (Softwareverteilung)" Style="{StaticResource BtnChange}" ToolTip="Pakete (MSI/EXE/MSP oder Ordner) silent installieren - auf dem gewaehlten Computer oder mehreren PCs. Parameter werden aus dem Installer gelesen und vorgeschlagen, bereits installierte Software wird erkannt."/>
+                                        <Button x:Name="btnToolDrvDeploy" Content="Treiber installieren (Treiberverteilung)" Style="{StaticResource BtnChange}" ToolTip="Treiber aus einem eigenen Ordner (INF-Ordner per pnputil oder Hersteller-Setup) auf den gewaehlten Computer oder mehrere PCs - mit Hardware-Pruefung und Versionsvergleich, auf Wunsch erzwungen (auch aeltere Version)."/>
+                                        <Button x:Name="btnToolSoftList" Content="Installierte Software anzeigen" Style="{StaticResource BtnDefault}" ToolTip="Programme des gewaehlten Computers als Tabelle (Filter, CSV, Drucken)"/>
                                     </WrapPanel>
                                 </StackPanel>
                             </Border>
@@ -541,14 +541,14 @@
                         <Border Grid.Row="0" Style="{StaticResource SectionBorder}">
                             <StackPanel>
                                 <WrapPanel>
-                                    <Button x:Name="btnAuSearch" Content="Updates suchen" Style="{StaticResource BtnBlue}" Padding="12,6" ToolTip="Verfuegbare Updates der installierten Programme lesen (WinGet, angehakte Quellen)"/>
+                                    <Button x:Name="btnAuSearch" Content="Updates suchen" Style="{StaticResource BtnDefault}" Padding="12,6" ToolTip="Verfuegbare Updates der installierten Programme lesen (WinGet, angehakte Quellen)"/>
                                     <Grid>
-                                        <Button x:Name="btnAuUpdateSel" Content="Angehakte aktualisieren" Style="{StaticResource BtnGreen}" FontWeight="SemiBold" Padding="14,6" ToolTip="Angehakte Programme still aktualisieren - Ausnahmen werden nie aktualisiert"/>
-                                        <Button x:Name="btnAuCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" Padding="14,6" ToolTip="Nach dem laufenden Programm abbrechen" FontWeight="SemiBold" Visibility="Collapsed"/>
+                                        <Button x:Name="btnAuUpdateSel" Content="Angehakte aktualisieren" Style="{StaticResource BtnMain}" FontWeight="SemiBold" Padding="14,6" ToolTip="Angehakte Programme still aktualisieren - Ausnahmen werden nie aktualisiert"/>
+                                        <Button x:Name="btnAuCancel" Content="Abbrechen" Style="{StaticResource BtnDanger}" Padding="14,6" ToolTip="Nach dem laufenden Programm abbrechen" FontWeight="SemiBold" Visibility="Collapsed"/>
                                     </Grid>
-                                    <Button x:Name="btnAuUpdateAll" Content="Alle aktualisieren" Style="{StaticResource BtnTeal}" Padding="12,6" ToolTip="Alle gefundenen Updates ausser den Ausnahmen"/>
+                                    <Button x:Name="btnAuUpdateAll" Content="Alle aktualisieren" Style="{StaticResource BtnMain}" Padding="12,6" ToolTip="Alle gefundenen Updates ausser den Ausnahmen"/>
                                     <CheckBox Style="{StaticResource WrapCheck}" x:Name="chkAuUnknown" Content="Programme ohne bekannte Version zeigen" VerticalAlignment="Center" Margin="10,0,0,4" ToolTip="WinGet kennt die installierte Version nicht - die Zuordnung zum Paket ist dann unsicher (Variante, Sprache, x86/x64). Nur gezielt verwenden."/>
-                                    <Button x:Name="btnAuSetup" Content="WinGet einrichten" Style="{StaticResource BtnYellow}" Padding="12,6" Margin="10,0,4,4" Visibility="Collapsed" ToolTip="Modul Microsoft.WinGet.Client aus der PowerShell Gallery installieren (alle Benutzer) und WinGet fuer dieses Konto registrieren/reparieren - Internet noetig"/>
+                                    <Button x:Name="btnAuSetup" Content="WinGet einrichten" Style="{StaticResource BtnChange}" Padding="12,6" Margin="10,0,4,4" Visibility="Collapsed" ToolTip="Modul Microsoft.WinGet.Client aus der PowerShell Gallery installieren (alle Benutzer) und WinGet fuer dieses Konto registrieren/reparieren - Internet noetig"/>
                                     <Ellipse x:Name="dotAuBusy" Width="11" Height="11" Fill="{StaticResource CatGreen}" Margin="10,0,6,4" VerticalAlignment="Center" Visibility="Collapsed"/>
                                     <TextBlock x:Name="lblAuBusy" Text="" Foreground="{StaticResource CatGreen}" FontSize="11" VerticalAlignment="Center" Margin="0,0,0,4" Visibility="Collapsed"/>
                                 </WrapPanel>
@@ -557,7 +557,7 @@
                                     <TextBlock x:Name="lblAuTarget" Text="" Foreground="{StaticResource CatMauve}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,4" MaxWidth="520" TextTrimming="CharacterEllipsis"/>
                                     <Button x:Name="btnAuPcs" Content="Mehrere PCs / EDV-Saal ..." Style="{StaticResource BtnDefault}" Padding="10,4" ToolTip="PCs aus dem AD waehlen (OU, Filter, eigene Namen) - Suche und Aktualisierung laufen parallel auf allen PCs (WinRM)"/>
                                     <Button x:Name="btnAuPcTop" Content="Oben gewaehlter PC" Style="{StaticResource BtnDefault}" Padding="10,4" ToolTip="Zurueck zum Computer oben (Reiter Migration)"/>
-                                    <Button x:Name="btnAuSchedule" Content="Zeitplan ..." Style="{StaticResource BtnYellow}" Padding="10,4" Margin="14,0,4,4" ToolTip="Programme fuer alle Benutzer auf den Ziel-PCs automatisch aktualisieren (taeglich/woechentlich, als SYSTEM, Ausnahmen dieses Standorts gelten)"/>
+                                    <Button x:Name="btnAuSchedule" Content="Zeitplan ..." Style="{StaticResource BtnDefault}" Padding="10,4" Margin="14,0,4,4" ToolTip="Programme fuer alle Benutzer auf den Ziel-PCs automatisch aktualisieren (taeglich/woechentlich, als SYSTEM, Ausnahmen dieses Standorts gelten)"/>
                                     <Button x:Name="btnAuScheduleView" Content="Zeitplaene ansehen ..." Style="{StaticResource BtnDefault}" Padding="10,4" ToolTip="Zeitplan, letzter Lauf und Verlauf je Ziel-PC - entfernen, Verlauf uebernehmen"/>
                                 </WrapPanel>
                                 <TextBlock x:Name="lblAuInfo" Text="" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource CatSubtext}" Margin="2,2,0,0"/>
@@ -600,8 +600,8 @@
                                     </WrapPanel>
                                     <TextBlock DockPanel.Dock="Top" Text="AUSNAHMEN (NIE AKTUALISIEREN)" Style="{StaticResource SectionLabel}"/>
                                     <WrapPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
-                                        <Button x:Name="btnAuExclAdd" Content="Hinzufuegen ..." Style="{StaticResource BtnBlue}" ToolTip="Muster (Platzhalter *) auf Paket-ID oder Programmname, mit Grund - z.B. Pruefungssoftware"/>
-                                        <Button x:Name="btnAuExclDel" Content="Entfernen" Style="{StaticResource BtnRed}"/>
+                                        <Button x:Name="btnAuExclAdd" Content="Hinzufuegen ..." Style="{StaticResource BtnDefault}" ToolTip="Muster (Platzhalter *) auf Paket-ID oder Programmname, mit Grund - z.B. Pruefungssoftware"/>
+                                        <Button x:Name="btnAuExclDel" Content="Entfernen" Style="{StaticResource BtnDefault}"/>
                                     </WrapPanel>
                                     <ListBox x:Name="lstAuExcl" Background="{StaticResource CatSurface0}" Foreground="{StaticResource CatText}" BorderBrush="{StaticResource CatSurface2}" SelectionMode="Extended"/>
                                 </DockPanel>
@@ -625,27 +625,27 @@
                         <Border DockPanel.Dock="Bottom" Style="{StaticResource SectionBorder}">
                             <WrapPanel>
                                 <Grid>
-                                    <Button x:Name="btnSbBackup" Content="Server-Backup starten" Style="{StaticResource BtnGreen}" FontWeight="SemiBold" Padding="18,6" ToolTip="Angehakte VMs online (VSS) auf die Ziel-Platte sichern - Windows Server-Sicherung (wbadmin)"/>
-                                    <Button x:Name="btnSbCancel" Content="Abbrechen" Style="{StaticResource BtnRed}" Padding="18,6" FontWeight="SemiBold" Visibility="Collapsed"/>
+                                    <Button x:Name="btnSbBackup" Content="Server-Backup starten" Style="{StaticResource BtnMain}" FontWeight="SemiBold" Padding="18,6" ToolTip="Angehakte VMs online (VSS) auf die Ziel-Platte sichern - Windows Server-Sicherung (wbadmin)"/>
+                                    <Button x:Name="btnSbCancel" Content="Abbrechen" Style="{StaticResource BtnDanger}" Padding="18,6" FontWeight="SemiBold" Visibility="Collapsed"/>
                                 </Grid>
                                 <Button x:Name="btnSbHostOnly" Content="Nur Host-Konfiguration" Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Switches, VLANs, Netzwerk, VM-Einstellungen sofort exportieren (Ziel-Platte oder Tool-Ordner\Logs\ServerBackup)"/>
-                                <Button x:Name="btnSbExport" Content="VMs exportieren ..." Style="{StaticResource BtnTeal}" Padding="10,6" ToolTip="Ausgewaehlte VMs mit Hyper-V exportieren (vollstaendige Kopie, mit 'VM importieren' an jedem Hyper-V-Host wiederherstellbar) - auf die Platte oder in einen Ordner. Im Profil auch automatisch nach jeder Sicherung (Zeitplan)."/>
-                                <Button x:Name="btnSbSchedule" Content="Zeitplan ..." Style="{StaticResource BtnMauve}" Padding="10,6" ToolTip="Links: Server-Backup planen (einmalig, taeglich, woechentlich - als SYSTEM ohne Anmeldung, angehakte VMs) | Rechts: geplante Server-Backups anzeigen, starten, loeschen"/>
+                                <Button x:Name="btnSbExport" Content="VMs exportieren ..." Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Ausgewaehlte VMs mit Hyper-V exportieren (vollstaendige Kopie, mit 'VM importieren' an jedem Hyper-V-Host wiederherstellbar) - auf die Platte oder in einen Ordner. Im Profil auch automatisch nach jeder Sicherung (Zeitplan)."/>
+                                <Button x:Name="btnSbSchedule" Content="Zeitplan ..." Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Links: Server-Backup planen (einmalig, taeglich, woechentlich - als SYSTEM ohne Anmeldung, angehakte VMs) | Rechts: geplante Server-Backups anzeigen, starten, loeschen"/>
                                 <StackPanel Orientation="Horizontal">
                                     <Border Style="{StaticResource GroupSep}"/>
                                     <TextBlock Text="Platte:" Style="{StaticResource GroupCaption}"/>
-                                    <Button x:Name="btnSbVersions" Content="Versionen auf der Platte" Style="{StaticResource BtnBlue}" Padding="10,6" ToolTip="wbadmin get versions der Ziel-Platte"/>
+                                    <Button x:Name="btnSbVersions" Content="Versionen auf der Platte" Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="wbadmin get versions der Ziel-Platte"/>
                                 </StackPanel>
-                                <Button x:Name="btnSbShadow" Content="Speicher fuer Versionen ..." Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Speicher fuer aeltere Versionen (Schattenkopien) auf der Ziel-Platte auf 50 % erhoehen - mit Rueckfrage, nur erhoehen, nie verkleinern"/>
-                                <Button x:Name="btnSbRestore" Content="Wiederherstellen ..." Style="{StaticResource BtnPeach}" Padding="10,6" ToolTip="Windows Server-Sicherung oeffnen (Wiederherstellen > Anwendungen > Hyper-V) mit Anleitung"/>
+                                <Button x:Name="btnSbShadow" Content="Speicher fuer Versionen ..." Style="{StaticResource BtnChange}" Padding="10,6" ToolTip="Speicher fuer aeltere Versionen (Schattenkopien) auf der Ziel-Platte auf 50 % erhoehen - mit Rueckfrage, nur erhoehen, nie verkleinern"/>
+                                <Button x:Name="btnSbRestore" Content="Wiederherstellen ..." Style="{StaticResource BtnChange}" Padding="10,6" ToolTip="Windows Server-Sicherung oeffnen (Wiederherstellen > Anwendungen > Hyper-V) mit Anleitung"/>
                                 <StackPanel Orientation="Horizontal">
                                     <Border Style="{StaticResource GroupSep}"/>
                                     <TextBlock Text="Ohne Auswahl:" Style="{StaticResource GroupCaption}"/>
-                                    <Button x:Name="btnSbOverview" Content="Statistik / Uebersicht" Style="{StaticResource BtnMauve}" Padding="10,6" ToolTip="Alle Profile und Platten: letzte Sicherung, Alter, Anzahl, Status - Rechts: alle Laeufe"/>
+                                    <Button x:Name="btnSbOverview" Content="Statistik / Uebersicht" Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Alle Profile und Platten: letzte Sicherung, Alter, Anzahl, Status - Rechts: alle Laeufe"/>
                                 </StackPanel>
-                                <Button x:Name="btnSbLogs" Content="Protokolle ..." Style="{StaticResource BtnBlue}" Padding="10,6" ToolTip="Protokolle der Laeufe lesen (Zeitplan/Hintergrund als SYSTEM, VM-Export, wbadmin-Ausgaben) - ohne Ordner zu oeffnen"/>
+                                <Button x:Name="btnSbLogs" Content="Protokolle ..." Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Protokolle der Laeufe lesen (Zeitplan/Hintergrund als SYSTEM, VM-Export, wbadmin-Ausgaben) - ohne Ordner zu oeffnen"/>
                                 <Button x:Name="btnSbConflicts" Content="Zeitplan-Pruefung" Style="{StaticResource BtnDefault}" Padding="10,6" ToolTip="Alle geplanten Sicherungsaufgaben am Host anzeigen (andere Programme, alte Aufgaben, Zeitplaene aller HUMig-Profile) - Suchwoerter frei aenderbar"/>
-                                <Button x:Name="btnSbFeature" Content="Windows Server-Sicherung installieren" Style="{StaticResource BtnYellow}" Padding="10,6" Visibility="Collapsed" ToolTip="Install-WindowsFeature Windows-Server-Backup (kein Neustart noetig)"/>
+                                <Button x:Name="btnSbFeature" Content="Windows Server-Sicherung installieren" Style="{StaticResource BtnChange}" Padding="10,6" Visibility="Collapsed" ToolTip="Install-WindowsFeature Windows-Server-Backup (kein Neustart noetig)"/>
                             </WrapPanel>
                         </Border>
                         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -662,10 +662,10 @@
                                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Profil:" Style="{StaticResource Lbl}"/>
                                         <ComboBox x:Name="cmbSbProfile" Grid.Row="0" Grid.Column="1" Margin="0,0,4,4" FontWeight="SemiBold" ToolTip="Sicherungs-Profil (z.B. je Schule): welche VMs, welche Platten (Bezeichnung), Optionen"/>
                                         <WrapPanel Grid.Row="0" Grid.Column="2">
-                                            <Button x:Name="btnSbProfileNew" Content="Neu ..." Style="{StaticResource BtnBlue}" ToolTip="Neues Profil: Name, Platten-Bezeichnung (z.B. HUMIG-SCHULE1) und Anzahl Platten. Die angehakten VMs werden uebernommen."/>
-                                            <Button x:Name="btnSbProfileSave" Content="Profil speichern" Style="{StaticResource BtnGreen}" ToolTip="Angehakte VMs und Optionen im gewaehlten Profil speichern"/>
+                                            <Button x:Name="btnSbProfileNew" Content="Neu ..." Style="{StaticResource BtnDefault}" ToolTip="Neues Profil: Name, Platten-Bezeichnung (z.B. HUMIG-SCHULE1) und Anzahl Platten. Die angehakten VMs werden uebernommen."/>
+                                            <Button x:Name="btnSbProfileSave" Content="Profil speichern" Style="{StaticResource BtnDefault}" ToolTip="Angehakte VMs und Optionen im gewaehlten Profil speichern"/>
                                             <Button x:Name="btnSbProfileEdit" Content="Bearbeiten ..." Style="{StaticResource BtnDefault}" ToolTip="Profil umbenennen (Verlauf wird uebernommen), Platten-Bezeichnung, Anzahl Platten, Warnung nach Tagen"/>
-                                            <Button x:Name="btnSbProfileDel" Content="Loeschen" Style="{StaticResource BtnRed}" ToolTip="Profil loeschen (Sicherungen auf den Platten bleiben erhalten)"/>
+                                            <Button x:Name="btnSbProfileDel" Content="Loeschen" Style="{StaticResource BtnDanger}" ToolTip="Profil loeschen (Sicherungen auf den Platten bleiben erhalten)"/>
                                             <Ellipse x:Name="dotSbBusy" Width="11" Height="11" Fill="{StaticResource CatGreen}" Margin="10,0,6,4" VerticalAlignment="Center" Visibility="Collapsed"/>
                                             <TextBlock x:Name="lblSbBusy" Text="" Foreground="{StaticResource CatGreen}" FontSize="11" VerticalAlignment="Center" Margin="0,0,0,4" Visibility="Collapsed"/>
                                             <TextBlock x:Name="lblSbHost" Text="" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,4"/>
@@ -675,8 +675,8 @@
                                         <WrapPanel Grid.Row="1" Grid.Column="2">
                                             <Button x:Name="btnSbDrives" Content="Aktualisieren" Style="{StaticResource BtnDefault}" ToolTip="Laufwerke und VMs neu einlesen (offline geschaltete USB-Platten werden online geschaltet)"/>
                                             <Button x:Name="btnSbOpenDrive" Content="Oeffnen" Style="{StaticResource BtnDefault}" ToolTip="Berichtsordner HUMig-ServerBackup auf der Platte oeffnen"/>
-                                            <Button x:Name="btnSbEject" Content="Auswerfen" Style="{StaticResource BtnTeal}" ToolTip="Schreibcache leeren und Platte sicher entfernen"/>
-                                            <Button x:Name="btnSbDiskSetup" Content="Platte einrichten ..." Style="{StaticResource BtnPeach}" ToolTip="USB-Platte vorbereiten: Einrichten = ALLE Daten loeschen, GPT, NTFS (64K), Bezeichnung nach Profil (z.B. HUMIG-SCHULE1-2) - oder Uebernehmen = schon genutzte Platte nur umbenennen, Daten bleiben"/>
+                                            <Button x:Name="btnSbEject" Content="Auswerfen" Style="{StaticResource BtnDefault}" ToolTip="Schreibcache leeren und Platte sicher entfernen"/>
+                                            <Button x:Name="btnSbDiskSetup" Content="Platte einrichten ..." Style="{StaticResource BtnDanger}" ToolTip="USB-Platte vorbereiten: Einrichten = ALLE Daten loeschen, GPT, NTFS (64K), Bezeichnung nach Profil (z.B. HUMIG-SCHULE1-2) - oder Uebernehmen = schon genutzte Platte nur umbenennen, Daten bleiben"/>
                                             <TextBlock Text="Nach Sicherung:" Foreground="{StaticResource CatSubtext}" FontSize="11" VerticalAlignment="Center" Margin="8,0,4,4"/>
                                             <ComboBox x:Name="cmbSbAfter" Width="130" Margin="0,0,0,4" VerticalAlignment="Center" ToolTip="Gilt fuer die gewaehlte Platte des Profils (auch im Zeitplan). Auswerfen: bis zum Ab- und Anstecken weg. Offline schalten: kein Laufwerksbuchstabe mehr, der naechste geplante Lauf oder 'Aktualisieren' schaltet sie wieder online.">
                                                 <ComboBoxItem Content="nichts tun"/>
