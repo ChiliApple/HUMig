@@ -963,10 +963,43 @@ $script:HMRemoteHeaders = [ordered]@{
     'Cross-Origin-Resource-Policy' = 'same-origin'
 }
 
-# Zugriffsprotokoll (nie Token oder Codes)
+# Zugriffsprotokoll (nie Token oder Codes). Der Ordner Logs ist fuer Benutzer beschreibbar: vor JEDEM Schreiben pruefen, dass weder
+# die Datei noch ihre Ordner (bis Logs) eine Verknuepfung ist - sonst schriebe HUMig als Administrator an ein fremdes Ziel.
+# Werte des Aufrufers (Origin, Geraetename) werden entschaerft: keine Zeilenumbrueche/Steuerzeichen (C0, C1, Zeilentrenner),
+# keine Zeichen, die die Schreibrichtung der Anzeige umordnen, Laenge begrenzt.
+$script:HMRemoteLogMaxLine = 600
+function ConvertTo-HMRemoteLogText([string]$Text) {
+    $t = "$Text" -replace '[\x00-\x1F\x7F-\x9F\u2028\u2029\u200E\u200F\u202A-\u202E\u2066-\u2069]', ' '
+    if ($t.Length -gt $script:HMRemoteLogMaxLine) { $t = $t.Substring(0, $script:HMRemoteLogMaxLine) + ' ...' }
+    return $t
+}
+# Darf in die Protokolldatei geschrieben werden? '' = ja, sonst Grund. $Depth = Anzahl Ordner ueber der Datei, die geprueft werden
+function Test-HMRemoteLogTarget([string]$File, [int]$Depth = 2) {
+    if (-not $File) { return 'kein Protokoll' }
+    $isRp = { param($p) (([int][IO.File]::GetAttributes($p)) -band [int][IO.FileAttributes]::ReparsePoint) -ne 0 }
+    try {
+        if ([IO.File]::Exists($File) -and (& $isRp $File)) { return "Verknuepfung: $File" }
+        $d = [IO.Path]::GetDirectoryName($File)
+        for ($i = 0; $i -lt $Depth -and $d; $i++) {
+            if ([IO.Directory]::Exists($d) -and (& $isRp $d)) { return "Verknuepfung: $d" }
+            $d = [IO.Path]::GetDirectoryName($d)
+        }
+    } catch { return "nicht pruefbar: $($_.Exception.Message)" }
+    return ''
+}
 function Write-HMRemoteLog($S, [string]$Text) {
     if (-not $S.LogFile) { return }
-    try { [IO.File]::AppendAllText($S.LogFile, ("{0}  {1}`r`n" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $Text), (New-Object Text.UTF8Encoding $false)) } catch { }
+    $why = Test-HMRemoteLogTarget $S.LogFile
+    if ($why) {
+        # nicht schreiben, einmal je Sitzung als Ereignis melden (die Oberflaeche gibt es aus: Show-HMRemoteEvents); die Fernbedienung laeuft weiter
+        if (-not $S.LogBlocked) {
+            $S.LogBlocked = $true
+            if ($null -ne $S.Events) { try { $S.Events.Enqueue(@{ Kind = 'LogBlocked'; Text = "Zugriffsprotokoll wird nicht geschrieben ($why) - Verknuepfung im Ordner Logs pruefen" }) } catch { } }
+        }
+        return
+    }
+    $line = ConvertTo-HMRemoteLogText $Text
+    try { [IO.File]::AppendAllText($S.LogFile, ("{0}  {1}`r`n" -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $line), (New-Object Text.UTF8Encoding $false)) } catch { }
 }
 
 # Webserver-Schleife (im Hintergrund-Runspace). $S.Run = $false beendet sie.

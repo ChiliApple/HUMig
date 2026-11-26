@@ -164,7 +164,7 @@ function Get-HMSbDriveList([switch]$KeepHumigOffline) {
             if (@($pt) -contains [int]$d.Number) { $msgs += "USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) ist direkt an eine VM durchgereicht (Pass-Through) - bleibt offline und ist kein Sicherungsziel"; continue }
             if (-not $ptKnown) { $msgs += "Hinweis: Hyper-V-VM-Liste nicht lesbar oder zu langsam - ob die offline USB-Platte $($d.Number) ($("$($d.FriendlyName)".Trim())) an eine VM durchgereicht ist, war nicht pruefbar; sie wird wie bisher online geschaltet" }
         }
-        if ($KeepHumigOffline -and $m) { $msgs += "USB-Platte $("$m".Split('|')[1]) (Datentraeger $($d.Number)) wurde nach der Sicherung von HUMig offline geschaltet und bleibt offline - ""Aktualisieren"" schaltet sie wieder online."; continue }
+        if ($KeepHumigOffline -and $m) { $msgs += "USB-Platte $("$m".Split('|')[1]) (Datentraeger $($d.Number)) wurde nach der Sicherung von HUMig offline geschaltet und bleibt offline - ""Neu laden"" schaltet sie wieder online."; continue }
         try {
             Set-Disk -Number $d.Number -IsOffline $false -ErrorAction Stop
             $msgs += "USB-Platte $($d.Number) ($($d.FriendlyName)) war offline - online geschaltet"
@@ -1738,7 +1738,7 @@ function Invoke-HMSbAfterBackup([string]$Letter, [string]$Mode, [string]$Label) 
     if ($Mode -eq 'Offline') {
         try {
             Set-HMSbDiskOffline -Number $disk.Number -Label $Label
-            Write-HMSbLog "Platte $Label offline geschaltet (Datentraeger $($disk.Number), kein Laufwerksbuchstabe mehr). Wieder online: HUMig ""Aktualisieren"", naechster geplanter Lauf oder Datentraegerverwaltung." 'Success'
+            Write-HMSbLog "Platte $Label offline geschaltet (Datentraeger $($disk.Number), kein Laufwerksbuchstabe mehr). Wieder online: HUMig ""Neu laden"", naechster geplanter Lauf oder Datentraegerverwaltung." 'Success'
         } catch { Write-HMSbLog "Platte $Label konnte nicht offline geschaltet werden: $($_.Exception.Message)" 'Warning' }
     } else {
         try {
@@ -2504,7 +2504,7 @@ function Start-HMServerBackup {
     if ($mm) {
         Write-HMSbLog "ACHTUNG Ziel-Platte: $mm" 'Warning'
         $status = 'Warning'; $notes += "Ziel-Platte: $mm"
-        $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Ziel-Platte passt nicht mehr zur gewaehlten: $mm."; Fix = 'Im Bericht und unter "Versionen auf der Platte" pruefen, auf welche Platte gesichert wurde; vor dem naechsten Lauf "Aktualisieren".' }
+        $hints += [pscustomobject]@{ Lvl = 'Warning'; Text = "Die Ziel-Platte passt nicht mehr zur gewaehlten: $mm."; Fix = 'Im Bericht und unter "Versionen auf der Platte" pruefen, auf welche Platte gesichert wurde; vor dem naechsten Lauf "Neu laden".' }
     }
     $info = @()
     if ($vms.Count) {

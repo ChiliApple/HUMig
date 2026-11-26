@@ -1,5 +1,74 @@
 ﻿# Changelog
 
+## v2.1.30 - 2026-11-26
+### 📖 Hilfe
+- **Neue Bilder:** Die Bilder in Anleitung, Funktionsübersicht und README zeigen die aktuelle Oberfläche mit allen sechs Reitern und die aktuelle Handy-Ansicht, mit Beispieldaten.
+- **Werkzeuge nach Ziel:** Die Anleitung gliedert die Werkzeuge wie die App nach gewähltem PC, mehreren PCs, gewähltem Benutzer, Diagnose, Software und Treiber und ohne Ziel-PC.
+- **Begriffe wie in der App:** "Neu laden", "Bericht", "Fortlaufendes Backup", "Abbrechen: <Vorgang>" und die Knöpfe der Rückfragen heißen in der Hilfe wie in der Oberfläche.
+- **Neue Abläufe beschrieben:** Anzeige "verbunden mit", Rückfrage bei anderem PC im Feld, Ergebnis in der Statuszeile, Prüfungen beim Update, Signieren mit Abgleich und Zugriffsprotokoll der Fernbedienung.
+- **Nur, was die App tut:** Texte zu Vorschau, Vorab-Prüfung, Umzugs-Assistent, Backup mit Fehlern und Erstinstallation sind auf das gekürzt, was die App wirklich macht.
+- **Verweise repariert:** Doppelte Sprungmarken in der Anleitung zeigen jetzt auf die richtige Stelle.
+
+## v2.1.29 - 2026-11-26
+### 🔐 Rechte
+- **Meldungen der Ordnerrechte-Prüfung erscheinen wieder:** Was die Prüfung des Programmordners beim Start feststellt, steht jetzt in der Konsole, zum Beispiel dass HUMig in einem Benutzerprofil liegt oder dass die Prüfung abgeschaltet ist.
+  - Bisher gingen diese Meldungen bei jedem Start verloren.
+  - An der Prüfung selbst und an ihren Rückfragen ändert sich nichts.
+### ✅ Qualität
+- **Tests:** 650 bestanden.
+
+## v2.1.28 - 2026-11-26
+### 🎨 Oberfläche
+- **Kopfzeile in drei Zeilen:** Computer und Benutzer, darunter Verbindung und SID, darunter Backup-Ordner und freier Platz. Lange Namen brechen um statt abgeschnitten zu werden, die Listen darunter sind dadurch höher.
+- **Farben nach Bedeutung:** Grün startet den Hauptvorgang eines Reiters, Orange ändert etwas am PC oder an Einstellungen, Rot löscht oder bricht ab, alles andere ist neutral.
+- **Dunkle Auswahlfelder:** Auswahllisten passen zum dunklen Fenster, der mit der Pfeiltaste erreichte Eintrag ist deutlich hervorgehoben.
+- **Tooltips überall:** Jeder Knopf, jeder Haken und jedes Feld erklärt in einem Satz, was es tut. Gesperrte Knöpfe zeigen ihren Tooltip ebenfalls.
+- **Fenster mit Anfasser:** Haupt- und Einstellungsfenster lassen sich rechts unten größer ziehen.
+- **Lange Texte brechen um:** Modulnamen, Haken, VM-Namen und Erklärtexte stehen vollständig da, auch bei kleinem Fenster.
+### 💾 Backup und Restore
+- **Startknopf immer sichtbar:** "Backup starten" und "Restore starten" stehen fest unter der rechten Spalte, der Inhalt darüber scrollt.
+- **Abbrechen am Platz des Startknopfs:** Während ein Vorgang läuft, steht in jedem Reiter "Abbrechen: <Vorgang>" dort, wo sonst der Startknopf steht, ein Klick bricht ihn ab wie bisher. Im Leerlauf ist Abbrechen ausgeblendet.
+- **Worauf sich ein Reiter bezieht:** Über dem Startknopf steht, welcher Benutzer von welchem PC gesichert wird. Das Restore-Ziel zeigt PC und Benutzer in zwei Zeilen.
+- **Knopfreihe im Restore nach Bezug:** zuerst ohne Auswahl, dann "Markiertes Backup:", dann die löschenden Knöpfe.
+- **Ausgeblendet statt gesperrt:** "Grosse Dateien ..." erscheint erst nach "Groesse ermitteln", bis dahin steht dort ein kurzer Hinweis. Module, die ein Backup nicht enthält, sind im Restore ausgeblendet.
+- **Einheitliche Begriffe:** "Neu laden" liest Listen neu (auch in Softwareverteilung und Treiberverteilung), "Fortlaufendes Backup" ergänzt ein vorhandenes Backup, "Bericht" öffnet den Bericht eines Laufs.
+### 🛠️ Werkzeuge
+- **Abschnitte nach Ziel:** gewählter PC, mehrere PCs, gewählter Benutzer, Diagnose, Software und Treiber, ohne Ziel-PC. Jeder Knopf steht in dem Abschnitt, auf den er wirkt.
+- **Überschriften mit Namen:** Die Überschriften nennen PC und Benutzer und ziehen nach Verbinden, Umschalten und Benutzerwahl nach.
+### 🖥️ Server-Backup
+- **Knopfreihe nach Bezug:** gewähltes Profil, "Platte:", "Ohne Auswahl:". "Platte einrichten ..." steht am Ende der Plattenzeile.
+- **Bildlauf bei kleinem Fenster:** Der obere Teil scrollt, die Knopfreihe unten bleibt immer sichtbar.
+- **Kurze Haken:** "Host-Konfiguration sichern" und "Host-System mitsichern (C:, Boot/EFI)", Einzelheiten im Tooltip.
+### ❓ Rückfragen
+- **Knöpfe mit Verben:** z.B. "Im Hintergrund starten", "Hier in HUMig starten", "Admin-Teile auslassen", "Endgueltig loeschen". Enter, Esc und Schließen wirken wie bisher.
+- **Neustart-Frage richtig herum:** Beim Bearbeiten eines Server-Backup-Profils heißen die Knöpfe "Nicht sichern" und "Sichern".
+- **Namen in der Rückfrage:** Löschen eines Backups nennt Datum, PC, Benutzer, Größe und Status. Beenden während eines Vorgangs nennt den Vorgang.
+### ⚙️ Einstellungen
+- **Hinweis zu Speichern:** Die Fußzeile sagt, dass Speichern für Haken und Felder gilt und Knöpfe in den Reitern sofort wirken.
+- **Reiter Restore mit Bildlauf:** lange Haken und Erklärtexte brechen um.
+### ✅ Qualität
+- **Tests:** 649 automatische Tests bestanden.
+
+## v2.1.27 - 2026-11-26
+### 📱 Fernbedienung
+- **Zugriffsprotokoll abgesichert:** Das Zugriffsprotokoll wird vor jedem Eintrag geprüft und enthält keine eingeschleusten Zeilen oder Steuerzeichen mehr.
+  - Kann ein Eintrag nicht sicher geschrieben werden, meldet HUMig das einmal in der Konsole, die Fernbedienung läuft weiter.
+### ✅ Qualität
+- **Tests:** 601 bestanden.
+
+## v2.1.26 - 2026-11-26
+### 🔐 Herausgeber
+- **Release signieren zeigt den Abgleich:** Die Bestätigung nennt je Release, ob die Prüfsummen-Datei gleich wie der lokale Stand ist, nicht abgeglichen werden konnte (z. B. andere Version installiert) oder abweicht.
+  - Im Normalfall bleibt es bei einer Bestätigung, kein zusätzlicher Klick.
+- **Rückfrage nur bei echter Abweichung:** Weicht die Prüfsummen-Datei bei gleicher Version vom lokalen Stand ab, fragt HUMig mit den betroffenen Dateien nach, Standard ist Nein.
+  - Nein lässt diese Releases aus und signiert die anderen.
+  - Erkennt erst das Signieren selbst eine Abweichung, wird dieses Release nicht ohne Rückfrage signiert. HUMig sagt dann, dass es beim nächsten Start nachfragt.
+- **Signieren wird nie verhindert:** Scheitert der Abgleich oder dauert er zu lange, wird wie bisher signiert, die Bestätigung sagt "nicht abgeglichen".
+- **Kein zweiter Ablauf:** Ein weiterer Klick auf "Release signieren", während ein Ablauf läuft, meldet "Signieren läuft bereits".
+- **Nichts zu signieren:** Werden alle Releases ausgelassen, steht dort eine Hinweiszeile, es wird nichts gestartet.
+### ✅ Qualität
+- **Tests:** 596 bestanden.
+
 ## v2.1.25 - 2026-11-26
 ### 🛠️ Werkzeuge
 - **IP-Adresse ändern prüft das Ergebnis:** Meldet erst nach der Kontrolle am PC, ob Adresse, Gateway und DNS eingetragen sind.

@@ -79,7 +79,7 @@ function Show-HMBsDialog([string]$Info, [string]$DefaultName, [string]$EjectInfo
       <TextBox x:Name="txtName" Width="300" Background="#FF313244" Foreground="#FFCDD6F4" BorderBrush="#FF585B70" CaretBrush="#FFCDD6F4" Padding="4,2"/>
     </StackPanel>
     <TextBlock Text="ART" Foreground="#FF89B4FA" FontWeight="SemiBold" Margin="0,0,0,2"/>
-    <RadioButton x:Name="rbUpdate" GroupName="kind" IsChecked="True" Foreground="#FFCDD6F4" Margin="0,2" Content="Fortlaufend: vorhandenes Backup aktualisieren (nur neue/geaenderte Dateien - schnell, ein Stand)"/>
+    <RadioButton x:Name="rbUpdate" GroupName="kind" IsChecked="True" Foreground="#FFCDD6F4" Margin="0,2" Content="Fortlaufendes Backup (nur Neues und Geaendertes - schnell, ein Stand)"/>
     <RadioButton x:Name="rbNew" GroupName="kind" Foreground="#FFCDD6F4" Margin="0,2,0,8" Content="Neues Backup: eigener Stand (kopiert alles - dauert laenger, braucht mehr Platz)"/>
     <TextBlock Text="WANN" Foreground="#FF89B4FA" FontWeight="SemiBold" Margin="0,0,0,2"/>
     <RadioButton x:Name="rbDaily" GroupName="when" IsChecked="True" Content="Taeglich" Foreground="#FFCDD6F4" Margin="0,2"/>

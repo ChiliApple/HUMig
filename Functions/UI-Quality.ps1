@@ -470,14 +470,14 @@ function Start-HMRestorePreviewUi {
 }
 
 # ----------------------------------------------------------------------------
-# Checkliste nach dem Restore (landet im Restore-Protokoll)
+# Checkliste nach dem Restore (landet im Restore-Bericht)
 # ----------------------------------------------------------------------------
 function Show-HMChecklist([string]$ReportPath, [string[]]$Extra = @()) {
     if (-not $ReportPath) {
         $b = $script:SelectedBackup
         if (-not $b) { Out-Console 'Bitte zuerst ein Backup markieren.' 'Warning'; return }
         $rp = @(Get-ChildItem -LiteralPath $b.Path -Filter 'Bericht_Restore_*.html' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
-        if (-not $rp.Count) { Out-Console 'Zu diesem Backup gibt es noch kein Restore-Protokoll - die Checkliste gehoert zum Restore.' 'Info'; return }
+        if (-not $rp.Count) { Out-Console 'Zu diesem Backup gibt es noch keinen Restore-Bericht - die Checkliste gehoert zum Restore.' 'Info'; return }
         $ReportPath = $rp[0].FullName
         if (Get-Command Get-HMAppAfterSteps -ErrorAction SilentlyContinue) { $Extra = @(Get-HMAppAfterSteps $b) }
     }
@@ -507,7 +507,7 @@ function Show-HMChecklist([string]$ReportPath, [string[]]$Extra = @()) {
     $w = [System.Windows.Markup.XamlReader]::Parse($x)
     if ($script:AppIcon) { $w.Icon = $script:AppIcon }
     $w.Owner = $script:Window; Set-HMWindowScale $w
-    $w.FindName('head').Text = "Protokoll: $(Split-Path $ReportPath -Leaf)`nErledigtes abhaken - Stand und Bemerkung werden ins Restore-Protokoll geschrieben (kann spaeter ergaenzt werden)."
+    $w.FindName('head').Text = "Protokoll: $(Split-Path $ReportPath -Leaf)`nErledigtes abhaken - Stand und Bemerkung werden in den Restore-Bericht geschrieben (kann spaeter ergaenzt werden)."
     $pnl = $w.FindName('pnl')
     $fg = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString('#FFCDD6F4'))
     $boxes = New-Object System.Collections.Generic.List[object]

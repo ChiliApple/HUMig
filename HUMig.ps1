@@ -478,7 +478,7 @@ function Show-HMMsgEarly([object]$Owner, [string]$Text, [string]$Title, [string]
     return "$r"
 }
 function Invoke-HMAppFolderCheck($Owner = $null) {
-    $r = [pscustomobject]@{ Msgs = (New-Object System.Collections.Generic.List[object]); CheckOff = $false }
+    $r = [pscustomobject]@{ Msgs = [System.Collections.Generic.List[object]]::new(); CheckOff = $false }
     if (-not $isAdmin -or $script:UserMode) { return $r }
     $root = $script:AppRoot
     if ($root -like '\\*') { return $r }   # Netzwerkfreigabe: Rechte verwaltet der Server
@@ -731,8 +731,8 @@ foreach ($n in @('btnWizard', 'btnRemote', 'brdMonBackup', 'brdMonRestore', 'brd
     'pnlRestoreModules', 'lblRestoreTarget', 'chkGpUpdate', 'chkWUDrivers', 'chkNumLock', 'chkFavorites', 'chkFastBoot', 'txtPostScript', 'btnPostScript',
     'btnRestore', 'btnCancelRestore', 'btnExtraTargets', 'lblExtraTargets', 'btnToolCredWiz', 'btnToolCredList', 'btnToolUserAppData', 'btnToolUserStartup', 'btnToolProfileFolder', 'pnlSysTools',
     'pnlLinks', 'rtbConsole', 'pbMain', 'lblStatus', 'lblElapsed', 'rowConsole', 'btnToolSoftDeploy', 'btnToolDrvDeploy', 'btnToolSoftList', 'lblSizeTotal', 'lstExclude',
-    'btnExclAdd', 'btnExclDel', 'btnBigFiles', 'chkIncremental', 'lblIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport',
-    'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag',
+    'btnExclAdd', 'btnExclDel', 'btnBigFiles', 'lblBigFilesHint', 'chkIncremental', 'lblIncremental', 'chkSpaceCheck', 'chkVerify', 'chkOneDriveLocal', 'btnBitLocker', 'btnReport',
+    'chkRestoreOneDrive', 'pnlToolsComputer', 'pnlToolsProfile', 'pnlToolsDiag', 'pnlToolsMulti', 'pnlToolsNoTarget', 'pnlToolsSoft', 'lblScopeStatus', 'lblScopeBackup', 'lblScopeAu', 'lblToolsPc', 'lblToolsMulti', 'lblToolsUser', 'lblToolsDiag', 'lblToolsSoft', 'lblToolsNoTarget',
     'chkCatalog', 'btnVerifyBackup', 'btnCompare', 'btnBackupSearch', 'btnFileSearch', 'btnOverview', 'chkKeepNewer', 'btnRestorePreview', 'btnChecklist', 'pnlSchool', 'cmbSchool', 'btnApps', 'btnFeedback', 'btnFeedbackR', 'btnReinstall', 'btnADDevices',
     'tabServerBackup', 'btnSbHealth', 'cmbSbProfile', 'btnSbProfileNew', 'btnSbProfileSave', 'btnSbProfileEdit', 'btnSbProfileDel', 'lblSbHost', 'cmbSbDrive', 'btnSbDrives',
     'btnSbDiskSetup', 'btnSbOpenDrive', 'btnSbEject', 'cmbSbAfter', 'lblSbDiskInfo', 'lblSbSize', 'chkSbHostConfig', 'chkSbVerify', 'chkSbHostSystem', 'lblSbHostSystem', 'pnlSbVms',
@@ -765,8 +765,8 @@ function Set-ConnectStatus([string]$Text, [string]$Color = '#FFA6E3A1') {
     # laeuft inzwischen ein neuer Vorgang, kein altes Ergebnis voranstellen; ein Verbindungsfehler bleibt rot
     if ($k -and -not $script:JobRunning) { Set-Status "$($k.Text) - $Text" $(if ($Color -eq '#FFF38BA8') { $Color } else { $k.Color }) } else { Set-Status $Text $Color }
 }
-function Confirm-Action([string]$Message, [string]$Title = 'HUMig') {
-    return ((Show-HMDialogBox -Owner $script:Window -Text $Message -Title $Title -Mode 'YesNo' -Icon 'Warning') -eq 'Yes')
+function Confirm-Action([string]$Message, [string]$Title = 'HUMig', [hashtable]$Labels = $null) {
+    return ((Show-HMDialogBox -Owner $script:Window -Text $Message -Title $Title -Mode 'YesNo' -Icon 'Warning' -Labels $Labels) -eq 'Yes')
 }
 $ui.rtbConsole.Add_MouseRightButtonUp({ Clear-ConsoleOutput -Window $script:Window; $_.Handled = $true })
 
@@ -882,10 +882,10 @@ function Build-ModulePanel {
         [void]$sp.Children.Add($h)
         $wp = New-Object System.Windows.Controls.WrapPanel
         foreach ($m in $mods) {
-            # Zeile: Checkbox (Name gekuerzt mit ...) | Groesse rechtsbuendig, Abstand zur naechsten Spalte
+            # Zeile: Checkbox (Name umbrechend) | Groesse rechtsbuendig, Abstand zur naechsten Spalte
             $cb = New-Object System.Windows.Controls.CheckBox
             $nt = New-Object System.Windows.Controls.TextBlock
-            $nt.Text = $m.Name; $nt.TextTrimming = 'CharacterEllipsis'
+            $nt.Text = $m.Name; $nt.TextWrapping = 'Wrap'   # lange Modulnamen brechen um statt abgeschnitten zu werden
             $cb.Content = $nt; $cb.Tag = $m.Id; $cb.VerticalAlignment = 'Center'
             $cb.ToolTip = $(if ($m.Hint) { "$($m.Name)`n$($m.Hint)" } else { $m.Name })
             $row = New-Object System.Windows.Controls.Grid
@@ -912,6 +912,27 @@ function Build-ModulePanel {
         $b.Child = $sp
         [void]$Panel.Children.Add($b)
     }
+}
+# Restore: Module, die das markierte Backup nicht enthaelt, sind gesperrt (fuer die Auswahl) und ausgeblendet, leere Gruppen ebenso.
+# Aufbau wie Build-ModulePanel: Gruppe = Border > StackPanel (Ueberschrift, WrapPanel mit Zeilen), Zeile = Grid mit dem Haken.
+# Rueckgabe: Zahl der ausgeblendeten Module
+function Set-HMRestoreModulesForBackup($Backup) {
+    $absent = 0
+    foreach ($k in @($script:RestoreChecks.Keys)) {
+        $has = @($Backup.Modules) -contains $k
+        $script:RestoreChecks[$k].IsEnabled = $has
+        $script:RestoreChecks[$k].IsChecked = ($has -and $k -notin @('Info', 'Drivers', 'Tasks', 'PrintersFull'))
+        $rowEl = $script:RestoreChecks[$k].Parent
+        if ($rowEl -is [System.Windows.UIElement]) { $rowEl.Visibility = $(if ($has) { 'Visible' } else { 'Collapsed' }) }
+        if (-not $has) { $absent++ }
+    }
+    foreach ($grp in @($ui.pnlRestoreModules.Children)) {
+        if (-not ($grp -is [System.Windows.Controls.Border]) -or -not ($grp.Child -is [System.Windows.Controls.Panel])) { continue }
+        $wp = @($grp.Child.Children | Where-Object { $_ -is [System.Windows.Controls.WrapPanel] })[0]
+        if (-not $wp) { continue }
+        $grp.Visibility = $(if (@($wp.Children | Where-Object { $_.Visibility -eq 'Visible' }).Count) { 'Visible' } else { 'Collapsed' })
+    }
+    return $absent
 }
 function Get-CheckedModules([hashtable]$Store) {
     # IsEnabled nur im Reiter Restore relevant (Module, die das Backup nicht enthaelt, sind dort gesperrt)
@@ -968,7 +989,10 @@ function Show-ModuleSizes {
         $l = $script:ModuleSizeLbl[$k]; $l.Text = ''
         if ($valid -and $script:SizeCache.Modules.ContainsKey($k)) { $v = [long]$script:SizeCache.Modules[$k]; $l.Text = $(if ($v -lt 0) { '-' } else { Format-HMSize $v }) }
     }
-    $ui.btnBigFiles.IsEnabled = [bool]($valid -and @($script:SizeCache.Top).Count)
+    # ohne Groessenermittlung kann der Knopf nichts zeigen: ausgeblendet, an seiner Stelle ein kurzer Hinweis
+    $big = [bool]($valid -and @($script:SizeCache.Top).Count)
+    $ui.btnBigFiles.Visibility = $(if ($big) { 'Visible' } else { 'Collapsed' })
+    if ($ui.lblBigFilesHint) { $ui.lblBigFilesHint.Visibility = $(if ($big) { 'Collapsed' } else { 'Visible' }) }
     Update-SizeTotal
 }
 
@@ -1450,6 +1474,7 @@ function Update-HMTargetLabel {
     $ui.lblConnected.Text = $l.Text
     $ui.lblConnected.Foreground = Get-ConsoleBrush $l.Color
     $ui.lblConnected.ToolTip = $l.Tip
+    if (Get-Command Update-HMToolHeads -ErrorAction SilentlyContinue) { Update-HMToolHeads }
 }
 # Vor jedem Vorgang: steht im Feld ein anderer PC als das Ziel, nachfragen statt still zu mischen. $true = Vorgang starten
 # $script:HMTargetDeclined: $true, wenn der Anwender die Rueckfrage abgelehnt hat (fuer den Umzugs-Assistenten)
@@ -1545,6 +1570,7 @@ function Get-SelectedProfile {
 }
 function Update-SidLabel {
     $p = Get-SelectedProfile
+    if (Get-Command Update-HMToolHeads -ErrorAction SilentlyContinue) { Update-HMToolHeads }   # Ueberschriften im Reiter Werkzeuge
     if (-not $p) { $ui.lblSid.Text = ''; return }
     if ($p.NoProfile) { $ui.lblSid.Text = 'kein Profil an diesem PC (nur Restore mit USMT)'; $ui.lblSid.Foreground = Get-ConsoleBrush '#FFF9E2AF' }
     else {
@@ -1680,14 +1706,35 @@ function Set-JobUi([bool]$Running) {
     foreach ($b in @($ui.btnBackup, $ui.btnRestore, $ui.btnProfileSize, $ui.btnConnect, $ui.btnLocal, $ui.btnDeleteBackup, $ui.btnCleanupBackups, $ui.btnEmptyDeleted, $ui.btnUpdate, $ui.btnPrecheck)) { $b.IsEnabled = -not $Running }
     # waehrend des Mehrfach-Loeschens bleiben Loeschen und Alte loeschen gesperrt, auch wenn ein anderer Vorgang endet (B48)
     if ($script:MultiDelBusy) { foreach ($b in @($ui.btnDeleteBackup, $ui.btnCleanupBackups)) { if ($b) { $b.IsEnabled = $false } } }
-    $ui.btnCancel.IsEnabled = $Running
-    $ui.btnCancelRestore.IsEnabled = $Running
     $ui.cmbComputer.IsEnabled = -not $Running -and -not $script:UserMode
     $ui.cmbUser.IsEnabled = -not $Running -and -not $script:UserMode
     foreach ($b in @($script:SbButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
-    if ($ui.btnSbCancel) { $ui.btnSbCancel.IsEnabled = $Running }
     foreach ($b in @($script:AuButtons)) { if ($b) { $b.IsEnabled = -not $Running } }
-    if ($ui.btnAuCancel) { $ui.btnAuCancel.IsEnabled = $Running }
+    # Start und Abbrechen teilen sich je Reiter eine Zelle: im Lauf ist der Startknopf unsichtbar (behaelt seinen Platz)
+    # und Abbrechen liegt an seiner Stelle, im Leerlauf ist Abbrechen ausgeblendet. Es laeuft immer nur ein Vorgang, und
+    # jeder Abbrechen-Knopf bricht ihn ab (wie bisher) - deshalb steht Abbrechen in jedem Reiter, mit dem Namen des Vorgangs.
+    foreach ($pair in @(@($ui.btnBackup, $ui.btnCancel), @($ui.btnRestore, $ui.btnCancelRestore), @($ui.btnSbBackup, $ui.btnSbCancel), @($ui.btnAuUpdateSel, $ui.btnAuCancel))) {
+        $startBtn = $pair[0]; $cancelBtn = $pair[1]
+        if (-not $cancelBtn) { continue }
+        if ($null -eq $cancelBtn.Tag) { $cancelBtn.Tag = @{ Text = $cancelBtn.Content; Tip = $cancelBtn.ToolTip } }   # Text und Tooltip aus dem XAML
+        if ($Running) {
+            $jt = "$($script:JobTitle)".Trim()
+            $tb = New-Object System.Windows.Controls.TextBlock
+            $tb.Text = $(if ($jt) { "Abbrechen: $jt" } else { "$($cancelBtn.Tag.Text)" }); $tb.TextTrimming = 'CharacterEllipsis'
+            $cancelBtn.Content = $tb
+            # Tooltip: der laufende Vorgang; gehoert er zu diesem Reiter, dazu der Hinweis aus dem XAML (z.B. "nach dem laufenden Programm")
+            # Vergleich ueber die Objekt-Identitaet (switch wuerde die Knoepfe als Text vergleichen, dann traefen mehrere Zweige zu)
+            $own = '^$'
+            if ([object]::ReferenceEquals($cancelBtn, $ui.btnCancel)) { $own = '^Backup$' } elseif ([object]::ReferenceEquals($cancelBtn, $ui.btnCancelRestore)) { $own = '^Restore$' } elseif ([object]::ReferenceEquals($cancelBtn, $ui.btnSbCancel)) { $own = '^(Server-Backup|VM-Export)$' } elseif ([object]::ReferenceEquals($cancelBtn, $ui.btnAuCancel)) { $own = '^App-Updates' }
+            $cancelBtn.ToolTip = $(if (-not $jt) { $cancelBtn.Tag.Tip } elseif ($jt -match $own) { "Laufenden Vorgang '$jt' abbrechen, wirkt aus jedem Reiter.`n$($cancelBtn.Tag.Tip)" } else { "Laufenden Vorgang '$jt' abbrechen (mit Rueckfrage), wirkt aus jedem Reiter." })
+            # die Breite begrenzt das XAML (MaxWidth = Breite des Startknopfs), langer Text wird mit ... gekuerzt
+        } else {
+            $cancelBtn.Content = $cancelBtn.Tag.Text; $cancelBtn.ToolTip = $cancelBtn.Tag.Tip
+        }
+        $cancelBtn.IsEnabled = $Running
+        $cancelBtn.Visibility = $(if ($Running) { 'Visible' } else { 'Collapsed' })
+        if ($startBtn) { $startBtn.Visibility = $(if ($Running) { 'Hidden' } else { 'Visible' }) }
+    }
     # mehrere Backups markiert: Restore/Geloeschte leeren bleiben gesperrt
     if (-not $Running -and (Get-Command Update-HMBackupMultiUi -ErrorAction SilentlyContinue)) { try { Update-HMBackupMultiUi } catch { } }
 }
@@ -1704,10 +1751,10 @@ function Start-EngineJob {
     $job = New-JobState
     $script:CurrentJob = $job
     $script:JobCtx = $Ctx
+    $script:JobTitle = $Title   # vor Set-JobUi: die Abbrechen-Knoepfe nennen den Vorgang
     Set-JobUi $true
     $ui.pbMain.Value = 0
     Set-Status "$Title ..." '#FFF9E2AF'
-    $script:JobTitle = $Title
     $script:JobOnFinished = $OnFinished
     $script:JobReport = $null   # Bericht des Vorgangs (fuer den Verlauf am Handy) - setzt OnFinished bei Bedarf
     try {
@@ -2086,8 +2133,8 @@ function Update-BackupList {
 function Update-RestoreTargetLabel {
     $p = Get-SelectedProfile
     $c = Get-TargetComputer
-    if (-not $p) { $ui.lblRestoreTarget.Text = "$c - kein Benutzer gewaehlt"; return }
-    $t = "$c \ $($p.Folder)"
+    if (-not $p) { $ui.lblRestoreTarget.Text = "$c`nBenutzer: keiner gewaehlt"; return }
+    $t = "$c`nBenutzer: $($p.Folder)"
     if ($p.NoProfile) { $t += "`n(noch kein Profil - Modul 'Windows-Einstellungen (USMT)' legt es an)" }
     if ($script:SelectedBackup -and $script:SelectedBackup.User -and ($script:SelectedBackup.User -ne $p.Folder)) { $t += "`nACHTUNG: Backup stammt von '$($script:SelectedBackup.User)'" }
     $ui.lblRestoreTarget.Text = $t
@@ -2108,7 +2155,7 @@ $ui.dgBackups.Add_SelectionChanged({
     Update-HMBackupMultiUi
     if (Test-HMBackupMulti) {
         $script:SelectedBackup = $null
-        $ui.lblRestoreInfo.Text = "$(@($ui.dgBackups.SelectedItems).Count) Backups markiert - 'Loeschen' gilt fuer alle markierten; Restore, Protokoll, Pruefen usw. brauchen genau ein markiertes Backup"
+        $ui.lblRestoreInfo.Text = "$(@($ui.dgBackups.SelectedItems).Count) Backups markiert - 'Loeschen' gilt fuer alle markierten; Restore, Bericht, Pruefen usw. brauchen genau ein markiertes Backup"
         Update-RestoreTargetLabel
         Update-HMExtraTargetsUi
         return
@@ -2125,13 +2172,10 @@ $ui.dgBackups.Add_SelectionChanged({
         $script:RestoreExtraIds = @(@($script:RestoreExtraIds) + $hidden | Where-Object { $_ } | Select-Object -Unique)
         Build-ModulePanel $ui.pnlRestoreModules $script:RestoreChecks -Restore -Extra $script:RestoreExtraIds
     }
-    foreach ($k in $script:RestoreChecks.Keys) {
-        $has = @($b.Modules) -contains $k
-        $script:RestoreChecks[$k].IsEnabled = $has
-        $script:RestoreChecks[$k].IsChecked = ($has -and $k -notin @('Info', 'Drivers', 'Tasks', 'PrintersFull'))
-    }
+    $absent = Set-HMRestoreModulesForBackup $b
     $txt = "Backup: $($b.Name)"
-    if ($b.Archived) { $txt += '  |  ARCHIV: wird nicht weitergefuehrt, nicht geloescht, _GELOESCHT bleibt erhalten' }
+    if ($absent) { $txt += "  |  $absent Module nicht in diesem Backup (ausgeblendet)" }
+    if ($b.Archived) { $txt += '  |  ARCHIV: kein fortlaufendes Backup schreibt mehr hinein, nicht geloescht, _GELOESCHT bleibt erhalten' }
     if ($b.Legacy) { $txt += '  |  Format der Vorgaengerversion' }
     if ($b.Manifest -and $b.Manifest.SourceOS) { $txt += "  |  Quelle: $($b.Manifest.SourceOS)" }
     if ($b.Manifest -and $b.Manifest.OneDriveFolders) { $txt += "  |  OneDrive-Ordner nicht enthalten" }
@@ -2170,7 +2214,10 @@ $ui.btnDeleteBackup.Add_Click({
     if (-not (Confirm-HMBackupNotInUse @("$($b.Path)") "$($b.Name)")) { return }
     # unvollstaendig bzw. "laeuft": z.B. ein geplantes Backup in einem anderen Prozess schreibt gerade hinein
     $runTxt = $(if ("$($b.Status)" -eq 'Running') { "`n`nACHTUNG: Dieses Backup ist unvollstaendig oder wird gerade geschrieben (z.B. von einem geplanten Backup)." } else { '' })
-    if (-not (Confirm-Action "Backup '$($b.Name)' endgueltig loeschen?$runTxt")) { return }
+    # Angaben wie in der Backup-Liste (markierte Zeile)
+    $det = @(); $rw = $ui.dgBackups.SelectedItem
+    if ($rw) { foreach ($pair in @(@('Datum', 'Datum'), @('Computer', 'PC'), @('Benutzer', 'Benutzer'), @('Groesse', 'Groesse'), @('Status', 'Status'))) { $v = "$($rw.($pair[0]))".Trim(); if ($v) { $det += "$($pair[1]): $v" } } }
+    if (-not (Confirm-Action "Backup '$($b.Name)' endgueltig loeschen?$(if ($det.Count) { "`n`n" + ($det -join "`n") })$runTxt" -Labels @{ Yes = 'Endgueltig loeschen'; No = 'Nicht loeschen' })) { return }
     Out-Console "Loesche $($b.Path) ..." 'Warning'
     Add-HMDeleting @("$($b.Path)")
     Invoke-AsyncCommand -ScriptBlock { param($eng, $p) . $eng; Remove-HMBackupFolder $p } -ArgumentList @($script:Engine, $b.Path) -TimeoutSec 3600 -State "$($b.Path)" -OnComplete {
@@ -2332,7 +2379,7 @@ $ui.btnRestore.Add_Click({
     if (-not $p) { Out-Console 'Bitte Zielbenutzer waehlen (oder DOMAENE\Benutzer eintragen).' 'Warning'; return }
     if ($p.NoProfile -and -not @($mods | Where-Object { $_.Id -eq 'Usmt' }).Count -and @($mods | Where-Object { $_.Scope -eq 'User' }).Count) {
         Out-Console "$($p.Account) hat an $comp noch kein Profil: Benutzer einmal anmelden lassen oder 'Windows-Einstellungen (USMT)' mitwaehlen." 'Warning'
-        if (-not (Confirm-Action "Ohne Profil werden nur die Computer-Module wiederhergestellt. Fortfahren?")) { return }
+        if (-not (Confirm-Action "$($p.Account) hat an $comp noch kein Profil. Ohne Profil werden nur die Computer-Module wiederhergestellt." -Labels @{ Yes = 'Nur Computer-Module'; No = 'Nicht starten' })) { return }
     }
     $msg = "Restore von`n  $($b.Name)`nnach`n  $comp \ $($p.Folder)`n`nModule: $(($mods | ForEach-Object { $_.Name }) -join ', ')"
     if ($b.User -and $b.User -ne $p.Folder) { $msg += "`n`nACHTUNG: anderer Benutzer als im Backup ($($b.User))!" }
@@ -2356,8 +2403,8 @@ $ui.btnRestore.Add_Click({
         $ut = @(Get-HMUntrustedBackupItems $b.Path $ctx.Modules)
         if ($ut.Count) {
             $own = @($ut | ForEach-Object { "$($_.Owner)" } | Select-Object -Unique) -join ', '
-            $um = "Dieses Backup wurde nicht von einem Administrator angelegt (Besitzer: $own).`n`nFolgende Teile laufen mit Adminrechten:`n$(@($ut | ForEach-Object { "  $($_.Name)" }) -join "`n")`n`nNur uebernehmen, wenn du dem Backup vertraust. Uebernehmen?`n`nNein = diese Teile auslassen, Rest wiederherstellen"
-            if ("$((Show-HMDialogBox -Owner $script:Window -Text $um -Title 'Restore - Backup pruefen' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" -ne 'Yes') {
+            $um = "Dieses Backup wurde nicht von einem Administrator angelegt (Besitzer: $own).`n`nFolgende Teile laufen mit Adminrechten:`n$(@($ut | ForEach-Object { "  $($_.Name)" }) -join "`n")`n`nNur uebernehmen, wenn du dem Backup vertraust. Ausgelassen wird nur dieser Teil, der Rest wird wiederhergestellt."
+            if ("$((Show-HMDialogBox -Owner $script:Window -Text $um -Title 'Restore - Backup pruefen' -Mode 'YesNo' -Icon 'Warning' -Default 'No' -Labels @{ Yes = 'Admin-Teile uebernehmen'; No = 'Admin-Teile auslassen' }))" -ne 'Yes') {
                 $ctx.SkipUntrustedMachine = @($ut | ForEach-Object { "$($_.Id)" })
                 Out-Console "Ausgelassen (Backup nicht von einem Administrator angelegt, Besitzer: $own): $(@($ut | ForEach-Object { $_.Name }) -join ', ')" 'Warning'
             } else { Out-Console "Backup-Besitzer $own - Uebernahme der Admin-Teile bestaetigt." 'Warning' }
@@ -2372,7 +2419,7 @@ $ui.btnRestore.Add_Click({
 function Start-RestoreJob([hashtable]$Ctx) {
     Start-EngineJob -Command 'Start-HMRestore -Ctx $Ctx -Job $Job' -Ctx $Ctx -Title 'Restore' -OnFinished {
         param($j)
-        if ($j.Result -and $j.Result.Report) { Out-Console "Protokoll: $($j.Result.Report)  (Knopf 'Protokoll')" 'Info' }
+        if ($j.Result -and $j.Result.Report) { Out-Console "Protokoll: $($j.Result.Report)  (Knopf 'Bericht')" 'Info' }
         Connect-Target
         if ($script:Settings.OverviewAuto -ne $false) { Update-HMBackupOverview -Quiet }
         if ($j.Result -and [int]$j.Result.MissingFiles -gt 0) { Out-Console "Kontrolle nach dem Restore: $([int]$j.Result.MissingFiles) Datei(en) aus dem Backup fehlen am Ziel - Liste: $($j.Result.MissingList)" 'Warning' }
@@ -2455,50 +2502,71 @@ function Test-HMToolStart($Tag) {
     if ("$($Tag.Kind)" -eq 'User') { Save-HMUserMemory }   # mit diesem Benutzer wird gearbeitet
     return $true
 }
+# Abschnitte folgen der Einstufung jedes Werkzeugs (Schalter von Add-ToolButton): ohne Schalter = gewaehlter PC ($tc, Diagnose $td),
+# -User = gewaehlter Benutzer ($tp), -NoTarget = mehrere PCs ($tm) oder ohne Ziel-PC ($tn). Ein Test prueft, dass beides zusammenpasst.
 $tc = $ui.pnlToolsComputer
-Add-ToolButton $tc 'Fernwartung aktivieren' 'BtnGreen' 'Am gewaehlten PC WinRM, Remotedesktop, SMB/C$, Remoteregistrierung und Firewall-Regeln aktivieren - Start ueber WMI (Port 135), auch wenn WinRM noch aus ist' { Start-HMEnableRemote }
-Add-ToolButton $tc 'Umbenennen' 'BtnPeach' 'Computernamen aendern (Domaenen-PC: Domaenen-Anmeldedaten), optional Neustart' { Start-HMRenameComputer } -Busy
-Add-ToolButton $tc 'IP-Adresse / DHCP' 'BtnPeach' 'Statische IP oder DHCP - wird als SYSTEM-Aufgabe am Ziel ausgefuehrt (Verbindungsabbruch egal)' { Start-HMNetworkConfig } -Busy
-Add-ToolButton $tc 'Lokale Gruppen' 'BtnBlue' 'Administratoren, Netzwerkkonfigurations-Operatoren, Remotedesktopbenutzer, Benutzer: anzeigen, hinzufuegen, entfernen' { Show-HMLocalGroups }
-Add-ToolButton $tc 'Autologon' 'BtnDefault' 'Automatische Anmeldung setzen/aufheben/anzeigen (Kennwort als LSA-Geheimnis)' { Start-HMAutologon }
-Add-ToolButton $tc 'Sperrbildschirm / Energie' 'BtnDefault' 'Links: Sperrbildschirm, automatisches Sperren, Bildschirm aus, Energiesparen, Schnellstart setzen | Rechts: aktuelle Werte' { Start-HMPowerSettings } { Show-HMPowerSettings }
-Add-ToolButton $tc 'Firewall / Netzwerkprofil' 'BtnDefault' 'Firewall-Profile und Netzwerkkategorie (Privat/Oeffentlich) anzeigen und aendern' { Show-HMFirewall }
-Add-ToolButton $tc 'Angemeldete Benutzer' 'BtnTeal' 'Wer ist angemeldet? Sitzungen abmelden (z.B. vor einem Backup)' { Show-HMSessions }
-Add-ToolButton $tc 'Nachricht senden' 'BtnTeal' 'Nachricht an alle angemeldeten Benutzer' { Start-HMMessage }
-Add-ToolButton $tc 'Neustart / Herunterfahren' 'BtnRed' 'Mit Wartezeit und Nachricht - oder geplanten Neustart abbrechen' { Start-HMShutdown } -Busy
+Add-ToolButton $tc 'Fernwartung aktivieren' 'BtnChange' 'Am gewaehlten PC WinRM, Remotedesktop, SMB/C$, Remoteregistrierung und Firewall-Regeln aktivieren - Start ueber WMI (Port 135), auch wenn WinRM noch aus ist' { Start-HMEnableRemote }
+Add-ToolButton $tc 'Umbenennen' 'BtnChange' 'Computernamen aendern (Domaenen-PC: Domaenen-Anmeldedaten), optional Neustart' { Start-HMRenameComputer } -Busy
+Add-ToolButton $tc 'IP-Adresse / DHCP' 'BtnChange' 'Statische IP oder DHCP - wird als SYSTEM-Aufgabe am Ziel ausgefuehrt (Verbindungsabbruch egal)' { Start-HMNetworkConfig } -Busy
+Add-ToolButton $tc 'Lokale Gruppen' 'BtnDefault' 'Administratoren, Netzwerkkonfigurations-Operatoren, Remotedesktopbenutzer, Benutzer: anzeigen, hinzufuegen, entfernen' { Show-HMLocalGroups }
+Add-ToolButton $tc 'Autologon' 'BtnChange' 'Automatische Anmeldung setzen/aufheben/anzeigen (Kennwort als LSA-Geheimnis)' { Start-HMAutologon }
+Add-ToolButton $tc 'Sperrbildschirm / Energie' 'BtnChange' 'Links: Sperrbildschirm, automatisches Sperren, Bildschirm aus, Energiesparen, Schnellstart setzen | Rechts: aktuelle Werte' { Start-HMPowerSettings } { Show-HMPowerSettings }
+Add-ToolButton $tc 'Firewall / Netzwerkprofil' 'BtnChange' 'Firewall-Profile und Netzwerkkategorie (Privat/Oeffentlich) anzeigen und aendern' { Show-HMFirewall }
+Add-ToolButton $tc 'Angemeldete Benutzer' 'BtnDefault' 'Wer ist angemeldet? Sitzungen abmelden (z.B. vor einem Backup)' { Show-HMSessions }
+Add-ToolButton $tc 'Nachricht senden' 'BtnDefault' 'Nachricht an alle angemeldeten Benutzer' { Start-HMMessage }
+Add-ToolButton $tc 'Neustart / Herunterfahren' 'BtnDanger' 'Mit Wartezeit und Nachricht - oder geplanten Neustart abbrechen' { Start-HMShutdown } -Busy
 Add-ToolButton $tc 'Netzwerktest' 'BtnDefault' 'Von diesem PC zum Ziel: DNS (vor/rueckwaerts), Ping, Ports 445/5985/135/3389, WinRM' { Start-HMNetTest }
-Add-ToolButton $tc 'Geraete (AD) / Mehrfach' 'BtnGreen' 'PCs aus dem Active Directory (Filter, OU) anhaken und Aktionen parallel ausfuehren: Online-Check, Fernwartung, Inventar, Autopilot, Uebermittlungsoptimierung, Aufraeumen, Software, GPUpdate, Intune, Nachricht, Neustart' { Show-HMMultiDialog } -NoTarget
-Add-ToolButton $tc 'Remote-PowerShell' 'BtnTeal' 'Links: PowerShell-Sitzung am gewaehlten PC (Enter-PSSession) | Rechts: CMD (winrs)' { Start-HMRemoteShell $false } { Start-HMRemoteShell $true }
+Add-ToolButton $tc 'Remote-PowerShell' 'BtnDefault' 'Links: PowerShell-Sitzung am gewaehlten PC (Enter-PSSession) | Rechts: CMD (winrs)' { Start-HMRemoteShell $false } { Start-HMRemoteShell $true }
 Add-ToolButton $tc 'Uebermittlungsoptimierung' 'BtnDefault' 'Delivery Optimization: Updates zwischen PCs im Netz teilen (LAN/Gruppe) - lokale Richtlinie setzen und Status anzeigen' { Start-HMDeliveryOpt }
-Add-ToolButton $tc 'Ordnerfreigaben' 'BtnBlue' 'Freigaben mit Freigabe- und NTFS-Rechten anzeigen, Freigaben aus einem Backup uebernehmen' { Show-HMShares }
-Add-ToolButton $tc 'USMT einrichten (ADK)' 'BtnDefault' 'User State Migration Tool aus dem Windows ADK nach BIN\USMT kopieren - ohne ADK: nur USMT still installieren' { Start-HMUsmtSetup } -NoTarget
-Add-ToolButton $tc 'Inventar (mehrere PCs)' 'BtnMauve' 'Links: Hardware, Windows, BitLocker, TPM, IP/MAC mehrerer PCs parallel (WinRM) - Tabelle + CSV im Backup-Ordner\Inventar | Rechts: zusaetzlich installierte Software' { Start-HMInventory $false } { Start-HMInventory $true } -NoTarget
-Add-ToolButton $tc 'BitLocker-Schluessel' 'BtnBlue' 'Status und Schluesselschutz aller Laufwerke, Wiederherstellungskennwort in AD oder Entra ID sichern' { Show-HMBitLockerKeys }
+Add-ToolButton $tc 'Ordnerfreigaben' 'BtnDefault' 'Freigaben mit Freigabe- und NTFS-Rechten anzeigen, Freigaben aus einem Backup uebernehmen' { Show-HMShares }
+Add-ToolButton $tc 'BitLocker-Schluessel' 'BtnDefault' 'Status und Schluesselschutz aller Laufwerke, Wiederherstellungskennwort in AD oder Entra ID sichern' { Show-HMBitLockerKeys }
 Add-ToolButton $tc 'Autopilot-Hash' 'BtnDefault' 'Hardware-Hash fuer Intune/Autopilot als CSV (Backup-Ordner\Autopilot) - ist HUPilot eingetragen, auf Wunsch auch an HUPilot uebergeben' { Start-HMAutopilotHash }
-Add-ToolButton $tc 'HUPilot ...' 'BtnDefault' 'Links: HUPilot-Setup an diesem PC oeffnen (Autopilot per USB-Stick - eigenes Werkzeug; noch nicht eingetragen: suchen oder Anleitung) | Rechts: HUPilot-Ordner neu waehlen' { Start-HMHUPilot } { Start-HMHUPilot -Choose } -NoTarget
 Add-ToolButton $tc 'Wake-on-LAN' 'BtnDefault' 'PC aufwecken (MAC aus Inventar/Backup) - optional ueber einen PC im Zielnetz senden' { Start-HMWakeOnLan }
-Add-ToolButton $tc 'Laufwerke (C$)' 'BtnBlue' 'Links: Laufwerk C: des gewaehlten PCs im Explorer oeffnen (remote \\PC\C$) | Rechts: Laufwerk oder Freigabe waehlen - auch USB-Sticks am Remote-PC. Der angemeldete Windows-Benutzer braucht Adminrechte am Ziel-PC.' { Open-HMAdminShare } { Show-HMDriveMenu }
+Add-ToolButton $tc 'Laufwerke (C$)' 'BtnDefault' 'Links: Laufwerk C: des gewaehlten PCs im Explorer oeffnen (remote \\PC\C$) | Rechts: Laufwerk oder Freigabe waehlen - auch USB-Sticks am Remote-PC. Der angemeldete Windows-Benutzer braucht Adminrechte am Ziel-PC.' { Open-HMAdminShare } { Show-HMDriveMenu }
+Add-ToolButton $tc 'Profil zurueckholen' 'BtnChange' 'Erneuerte Profile anzeigen und das alte Profil wiederherstellen (Test-Profil wird beiseitegelegt)' { Show-HMProfileRestore } -Busy
+Add-ToolButton $tc 'Aufgaben aus Backup importieren' 'BtnChange' 'Geplante Aufgaben aus dem im Reiter Restore markierten Backup einzeln importieren' { Show-HMTaskImport }
+Add-ToolButton $tc 'Alte Profile loeschen' 'BtnDanger' 'Alle Profile mit letzter Anmeldung anzeigen, markierte sauber loeschen (Ordner + Registry)' { Show-HMOldProfiles } -Busy
+Add-ToolButton $tc 'Wichtige Dateien suchen' 'BtnDefault' 'PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche finden und als Zusaetzliche Ordner aufnehmen' { Start-HMFileSearch }
+$tm = $ui.pnlToolsMulti
+Add-ToolButton $tm 'Geraete (AD) / Mehrfach' 'BtnDefault' 'PCs aus dem Active Directory (Filter, OU) anhaken und Aktionen parallel ausfuehren: Online-Check, Fernwartung, Inventar, Autopilot, Uebermittlungsoptimierung, Aufraeumen, Software, GPUpdate, Intune, Nachricht, Neustart' { Show-HMMultiDialog } -NoTarget
+Add-ToolButton $tm 'Inventar (mehrere PCs)' 'BtnDefault' 'Links: Hardware, Windows, BitLocker, TPM, IP/MAC mehrerer PCs parallel (WinRM) - Tabelle + CSV im Backup-Ordner\Inventar | Rechts: zusaetzlich installierte Software' { Start-HMInventory $false } { Start-HMInventory $true } -NoTarget
 $tp = $ui.pnlToolsProfile
-Add-ToolButton $tp 'Profil erneuern (Test)' 'BtnPeach' 'Profilordner umbenennen + Registry-Eintrag sichern/entfernen: Benutzer bekommt beim Anmelden ein frisches Profil (z.B. bei defektem Profil). Rueckgaengig: Profil zurueckholen' { Start-HMProfileRenew } -Busy -User
-Add-ToolButton $tp 'Profil zurueckholen' 'BtnGreen' 'Erneuerte Profile anzeigen und das alte Profil wiederherstellen (Test-Profil wird beiseitegelegt)' { Show-HMProfileRestore } -Busy
-Add-ToolButton $tp 'Profilordner umbenennen' 'BtnDefault' 'Ordnernamen des Profils aendern (z.B. nach Namensaenderung) und ProfileList anpassen' { Start-HMProfileRename } -Busy -User
-Add-ToolButton $tp 'Profil anderem Konto zuweisen' 'BtnMauve' 'Profil bleibt am Ort und gehoert danach einem anderen Konto (z.B. Domaene -> lokal): Rechte, Registry, ProfileList' { Start-HMProfileAssign } -Busy -User
-Add-ToolButton $tp 'Windows-Apps neu registrieren' 'BtnDefault' 'Store-Apps, Startmenue, Einstellungen reparieren - im Kontext des Benutzers (sofort oder bei Anmeldung)' { Start-HMAppxReregister } -User
+Add-ToolButton $tp 'Profil erneuern (Test)' 'BtnChange' 'Profilordner umbenennen + Registry-Eintrag sichern/entfernen: Benutzer bekommt beim Anmelden ein frisches Profil (z.B. bei defektem Profil). Rueckgaengig: Profil zurueckholen' { Start-HMProfileRenew } -Busy -User
+Add-ToolButton $tp 'Profilordner umbenennen' 'BtnChange' 'Ordnernamen des Profils aendern (z.B. nach Namensaenderung) und ProfileList anpassen' { Start-HMProfileRename } -Busy -User
+Add-ToolButton $tp 'Profil anderem Konto zuweisen' 'BtnChange' 'Profil bleibt am Ort und gehoert danach einem anderen Konto (z.B. Domaene -> lokal): Rechte, Registry, ProfileList' { Start-HMProfileAssign } -Busy -User
+Add-ToolButton $tp 'Windows-Apps neu registrieren' 'BtnChange' 'Store-Apps, Startmenue, Einstellungen reparieren - im Kontext des Benutzers (sofort oder bei Anmeldung)' { Start-HMAppxReregister } -User
 Add-ToolButton $tp 'Gruppenrichtlinien-Ergebnis' 'BtnDefault' 'gpresult als HTML fuer PC + gewaehlten Benutzer' { Start-HMGpResult } -User
-Add-ToolButton $tp 'Aufgaben aus Backup importieren' 'BtnDefault' 'Geplante Aufgaben aus dem im Reiter Restore markierten Backup einzeln importieren' { Show-HMTaskImport }
-Add-ToolButton $tp 'Alte Profile loeschen' 'BtnRed' 'Alle Profile mit letzter Anmeldung anzeigen, markierte sauber loeschen (Ordner + Registry)' { Show-HMOldProfiles } -Busy
-Add-ToolButton $tp 'Wichtige Dateien suchen' 'BtnPeach' 'PST, KeePass, Access, OneNote, CAD ... ausserhalb der gesicherten Bereiche finden und als Zusaetzliche Ordner aufnehmen' { Start-HMFileSearch }
-Add-ToolButton $tp 'Datenbanken suchen' 'BtnPeach' 'Lokale Datenbanken (SQLite, Access, KeePass, SQL Server, Firebird ...) und Datenbank-Dienste am PC finden - als Zusaetzliche Ordner oder als Katalog-Eintrag uebernehmen (Programm wird dann vor dem Backup geschlossen)' { Start-HMDbSearch } -User
-Add-ToolButton $tp 'Im Backup suchen' 'BtnTeal' 'Dateien im markierten Backup suchen und einzeln herauskopieren' { Start-HMBackupSearch } -NoTarget
+Add-ToolButton $tp 'Datenbanken suchen' 'BtnDefault' 'Lokale Datenbanken (SQLite, Access, KeePass, SQL Server, Firebird ...) und Datenbank-Dienste am PC finden - als Zusaetzliche Ordner oder als Katalog-Eintrag uebernehmen (Programm wird dann vor dem Backup geschlossen)' { Start-HMDbSearch } -User
 $td = $ui.pnlToolsDiag
-Add-ToolButton $td 'Ereignisse (Fehler)' 'BtnBlue' 'Links: Fehler der letzten 3 Tage | Rechts: 14 Tage inkl. Warnungen' { Show-HMEventLog 3 $false } { Show-HMEventLog 14 $true }
+Add-ToolButton $td 'Ereignisse (Fehler)' 'BtnDefault' 'Links: Fehler der letzten 3 Tage | Rechts: 14 Tage inkl. Warnungen' { Show-HMEventLog 3 $false } { Show-HMEventLog 14 $true }
 Add-ToolButton $td 'Akku-Bericht' 'BtnDefault' 'Ladestand, Akku-Zustand in %, Ladezyklen + ausfuehrlicher Windows-Akku-Bericht (HTML)' { Start-HMBatteryReport }
 Add-ToolButton $td 'Aktivierung' 'BtnDefault' 'Windows- und Office-Lizenzstatus (KMS, Abo)' { Show-HMActivation }
 Add-ToolButton $td 'Entra ID / Intune' 'BtnDefault' 'Links: Status (dsregcmd, MDM-Registrierung) | Rechts: Intune-Synchronisierung anstossen' { Start-HMIntune $false } { Start-HMIntune $true }
 Add-ToolButton $td 'Domaene / Zeit / Kerberos' 'BtnDefault' 'Vertrauensstellung pruefen/reparieren, Zeit synchronisieren, Kerberos-Tickets des Computers leeren' { Start-HMDomainRepair }
-Add-ToolButton $td 'Druckwarteschlange leeren' 'BtnDefault' 'Druckspooler stoppen, haengende Auftraege loeschen, neu starten' { Start-HMSpoolerReset }
-Add-ToolButton $td 'Speicher aufraeumen' 'BtnPeach' 'Temp, Windows-Update-Cache, Fehlerberichte, Papierkorb, Komponentenspeicher - mit Anzeige des freigegebenen Platzes' { Start-HMCleanup }
-Add-ToolButton $td 'Systemdateien reparieren' 'BtnPeach' 'Links: DISM /RestoreHealth + SFC /scannow im Hintergrund starten | Rechts: Status/Ergebnis' { Start-HMSystemRepair $false } { Start-HMSystemRepair $true }
+Add-ToolButton $td 'Druckwarteschlange leeren' 'BtnChange' 'Druckspooler stoppen, haengende Auftraege loeschen, neu starten' { Start-HMSpoolerReset }
+Add-ToolButton $td 'Speicher aufraeumen' 'BtnChange' 'Temp, Windows-Update-Cache, Fehlerberichte, Papierkorb, Komponentenspeicher - mit Anzeige des freigegebenen Platzes' { Start-HMCleanup }
+Add-ToolButton $td 'Systemdateien reparieren' 'BtnChange' 'Links: DISM /RestoreHealth + SFC /scannow im Hintergrund starten | Rechts: Status/Ergebnis' { Start-HMSystemRepair $false } { Start-HMSystemRepair $true }
+$tn = $ui.pnlToolsNoTarget
+Add-ToolButton $tn 'USMT einrichten (ADK)' 'BtnChange' 'User State Migration Tool aus dem Windows ADK nach BIN\USMT kopieren - ohne ADK: nur USMT still installieren' { Start-HMUsmtSetup } -NoTarget
+Add-ToolButton $tn 'HUPilot ...' 'BtnDefault' 'Links: HUPilot-Setup an diesem PC oeffnen (Autopilot per USB-Stick - eigenes Werkzeug; noch nicht eingetragen: suchen oder Anleitung) | Rechts: HUPilot-Ordner neu waehlen' { Start-HMHUPilot } { Start-HMHUPilot -Choose } -NoTarget
+Add-ToolButton $tn 'Im Backup suchen' 'BtnDefault' 'Dateien im markierten Backup suchen und einzeln herauskopieren' { Start-HMBackupSearch } -NoTarget
+# die drei Ordner-Knoepfe aus dem XAML (Benutzerbezug) stehen am Ende des Benutzer-Abschnitts
+foreach ($b in @($ui.btnToolUserAppData, $ui.btnToolUserStartup, $ui.btnToolProfileFolder)) { if ($b) { [void]$tp.Children.Remove($b); [void]$tp.Children.Add($b) } }
+# Ueberschriften der Werkzeug-Abschnitte nennen PC und Benutzer, auf die die Knoepfe wirken (nach Verbinden, Umschalten, Benutzerwahl)
+function Update-HMToolHeads {
+    if (-not $ui.lblToolsPc) { return }
+    $pc = $(if ($script:UserMode) { $env:COMPUTERNAME } else { Get-HMTargetCaption })
+    $acc = ''
+    try { $sp = Get-SelectedProfile; if ($sp -and "$($sp.Account)") { $acc = "$($sp.Account)" } } catch { }
+    if (-not $acc) { $acc = "$($ui.cmbUser.Text)".Trim() }
+    $ui.lblToolsPc.Text = "GEWAEHLTER PC: $pc"
+    $ui.lblToolsDiag.Text = "DIAGNOSE UND WARTUNG: $pc"
+    $ui.lblToolsSoft.Text = "SOFTWARE UND TREIBER: $pc"
+    $ui.lblToolsUser.Text = $(if ($acc) { "GEWAEHLTER BENUTZER: $acc auf $pc" } else { "GEWAEHLTER BENUTZER: keiner gewaehlt (auf $pc)" })
+    # Bezug im Reiter Backup, direkt ueber dem Startknopf
+    if ($ui.lblScopeBackup) { $ui.lblScopeBackup.Text = $(if ($acc) { "Sichert $acc von $pc" } else { "Kein Benutzer gewaehlt - oben einen Benutzer waehlen." }) }
+}
+Update-HMToolHeads
 $sysTools = @(
     @('Taskmanager', 'taskmgr.exe', ''), @('Autostart-Apps', 'ms-settings:startupapps', ''), @('Netzwerkadapter', 'ncpa.cpl', ''),
     @('Systemsteuerung', 'control.exe', ''), @('Verwaltung', 'control.exe', 'admintools'), @('Firewall', 'firewall.cpl', ''),
@@ -2531,11 +2599,12 @@ foreach ($t in $sysTools) {
     [void]$ui.pnlSysTools.Children.Add($b)
 }
 $bx = New-Object System.Windows.Controls.Button
-$bx.Content = '.exe als Admin starten'; $bx.Style = $script:Window.FindResource('BtnMauve')
+$bx.Content = '.exe als Admin starten'; $bx.Style = $script:Window.FindResource('BtnDefault')
+$bx.ToolTip = 'Programm, Installer oder Skript (.exe, .msi, .cmd, .bat) waehlen und an diesem PC als Administrator starten'
 $bx.Add_Click({ $d = New-Object Microsoft.Win32.OpenFileDialog; $d.Filter = 'Programme (*.exe;*.msi;*.cmd;*.bat)|*.exe;*.msi;*.cmd;*.bat'; if ($d.ShowDialog() -eq $true) { Start-Process -FilePath $d.FileName -Verb RunAs } })
 [void]$ui.pnlSysTools.Children.Add($bx)
 $bc = New-Object System.Windows.Controls.Button
-$bc.Content = 'Alle offenen Programme schliessen'; $bc.Style = $script:Window.FindResource('BtnRed')
+$bc.Content = 'Alle offenen Programme schliessen'; $bc.Style = $script:Window.FindResource('BtnDanger')
 $bc.ToolTip = 'Schliesst alle Programme mit Fenster ohne Rueckfrage (ausser PowerShell/HUMig) - z.B. vor einem lokalen Backup'
 $bc.Add_Click({
     if (-not (Confirm-Action 'Alle Programme mit Fenster OHNE Rueckfrage schliessen (nicht gespeicherte Daten gehen verloren)?')) { return }
@@ -2593,7 +2662,7 @@ $ui.pnlLinks.Children.Clear()
 foreach ($l in @($script:Settings.Links)) {
     if (-not $l.Name -or -not $l.Url) { continue }
     $b = New-Object System.Windows.Controls.Button
-    $b.Content = $l.Name; $b.Style = $script:Window.FindResource('BtnTeal')
+    $b.Content = $l.Name; $b.Style = $script:Window.FindResource('BtnDefault')
     $b.ToolTip = "$($l.Url)"
     $b.Tag = @("$($l.Url)", [bool]$l.CopySerial)
     $b.Add_Click({
@@ -3008,48 +3077,156 @@ function Get-HMSignTokenOrPrompt($Cfg) {
     try { New-Item -ItemType Directory -Path (Split-Path $f -Parent) -Force | Out-Null; $c | Export-Clixml -Path $f -Force } catch { Out-Console "Token nicht gespeichert: $($_.Exception.Message)" 'Warning' }
     return $tok
 }
+#region HMSign - reine Funktionen fuer "Release signieren" (ohne Fenster testbar, .github\tests\Signieren.Tests.ps1)
+# Eine Zeile je Release fuer die Bestaetigung: Ergebnis des Abgleichs der Pruefsummen-Datei mit dem lokalen Stand
+function Get-HMSignCheckLine([string]$Tag, $Check) {
+    if (-not $Check) { return "${Tag}: nicht abgeglichen" }
+    switch ("$($Check.State)") {
+        'gleich' { return "${Tag}: gleich wie der lokale Stand" }
+        'abweichend' { return "${Tag}: WEICHT vom lokalen Stand ab ($(@($Check.Diff).Count) Datei(en))" }
+    }
+    $why = "$($Check.Text)".Trim()
+    # Ordner des lokalen Stands am Ende weglassen: letzte " (" vor einem Pfad (Laufwerk oder \\), Klammern im Pfad
+    # wie "Program Files (x86)" bleiben dabei Teil des weggelassenen Ordners
+    if ($why.EndsWith(')')) {
+        $ms = [regex]::Matches($why, '\s\((?=[A-Za-z]:\\|\\\\)')
+        if ($ms.Count) { $why = $why.Substring(0, $ms[$ms.Count - 1].Index).TrimEnd() }
+    }
+    if ($why -match '^nicht mit lokalem Stand abgeglichen, (.+)$') { return "${Tag}: nicht abgeglichen, $($Matches[1])" }
+    if ($why -match '^nicht abgleichbar: (.+)$') { $why = $Matches[1] }
+    return "${Tag}: nicht abgeglichen: $(if ($why) { $why } else { 'unbekannter Grund' })"
+}
+# Abgleich je Release aus dem Ergebnis des Hintergrundlaufs. Fehlt er (Fehler, Zeitgrenze), gilt das Release als nicht abgeglichen
+# und wird wie bisher signiert - der Abgleich verhindert das Signieren nie.
+function Get-HMSignChecks([string[]]$Tags, $Result) {
+    $why = ''
+    if (-not $Result) { $why = 'keine Antwort' }
+    elseif ($Result -is [string]) { $why = "$Result" -replace '^FEHLER:\s*', '' }
+    elseif ("$($Result.Err)") { $why = "$($Result.Err)" }
+    $by = @{}
+    if (-not $why) { foreach ($c in @($Result.Checks | Where-Object { $_ -and "$($_.Tag)" })) { $by["$($c.Tag)"] = $c } }
+    return @(foreach ($tg in @($Tags | Where-Object { $_ })) {
+        if ($by.ContainsKey($tg)) { $by[$tg] }
+        else { [pscustomobject]@{ Tag = $tg; State = 'Fehler'; Text = $(if ($why) { $why } else { 'kein Ergebnis' }); Diff = @() } }
+    })
+}
+# Was gefragt und was signiert wird. Mismatch: Releases mit gleicher Version und anderem Inhalt (nur dann zweite Rueckfrage).
+function Get-HMSignPlan([string[]]$Tags, $Checks) {
+    $tags = @($Tags | Where-Object { $_ })
+    $by = @{}; foreach ($c in @($Checks | Where-Object { $_ })) { $by["$($c.Tag)"] = $c }
+    $lines = @(foreach ($tg in $tags) { Get-HMSignCheckLine $tg $by[$tg] })
+    $bad = @(foreach ($tg in $tags) { if ($by.ContainsKey($tg) -and "$($by[$tg].State)" -eq 'abweichend') { $by[$tg] } })
+    $confirm = "Diese Releases jetzt mit deinem Zertifikat signieren?`n`n$($lines -join "`n")`n`nDanach werden sie allen HUMig-Installationen als Update angeboten (je nach Kanal Stabil/Test)."
+    $mis = ''
+    if ($bad.Count) {
+        $det = @(foreach ($b in $bad) {
+            $dl = @($b.Diff)
+            "$($b.Tag):`n" + (@($dl | Select-Object -First 8 | ForEach-Object { "   $_" }) -join "`n") + $(if ($dl.Count -gt 8) { "`n   ... und $($dl.Count - 8) weitere" } else { '' })
+        })
+        $mis = "Die Pruefsummen-Datei auf GitHub weicht bei gleicher Version vom lokalen Stand ab:`n`n$($det -join "`n`n")`n`nTrotzdem signieren? Die Signatur bestaetigt dann den Stand auf GitHub, nicht deinen lokalen.`n`nJa = trotzdem signieren`nNein = diese Releases auslassen, die anderen signieren"
+    }
+    return [pscustomobject]@{ Tags = $tags; Lines = $lines; ConfirmText = $confirm; Mismatch = @($bad | ForEach-Object { "$($_.Tag)" }); MismatchText = $mis }
+}
+# Antwort auf die zweite Rueckfrage -> Parameter fuer Invoke-HMReleaseSigning, ausgelassene und zu signierende Releases.
+# OnMismatch 'Sign' NUR nach ausdruecklichem Ja in der zweiten Rueckfrage, sonst 'Skip': findet erst der Signier-Lauf eine echte
+# Abweichung (Abgleich vorher gescheitert, Datei inzwischen ersetzt), wird dieses Release nicht ohne Rueckfrage signiert.
+# 'Skip' laesst dort nur wirklich abweichende aus (gleiche Version, anderer Inhalt), nicht abgleichbare werden signiert.
+# SignTags ist nie leer, wenn signiert wird: leer heisst "nichts signieren" (eine leere Liste wuerde in Core-Update ALLE
+# unsignierten Releases signieren).
+function Get-HMSignDecision($Plan, [string]$Answer) {
+    $skip = @()
+    $mode = $(if (@($Plan.Mismatch).Count -and $Answer -eq 'Yes') { 'Sign' } else { 'Skip' })
+    if ($mode -eq 'Skip') { $skip = @($Plan.Mismatch) }
+    $sign = @(@($Plan.Tags) | Where-Object { $_ -and $skip -notcontains $_ })
+    return [pscustomobject]@{ OnMismatch = $mode; Skipped = $skip; SignTags = $sign }
+}
+# Zeile je Ergebnis des Signier-Laufs: erst dort erkannte Abweichung ist kein Fehler, sondern ein Hinweis mit dem naechsten Schritt
+function Get-HMSignResultLine($Item) {
+    if ($Item.Ok) { return [pscustomobject]@{ Text = "$($Item.Tag): $($Item.Text)"; Level = 'Success' } }
+    if ("$($Item.Text)" -match '^nicht signiert: weicht vom lokalen Stand') { return [pscustomobject]@{ Text = "$($Item.Tag): weicht ab, nicht signiert: Release signieren erneut starten, dann kommt die Rueckfrage"; Level = 'Info' } }
+    return [pscustomobject]@{ Text = "$($Item.Tag): $($Item.Text)"; Level = 'Error' }
+}
+#endregion HMSign
+# Merkmal "Signieren laeuft": ein zweiter Klick startet keinen zweiten Ablauf. Jeder Ausgang setzt es zurueck (Stop-HMSigning).
+$script:SignBusy = $false
+function Stop-HMSigning { $script:SignBusy = $false }
 function Start-HMReleaseSigning {
     if ($script:JobRunning) { Out-Console 'Waehrend eines Backups/Restores nicht moeglich.' 'Warning'; return }
+    if ($script:SignBusy) { Out-Console 'Signieren laeuft bereits - bitte warten, bis der laufende Ablauf fertig ist.' 'Warning'; return }
     $cfg = Get-HMUpdateConfig $script:ConfigDir
     if (-not (Get-HMSigningCert $cfg.SignerThumbprint)) { Out-Console "Signatur-Zertifikat $($cfg.SignerThumbprint) mit privatem Schluessel ist auf diesem PC nicht vorhanden." 'Error'; return }
     $tok = Get-HMSignTokenOrPrompt $cfg
     if (-not $tok) { return }
-    $script:SignCtx = [pscustomobject]@{ Owner = $cfg.Owner; Repo = $cfg.Repo; Thumb = $cfg.SignerThumbprint; Token = $tok }
+    # ohne Hintergrund-Pool kehrt Invoke-AsyncCommand sofort zurueck (kein OnComplete) - das Merkmal bliebe sonst haengen
+    if (-not $script:RunspacePool) { Out-Console 'Signieren nicht moeglich: Hintergrundlaeufe sind nicht bereit - HUMig neu starten.' 'Error'; return }
+    $script:SignBusy = $true
+    # Kontext je Lauf (State der Hintergrundlaeufe), kein gemeinsamer Zustand zwischen zwei Starts
+    $ctx = [pscustomobject]@{ Owner = $cfg.Owner; Repo = $cfg.Repo; Thumb = $cfg.SignerThumbprint; Token = $tok; Tags = @(); Releases = @() }
     Out-Console 'Releases ohne Signatur werden gesucht ...' 'Info'
-    Invoke-AsyncCommand -ScriptBlock {
-        param($lib, $tok, $owner, $repo)
-        try {
-            . $lib
-            try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
-            $l = @(Get-HMReleases $owner $repo $tok | Where-Object { $_.ManifestUrl -and -not $_.SignatureUrl })
-            return [pscustomobject]@{ Tags = @($l | ForEach-Object { "$($_.Tag)" }); Err = '' }
-        } catch { return [pscustomobject]@{ Tags = @(); Err = "$($_.Exception.Message)" } }
-    } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $tok, $cfg.Owner, $cfg.Repo) -TimeoutSec 40 -OnComplete {
-        param($r)
-        if (-not $r -or $r -is [string] -or $r.Err) { Out-Console "Releases nicht lesbar: $(if ($r -is [string]) { $r } else { $r.Err })" 'Error'; return }
-        $tags = @($r.Tags | Where-Object { $_ })
-        if (-not $tags.Count) { Out-Console 'Alle Releases mit Pruefsumme sind bereits signiert.' 'Success'; return }
-        if (-not (Confirm-Action "Diese Releases jetzt mit deinem Zertifikat signieren?`n`n$($tags -join ', ')`n`nDanach werden sie allen HUMig-Installationen als Update angeboten (je nach Kanal Stabil/Test)." 'Release signieren')) { return }
-        Out-Console "Signiere $($tags -join ', ') ..." 'Info'
-        $sc = $script:SignCtx
+    try {
         Invoke-AsyncCommand -ScriptBlock {
-            param($lib, $owner, $repo, $tp, $tok, $tags)
-            try { . $lib; return [pscustomobject]@{ Items = @(Invoke-HMReleaseSigning $owner $repo $tp $tok $tags); Err = '' } }
-            catch { return [pscustomobject]@{ Items = @(); Err = "$($_.Exception.Message)" } }
-        } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $sc.Owner, $sc.Repo, $sc.Thumb, $sc.Token, [string[]]$tags) -TimeoutSec 180 -OnComplete {
-            param($res)
-            $script:SignCtx = $null
-            if (-not $res -or $res -is [string] -or $res.Err) { Out-Console "Signieren fehlgeschlagen: $(if ($res -is [string]) { $res } else { $res.Err })" 'Error'; return }
-            $items = @($res.Items | Where-Object { $_ })
-            foreach ($x in $items) { Out-Console "$($x.Tag): $($x.Text)" $(if ($x.Ok) { 'Success' } else { 'Error' }) }
-            if (@($items | Where-Object { -not $_.Ok -and "$($_.Text)" -match 'Schreibrecht' }).Count) {
-                Remove-Item -LiteralPath (Get-HMSignTokenFile) -Force -ErrorAction SilentlyContinue
-                Out-Console 'Gespeicherter Schreib-Token geloescht - beim naechsten Signieren neu eingeben.' 'Warning'
-            }
-            if (@($items | Where-Object { $_.Ok }).Count) { Out-Console 'Naechster Schritt: testen, dann Rechtsklick auf Update > Release freigeben.' 'Info' }
-            Invoke-UpdateCheck -Force
+            param($lib, $tok, $owner, $repo)
+            try {
+                . $lib
+                try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+                $l = @(Get-HMReleases $owner $repo $tok | Where-Object { $_.ManifestUrl -and -not $_.SignatureUrl })
+                return [pscustomobject]@{ Tags = @($l | ForEach-Object { "$($_.Tag)" }); Releases = $l; Err = '' }
+            } catch { return [pscustomobject]@{ Tags = @(); Releases = @(); Err = "$($_.Exception.Message)" } }
+        } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $tok, $cfg.Owner, $cfg.Repo) -TimeoutSec 40 -State $ctx -OnComplete {
+            param($r, $ctx)
+            try {
+                if (-not $r -or $r -is [string] -or $r.Err) { Out-Console "Releases nicht lesbar: $(if ($r -is [string]) { $r } else { $r.Err })" 'Error'; Stop-HMSigning; return }
+                $tags = @($r.Tags | Where-Object { $_ })
+                if (-not $tags.Count) { Out-Console 'Alle Releases mit Pruefsumme sind bereits signiert.' 'Success'; Stop-HMSigning; return }
+                $ctx.Tags = $tags; $ctx.Releases = @($r.Releases)
+                # Abgleich mit dem lokalen Stand als eigener Lauf mit eigener Zeitgrenze (je Release eine Pruefsummen-Datei):
+                # scheitert er oder dauert er zu lange, wird wie bisher signiert ("nicht abgeglichen")
+                Out-Console 'Pruefsummen-Dateien werden mit dem lokalen Stand abgeglichen ...' 'Info'
+                Invoke-AsyncCommand -ScriptBlock {
+                    param($lib, $tok, $rels)
+                    try {
+                        . $lib
+                        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+                        return [pscustomobject]@{ Checks = @(Get-HMReleaseSignCheck $rels $tok); Err = '' }
+                    } catch { return [pscustomobject]@{ Checks = @(); Err = "$($_.Exception.Message)" } }
+                } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $ctx.Token, @($ctx.Releases)) -TimeoutSec ([Math]::Min(300, 30 + 30 * $tags.Count)) -State $ctx -OnComplete {
+                    param($cr, $ctx)
+                    try {
+                        $plan = Get-HMSignPlan $ctx.Tags (Get-HMSignChecks $ctx.Tags $cr)
+                        if (-not (Confirm-Action $plan.ConfirmText 'Release signieren')) { Stop-HMSigning; return }
+                        $ans = ''
+                        if (@($plan.Mismatch).Count) { $ans = "$((Show-HMDialogBox -Owner $script:Window -Text $plan.MismatchText -Title 'Release signieren' -Mode 'YesNo' -Icon 'Warning' -Default 'No'))" }
+                        $dec = Get-HMSignDecision $plan $ans
+                        # ausgelassene Releases sind kein Fehler (Hinweis) und gehen gar nicht erst an den Signier-Lauf
+                        if (-not @($dec.SignTags).Count) {
+                            Out-Console "Nichts signiert: $(@($dec.Skipped) -join ', ') ausgelassen (weicht vom lokalen Stand ab)." 'Info'
+                            Stop-HMSigning; return
+                        }
+                        if (@($dec.Skipped).Count) { Out-Console "Ausgelassen (weicht vom lokalen Stand ab): $(@($dec.Skipped) -join ', ')" 'Info' }
+                        Out-Console "Signiere $(@($dec.SignTags) -join ', ') ..." 'Info'
+                        Invoke-AsyncCommand -ScriptBlock {
+                            param($lib, $owner, $repo, $tp, $tok, $tags, $onMis)
+                            try { . $lib; return [pscustomobject]@{ Items = @(Invoke-HMReleaseSigning $owner $repo $tp $tok $tags -OnMismatch $onMis); Err = '' } }
+                            catch { return [pscustomobject]@{ Items = @(); Err = "$($_.Exception.Message)" } }
+                        } -ArgumentList @((Join-Path $script:AppRoot 'Functions\Core-Update.ps1'), $ctx.Owner, $ctx.Repo, $ctx.Thumb, $ctx.Token, [string[]]@($dec.SignTags), $dec.OnMismatch) -TimeoutSec 180 -State $ctx -OnComplete {
+                            param($res, $ctx)
+                            try {
+                                if (-not $res -or $res -is [string] -or $res.Err) { Out-Console "Signieren fehlgeschlagen: $(if ($res -is [string]) { $res } else { $res.Err })" 'Error'; return }
+                                $items = @($res.Items | Where-Object { $_ })
+                                foreach ($x in $items) { $ln = Get-HMSignResultLine $x; Out-Console $ln.Text $ln.Level }
+                                if (@($items | Where-Object { -not $_.Ok -and "$($_.Text)" -match 'Schreibrecht' }).Count) {
+                                    Remove-Item -LiteralPath (Get-HMSignTokenFile) -Force -ErrorAction SilentlyContinue
+                                    Out-Console 'Gespeicherter Schreib-Token geloescht - beim naechsten Signieren neu eingeben.' 'Warning'
+                                }
+                                if (@($items | Where-Object { $_.Ok }).Count) { Out-Console 'Naechster Schritt: testen, dann Rechtsklick auf Update > Release freigeben.' 'Info' }
+                                Invoke-UpdateCheck -Force
+                            } finally { Stop-HMSigning }
+                        }
+                    } catch { Out-Console "Signieren: $($_.Exception.Message)" 'Error'; Stop-HMSigning }
+                }
+            } catch { Out-Console "Signieren: $($_.Exception.Message)" 'Error'; Stop-HMSigning }
         }
-    }
+    } catch { Out-Console "Signieren: $($_.Exception.Message)" 'Error'; Stop-HMSigning }
 }
 # Release freigeben: neuestes signiertes Vorab-Release (Kanal Test), das neuer als die freigegebene Version ist -> Kanal Stabil
 function Start-HMReleasePublish {
@@ -3115,7 +3292,7 @@ $miS = New-Object System.Windows.Controls.MenuItem; $miS.Header = 'Update-Einste
 $miT = New-Object System.Windows.Controls.MenuItem; $miT.Header = 'GitHub-Token (nur privates Repo) ...'
 $miT.Add_Click({
     $f = Get-GitHubTokenFile
-    $a = (Show-HMDialogBox -Owner $script:Window -Text ("Update-Quelle: $($script:UpdateOwner)/$($script:UpdateRepo)`nGespeicherter Token: $(if (Test-Path -LiteralPath $f) { 'vorhanden' } else { 'keiner' })`n`nNur fuer PRIVATE Repos noetig (Fine-grained PAT, nur 'Contents: Read').`n`nJa = Token eingeben`nNein = Token loeschen") -Title 'GitHub-Token' -Mode 'YesNoCancel' -Icon 'Question')
+    $a = (Show-HMDialogBox -Owner $script:Window -Text ("Update-Quelle: $($script:UpdateOwner)/$($script:UpdateRepo)`nGespeicherter Token: $(if (Test-Path -LiteralPath $f) { 'vorhanden' } else { 'keiner' })`n`nNur fuer PRIVATE Repos noetig (Fine-grained PAT, nur 'Contents: Read').") -Title 'GitHub-Token' -Mode 'YesNoCancel' -Icon 'Question' -Labels @{ Yes = 'Token eingeben'; No = 'Token loeschen'; Cancel = 'Abbrechen' })
     if ($a -eq 'Yes') {
         $c = Get-Credential -UserName 'github' -Message 'GitHub-Token als Kennwort eingeben (wird verschluesselt gespeichert)'
         if ($c) { $c | Export-Clixml -Path $f -Force; Out-Console 'GitHub-Token gespeichert (DPAPI)' 'Success'; Invoke-UpdateCheck -Force }
@@ -3143,15 +3320,20 @@ function Set-HMUserModeUi {
     # Backup / Restore: Funktionen mit Systemzugriff ausblenden
     foreach ($c in @($ui.btnEditExceptions, $ui.chkMinSystemExc, $ui.chkNoSystemFileExc, $ui.btnCleanupBackups, $ui.btnReinstall,
                      $ui.chkGpUpdate, $ui.chkWUDrivers, $ui.chkNumLock, $ui.chkFastBoot, $ui.txtPostScript, $ui.btnPostScript)) { & $hide $c }
-    # Werkzeuge: nur Suche und Ordner/Anmeldedaten des eigenen Profils
+    # Werkzeuge: nur Suche und Ordner/Anmeldedaten des eigenen Profils (gleiche Auswahl wie bisher, in welchem Abschnitt sie auch stehen)
     $keep = @('Im Backup suchen', 'Wichtige Dateien suchen', 'Datenbanken suchen')
-    foreach ($b in @($ui.pnlToolsProfile.Children)) { if ($keep -notcontains "$($b.Content)") { $b.Visibility = 'Collapsed' } }
-    foreach ($p in @($ui.pnlToolsComputer, $ui.pnlToolsDiag, $ui.pnlSysTools, $ui.btnToolSoftDeploy)) {
-        # ganze Abschnitte (Border) ausblenden
-        $e = $p
-        while ($e -and -not ($e -is [System.Windows.Controls.Border])) { $e = $e.Parent }
-        & $hide $(if ($e) { $e } else { $p })
+    $keepUi = @($ui.btnToolCredWiz, $ui.btnToolCredList, $ui.btnToolUserAppData, $ui.btnToolUserStartup, $ui.btnToolProfileFolder)
+    foreach ($p in @($ui.pnlToolsComputer, $ui.pnlToolsMulti, $ui.pnlToolsProfile, $ui.pnlToolsDiag, $ui.pnlToolsSoft, $ui.pnlToolsNoTarget, $ui.pnlSysTools)) {
+        if (-not $p) { continue }
+        foreach ($b in @($p.Children)) { if ($p -eq $ui.pnlSysTools -or ($keep -notcontains "$($b.Content)" -and -not ($keepUi | Where-Object { [object]::ReferenceEquals($_, $b) }))) { $b.Visibility = 'Collapsed' } }
+        # Abschnitt ohne sichtbaren Knopf ganz ausblenden (Border um die Leiste)
+        if (-not @($p.Children | Where-Object { $_.Visibility -eq 'Visible' }).Count) {
+            $e = $p
+            while ($e -and -not ($e -is [System.Windows.Controls.Border])) { $e = $e.Parent }
+            & $hide $(if ($e) { $e } else { $p })
+        }
     }
+    if (Get-Command Update-HMToolHeads -ErrorAction SilentlyContinue) { Update-HMToolHeads }
     Out-Console 'BENUTZER-MODUS: eigenes Profil sichern/wiederherstellen, Dateien im Backup suchen. Alle anderen Funktionen brauchen Administratorrechte.' 'Warning'
 }
 
@@ -3169,7 +3351,7 @@ function Wait-HMJobEnd($Job, [int]$Seconds) {
 function Test-HMAppFolderSecurity {
     $r = Invoke-HMAppFolderCheck $script:Window
     if ($r.CheckOff) { Save-LocalSetting 'AclCheckOff' $true }
-    foreach ($x in @($r.Msgs)) { Out-Console "$($x.Text)" "$($x.Level)" }
+    foreach ($x in $r.Msgs) { Out-Console "$($x.Text)" "$($x.Level)" }
 }
 # Zuletzt gewaehlten Reiter merken (pro Windows-Benutzer, %APPDATA%\HUMig\ui-state.json - nicht im Programmordner)
 $script:UiStateFile = Join-Path $env:APPDATA 'HUMig\ui-state.json'
@@ -3226,7 +3408,7 @@ $script:Window.Add_Closing({
             try { Clear-HMSbRunMarker @{ LocalHistory = $script:SbHistFile; Profile = "$($script:SbRunProfile)" } } catch { }
         }
     } elseif ($script:JobRunning) {
-        if (-not (Confirm-Action 'Ein Backup/Restore laeuft noch. Wirklich beenden (Vorgang wird abgebrochen)?')) { $e.Cancel = $true; return }
+        if (-not (Confirm-Action "'$(if ("$($script:JobTitle)") { $script:JobTitle } else { 'Backup/Restore' })' laeuft noch. Beim Beenden wird der Vorgang abgebrochen." -Labels @{ Yes = 'Abbrechen und beenden'; No = 'Weiterlaufen lassen' })) { $e.Cancel = $true; return }
         if ($script:CurrentJob) { $script:CurrentJob.Cancel = $true; Stop-HMJobProcess $script:CurrentJob }
         # Aufraeumen abwarten (u.a. Benutzer-Registry entladen - bliebe sonst bis zum Neustart geladen)
         Wait-HMJobEnd $script:CurrentJob 30
@@ -3301,7 +3483,7 @@ Update-BackupRootInfo
 Out-Console "HUMig v$($script:Version) - $env:USERDOMAIN\$env:USERNAME auf $env:COMPUTERNAME$(if ($script:UserMode) { ' (Benutzer-Modus)' } elseif ($isAdmin) { ' (Administrator)' } else { ' (OHNE Administratorrechte)' })" 'Header'
 foreach ($e in $script:ConfigErrors) { Out-Console "Konfigurationsfehler: $e" 'Error' }
 # Ergebnis der Ordnerrechte-Pruefung beim Start (lief vor dem Fenster)
-if ($script:AclEarly) { foreach ($x in @($script:AclEarly.Msgs)) { Out-Console "$($x.Text)" "$($x.Level)" } }
+if ($script:AclEarly) { foreach ($x in $script:AclEarly.Msgs) { Out-Console "$($x.Text)" "$($x.Level)" } }
 if ($script:ActiveSchool) { Out-Console "Standort: $($script:ActiveSchool.Name) - Backup-Ordner $(Get-BackupRoot)" 'Info' }
 if ($script:UserMode) { Set-HMUserModeUi }
 Initialize-HMServerBackupTab -IsAdmin $isAdmin

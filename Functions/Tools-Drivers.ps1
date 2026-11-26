@@ -1040,7 +1040,7 @@ function Show-DriverWindow {
         <Button x:Name="btnAddDir" Content="Ordner hinzufuegen" Background="#FFA6E3A1" ToolTip="Entpackten Treiber (Ordner mit INF-Dateien und/oder Setup) in die Treiberverteilung kopieren"/>
         <Button x:Name="btnAddFile" Content="Datei hinzufuegen" Background="#FFA6E3A1" ToolTip="Setup (EXE/MSI) kopieren oder ZIP/CAB als eigenes Paket entpacken"/>
         <Button x:Name="btnOpen" Content="Ordner oeffnen" Background="#FF89B4FA"/>
-        <Button x:Name="btnReload" Content="Aktualisieren" Background="#FF89B4FA" Margin="0"/>
+        <Button x:Name="btnReload" Content="Neu laden" Background="#FF89B4FA" Margin="0"/>
       </StackPanel>
       <TextBlock x:Name="lblFolder" TextTrimming="CharacterEllipsis"/>
     </DockPanel>
