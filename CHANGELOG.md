@@ -5,7 +5,7 @@
 - **Zugriffsprotokoll abgesichert:** Das Zugriffsprotokoll wird vor jedem Eintrag geprüft und enthält keine eingeschleusten Zeilen oder Steuerzeichen mehr.
   - Kann ein Eintrag nicht sicher geschrieben werden, meldet HUMig das einmal in der Konsole, die Fernbedienung läuft weiter.
 ### ✅ Qualität
-- **Tests:** PLATZHALTER
+- **Tests:** 601 bestanden.
 
 ## v2.1.26 - 2026-11-26
 ### 🔐 Herausgeber
