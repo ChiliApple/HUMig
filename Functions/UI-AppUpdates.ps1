@@ -251,6 +251,14 @@ function Show-HMAuSearchResult($Res) {
 # ----------------------------------------------------------------------------
 # Aktualisieren
 # ----------------------------------------------------------------------------
+# Laeuft gerade die Vorpruefung (laufende Programme) eines frueheren "Aktualisieren"? Eigener Zaehler: vor jeder Vorpruefung +1,
+# in deren OnComplete -1 (Invoke-AsyncCommand ruft OnComplete immer auf, auch nach dem Zeitlimit). Rueckgabe Text oder ''
+$script:AuPreCheck = 0
+function Get-HMAuBusyText {
+    $n = 0; try { $n = [int]$script:AuPreCheck } catch { $n = 0 }
+    if ($n -le 0) { return '' }
+    return 'die Pruefung der laufenden Programme eines frueheren Klicks laeuft noch'
+}
 function Start-HMAuUpdate([switch]$All) {
     if ($script:JobRunning) { Out-Console 'Es laeuft bereits ein Vorgang.' 'Warning'; return }
     if (-not $script:AuDt -or -not $script:AuDt.Rows.Count) { Out-Console 'App-Updates: zuerst "Updates suchen".' 'Warning'; return }
@@ -273,6 +281,10 @@ function Start-HMAuUpdate([switch]$All) {
     }
     if ($noUser.Count) { Out-Console "App-Updates: ohne angemeldeten Benutzer nicht moeglich: $($noUser -join ', ')" 'Warning' }
     if (-not $byPc.Count) { return }
+    # Ausnahmefall: die Vorpruefung (laufende Programme) eines frueheren Klicks laeuft noch - der fruehere Lauf startet danach
+    # von selbst, ein zweiter liefe nebenher. Rueckfrage mit Standard Nein, keine Sperre.
+    $busy = Get-HMAuBusyText
+    if ($busy -and -not (Confirm-Action "App-Updates: $busy`n`nDer fruehere Klick auf 'Aktualisieren' startet danach von selbst.`n`nTrotzdem einen zweiten Lauf starten?" 'App-Updates')) { return }
     $cnt = 0; foreach ($k in $byPc.Keys) { $cnt += $byPc[$k].Items.Count }
     $all2 = @(foreach ($k in @($byPc.Keys | Sort-Object)) { foreach ($i in $byPc[$k].Items) { "  $(if ($byPc.Count -gt 1) { "${k}: " })$($i.Name): $($i.Installed) -> $($i.Available)" } })
     $list = @($all2 | Select-Object -First 25) -join "`n"
@@ -297,12 +309,14 @@ function Start-HMAuUpdate([switch]$All) {
         $rk = @($byPc.Keys | Where-Object { "$_" -ne $lk2 })
         if (-not $rk.Count) { & $script:AuGoBlock $byPc $running $dec; return }
         $rp = @{}; foreach ($k in $rk) { $rp[$k] = @{ Items = @($byPc[$k].Items | ForEach-Object { @{ Id = "$($_.Id)"; Name = "$($_.Name)" } }) } }
+        $script:AuPreCheck = [int]$script:AuPreCheck + 1
         Invoke-AsyncCommand -ScriptBlock {
             param($eng, $au, $keys, $rp, $cred)
             . $eng; . $au
             Invoke-HMAuTarget $keys 'Running' @{ ByPc = $rp } $cred
         } -ArgumentList @($script:Engine, $script:AuEngine, $rk, $rp, $script:RemoteCred) -TimeoutSec 180 -BusyTag 'Au' -BusyText 'Laufende Programme an den PCs pruefen ...' -State @{ ByPc = $byPc; Running = $running; Dec = $dec; Go = $script:AuGoBlock } -OnComplete {
             param($r, $st)
+            $script:AuPreCheck = [Math]::Max(0, [int]$script:AuPreCheck - 1)
             $d2 = @{}; foreach ($kk in @($st.Dec.Keys)) { $d2[$kk] = $st.Dec[$kk] }
             $res = @($r | Where-Object { $_ -is [hashtable] })[0]
             if (-not $res) { Out-Console "App-Updates: laufende Programme an den PCs nicht pruefbar ($(@($r) -join ' ')) - Installer melden sich dann selbst" 'Warning'; & $st.Go $st.ByPc $st.Running $d2; return }
@@ -324,12 +338,14 @@ function Start-HMAuUpdate([switch]$All) {
     $script:AuGoBlock = $go; $script:AuRemoteBlock = $remote
     if (-not $localItems.Count) { & $remote $byPc @() @{}; return }
     Out-Console 'App-Updates: laufende Programme pruefen ...' 'Debug'
+    $script:AuPreCheck = [int]$script:AuPreCheck + 1
     Invoke-AsyncCommand -ScriptBlock {
         param($eng, $items)
         . $eng
         @(Get-HMAuRunning $items)
     } -ArgumentList @($script:AuEngine, $localItems) -TimeoutSec 60 -BusyTag 'Au' -BusyText 'Laufende Programme pruefen ...' -State @{ ByPc = $byPc; Go = $script:AuRemoteBlock } -OnComplete {
         param($r, $st)
+        $script:AuPreCheck = [Math]::Max(0, [int]$script:AuPreCheck - 1)
         $running = @()
         if ($r -is [string]) { Out-Console "App-Updates: laufende Programme nicht pruefbar ($r) - Installer melden sich dann selbst" 'Warning' }
         else { $running = @(@($r) | Where-Object { $_ -and $_.Id }) }
@@ -429,6 +445,16 @@ function Start-HMAuSchedule {
     }
     Start-EngineJob -Command 'Start-HMAuScheduleJob -Ctx $Ctx -Job $Job' -Ctx $ctx -Title 'App-Updates Zeitplan' -ScriptFiles @($script:Engine, $script:AuEngine) -OnFinished { param($j) }
 }
+# Spalte "Ergebnis" im Fenster Zeitplaene: Fehler aus dem letzten Bericht (last.json) gehen vor dem Rueckgabewert der Aufgabe -
+# aeltere Zeitplaene liefern immer 0, auch wenn Programme scheiterten
+function Get-HMAuScheduleResultText([bool]$Running, [string]$LastResult, [string]$Last, $LastErr) {
+    if ($Running -or $LastResult -eq '267009') { return 'laeuft' }
+    if (-not $Last) { return '' }
+    $ne = 0; if ($null -ne $LastErr -and "$LastErr" -match '^\d+$') { $ne = [int]"$LastErr" }
+    if ($ne -gt 0) { return "Fehler ($ne)" }
+    if ($LastResult -eq '0') { return 'OK' }
+    return "Code $LastResult"
+}
 function Start-HMAuScheduleView {
     if ($script:JobRunning) { Out-Console 'Es laeuft bereits ein Vorgang.' 'Warning'; return }
     Update-HMAuTargetLabel
@@ -442,7 +468,7 @@ function Start-HMAuScheduleView {
             $v = $j.Result.ByPc[$k]
             if (-not $v.PSObject.Properties['Exists']) { [void]$rows.Add(@($k, '(nicht erreichbar)', '', '', '', '', (@($v.Errors) -join '; '))); continue }
             $lr = "$($v.LastResult)"
-            $lrT = if ([bool]$v.Running -or $lr -eq '267009') { 'laeuft' } elseif (-not $v.Last) { '' } elseif ($lr -eq '0') { 'OK' } else { "Code $lr" }
+            $lrT = Get-HMAuScheduleResultText ([bool]$v.Running) $lr "$($v.Last)" $(if ($v.PSObject.Properties['LastErr']) { $v.LastErr } else { $null })
             [void]$rows.Add(@($k, $(if ($v.Exists) { "$($v.When)" } else { '(kein Zeitplan)' }), "$($v.Next)", "$($v.Last)", $lrT, "$($v.Progress)", "$($v.Summary)", "$(@($v.History).Count) Eintraege"))
         }
         $run = @($rows | Where-Object { $_[4] -eq 'laeuft' }).Count

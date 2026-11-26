@@ -99,6 +99,24 @@ function Get-ARunningText([string]$Name) {
     $run = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { [int]$_.SessionId -gt 0 -and $_.ExecutablePath -and -not (Test-AWinPath "$($_.ExecutablePath)") -and $(foreach ($d in $dirs) { if ("$($_.ExecutablePath)".ToLower().StartsWith($d.ToLower() + '\')) { $true; break } }) })
     return (@($run | ForEach-Object { "$($_.Name) ($($_.ProcessId))" }) -join ', ')
 }
+# winget.exe mit Zeitlimit starten (Ausgabe asynchron lesen, sonst blockiert ein voller Puffer). Haengt der Installer laenger,
+# wird winget samt Unterprozessen beendet. Rueckgabe @{ TimedOut; Code; Out }
+function Invoke-AWinget([string]$Exe, [string[]]$ArgList, [double]$TimeoutMin) {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo $Exe
+    $psi.Arguments = (@($ArgList | ForEach-Object { if ("$_" -match '[\s"]') { '"' + ("$_" -replace '"', '\"') + '"' } else { "$_" } }) -join ' ')
+    $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+    try { $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8; $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8 } catch { }
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $to = $p.StandardOutput.ReadToEndAsync(); $te = $p.StandardError.ReadToEndAsync()
+    # Wartezeit begrenzt auf hoechstens 24 Stunden (sehr grosse Werte liefen sonst bei der Umrechnung in Millisekunden ueber)
+    if (-not $p.WaitForExit([int]([Math]::Min([double]1440, [Math]::Max([double]0.01, [double]$TimeoutMin)) * 60000))) {
+        try { $p.Kill($true) } catch { try { $p.Kill() } catch { } }
+        return @{ TimedOut = $true; Code = -1; Out = @() }
+    }
+    $p.WaitForExit()
+    return @{ TimedOut = $false; Code = [int64]$p.ExitCode; Out = @((("$($to.Result)`n$($te.Result)") -split "`r?`n") | Where-Object { "$_".Trim() }) }
+}
 # Verlauf und Fortschritt nach jedem Programm speichern (HUMig > Zeitplaene ansehen liest beides auch waehrend des Laufs)
 $hf = Join-Path $Dir 'history.json'
 $pf = Join-Path $Dir 'progress.json'
@@ -118,6 +136,8 @@ try {
     # Log kurz halten (letzte 2000 Zeilen)
     try { $lf = Join-Path $Dir 'log.txt'; if ((Get-Item -LiteralPath $lf -ErrorAction Stop).Length -gt 400KB) { Get-Content -LiteralPath $lf -Tail 2000 | Set-Content -LiteralPath $lf -Encoding UTF8 } } catch { }
     $cfg = Get-Content -LiteralPath (Join-Path $Dir 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    # Zeitlimit je Programm (Minuten), ueberschreibbar in config.json (ItemTimeoutMin)
+    $itemMin = 120; $im = 0; if ([int]::TryParse("$($cfg.ItemTimeoutMin)", [ref]$im) -and $im -gt 0) { $itemMin = $im }
     try { Import-Module Microsoft.WinGet.Client -ErrorAction Stop } catch { Import-Module (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\Microsoft.WinGet.Client') -ErrorAction Stop }
     $wg = Get-AWingetExe
     if (-not $wg) { throw 'winget.exe nicht gefunden' }
@@ -128,6 +148,7 @@ try {
     foreach ($d in @(@($vcl | Select-Object -First 1 | ForEach-Object { $_.FullName }) + @(Split-Path $wg -Parent))) { if ($d -and "$env:PATH" -notlike "*$d*") { $env:PATH = "$d;$env:PATH" } }
     $seen = @{}
     $todo = @()
+    $srcOk = 0; $srcBad = @()
     foreach ($src in @($cfg.Sources | Where-Object { $_ })) {
         try {
             foreach ($p in @(Get-WinGetPackage -Source "$src" -ErrorAction Stop | Where-Object { $_.IsUpdateAvailable })) {
@@ -139,8 +160,11 @@ try {
                 if ($ex) { $excl++; Write-ALog "Ausnahme: $($p.Name) ($($ex.Pattern))"; continue }
                 $todo += [pscustomobject]@{ Id = "$($p.Id)"; Name = "$($p.Name)"; From = "$($p.InstalledVersion)"; To = "$(@($p.AvailableVersions)[0])"; Source = "$src" }
             }
-        } catch { Write-ALog "Quelle ${src}: $($_.Exception.Message)" }
+            $srcOk++
+        } catch { $srcBad += "$src"; Write-ALog "Hinweis: Quelle ${src} nicht lesbar: $($_.Exception.Message)" }
     }
+    # eine nicht lesbare Quelle (z. B. der Store als SYSTEM) ist nur ein Hinweis; Fehler nur, wenn gar keine Quelle lesbar war
+    if ($srcBad.Count -and -not $srcOk) { $err++; Write-ALog "FEHLER: keine Quelle lesbar ($($srcBad -join ', '))" }
     Write-ALog "$found Update(s), $excl Ausnahme(n), $($todo.Count) zu aktualisieren"
     $i = 0
     foreach ($t in $todo) {
@@ -154,8 +178,9 @@ try {
             Add-AHistory ([pscustomobject]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Computer = $PC; Id = $t.Id; Name = $t.Name; From = $t.From; To = $t.To; Source = $t.Source; Scope = 'Machine'; Status = 'Skipped'; Text = "uebersprungen - laeuft ($rt) (Zeitplan)"; Reboot = $false })
             continue
         }
-        $out = @(& $wg upgrade --id $t.Id --exact --source $t.Source --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | ForEach-Object { "$_" })
-        $r = Format-ACode ([int64]$LASTEXITCODE)
+        $wr = Invoke-AWinget $wg @('upgrade', '--id', "$($t.Id)", '--exact', '--source', "$($t.Source)", '--silent', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity') $itemMin
+        $out = @($wr.Out)
+        $r = if ($wr.TimedOut) { @{ Ok = $false; Reboot = $false; Text = "abgebrochen nach $itemMin min (Zeitlimit je Programm) - der Installer hing" } } else { Format-ACode ([int64]$wr.Code) }
         $i++
         if ($r.Ok) { $ok++ } else { $err++ }
         $det = ''
@@ -169,3 +194,5 @@ try {
     [pscustomobject]@{ Date = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Found = $found; Ok = $ok; Err = $err; Excluded = $excl; Skipped = $skip } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Dir 'last.json') -Encoding UTF8
 } catch { Write-ALog "Bericht nicht speicherbar: $($_.Exception.Message)" }
 Write-ALog "=== Ende: $ok aktualisiert, $err Fehler$(if ($skip) { ", $skip uebersprungen (lief)" })"
+# Rueckgabewert der geplanten Aufgabe: 1 bei mindestens einem Fehler (Aufgabenplanung zeigt sonst "erfolgreich")
+exit $(if ($err -gt 0) { 1 } else { 0 })
