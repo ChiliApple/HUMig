@@ -16,12 +16,19 @@
 # Rueckfall auf die Windows-MessageBox, wenn das Hauptfenster noch nicht steht oder das Fenster nicht aufgebaut werden kann.
 # ----------------------------------------------------------------------------
 function Show-HMDialogBox {
-    param([object]$Owner = $null, [string]$Text = '', [string]$Title = 'HUMig', [string]$Mode = 'OK', [string]$Icon = 'Information', [string]$Default = '')
+    # -Labels: eigene Knopftexte je Rueckgabewert (z.B. @{ Yes = 'Starten'; No = 'Nicht starten' }) - Rueckgabe, Standardknopf,
+    # Enter, Esc und Schliessen bleiben wie ohne den Parameter
+    param([object]$Owner = $null, [string]$Text = '', [string]$Title = 'HUMig', [string]$Mode = 'OK', [string]$Icon = 'Information', [string]$Default = '', [hashtable]$Labels = $null)
     $Mode = switch ("$Mode") { 'YesNo' { 'YesNo' } 'YesNoCancel' { 'YesNoCancel' } 'OKCancel' { 'OKCancel' } default { 'OK' } }
     $Icon = switch ("$Icon") { 'Warning' { 'Warning' } 'Exclamation' { 'Warning' } 'Error' { 'Error' } 'Stop' { 'Error' } 'Hand' { 'Error' } 'Question' { 'Question' } default { 'Information' } }
     $o = $null
     try { if ($Owner -is [System.Windows.Window] -and $Owner.IsLoaded) { $o = $Owner } elseif ($script:Window -and $script:Window.IsLoaded) { $o = $script:Window } } catch { $o = $null }
     $fallback = {
+        if ($Labels -and $Labels.Count) {
+            $fix = @{ Yes = 'Ja'; No = 'Nein'; Cancel = 'Abbrechen'; OK = 'OK' }
+            $leg = @(foreach ($k in 'Yes', 'No', 'OK', 'Cancel') { if ($Labels.ContainsKey($k) -and "$($Labels[$k])") { "$($fix[$k]) = $($Labels[$k])" } }) -join ', '
+            if ($leg) { $Text = "($leg)`n`n$Text" }
+        }
         $img = $(if ($Icon -eq 'Information') { 'Information' } else { $Icon })
         $def = $(if ($Default) { $Default } elseif ($Mode -eq 'YesNo' -and $Icon -eq 'Warning') { 'No' } elseif ($Mode -in @('YesNoCancel', 'OKCancel') -and $Icon -eq 'Warning') { 'Cancel' } else { '' })
         $r = if ($o -and $def) { [System.Windows.MessageBox]::Show($o, $Text, $Title, $Mode, $img, $def) }
@@ -81,6 +88,7 @@ function Show-HMDialogBox {
             'OKCancel' { @(@('OK', 'OK', $yesCol, '#FF1E1E2E'), @('Cancel', 'Abbrechen', '#FF45475A', '#FFCDD6F4')) }
             default { , @('OK', 'OK', '#FF89B4FA', '#FF1E1E2E') }
         })
+        if ($Labels) { foreach ($d in $defs) { if ($Labels.ContainsKey($d[0]) -and "$($Labels[$d[0]])") { $d[1] = "$($Labels[$d[0]])" } } }
         $keys = @($defs | ForEach-Object { $_[0] })
         $cancelKey = $(switch ($Mode) { 'YesNo' { 'No' } 'YesNoCancel' { 'Cancel' } 'OKCancel' { 'Cancel' } default { 'OK' } })
         $defaultKey = $(if ($Default -and $keys -contains "$Default") { "$Default" } elseif ($Mode -eq 'YesNo' -and $Icon -eq 'Warning') { 'No' } elseif ($Mode -in @('YesNoCancel', 'OKCancel') -and $Icon -eq 'Warning') { $cancelKey } else { $keys[0] })

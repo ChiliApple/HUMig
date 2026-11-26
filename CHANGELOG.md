@@ -1,5 +1,37 @@
 ﻿# Changelog
 
+## v2.1.28 - 2026-11-26
+### 🎨 Oberfläche
+- **Kopfzeile in drei Zeilen:** Computer und Benutzer, darunter Verbindung und SID, darunter Backup-Ordner und freier Platz. Lange Namen brechen um statt abgeschnitten zu werden, die Listen darunter sind dadurch höher.
+- **Farben nach Bedeutung:** Grün startet den Hauptvorgang eines Reiters, Orange ändert etwas am PC oder an Einstellungen, Rot löscht oder bricht ab, alles andere ist neutral.
+- **Dunkle Auswahlfelder:** Auswahllisten passen zum dunklen Fenster, der mit der Pfeiltaste erreichte Eintrag ist deutlich hervorgehoben.
+- **Tooltips überall:** Jeder Knopf, jeder Haken und jedes Feld erklärt in einem Satz, was es tut. Gesperrte Knöpfe zeigen ihren Tooltip ebenfalls.
+- **Fenster mit Anfasser:** Haupt- und Einstellungsfenster lassen sich rechts unten größer ziehen.
+- **Lange Texte brechen um:** Modulnamen, Haken, VM-Namen und Erklärtexte stehen vollständig da, auch bei kleinem Fenster.
+### 💾 Backup und Restore
+- **Startknopf immer sichtbar:** "Backup starten" und "Restore starten" stehen fest unter der rechten Spalte, der Inhalt darüber scrollt.
+- **Abbrechen am Platz des Startknopfs:** Während ein Vorgang läuft, steht in jedem Reiter "Abbrechen: <Vorgang>" dort, wo sonst der Startknopf steht, ein Klick bricht ihn ab wie bisher. Im Leerlauf ist Abbrechen ausgeblendet.
+- **Worauf sich ein Reiter bezieht:** Über dem Startknopf steht, welcher Benutzer von welchem PC gesichert wird. Das Restore-Ziel zeigt PC und Benutzer in zwei Zeilen.
+- **Knopfreihe im Restore nach Bezug:** zuerst ohne Auswahl, dann "Markiertes Backup:", dann die löschenden Knöpfe.
+- **Ausgeblendet statt gesperrt:** "Grosse Dateien ..." erscheint erst nach "Groesse ermitteln", bis dahin steht dort ein kurzer Hinweis. Module, die ein Backup nicht enthält, sind im Restore ausgeblendet.
+- **Einheitliche Begriffe:** "Neu laden" liest Listen neu (auch in Softwareverteilung und Treiberverteilung), "Fortlaufendes Backup" ergänzt ein vorhandenes Backup, "Bericht" öffnet den Bericht eines Laufs.
+### 🛠️ Werkzeuge
+- **Abschnitte nach Ziel:** gewählter PC, mehrere PCs, gewählter Benutzer, Diagnose, Software und Treiber, ohne Ziel-PC. Jeder Knopf steht in dem Abschnitt, auf den er wirkt.
+- **Überschriften mit Namen:** Die Überschriften nennen PC und Benutzer und ziehen nach Verbinden, Umschalten und Benutzerwahl nach.
+### 🖥️ Server-Backup
+- **Knopfreihe nach Bezug:** gewähltes Profil, "Platte:", "Ohne Auswahl:". "Platte einrichten ..." steht am Ende der Plattenzeile.
+- **Bildlauf bei kleinem Fenster:** Der obere Teil scrollt, die Knopfreihe unten bleibt immer sichtbar.
+- **Kurze Haken:** "Host-Konfiguration sichern" und "Host-System mitsichern (C:, Boot/EFI)", Einzelheiten im Tooltip.
+### ❓ Rückfragen
+- **Knöpfe mit Verben:** z.B. "Im Hintergrund starten", "Hier in HUMig starten", "Admin-Teile auslassen", "Endgueltig loeschen". Enter, Esc und Schließen wirken wie bisher.
+- **Neustart-Frage richtig herum:** Beim Bearbeiten eines Server-Backup-Profils heißen die Knöpfe "Nicht sichern" und "Sichern".
+- **Namen in der Rückfrage:** Löschen eines Backups nennt Datum, PC, Benutzer, Größe und Status. Beenden während eines Vorgangs nennt den Vorgang.
+### ⚙️ Einstellungen
+- **Hinweis zu Speichern:** Die Fußzeile sagt, dass Speichern für Haken und Felder gilt und Knöpfe in den Reitern sofort wirken.
+- **Reiter Restore mit Bildlauf:** lange Haken und Erklärtexte brechen um.
+### ✅ Qualität
+- **Tests:** 649 automatische Tests bestanden.
+
 ## v2.1.27 - 2026-11-26
 ### 📱 Fernbedienung
 - **Zugriffsprotokoll abgesichert:** Das Zugriffsprotokoll wird vor jedem Eintrag geprüft und enthält keine eingeschleusten Zeilen oder Steuerzeichen mehr.
